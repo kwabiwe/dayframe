@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DAYFRAME_APP_ICONS, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -162,26 +162,45 @@ export function ChecksChip({ count, onNext }: { count: number; onNext: () => voi
   );
 }
 
-/** A suggestion's question under its row, with the deck's answers. */
+/**
+ * A suggestion's question under its row, with the deck's answers. A trip asks by its title, "Getting
+ * around, 14:44–16:31?", with Yes, Edit (its editor, opened under the question) and Not now (card A).
+ */
 export function CheckQuestionRow({
   clock,
+  editor,
   item,
   onAnswer,
+  onEdit,
   onPickPlace,
   outing
 }: {
   clock: ClockFormat;
+  /** The trip's editor while it is open, under the question. */
+  editor?: ReactNode;
   item: ReviewItemRow;
   /** The trips there and back this answer decides too, as the deck shows them. */
   outing?: ReviewOuting;
   onAnswer: (kind: ReviewDecisionKind) => void;
+  /** Open (or close) a trip's editor. */
+  onEdit?: () => void;
   /** Correct the place first (step 13): the suggestion then offers the place you picked. */
   onPickPlace?: () => void;
 }) {
   const span = reviewWindow(item);
   const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
   const picture = reviewPicture(item);
-  const question = picture === "place"
+  // Every Move is a trip here, a round trip from a place too (Codex r1 on #590).
+  const trip = item.eventType === "commute_detected";
+  const editRef = useRef<HTMLButtonElement>(null);
+  const editing = Boolean(editor);
+  const wasEditing = useRef(editing);
+  // Closing the editor gives focus back to Edit (Codex r1 on #590).
+  useEffect(() => {
+    if (wasEditing.current && !editing) editRef.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+  const question = !trip && picture === "place"
     ? `Where were you${when ? `, ${when}` : ""}?`
     : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
   const detail = span ? `${formatDuration(Math.round((span.stopMs - span.startMs) / 1000))} · ${reviewSourceLabel(picture)}` : reviewSourceLabel(picture);
@@ -198,11 +217,15 @@ export function CheckQuestionRow({
             {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
                 stays for Play/Stop and live recording. */}
             <button className="ui-button timeline-check-log is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
-              Log {reviewDefaultName(item)}
+              {trip ? "Yes" : `Log ${reviewDefaultName(item)}`}
             </button>
+            {trip && onEdit ? (
+              <button aria-expanded={editing} className="ui-button ui-button-secondary is-compact" onClick={onEdit} ref={editRef} type="button">Edit</button>
+            ) : null}
             {onPickPlace ? <button className="ui-button ui-button-secondary is-compact" onClick={onPickPlace} type="button">Pick a place…</button> : null}
             <button className="ui-button ui-button-ghost is-compact" onClick={() => onAnswer("skip")} type="button">Not now</button>
           </div>
+          {editor}
         </div>
       </td>
     </tr>

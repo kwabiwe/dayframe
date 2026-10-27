@@ -10,26 +10,26 @@ const places = (rows: Array<{ id: string; name: string; role: string | null }>) 
   rows: sql.includes("from places pl") ? rows.filter((row) => (values?.[1] as string[]).includes(row.id)) : []
 }));
 
-describe("Move names from their ends (PRD D19)", () => {
-  it("calls Home ↔ Work a Commute, in either direction, with the mode on the route line", async () => {
+describe("Move names from their ends (PRD D19, D21; card A)", () => {
+  it("calls Home ↔ Work a Commute, in either direction, with no mode on the route line", async () => {
     const query = places([{ id: "home", name: "Home", role: "home" }, { id: "work", name: "Work", role: "work" }]);
     expect(await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "work", travelMode: "automotive" }), new Map()))
-      .toEqual({ title: "Commute", route: "Drive · Home → Work", activity: "commute" });
+      .toEqual({ title: "Commute", route: "Home → Work", activity: "commute" });
     expect((await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "work", toPlaceId: "home" }), new Map())).title).toBe("Commute");
   });
 
-  it("calls any other Move by its mode, else Trip, with Travel as its activity", async () => {
+  it("calls any other Move Getting around, whatever its mode, with Getting around as its activity", async () => {
     const query = places([{ id: "home", name: "Home", role: "home" }, { id: "gym", name: "Peak Gym", role: null }]);
     expect(await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "gym", travelMode: "walking" }), new Map()))
-      .toEqual({ title: "Walk", route: "Home → Peak Gym", activity: "travel" });
-    expect((await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "gym" }), new Map())).title).toBe("Trip");
+      .toEqual({ title: "Getting around", route: "Home → Peak Gym", activity: "travel" });
+    expect((await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "gym" }), new Map())).title).toBe("Getting around");
   });
 
   it("names a round trip and time away from where they started, and a Move with a stop as an errand", async () => {
     const query = places([{ id: "home", name: "Home", role: "home" }]);
     expect(await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "home",
       qualificationReason: "same_place_outing", travelMode: "automotive" }), new Map()))
-      .toEqual({ title: "Drive", route: "Round trip from Home", activity: "travel" });
+      .toEqual({ title: "Getting around", route: "Round trip from Home", activity: "travel" });
     expect(await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "home",
       qualificationReason: "same_place_outing", stops: [{}] }), new Map()))
       .toEqual({ title: "Trip", route: "Home → a stop → Home", activity: "errand" });

@@ -16,6 +16,24 @@ vi.mock("@/components/AppShellRuntime", () => ({
 const clientFetch = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
 
+// The trip editor stands in for the location editor: its Close, and a save the test finishes when it chooses.
+const editors = vi.hoisted(() => ({ resolve: new Map<string, () => void>() }));
+vi.mock("@/components/location/LocationReviewPanel", () => ({
+  LocationReviewPanel: ({ reviewItemId, onClose, onResolved }: { reviewItemId: string; onClose: () => void; onResolved?: () => void }) => {
+    // As the real editor does: a save resolves, then closes.
+    editors.resolve.set(reviewItemId, () => {
+      onResolved?.();
+      onClose();
+    });
+    return (
+      <div data-editor-for={reviewItemId}>
+        <input aria-label={`Name for ${reviewItemId}`} />
+        <button aria-label="Close location evidence" onClick={onClose} type="button">×</button>
+      </div>
+    );
+  }
+}));
+
 const { EntriesTable } = await import("./EntriesTable");
 
 // Location v4 step 14: a synthetic day, made-up names and ids.
@@ -125,6 +143,69 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
+  });
+
+  it("asks a trip by its title with Yes, Edit and Not now; Edit opens its editor under the question (card A)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    // The editor's evidence stays loading here: it only has to open and close.
+    clientFetch.mockImplementation(async (url: string, init?: RequestInit) => init?.method === "POST" || init?.body
+      ? new Response(JSON.stringify(acknowledge(url, init as RequestInit)), { status: 200 }) : new Promise(() => undefined));
+    const trip = { ...reviewItems[1], title: "Getting around" };
+    render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], trip, reviewItems[2]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
+    const edit = screen.getByRole("button", { name: "Edit" });
+    expect(edit.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(edit);
+    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(`[data-editor-for="${TRIP}"]`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close location evidence" }));
+    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
+    // Focus goes back to Edit (Codex r1 on #590).
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit" }));
+    // Closing the question closes its editor: reopening it shows the question alone (Codex r1 on #590).
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("false");
+    // Yes logs it as the deck's Log it does.
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    const posted = clientFetch.mock.calls.find(([url, init]) => url === `/api/review/${TRIP}` && init?.body);
+    expect(JSON.parse(posted![1].body).mutation).toEqual({ action: "confirm" });
+  });
+
+  it("lets a save that finishes late leave another trip's open editor alone (Codex r2 on #590)", () => {
+    editors.resolve.clear();
+    const other = { ...reviewItems[1], id: "00000000-0000-4000-8000-0000000000a4", title: "Getting around",
+      suggestedStartedAt: at(11), suggestedStoppedAt: at(11, 30), rawPayload: { clientSegmentId: "seg-other" } };
+    const trip = { ...reviewItems[1], title: "Getting around" };
+    render(<EntriesTable {...baseProps()} reviewItems={[trip, other]} />);
+    const checks = () => screen.getAllByRole("button", { name: "Check Getting around" });
+    expect(checks()).toHaveLength(2);
+    fireEvent.click(checks()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const opened = [...editors.resolve.keys()];
+    const firstId = opened[0];
+    const secondId = firstId === TRIP ? other.id : TRIP;
+    const finishFirst = editors.resolve.get(firstId)!;
+    // The person moves on to the other trip and starts editing it.
+    fireEvent.click(checks()[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText(`Name for ${secondId}`), { target: { value: "Shop run" } });
+    act(() => finishFirst());
+    expect((screen.getByLabelText(`Name for ${secondId}`) as HTMLInputElement).value).toBe("Shop run");
+    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("asks a round trip from a place as a trip too, with Yes and Edit (Codex r1 on #590)", () => {
+    const round = { ...reviewItems[1], title: "Getting around", rawPayload: { clientSegmentId: "seg-trip", qualificationReason: "same_place_outing" } };
+    render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], round, reviewItems[2]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
   it("moves from one check to the next with the chip", async () => {

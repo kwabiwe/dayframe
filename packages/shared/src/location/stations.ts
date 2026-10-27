@@ -20,6 +20,11 @@ function stations(): Station[] {
   return decoded;
 }
 
+/** The bundled stations of one kind (public data), for tests that need real station positions. */
+export function bundledStations(kind: StationKind) {
+  return stations().filter((station) => station.kind === kind).map((station) => ({ ...station }));
+}
+
 /** Metres per degree of latitude, rounded down so the search window never misses a station. */
 const METRES_PER_DEGREE_LATITUDE = 110_000;
 

@@ -1,10 +1,12 @@
 import type pg from "pg";
 import {
   applyTimelineCorrections,
+  mergeSameModeLegs,
   TimelineCorrectionRequestSchema,
   type LocationSegment,
   type TimelineCorrection,
-  type TimelineCorrectionRequest
+  type TimelineCorrectionRequest,
+  type TripLeg
 } from "@dayframe/shared";
 import { withSyncTransaction } from "../sync-transaction";
 import type { RequestSession } from "../session";
@@ -292,16 +294,21 @@ async function applyToSegment(
           where workspace_id = $2 and user_id = $3 and location_segment_id = $1 and status = 'open'`,
         [...scope, iso(request.startedAt), iso(request.stoppedAt)]);
       return;
-    case "leg_mode":
+    case "leg_mode": {
+      // The leg takes the mode, and a neighbour of the same mode becomes one leg with it, as replay
+      // makes them (card A; Codex r2 on #590).
+      const legs = (row.metadata?.legs as TripLeg[]).map((leg, index) => {
+        if (index !== legIndex) return leg;
+        const set: TripLeg = { ...leg, mode: request.mode, confidence: "sure", setByYou: true };
+        delete set.runnerUp;
+        return set;
+      });
       await client.query(
-        `update commute_segments
-            set metadata = jsonb_set(metadata, array['legs', $4::text],
-                  ((metadata -> 'legs' -> $4::int) - 'runnerUp')
-                    || jsonb_build_object('mode', $5::text, 'confidence', 'sure', 'setByYou', true)),
-                updated_at = now()
+        `update commute_segments set metadata = jsonb_set(metadata, '{legs}', $4::jsonb), updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
-        [...scope, legIndex, request.mode]);
+        [...scope, JSON.stringify(mergeSameModeLegs(legs))]);
       return;
+    }
     case "delete": {
       // A trip that wasn't one leaves the timeline, and its open Review suggestion with it.
       await client.query(`update commute_segments set status = 'superseded', updated_at = now() where id = $1 and workspace_id = $2 and user_id = $3`, scope);

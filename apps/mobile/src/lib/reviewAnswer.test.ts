@@ -68,8 +68,15 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
   });
 
   it("asks a trip and an outing", () => {
-    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Home to Office" }), "24h"))
-      .toMatchObject({ question: "Log the trip, 10:00–11:30?", detail: "Home to Office", skipLabel: "Not a trip", more: false });
+    // Card A: "Getting around, 14:44–16:31?" with Yes / Edit, and Not now.
+    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Getting around",
+      categoryName: "Getting around" }), "24h"))
+      .toEqual({ question: "Getting around, 10:00–11:30?", detail: "As Getting around.", logLabel: "Yes", skipLabel: "Not now",
+        more: true, moreLabel: "Edit", opens: false });
+    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Commute" }), "24h").question)
+      .toBe("Commute, 10:00–11:30?");
+    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: undefined }), "24h").question)
+      .toBe("Getting around, 10:00–11:30?");
     expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toMatchObject({
       question: "Log Exampleton Library with the trips there and back, 10:00–11:30?", logLabel: "Log it", skipLabel: "Skip"
     });

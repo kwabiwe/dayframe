@@ -84,6 +84,52 @@ describe("timeline corrections (location v4 step 11)", () => {
       unobserved: true, distanceMeters: 9_000, setByYou: true }]);
   });
 
+  it("sets the mode only over its own span when consecutive legs of one mode are one leg (card A; Codex r1 on #590)", () => {
+    // A correction saved on the first of two Underground legs, 60–70, after the engine merged them into 60–90.
+    const merged = [trip("m", 60, 90, [{ startedAt: at(60), stoppedAt: at(90), mode: "underground", confidence: "sure", unobserved: true, distanceMeters: 9_000 }])];
+    const [corrected] = applyTimelineCorrections(merged, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 70)], NOW);
+    expect((corrected as CommuteSegment).tripLegs).toEqual([
+      { startedAt: at(60), stoppedAt: at(70), mode: "bus", confidence: "sure", unobserved: true, distanceMeters: 3_000, setByYou: true },
+      { startedAt: at(70), stoppedAt: at(90), mode: "underground", confidence: "sure", unobserved: true, distanceMeters: 6_000 }
+    ]);
+    // Two corrections on its two parts both hold.
+    const [both] = applyTimelineCorrections(merged, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 70, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "train" } }, 70, 90, 2)], NOW);
+    expect((both as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt }) => [mode, startedAt, stoppedAt]))
+      .toEqual([["bus", at(60), at(70)], ["train", at(70), at(90)]]);
+  });
+
+  it("applies a later correction over its whole span, across the parts an earlier one joined (Codex r2 on #590)", () => {
+    // Walk 60–70 + Drive 70–90; the walk set to Drive makes one Drive 60–90; that leg then set to Bus.
+    const result = applyTimelineCorrections(segments, [
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 90, 2)
+    ], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt, setByYou }) =>
+      [mode, startedAt, stoppedAt, setByYou])).toEqual([["bus", at(60), at(90), true]]);
+  });
+
+  it("applies a correction over three joined parts, none covering half of it alone (Codex r3 on #590)", () => {
+    const three = [trip("w", 0, 30, [
+      { startedAt: at(0), stoppedAt: at(10), mode: "walking", confidence: "sure", distanceMeters: 700 },
+      { startedAt: at(10), stoppedAt: at(20), mode: "automotive", confidence: "sure", distanceMeters: 5_000 },
+      { startedAt: at(20), stoppedAt: at(30), mode: "walking", confidence: "sure", distanceMeters: 700 }
+    ])];
+    const [result] = applyTimelineCorrections(three, [
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 0, 10, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 20, 30, 2),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 0, 30, 3)
+    ], NOW);
+    expect((result as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt }) => [mode, startedAt, stoppedAt]))
+      .toEqual([["bus", at(0), at(30)]]);
+  });
+
+  it("makes a corrected leg one leg with a neighbour of the same mode, set by you", () => {
+    const result = applyTimelineCorrections(segments, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70)], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs)
+      .toEqual([{ startedAt: at(60), stoppedAt: at(90), mode: "automotive", confidence: "sure", distanceMeters: 9_700, setByYou: true }]);
+  });
+
   it("finds each correction's item among the engine's own spans, so a shortened item is still found (Codex r1 on #566)", () => {
     const result = applyTimelineCorrections(segments, [
       correction({ subject: "place", kind: "times", target: { startedAt: at(0), stoppedAt: at(10) } }, 0, 60, 1),

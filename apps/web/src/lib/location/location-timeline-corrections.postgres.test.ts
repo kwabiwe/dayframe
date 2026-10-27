@@ -132,6 +132,13 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     ]);
     await expect(correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(705), legStoppedAt: at(760), mode: "bus" }, session))
       .rejects.toMatchObject({ status: 404 });
+    // The walk set to Bus too: one Bus leg, stored at once (card A; Codex r2 on #590).
+    await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(700), legStoppedAt: at(710), mode: "bus" }, session);
+    const joined = await database!.query<{ metadata: { legs: unknown[] } }>(
+      `select metadata from commute_segments where client_segment_id = 'trip-2' and workspace_id = $1`, [workspaceId]);
+    expect(joined.rows[0].metadata.legs).toEqual([
+      { startedAt: at(700), stoppedAt: at(760), mode: "bus", confidence: "sure", distanceMeters: 9700, setByYou: true }
+    ]);
     await correctLocationTimeline({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(10), stoppedAt: at(470) }, session);
     const stay = await database!.query(`select started_at as "startedAt", stopped_at as "stoppedAt", metadata from stay_segments where client_segment_id = 'seg-a' and workspace_id = $1`, [workspaceId]);
     expect(stay.rows[0]).toMatchObject({ startedAt: new Date(at(10)), stoppedAt: new Date(at(470)), metadata: { setByYou: true } });

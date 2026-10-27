@@ -19,11 +19,16 @@ export const METRES_PER_DEGREE_LONGITUDE_AT_EQUATOR = 111320;
 
 export type Projection = { toLatitude: (y: number) => number; toLongitude: (x: number) => number };
 
-export function projectionAround(originLatitude: number): Projection {
+/**
+ * Relative metres back to degrees around the export's origin. With the origin's own longitude too (the
+ * export's exact reference point, kept private), positions come back where they were, so the bundled
+ * station list means something; without it they sit at longitude 0, nowhere near real stations.
+ */
+export function projectionAround(originLatitude: number, originLongitude = 0): Projection {
   const cos = Math.cos((originLatitude * Math.PI) / 180);
   return {
     toLatitude: (y) => originLatitude + y / METRES_PER_DEGREE_LATITUDE,
-    toLongitude: (x) => x / (METRES_PER_DEGREE_LONGITUDE_AT_EQUATOR * cos)
+    toLongitude: (x) => originLongitude + x / (METRES_PER_DEGREE_LONGITUDE_AT_EQUATOR * cos)
   };
 }
 
