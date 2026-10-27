@@ -92,6 +92,16 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(first.correction).toMatchObject({ subject: "place", kind: "place", spanStartedAt: at(520), spanStoppedAt: at(700),
       target: { placeId: homeId, learnedPlaceId: null } });
     const second = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-b", placeId: null, learnedPlaceId: null }, session);
+    // A late retry of a correction a newer one has replaced gets its own answer back, and undoes nothing (step 12).
+    const firstId = "66000000-0000-4000-8000-0000000000c0";
+    const receipt = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-c", placeId: homeId, learnedPlaceId: null, clientCorrectionId: firstId }, session);
+    const newer = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-c", placeId: null, learnedPlaceId: null }, session);
+    expect(await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-c", placeId: homeId, learnedPlaceId: null, clientCorrectionId: firstId }, session))
+      .toEqual(receipt);
+    const active = await database!.query(`select id from location_timeline_corrections where workspace_id = $1 and replaced_at is null and span_started_at = $2`, [workspaceId, at(760)]);
+    expect(active.rows.map((row) => row.id)).toEqual([newer.correction.id]);
+    await database!.query(`delete from location_timeline_corrections where id = any($1::uuid[])`, [[receipt.correction.id, newer.correction.id]]);
+    await database!.query(`update stay_segments set place_id = null, metadata = metadata - 'setByYou' where client_segment_id = 'seg-c' and workspace_id = $1`, [workspaceId]);
     const rows = await database!.query<{ id: string; replacedById: string | null; eventType: string; label: string | null }>(
       `select c.id, c.replaced_by_id as "replacedById", e.event_type as "eventType", e.raw_payload ->> 'itemId' as label
          from location_timeline_corrections c join activity_events e on e.id = c.created_from_event_id
@@ -133,7 +143,11 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await expect(correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(705), legStoppedAt: at(760), mode: "bus" }, session))
       .rejects.toMatchObject({ status: 404 });
     // The walk set to Bus too: one Bus leg, stored at once (card A; Codex r2 on #590).
-    await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(700), legStoppedAt: at(710), mode: "bus" }, session);
+    const mergeId = "66000000-0000-4000-8000-0000000000c2";
+    const merged = await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(700), legStoppedAt: at(710), mode: "bus", clientCorrectionId: mergeId }, session);
+    // Its retry finds the legs already joined, and is answered, not refused (step 12).
+    expect(await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-2", legStartedAt: at(700), legStoppedAt: at(710), mode: "bus", clientCorrectionId: mergeId }, session))
+      .toEqual(merged);
     const joined = await database!.query<{ metadata: { legs: unknown[] } }>(
       `select metadata from commute_segments where client_segment_id = 'trip-2' and workspace_id = $1`, [workspaceId]);
     expect(joined.rows[0].metadata.legs).toEqual([
@@ -156,6 +170,13 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       `select count(*)::int as n from activity_events where workspace_id = $1 and client_event_id = $2`,
       [workspaceId, `timeline_correction:${clientCorrectionId}`]);
     expect(events.rows[0].n).toBe(1);
+    // An id another event already holds is refused, never written under (Codex r1 on #597).
+    const taken = "66000000-0000-4000-8000-0000000000c3";
+    await database!.query(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, client_event_id)
+       values ($1, $2, 'manual_app', 'timer_start', now(), 'high', '{}'::jsonb, $3)`, [workspaceId, userId, `timeline_correction:${taken}`]);
+    await expect(correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-a", placeId: null, learnedPlaceId: null, clientCorrectionId: taken }, session))
+      .rejects.toMatchObject({ status: 409 });
     // Without its id, the same request is a new one: the trip is gone.
     await expect(correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-2" }, session)).rejects.toMatchObject({ status: 404 });
     const trip = await database!.query(`select status from commute_segments where client_segment_id = 'trip-2' and workspace_id = $1`, [workspaceId]);

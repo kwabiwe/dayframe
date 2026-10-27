@@ -181,15 +181,18 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     // the two attempts; the activity_events client id index backs it.
     const clientEventId = request.clientCorrectionId ? `timeline_correction:${request.clientCorrectionId}` : null;
     if (clientEventId) {
-      const earlier = await client.query<CorrectionRow>(
+      const earlier = await client.query<CorrectionRow | { id: null }>(
         `select c.id, c.subject, c.kind, c.span_started_at as "spanStartedAt", c.span_stopped_at as "spanStoppedAt", c.target,
                 c.created_at as "createdAt"
            from activity_events e
-           join location_timeline_corrections c
+           left join location_timeline_corrections c
              on c.created_from_event_id = e.id and c.workspace_id = e.workspace_id and c.user_id = e.user_id
-          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3 and e.event_type = 'timeline_correction'`,
+          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
         [session.workspaceId, session.userId, clientEventId]);
-      if (earlier.rows[0]) return { ok: true as const, correction: correctionFromRow(earlier.rows[0]) };
+      const found = earlier.rows[0];
+      if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
+      // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
+      if (found) throw new TimelineCorrectionError("That change was already used for something else. Try again.", 409);
     }
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
