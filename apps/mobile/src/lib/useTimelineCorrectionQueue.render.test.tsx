@@ -18,9 +18,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 
 vi.mock("./secure-session", () => ({
   isAuthenticatedSessionSnapshotCurrent: vi.fn(() => true),
-  readOwnedAuthenticatedSessionSnapshot: vi.fn(async () => ({ status: "signed_out" }))
+  readOwnedAuthenticatedSessionSnapshot: vi.fn(async (owner) => ({ status: "authenticated", snapshot: { generation: 1, owner, token: "t" } }))
 }));
 
+const account = await import("./mobileAccount");
 const outbox = await import("./timelineCorrectionOutbox");
 const { useTimelineCorrectionQueue } = await import("./useTimelineCorrectionQueue");
 
@@ -34,12 +35,16 @@ function Probe({ owner }: { owner: typeof OWNER | null }) {
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
 describe("the List's queued corrections (location v4 step 12)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     storage.clear();
+    account.__resetMobileAccountForTests();
+    await account.activateMobileAccount(OWNER);
     seen = null;
     outbox.__resetTimelineCorrectionOutboxForTests();
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it("shows each correction as it is queued, and counts a delivery so the timeline is read again", async () => {
     let tree!: ReturnType<typeof create>;
@@ -49,9 +54,17 @@ describe("the List's queued corrections (location v4 step 12)", () => {
     const queued = await outbox.enqueueTimelineCorrection(OWNER, { kind: "delete", subject: "trip", itemId: "trip-1" });
     await flush();
     expect(seen!.pending.map((item) => item.clientCorrectionId)).toEqual([queued.clientCorrectionId]);
-    await outbox.removeTimelineCorrections([queued.clientCorrectionId]);
+    // A refusal shows from the queue, but the timeline is read again only for an acknowledgement (Codex r2 on #598).
+    const refusedThenSaved = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "in a block" }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", refusedThenSaved);
+    const second = await outbox.enqueueTimelineCorrection(OWNER, { kind: "delete", subject: "trip", itemId: "trip-2" });
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER });
     await flush();
-    expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 1 });
+    expect(seen!.delivered).toBe(1);
+    expect(seen!.acknowledged.map((item) => item.clientCorrectionId)).toEqual([second.clientCorrectionId]);
+    expect(seen!.pending).toEqual([expect.objectContaining({ clientCorrectionId: queued.clientCorrectionId, failureKind: "permanent" })]);
     // Signed out: nothing of the last account's.
     await act(async () => { tree.update(createElement(Probe, { owner: null })); });
     expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 0 });

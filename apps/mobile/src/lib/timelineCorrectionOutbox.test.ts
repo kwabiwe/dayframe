@@ -26,6 +26,7 @@ const account = await import("./mobileAccount");
 const network = await import("./mobile-network");
 const outbox = await import("./timelineCorrectionOutbox");
 const secureSession = await import("./secure-session");
+const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
 
 // Location v4 step 12: synthetic item ids and times only.
 const OWNER_A = { userId: "user-a", workspaceId: "workspace-a" };
@@ -128,12 +129,53 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
     await outbox.clearTimelineCorrectionsForOwner(OWNER_A);
     expect(JSON.parse(storage.get("dayframe.timelineCorrectionOutbox.v1")!)).toEqual([theirs]);
-    // A queue that can't be read at all is set aside as it is, and the queue starts again.
+    // A queue that can't be read at all is set aside as it is (one slot), and the queue starts again.
     storage.set("dayframe.timelineCorrectionOutbox.v1", "{not json");
     expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([]);
-    expect([...storage.entries()].filter(([key]) => key.startsWith("dayframe.timelineCorrectionOutbox.v1.unreadable."))
-      .map(([, value]) => value)).toEqual(["{not json"]);
+    expect(storage.get("dayframe.timelineCorrectionOutbox.v1.unreadable")).toBe("{not json");
     expect(storage.has("dayframe.timelineCorrectionOutbox.v1")).toBe(false);
+  });
+
+  it("lets a leaving account's records go, even ones it can't read, and keeps others' (Codex r2 on #598)", async () => {
+    const mine = { userId: "user-a", workspaceId: "workspace-a", clientCorrectionId: "m", request: { kind: "leg_split" } };
+    const theirs = { userId: "user-b", workspaceId: "workspace-b", clientCorrectionId: "t", request: { kind: "leg_split" } };
+    storage.set("dayframe.timelineCorrectionOutbox.v1", JSON.stringify([mine, theirs]));
+    storage.set("dayframe.timelineCorrectionOutbox.v1.unreadable", "{old");
+    await outbox.clearTimelineCorrectionsForOwner(OWNER_A);
+    expect(JSON.parse(storage.get("dayframe.timelineCorrectionOutbox.v1")!)).toEqual([theirs]);
+    expect(storage.has("dayframe.timelineCorrectionOutbox.v1.unreadable")).toBe(false);
+  });
+
+  it("never marks a refusal on a correction whose account changed while the reply was read (Codex r2 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false, status: 404,
+      json: async () => { await account.activateMobileAccount(OWNER_B); return { error: "gone" }; }
+    }) as unknown as Response));
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "session_changed", refused: [] });
+    expect((await outbox.readPendingTimelineCorrections(OWNER_A))[0]).not.toHaveProperty("failureKind");
+  });
+
+  it("never calls a saved correction refused when only the phone's copy couldn't be removed (Codex r2 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true })));
+    vi.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error("disk full"));
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "retryable_failure", refused: [], deliveredCount: 1 });
+    expect((await outbox.readPendingTimelineCorrections(OWNER_A))[0]).not.toHaveProperty("failureKind");
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toHaveLength(1);
+  });
+
+  it("sends nothing when the app leaves while the session is read (Codex r2 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    let foreground = true;
+    vi.mocked(secureSession.readOwnedAuthenticatedSessionSnapshot).mockImplementationOnce(async (owner) => {
+      foreground = false;
+      return { status: "authenticated", snapshot: { generation: 1, owner, token: "token-a" } } as never;
+    });
+    const fetch = vi.fn(async () => json(200, { ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, isForeground: () => foreground })).toMatchObject({ reason: "background" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("leaves a correction untouched when its answer belongs to a session that has changed (Codex r1 on #598)", async () => {

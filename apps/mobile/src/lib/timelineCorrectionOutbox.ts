@@ -20,6 +20,7 @@ import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, ty
  */
 
 const TIMELINE_CORRECTION_OUTBOX_KEY = "dayframe.timelineCorrectionOutbox.v1";
+const TIMELINE_CORRECTION_UNREADABLE_KEY = `${TIMELINE_CORRECTION_OUTBOX_KEY}.unreadable`;
 const PERMANENT_STATUS_CODES = new Set([400, 404, 409, 413, 422]);
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
 export const MOBILE_TIMELINE_CORRECTION_TIMEOUT_MS = 8_000;
@@ -97,8 +98,9 @@ async function readStore(): Promise<Stored> {
     parsed = null;
   }
   if (!Array.isArray(parsed)) {
-    // Unreadable as a whole: set aside as it is (never overwritten), and the queue starts again (Codex r1 on #598).
-    await AsyncStorage.setItem(`${TIMELINE_CORRECTION_OUTBOX_KEY}.unreadable.${Date.now()}`, raw);
+    // Unreadable as a whole: set aside as it is in one slot (the latest), and the queue starts again; logout
+    // removes it (Codex r1 and r2 on #598).
+    await AsyncStorage.setItem(TIMELINE_CORRECTION_UNREADABLE_KEY, raw);
     await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
     return { items: [], unknown: [] };
   }
@@ -117,9 +119,12 @@ async function readAll() {
 }
 
 /** Rewrites the queue from this version's records, keeping every record it can't read exactly as it was. */
-async function updateAll(change: (items: PendingTimelineCorrection[]) => PendingTimelineCorrection[]) {
+async function updateAll(
+  change: (items: PendingTimelineCorrection[]) => PendingTimelineCorrection[],
+  keepUnknown: (record: unknown) => boolean = () => true
+) {
   const stored = await readStore();
-  const next = [...change(stored.items), ...stored.unknown];
+  const next = [...change(stored.items), ...stored.unknown.filter(keepUnknown)];
   if (next.length === 0) await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
   else await AsyncStorage.setItem(TIMELINE_CORRECTION_OUTBOX_KEY, JSON.stringify(next));
 }
@@ -203,7 +208,15 @@ export async function removeTimelineCorrections(clientCorrectionIds: readonly st
 
 /** Logout or account switch: this owner's corrections leave with the account (others' were never sent). */
 export async function clearTimelineCorrectionsForOwner(owner: MobileAccountOwner) {
-  await withMutation(() => updateAll((items) => items.filter((item) => !mobileAccountOwnersEqual(item, owner))));
+  // Its records this version can't read leave too, when they say whose they are; others' stay (Codex r2 on #598).
+  const theirs = (record: unknown) => {
+    const item = record as { userId?: unknown; workspaceId?: unknown } | null;
+    return !(item && item.userId === owner.userId && item.workspaceId === owner.workspaceId);
+  };
+  await withMutation(async () => {
+    await updateAll((items) => items.filter((item) => !mobileAccountOwnersEqual(item, owner)), theirs);
+    await AsyncStorage.removeItem(TIMELINE_CORRECTION_UNREADABLE_KEY);
+  });
   acknowledged = acknowledged.filter((item) => !mobileAccountOwnersEqual(item, owner));
   notify();
 }
@@ -262,9 +275,14 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     if (session.status !== "authenticated") {
       return finish(session.status === "signed_out" ? "authentication_required" : "session_changed");
     }
+    // Checked again right before sending: the app may have left while the queue and session were read.
+    if (input.isForeground && !input.isForeground()) return finish("background");
     const attemptedAt = new Date().toISOString();
+    const stillCurrent = async () => isAuthenticatedSessionSnapshotCurrent(session.snapshot) &&
+      mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner);
+    let response: Response;
     try {
-      const response = await mobileFetchWithTimeout(`${DAYFRAME_API_BASE}/api/timeline/corrections`, {
+      response = await mobileFetchWithTimeout(`${DAYFRAME_API_BASE}/api/timeline/corrections`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.snapshot.token}` },
         body: JSON.stringify(next.request),
@@ -273,33 +291,37 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         timeoutMilliseconds: MOBILE_TIMELINE_CORRECTION_TIMEOUT_MS,
         timeoutMessage: "This change is saved on your iPhone and will retry automatically."
       });
-      if (response.status === 401 || response.status === 403) return finish("authentication_required");
-      if (!isAuthenticatedSessionSnapshotCurrent(session.snapshot) || !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
-        return finish("session_changed");
-      }
-      if (response.ok) {
-        // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
-        acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-          { ...next, acknowledgedAt: Date.now() }];
-        await removeQuietly([next.clientCorrectionId]);
-        deliveredCount += 1;
-        continue;
-      }
-      const permanent = PERMANENT_STATUS_CODES.has(response.status);
-      const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, await responseMessage(response), response.status);
-      if (!permanent) return finish("retryable_failure");
-      if (kept) refused.push(kept);
     } catch (error) {
       // An answer for a session that has since changed: not this correction's fault (Codex r1 on #598).
-      if (error instanceof StaleMobileSessionResponseError || !isAuthenticatedSessionSnapshotCurrent(session.snapshot) ||
-        !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
-        return finish("session_changed");
-      }
+      if (error instanceof StaleMobileSessionResponseError || !await stillCurrent()) return finish("session_changed");
       const retryable = input.signal?.aborted || error instanceof MobileRequestTimeoutError || isMobileTransportFailure(error);
       const kept = await recordFailure(next.clientCorrectionId, attemptedAt, !retryable, error instanceof Error ? error.message : "Network request failed.");
       if (retryable) return finish("retryable_failure");
       if (kept) refused.push(kept);
+      continue;
     }
+    if (response.status === 401 || response.status === 403) return finish("authentication_required");
+    if (!await stillCurrent()) return finish("session_changed");
+    if (response.ok) {
+      // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
+      acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
+        { ...next, acknowledgedAt: Date.now() }];
+      deliveredCount += 1;
+      try {
+        await removeQuietly([next.clientCorrectionId]);
+      } catch {
+        // Saved on the server; only the local copy stayed. Sent again later, its id answers it (Codex r2 on #598).
+        return finish("retryable_failure");
+      }
+      continue;
+    }
+    const permanent = PERMANENT_STATUS_CODES.has(response.status);
+    const message = await responseMessage(response);
+    // The account may have changed while the reply was read: then this correction is not touched (Codex r2 on #598).
+    if (!await stillCurrent()) return finish("session_changed");
+    const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, response.status);
+    if (!permanent) return finish("retryable_failure");
+    if (kept) refused.push(kept);
   }
 }
 
