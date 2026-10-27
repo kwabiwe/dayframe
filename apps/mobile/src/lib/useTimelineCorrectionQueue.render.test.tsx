@@ -45,15 +45,15 @@ describe("the List's queued corrections (location v4 step 12)", () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(createElement(Probe, { owner: OWNER })); });
     await flush();
-    expect(seen).toEqual({ pending: [], delivered: 0 });
+    expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 0 });
     const queued = await outbox.enqueueTimelineCorrection(OWNER, { kind: "delete", subject: "trip", itemId: "trip-1" });
     await flush();
     expect(seen!.pending.map((item) => item.clientCorrectionId)).toEqual([queued.clientCorrectionId]);
     await outbox.removeTimelineCorrections([queued.clientCorrectionId]);
     await flush();
-    expect(seen).toEqual({ pending: [], delivered: 1 });
+    expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 1 });
     // Signed out: nothing of the last account's.
     await act(async () => { tree.update(createElement(Probe, { owner: null })); });
-    expect(seen).toEqual({ pending: [], delivered: 0 });
+    expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 0 });
   });
 });

@@ -1,7 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TimelineCorrectionRequestSchema, type TimelineCorrectionRequest } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { MobileRequestTimeoutError, isMobileTransportFailure, mobileFetchWithTimeout } from "./mobile-network";
+import {
+  MobileRequestTimeoutError,
+  StaleMobileSessionResponseError,
+  isMobileTransportFailure,
+  mobileFetchWithTimeout
+} from "./mobile-network";
 import { isAuthenticatedSessionSnapshotCurrent, readOwnedAuthenticatedSessionSnapshot } from "./secure-session";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
 
@@ -41,8 +46,13 @@ export type TimelineCorrectionSyncResult = {
   waitingCount: number;
   /** Refused during this pass. */
   refused: PendingTimelineCorrection[];
-  reason: "drained" | "retry_wait" | "retryable_failure" | "authentication_required" | "session_changed";
+  reason: "drained" | "retry_wait" | "retryable_failure" | "authentication_required" | "session_changed" | "background";
 };
+
+/** A correction the server has, kept a short while so the List keeps showing it until a timeline read after it lands. */
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number };
+const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
+let acknowledged: AcknowledgedTimelineCorrection[] = [];
 
 const listeners = new Set<() => void>();
 const inFlightByOwner = new Map<string, Promise<TimelineCorrectionSyncResult>>();
@@ -75,20 +85,43 @@ export function createTimelineCorrectionId(random = Math.random) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-async function readAll(): Promise<PendingTimelineCorrection[]> {
+type Stored = { items: PendingTimelineCorrection[]; /** Records this version can't read (another version's): kept as they are. */ unknown: unknown[] };
+
+async function readStore(): Promise<Stored> {
   const raw = await AsyncStorage.getItem(TIMELINE_CORRECTION_OUTBOX_KEY);
-  if (!raw) return [];
+  if (!raw) return { items: [], unknown: [] };
+  let parsed: unknown = null;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(parseStored).filter((item): item is PendingTimelineCorrection => item !== null) : [];
+    parsed = JSON.parse(raw);
   } catch {
-    return [];
+    parsed = null;
   }
+  if (!Array.isArray(parsed)) {
+    // Unreadable as a whole: set aside as it is (never overwritten), and the queue starts again (Codex r1 on #598).
+    await AsyncStorage.setItem(`${TIMELINE_CORRECTION_OUTBOX_KEY}.unreadable.${Date.now()}`, raw);
+    await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
+    return { items: [], unknown: [] };
+  }
+  const items: PendingTimelineCorrection[] = [];
+  const unknown: unknown[] = [];
+  for (const record of parsed) {
+    const item = parseStored(record);
+    if (item) items.push(item);
+    else unknown.push(record);
+  }
+  return { items, unknown };
 }
 
-async function writeAll(items: readonly PendingTimelineCorrection[]) {
-  if (items.length === 0) await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
-  else await AsyncStorage.setItem(TIMELINE_CORRECTION_OUTBOX_KEY, JSON.stringify(items));
+async function readAll() {
+  return (await readStore()).items;
+}
+
+/** Rewrites the queue from this version's records, keeping every record it can't read exactly as it was. */
+async function updateAll(change: (items: PendingTimelineCorrection[]) => PendingTimelineCorrection[]) {
+  const stored = await readStore();
+  const next = [...change(stored.items), ...stored.unknown];
+  if (next.length === 0) await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
+  else await AsyncStorage.setItem(TIMELINE_CORRECTION_OUTBOX_KEY, JSON.stringify(next));
 }
 
 function parseStored(value: unknown): PendingTimelineCorrection | null {
@@ -138,36 +171,48 @@ export async function enqueueTimelineCorrection(
     createdAt: (options.now ?? new Date()).toISOString(),
     attemptCount: 0
   };
-  await withMutation(async () => writeAll([...await readAll(), item]));
+  await withMutation(() => updateAll((items) => [...items, item]));
   notify();
   return item;
 }
 
 /** This owner's corrections, oldest first, refused ones included. */
 export async function readPendingTimelineCorrections(owner: MobileAccountOwner) {
-  return (await readAll()).filter((item) => mobileAccountOwnersEqual(item, owner));
+  // In the mutation chain: a read may set an unreadable queue aside, which must not race a write.
+  return (await withMutation(readAll)).filter((item) => mobileAccountOwnersEqual(item, owner));
+}
+
+/** This owner's corrections the server has had for less than five minutes (see `AcknowledgedTimelineCorrection`). */
+export function readAcknowledgedTimelineCorrections(owner: MobileAccountOwner, nowMs = Date.now()) {
+  acknowledged = acknowledged.filter((item) => nowMs - item.acknowledgedAt < ACKNOWLEDGED_KEEP_MS);
+  return acknowledged.filter((item) => mobileAccountOwnersEqual(item, owner));
+}
+
+async function removeQuietly(clientCorrectionIds: readonly string[]) {
+  if (clientCorrectionIds.length === 0) return;
+  const ids = new Set(clientCorrectionIds);
+  await withMutation(() => updateAll((items) => items.filter((item) => !ids.has(item.clientCorrectionId))));
 }
 
 /** Drops corrections (a refusal the List has shown, or Discard). */
 export async function removeTimelineCorrections(clientCorrectionIds: readonly string[]) {
   if (clientCorrectionIds.length === 0) return;
-  const ids = new Set(clientCorrectionIds);
-  await withMutation(async () => writeAll((await readAll()).filter((item) => !ids.has(item.clientCorrectionId))));
+  await removeQuietly(clientCorrectionIds);
   notify();
 }
 
 /** Logout or account switch: this owner's corrections leave with the account (others' were never sent). */
 export async function clearTimelineCorrectionsForOwner(owner: MobileAccountOwner) {
-  await withMutation(async () => writeAll((await readAll()).filter((item) => !mobileAccountOwnersEqual(item, owner))));
+  await withMutation(() => updateAll((items) => items.filter((item) => !mobileAccountOwnersEqual(item, owner))));
+  acknowledged = acknowledged.filter((item) => !mobileAccountOwnersEqual(item, owner));
   notify();
 }
 
 export async function getTimelineCorrectionDiagnostics(owner: MobileAccountOwner) {
   const items = await readPendingTimelineCorrections(owner);
   const waiting = items.filter((item) => item.failureKind !== "permanent");
-  const nextRetryAt = waiting.some((item) => !item.nextAttemptAt)
-    ? null
-    : waiting.map((item) => item.nextAttemptAt!).sort()[0] ?? null;
+  // Sent in order: only the first one waiting decides when the queue can move (Codex r1 on #598).
+  const nextRetryAt = waiting[0]?.nextAttemptAt ?? null;
   return {
     pendingCount: waiting.length,
     refusedCount: items.length - waiting.length,
@@ -177,7 +222,7 @@ export async function getTimelineCorrectionDiagnostics(owner: MobileAccountOwner
 }
 
 /** Sends this owner's corrections in order, one pass at a time per owner. */
-export function synchroniseTimelineCorrections(input: { owner: MobileAccountOwner; force?: boolean; now?: Date; signal?: AbortSignal }) {
+export function synchroniseTimelineCorrections(input: DrainInput) {
   const key = mobileAccountKey(input.owner);
   const existing = inFlightByOwner.get(key);
   if (existing) return existing;
@@ -188,7 +233,16 @@ export function synchroniseTimelineCorrections(input: { owner: MobileAccountOwne
   return pass;
 }
 
-async function runDrain(input: { owner: MobileAccountOwner; force?: boolean; now?: Date; signal?: AbortSignal }): Promise<TimelineCorrectionSyncResult> {
+type DrainInput = {
+  owner: MobileAccountOwner;
+  force?: boolean;
+  now?: Date;
+  signal?: AbortSignal;
+  /** Checked before each send: corrections are foreground-owned, so a pass stops when the app leaves. */
+  isForeground?: () => boolean;
+};
+
+async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult> {
   let deliveredCount = 0;
   const refused: PendingTimelineCorrection[] = [];
   const finish = async (reason: TimelineCorrectionSyncResult["reason"]) => {
@@ -199,6 +253,7 @@ async function runDrain(input: { owner: MobileAccountOwner; force?: boolean; now
   while (true) {
     if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) return finish("session_changed");
     if (input.signal?.aborted) return finish("retryable_failure");
+    if (input.isForeground && !input.isForeground()) return finish("background");
     const next = (await readPendingTimelineCorrections(input.owner)).find((item) => item.failureKind !== "permanent");
     if (!next) return finish("drained");
     const now = input.now ?? new Date();
@@ -223,7 +278,10 @@ async function runDrain(input: { owner: MobileAccountOwner; force?: boolean; now
         return finish("session_changed");
       }
       if (response.ok) {
-        await removeTimelineCorrections([next.clientCorrectionId]);
+        // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
+        acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
+          { ...next, acknowledgedAt: Date.now() }];
+        await removeQuietly([next.clientCorrectionId]);
         deliveredCount += 1;
         continue;
       }
@@ -232,6 +290,11 @@ async function runDrain(input: { owner: MobileAccountOwner; force?: boolean; now
       if (!permanent) return finish("retryable_failure");
       if (kept) refused.push(kept);
     } catch (error) {
+      // An answer for a session that has since changed: not this correction's fault (Codex r1 on #598).
+      if (error instanceof StaleMobileSessionResponseError || !isAuthenticatedSessionSnapshotCurrent(session.snapshot) ||
+        !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
+        return finish("session_changed");
+      }
       const retryable = input.signal?.aborted || error instanceof MobileRequestTimeoutError || isMobileTransportFailure(error);
       const kept = await recordFailure(next.clientCorrectionId, attemptedAt, !retryable, error instanceof Error ? error.message : "Network request failed.");
       if (retryable) return finish("retryable_failure");
@@ -242,9 +305,7 @@ async function runDrain(input: { owner: MobileAccountOwner; force?: boolean; now
 
 async function recordFailure(clientCorrectionId: string, attemptedAt: string, permanent: boolean, message: string, statusCode?: number) {
   let kept: PendingTimelineCorrection | null = null;
-  await withMutation(async () => {
-    const items = await readAll();
-    await writeAll(items.map((item) => {
+  await withMutation(() => updateAll((items) => items.map((item) => {
       if (item.clientCorrectionId !== clientCorrectionId) return item;
       const attemptCount = item.attemptCount + 1;
       kept = {
@@ -256,8 +317,7 @@ async function recordFailure(clientCorrectionId: string, attemptedAt: string, pe
         ...(permanent ? {} : { nextAttemptAt: nextRetryAt(attemptedAt, attemptCount) })
       };
       return kept;
-    }));
-  });
+    })));
   notify();
   return kept as PendingTimelineCorrection | null;
 }
@@ -278,6 +338,7 @@ async function responseMessage(response: Response) {
 }
 
 export function __resetTimelineCorrectionOutboxForTests() {
+  acknowledged = [];
   listeners.clear();
   inFlightByOwner.clear();
   mutationTail = Promise.resolve();

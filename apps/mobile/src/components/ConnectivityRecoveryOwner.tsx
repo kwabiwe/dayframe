@@ -400,7 +400,12 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
           name: "timeline_corrections",
           run: async () => {
             if(!due.has("review"))return "continue";
-            const result = await synchroniseTimelineCorrections({ owner, force: !context?.dueOnly });
+            const result = await synchroniseTimelineCorrections({
+              owner,
+              force: !context?.dueOnly,
+              // Checked before each send: a pass that runs on when the app leaves sends nothing more.
+              isForeground: () => AppState.currentState === "active"
+            });
             changed ||= result.deliveredCount>0||result.refused.length>0;
             if (result.reason === "authentication_required" || result.reason === "session_changed") throw new AuthRequiredError();
             if (result.reason === "retryable_failure") return "transport_failure";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LocationTimeline, TimelineCorrectionRequest, TimelinePlace, TimelineTrip } from "@dayframe/shared";
-import { projectTimelineCorrections } from "./timelineCorrectionProjection";
+import { correctionsToShow, projectTimelineCorrections } from "./timelineCorrectionProjection";
 import type { PendingTimelineCorrection } from "./timelineCorrectionOutbox";
 
 // Location v4 step 12: synthetic ids, names and times only.
@@ -61,10 +61,34 @@ describe("the List with the corrections the phone still holds (location v4 step 
     expect((bus.items[1] as TimelineTrip).legs[1]).toEqual({ startedAt: at(70), stoppedAt: at(100), mode: "bus", confidence: "sure", distanceMeters: 9000, setByYou: true });
   });
 
+  it("sets only the leg with exactly those ends, as the server, and leaves a leg that changed meanwhile (Codex r1 on #598)", () => {
+    const moved = projectTimelineCorrections(timeline, [
+      queued({ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: at(60), legStoppedAt: at(80), mode: "bus" })
+    ])!;
+    expect(moved.items[1]).toEqual(trip);
+  });
+
+  it("names the picked place even when its preview has no name, and keeps the name with no preview (Codex r1 on #598)", () => {
+    const named = { ...timeline, items: [{ ...place("seg-a", 0, 60), placeId: PLACE_ID, name: "Home", role: "home", matchKind: "saved" as const }] };
+    const learned = projectTimelineCorrections(named, [queued({ kind: "place", subject: "place", itemId: "seg-a", placeId: null,
+      learnedPlaceId: "6f000000-0000-4000-8000-000000000009" }, { preview: { name: null } })])!;
+    expect(learned.items[0]).toMatchObject({ name: null, role: null, matchKind: "learned" });
+    const kept = projectTimelineCorrections(named, [queued({ kind: "place", subject: "place", itemId: "seg-a", placeId: PLACE_ID, learnedPlaceId: null })])!;
+    expect(kept.items[0]).toMatchObject({ name: "Home", role: "home" });
+  });
+
   it("leaves a refused correction out, so its row is back as it was", () => {
     expect(projectTimelineCorrections(timeline, [
       queued({ kind: "delete", subject: "trip", itemId: "trip-1" }, { failureKind: "permanent", lastError: "This trip is already in a block." })
     ])).toBe(timeline);
     expect(projectTimelineCorrections(null, [queued({ kind: "delete", subject: "trip", itemId: "trip-1" })])).toBeNull();
+  });
+
+  it("keeps a delivered correction shown until a timeline asked for after it lands, so a trip never comes back (Codex r1 on #598)", () => {
+    const delivered = { ...queued({ kind: "delete", subject: "trip", itemId: "trip-1" }), acknowledgedAt: 2_000 };
+    const waiting = queued({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(5), stoppedAt: at(55) });
+    expect(correctionsToShow([delivered], [waiting], 1_000)).toEqual([delivered, waiting]);
+    expect(correctionsToShow([delivered], [waiting], 3_000)).toEqual([waiting]);
+    expect(projectTimelineCorrections(timeline, correctionsToShow([delivered], [], 1_000))!.items.map((item) => item.id)).toEqual(["seg-a", "seg-b"]);
   });
 });

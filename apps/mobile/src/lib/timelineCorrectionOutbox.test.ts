@@ -23,6 +23,7 @@ vi.mock("./secure-session", () => ({
 }));
 
 const account = await import("./mobileAccount");
+const network = await import("./mobile-network");
 const outbox = await import("./timelineCorrectionOutbox");
 const secureSession = await import("./secure-session");
 
@@ -118,9 +119,61 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     expect(await outbox.readPendingTimelineCorrections(OWNER_B)).toHaveLength(1);
   });
 
-  it("never stores a request the server would refuse as malformed, and ignores damaged storage", async () => {
+  it("never stores a request the server would refuse as malformed, and keeps records it can't read exactly as they were (Codex r1 on #598)", async () => {
     await expect(outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "" } as never, { createId })).rejects.toThrow();
-    storage.set("dayframe.timelineCorrectionOutbox.v1", JSON.stringify([{ userId: "user-a" }, "nonsense"]));
+    // Another version's correction for another account: not read here, never dropped by this one's writes.
+    const theirs = { userId: "user-b", workspaceId: "workspace-b", clientCorrectionId: "x", request: { kind: "leg_split", subject: "leg" } };
+    storage.set("dayframe.timelineCorrectionOutbox.v1", JSON.stringify([theirs]));
     expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([]);
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    await outbox.clearTimelineCorrectionsForOwner(OWNER_A);
+    expect(JSON.parse(storage.get("dayframe.timelineCorrectionOutbox.v1")!)).toEqual([theirs]);
+    // A queue that can't be read at all is set aside as it is, and the queue starts again.
+    storage.set("dayframe.timelineCorrectionOutbox.v1", "{not json");
+    expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([]);
+    expect([...storage.entries()].filter(([key]) => key.startsWith("dayframe.timelineCorrectionOutbox.v1.unreadable."))
+      .map(([, value]) => value)).toEqual(["{not json"]);
+    expect(storage.has("dayframe.timelineCorrectionOutbox.v1")).toBe(false);
+  });
+
+  it("leaves a correction untouched when its answer belongs to a session that has changed (Codex r1 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new network.StaleMobileSessionResponseError(); }));
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "session_changed", refused: [] });
+    expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([expect.objectContaining({ attemptCount: 0 })]);
+    expect((await outbox.readPendingTimelineCorrections(OWNER_A))[0]).not.toHaveProperty("failureKind");
+  });
+
+  it("sends nothing more once the app has left the foreground (Codex r1 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
+    let foreground = true;
+    const fetch = vi.fn(async () => { foreground = false; return json(200, { ok: true }); });
+    vi.stubGlobal("fetch", fetch);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, isForeground: () => foreground }))
+      .toMatchObject({ reason: "background", deliveredCount: 1, waitingCount: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a delivered correction a while for the List, and says so once per pass (Codex r1 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
+    const listener = vi.fn();
+    outbox.subscribeTimelineCorrectionOutbox(listener);
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.request.itemId)).toEqual(["trip-a", "trip-b"]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_B)).toEqual([]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A, Date.now() + 6 * 60_000)).toEqual([]);
+  });
+
+  it("is due when the first correction waiting is, since they go in order (Codex r1 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => json(503, { error: "busy" })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A });
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
+    const [head] = await outbox.readPendingTimelineCorrections(OWNER_A);
+    expect(await outbox.getTimelineCorrectionDiagnostics(OWNER_A)).toMatchObject({ pendingCount: 2, nextRetryAt: head.nextAttemptAt });
   });
 });

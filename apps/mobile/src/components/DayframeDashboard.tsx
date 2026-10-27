@@ -50,8 +50,8 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
-import { useCalendarTimeline } from "@/lib/useCalendarTimeline";
-import { projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
+import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
+import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
@@ -2064,17 +2064,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => ({ calendarData, delivered: correctionQueue.delivered }),
     [calendarData, correctionQueue.delivered]
   );
-  const serverCalendarTimeline = useCalendarTimeline({
+  const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
     enabled: calendarLayout === "list",
     fetchTimeline: fetchLocationTimeline,
     owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
     refreshKey: calendarTimelineRefreshKey
   });
-  const calendarTimeline = useMemo(
-    () => projectTimelineCorrections(serverCalendarTimeline, correctionQueue.pending),
-    [serverCalendarTimeline, correctionQueue.pending]
-  );
+  // Acknowledged corrections stay shown until a timeline asked for after them lands, so nothing flickers back.
+  const { timeline: serverCalendarTimeline, requestedAt: calendarTimelineRequestedAt } = serverCalendarSnapshot;
+  const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
+    correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
+  [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
