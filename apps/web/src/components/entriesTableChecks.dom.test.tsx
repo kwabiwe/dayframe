@@ -127,6 +127,30 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
   });
 
+  it("asks a trip by its title with Yes, Edit and Not now; Edit opens its editor under the question (card A)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    // The editor's evidence stays loading here: it only has to open and close.
+    clientFetch.mockImplementation(async (url: string, init?: RequestInit) => init?.method === "POST" || init?.body
+      ? new Response(JSON.stringify(acknowledge(url, init as RequestInit)), { status: 200 }) : new Promise(() => undefined));
+    const trip = { ...reviewItems[1], title: "Getting around" };
+    render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], trip, reviewItems[2]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
+    const edit = screen.getByRole("button", { name: "Edit" });
+    expect(edit.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(edit);
+    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Close location evidence" })).toBeTruthy();
+    expect(clientFetch.mock.calls.some(([url]) => url === `/api/review/${TRIP}/location-evidence`)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Close location evidence" }));
+    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
+    // Yes logs it as the deck's Log it does.
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    const posted = clientFetch.mock.calls.find(([url, init]) => url === `/api/review/${TRIP}` && init?.body);
+    expect(JSON.parse(posted![1].body).mutation).toEqual({ action: "confirm" });
+  });
+
   it("moves from one check to the next with the chip", async () => {
     renderList();
     fireEvent.click(await screen.findByRole("button", { name: "3 to check" }));

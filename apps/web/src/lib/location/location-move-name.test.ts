@@ -32,7 +32,7 @@ describe("Move names from their ends (PRD D19, D21; card A)", () => {
       .toEqual({ title: "Getting around", route: "Round trip from Home", activity: "travel" });
     expect(await segmentMoveName({ query } as never, session, segment({ fromPlaceId: "home", toPlaceId: "home",
       qualificationReason: "same_place_outing", stops: [{}] }), new Map()))
-      .toEqual({ title: "Getting around", route: "Home → a stop → Home", activity: "errand" });
+      .toEqual({ title: "Trip", route: "Home → a stop → Home", activity: "errand" });
   });
 
   it("names a learned end through its persisted stay, and an end it cannot name as Unknown place", async () => {

@@ -17,11 +17,11 @@ export const GETTING_AROUND = "Getting around";
 const endpointName = (endpoint: MoveEndpoint) => endpoint.name?.trim() || "Unknown place";
 
 /**
- * A Move's title, route line and activity. Every trip is "Getting around", or "Commute" between Home and
- * Work; its modes show only in its leg line, never in its title or route, so a title never names a mode
- * the trip's legs don't have (card A, owner feedback 25 Oct: "Drive" over three Underground legs).
+ * A Move's title, route line and activity. A trip is "Getting around", "Commute" between Home and Work, or
+ * "Trip" with a stop; its modes show only in its leg line, never in its title or route, so a title never
+ * names a mode the trip's legs don't have (card A, owner feedback 25 Oct: "Drive" over three Underground legs).
  * - Home ↔ Work, any mode: "Commute", "Home → Work".
- * - With a stop: "Getting around", "Home → a stop → Home" (an errand).
+ * - With a stop: "Trip", "Home → a stop → Home" (an errand: Errands when the workspace has it, PRD D19).
  * - Back to where it started (a round trip, or time away from a place): "Getting around", "Round trip from Home".
  * - Otherwise: "Getting around", "Home → Gym".
  */
@@ -40,7 +40,7 @@ export function moveName(input: {
   }
   const stops = Math.max(0, Math.floor(input.stopCount ?? 0));
   if (stops > 0) {
-    return { title: GETTING_AROUND, route: `${from} → ${stops === 1 ? "a stop" : `${stops} stops`} → ${to}`, activity: "errand" };
+    return { title: "Trip", route: `${from} → ${stops === 1 ? "a stop" : `${stops} stops`} → ${to}`, activity: "errand" };
   }
   if (input.sameEndpoint) return { title: GETTING_AROUND, route: `Round trip from ${from}`, activity: "travel" };
   return { title: GETTING_AROUND, route: `${from} → ${to}`, activity: "travel" };

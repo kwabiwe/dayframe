@@ -13,7 +13,7 @@ describe("Stays and Moves naming (PRD D19, D21; card A)", () => {
     expect(moveName({ from: home, to: gym, sameEndpoint: false }).title).toBe(GETTING_AROUND);
   });
 
-  it("calls every other trip Getting around, never by a mode", () => {
+  it("calls every other trip without a stop Getting around, never by a mode", () => {
     expect(GETTING_AROUND).toBe("Getting around");
     expect(moveName({ from: home, to: gym, sameEndpoint: false })).toEqual({ title: "Getting around", route: "Home → Peak Gym", activity: "travel" });
     expect(moveName({ from: gym, to: unknown, sameEndpoint: false }))
@@ -24,7 +24,7 @@ describe("Stays and Moves naming (PRD D19, D21; card A)", () => {
     expect(moveName({ from: home, to: home, sameEndpoint: true }))
       .toEqual({ title: "Getting around", route: "Round trip from Home", activity: "travel" });
     expect(moveName({ from: home, to: home, sameEndpoint: true, stopCount: 1 }))
-      .toEqual({ title: "Getting around", route: "Home → a stop → Home", activity: "errand" });
+      .toEqual({ title: "Trip", route: "Home → a stop → Home", activity: "errand" });
     expect(moveName({ from: home, to: gym, sameEndpoint: false, stopCount: 2 }).route).toBe("Home → 2 stops → Peak Gym");
     // A Home ↔ Work Move with a stop is still a Commute.
     expect(moveName({ from: home, to: work, sameEndpoint: false, stopCount: 1 }).activity).toBe("commute");
