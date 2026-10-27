@@ -479,18 +479,17 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
     );
   }
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
-  const notInBlock = row.unloggedSeconds >= 60 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
   const checkId = row.checkIds[0];
   const checkTitle = checkId ? checkTitles?.get(checkId) ?? label : null;
   return (
     <View style={styles.row}>
-      <View accessible accessibilityLabel={[label, notInBlock, span].filter(Boolean).join(", ")} style={styles.rowMain}>
+      {/* Card B: the place and its times; no "not in a block" line. */}
+      <View accessible accessibilityLabel={`${label}, ${span}`} style={styles.rowMain}>
         <View style={[styles.mark, styles.unknownMark, { backgroundColor: theme.surfaceMuted, borderColor: theme.warning }]}>
           <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={18} />
         </View>
         <View style={styles.text}>
           <Text {...mobileTextProps("itemTitle")} style={[styles.title, { color: theme.textPrimary }]}>{label}</Text>
-          {notInBlock ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{notInBlock}</Text> : null}
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{span}</Text>
         </View>
         <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textSecondary }]}>{formatDuration(length)}</Text>
@@ -533,7 +532,7 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
           </Pressable>
         ) : null}
         {edit && onMore ? (
-          <Pressable accessibilityHint="Opens the trip on its own screen to edit it" accessibilityRole="button" onPress={onMore}
+          <Pressable accessibilityHint="Opens it on its own screen to edit it" accessibilityRole="button" onPress={onMore}
             testID="calendar-list-answer-edit"
             style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.moreLabel}</Text>

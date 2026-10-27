@@ -58,10 +58,12 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     const rows = await screen.findAllByRole("row");
     const text = rows.map((row) => row.textContent ?? "");
     const index = (needle: string) => text.findIndex((value) => value.includes(needle));
+    const unknown = text.findIndex((value) => value.startsWith("Unknown place"));
     expect(index("Planning")).toBeLessThan(index("Travelling since"));
-    expect(index("Travelling since")).toBeLessThan(index("not in a block"));
-    expect(index("not in a block")).toBeLessThan(index("Getting around"));
-    expect(text[index("not in a block")]).toContain("Unknown place1h 20m not in a block");
+    expect(index("Travelling since")).toBeLessThan(unknown);
+    expect(unknown).toBeLessThan(index("Getting around"));
+    // Card B: the row names the place and its times; no "not in a block" line.
+    expect(text.some((value) => value.includes("not in a block"))).toBe(false);
     expect(text[index("Travelling since")]).toContain("Logs when you arrive");
     expect(screen.queryByText(/Home ·/)).toBeNull();
   });
@@ -106,7 +108,7 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     expect(occurrences).toHaveLength(2);
     const [at11, at08] = occurrences;
     expect(text[at11]).toMatch(/30m$/);
-    const shop = text.findIndex((value) => value.includes("not in a block"));
+    const shop = text.findIndex((value) => value.startsWith("Unknown place"));
     expect(at11).toBeLessThan(shop);
     expect(shop).toBeLessThan(at08);
   });
