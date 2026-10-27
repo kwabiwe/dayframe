@@ -37,9 +37,9 @@ describe("web contextual category creation contract", () => {
 
   it("publishes an optional palette colour without submitting a surrounding form", () => {
     expect(runtime).toContain('clientFetch("/api/categories"');
-    expect(runtime).toContain("body: JSON.stringify({ name, color })");
+    expect(runtime).toContain("body: JSON.stringify({ name, color, icon })");
     expect(runtime).toContain("commitData({ ...current, categories }, \"optimistic\")");
-    expect(picker).toContain("onCreateCategory(name, createColor ?? undefined)");
+    expect(picker).toContain("onCreateCategory(name, createColor ?? undefined, createIcon ?? suggestedActivityIconKey(name))");
     expect(picker).toContain("DAYFRAME_PALETTE_PICKER.map");
     expect(picker).toContain("paletteKeyFor(undefined, createName.trim())");
     expect(picker).toContain(">Cancel</button>");

@@ -451,9 +451,9 @@ export default function LocationReviewDetailScreen() {
 
   // All activities' Create (as in the entry sheet): the server picks the colour, and the new
   // activity joins this screen's bootstrap so it can be chosen at once.
-  async function createActivity(name: string): Promise<{ id: string } | { error: string }> {
+  async function createActivity(name: string, icon?: string): Promise<{ id: string } | { error: string }> {
     try {
-      const response = await createCategory(name);
+      const response = await createCategory(name, icon ? { icon } : {});
       setData((current) => current
         ? { ...current, categories: [...current.categories.filter((category) => category.id !== response.category.id), response.category] }
         : current);

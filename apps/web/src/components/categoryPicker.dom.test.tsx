@@ -25,7 +25,7 @@ describe("CategoryPicker", () => {
   afterEach(() => cleanup());
 
   it("prevents blank and duplicate names and gives Escape back to the picker before closing it", async () => {
-    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>();
+    const create = vi.fn<(name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>>();
     render(<PickerHarness create={create} />);
     const user = userEvent.setup();
     const trigger = screen.getByRole("button", { name: /No activity/ });
@@ -56,6 +56,8 @@ describe("CategoryPicker", () => {
     await user.tab();
     expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: /Choose activity colour/ }));
     await user.tab();
+    expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: /Choose activity icon/ }));
+    await user.tab();
     expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: "Cancel" }));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" })));
@@ -66,7 +68,7 @@ describe("CategoryPicker", () => {
   });
 
   it("preserves the surrounding draft after failure, retries, selects the category, and publishes it to another picker", async () => {
-    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>()
+    const create = vi.fn<(name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>>()
       .mockResolvedValueOnce({ ok: false, error: "Category creation failed. Try again." })
       .mockResolvedValueOnce({ ok: true, category: writingCategory });
     const submit = vi.fn((event: FormEvent) => event.preventDefault());
@@ -101,8 +103,8 @@ describe("CategoryPicker", () => {
 
     await user.keyboard("{Enter}");
     await waitFor(() => expect(firstTrigger.textContent).toContain("Writing"));
-    expect(create).toHaveBeenNthCalledWith(1, "Writing", undefined);
-    expect(create).toHaveBeenNthCalledWith(2, "Writing", undefined);
+    expect(create).toHaveBeenNthCalledWith(1, "Writing", undefined, "writing");
+    expect(create).toHaveBeenNthCalledWith(2, "Writing", undefined, "writing");
     expect(submit).not.toHaveBeenCalled();
 
     const secondTrigger = screen.getByTestId("second-picker").querySelector("button") as HTMLButtonElement;
@@ -110,8 +112,54 @@ describe("CategoryPicker", () => {
     expect(screen.getByRole("option", { name: "Writing" })).not.toBeNull();
   });
 
+  it("shows the name's suggested icon, else the neutral Other, and lets the user change it before Create (Trello D item 11)", async () => {
+    const create = vi.fn<(name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>>()
+      .mockResolvedValueOnce({ ok: true, category: { ...writingCategory, name: "Zorblax" } });
+    render(<PickerHarness create={create} portal />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /No activity/ }));
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
+    const dialog = screen.getByRole("dialog", { name: "Create new activity" });
+    const input = within(dialog).getByRole("textbox", { name: "Name" });
+    const iconTrigger = () => within(dialog).getByRole("button", { name: /Choose activity icon/ });
+    await user.type(input, "Gym");
+    expect(iconTrigger().getAttribute("aria-label")).toBe("Choose activity icon, currently Exercise");
+    await user.clear(input);
+    await user.type(input, "Zorblax");
+    expect(iconTrigger().getAttribute("aria-label")).toBe("Choose activity icon, currently Other");
+    await user.click(iconTrigger());
+    expect(iconTrigger().getAttribute("aria-expanded")).toBe("true");
+    // A radio group with one Tab stop: focus lands on the checked icon; arrows move the choice
+    // (wrapping), and Escape closes the icons first, keeping the draft (Codex r1 on #593).
+    const other = within(dialog).getByRole("radio", { name: "Other" });
+    await waitFor(() => expect(document.activeElement).toBe(other));
+    expect(other.getAttribute("aria-checked")).toBe("true");
+    expect(within(dialog).getAllByRole("radio").filter((radio) => radio.tabIndex === 0)).toEqual([other]);
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(within(dialog).getByRole("radio", { name: "Work" }));
+    expect(within(dialog).getByRole("radio", { name: "Work" }).getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(other);
+    await user.keyboard("{Escape}");
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
+    expect(document.activeElement).toBe(iconTrigger());
+    expect((input as HTMLInputElement).value).toBe("Zorblax");
+    // From the Name field too: Escape closes the open icons and keeps the draft (Codex r2 on #593).
+    await user.click(iconTrigger());
+    await user.click(input);
+    await user.keyboard("{Escape}");
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
+    expect((input as HTMLInputElement).value).toBe("Zorblax");
+    await user.click(iconTrigger());
+    await user.click(within(dialog).getByRole("radio", { name: "Boat" }));
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
+    expect(iconTrigger().getAttribute("aria-label")).toBe("Choose activity icon, currently Boat");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith("Zorblax", undefined, "boat"));
+  });
+
   it("lets the user choose a shared palette colour, preserves it after failure, and stages Escape locally", async () => {
-    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>()
+    const create = vi.fn<(name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>>()
       .mockResolvedValueOnce({ ok: false, error: "Category creation failed. Try again." })
       .mockResolvedValueOnce({
         ok: true,
@@ -142,7 +190,7 @@ describe("CategoryPicker", () => {
     expect((await within(dialog).findByRole("alert", undefined, { timeout: 3000 })).textContent).toContain("Category creation failed");
     expect((input as HTMLInputElement).value).toBe("Deep Work");
     expect(colorTrigger.getAttribute("aria-label")).toContain("currently Blue");
-    expect(create).toHaveBeenNthCalledWith(1, "Deep Work", "blue");
+    expect(create).toHaveBeenNthCalledWith(1, "Deep Work", "blue", "focus");
 
     await user.click(colorTrigger);
     await user.keyboard("{Escape}");
@@ -235,7 +283,7 @@ function PickerHarness({
   portal = false,
   secondPicker = false
 }: {
-  create: (name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>;
+  create: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
   initialSecondSelectedId?: string;
   nativeDialog?: boolean;
   onSubmit?: (event: FormEvent) => void;
@@ -249,8 +297,8 @@ function PickerHarness({
   const [firstOpen, setFirstOpen] = useState(false);
   const [secondOpen, setSecondOpen] = useState(false);
 
-  async function createAndPublish(name: string, color?: DayframePaletteKey) {
-    const outcome = await create(name, color);
+  async function createAndPublish(name: string, color?: DayframePaletteKey, icon?: string) {
+    const outcome = await create(name, color, icon);
     if (outcome.ok) setCategories((current) => [...current, outcome.category]);
     return outcome;
   }

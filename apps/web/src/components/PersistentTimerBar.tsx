@@ -6,7 +6,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
 import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -1010,7 +1010,7 @@ function ManualEntryEditor({
   fallbackFocus: () => HTMLElement | null;
   isBusy: boolean;
   onClose: () => void;
-  onCreateCategory: (name: string) => Promise<CreateCategoryOutcome>;
+  onCreateCategory: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
   onCreate: (input: {
     categoryId?: string;
     description?: string;

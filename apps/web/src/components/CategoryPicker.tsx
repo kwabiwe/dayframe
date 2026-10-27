@@ -15,12 +15,14 @@ import {
 import { createPortal } from "react-dom";
 import { Check, CheckCircle2, ChevronDown, Plus } from "lucide-react";
 import {
+  DAYFRAME_ACTIVITY_ICONS,
   DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH,
   DAYFRAME_PALETTE_PICKER,
   DEFAULT_PALETTE_KEY,
   resolveActivityIcon,
   paletteCssColorFor,
   paletteKeyFor,
+  suggestedActivityIconKey,
   type DayframePaletteKey
 } from "@dayframe/shared";
 import type { CategoryRow } from "@/lib/queries";
@@ -71,7 +73,8 @@ export function CategoryPicker({
   label?: string;
   menuId: string;
   onBeforeOpen?: () => void;
-  onCreateCategory?: (name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>;
+  /** `icon` is a key from the shared activity icons: the typed name's suggestion unless one was picked. */
+  onCreateCategory?: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
   onOpenChange: (open: boolean) => void;
   onSelect: (categoryId: string) => void;
   open: boolean;
@@ -111,6 +114,10 @@ export function CategoryPicker({
   const [createName, setCreateName] = useState("");
   const [createColor, setCreateColor] = useState<DayframePaletteKey | null>(null);
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
+  // null: the new activity's icon follows the typed name (else the neutral Other; Trello D item 11).
+  const [createIcon, setCreateIcon] = useState<string | null>(null);
+  const [isIconGridOpen, setIsIconGridOpen] = useState(false);
+  const iconTriggerRef = useRef<HTMLButtonElement>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const [colorMenuPosition, setColorMenuPosition] = useState<CSSProperties | null>(null);
@@ -536,6 +543,8 @@ export function CategoryPicker({
     // Create starts from what was searched for.
     setCreateName(searchable ? query.trim() : "");
     setCreateColor(null);
+    setCreateIcon(null);
+    setIsIconGridOpen(false);
     setIsColorMenuOpen(false);
     setCreateError(null);
     window.requestAnimationFrame(() => nameInputRef.current?.focus());
@@ -546,6 +555,8 @@ export function CategoryPicker({
     setIsCreating(false);
     setCreateName("");
     setCreateColor(null);
+    setCreateIcon(null);
+    setIsIconGridOpen(false);
     setIsColorMenuOpen(false);
     setCreateError(null);
     window.requestAnimationFrame(() => (listPanel ? searchRef : createOptionRef).current?.focus());
@@ -569,7 +580,7 @@ export function CategoryPicker({
     setCreateError(null);
     let outcome: CreateCategoryOutcome;
     try {
-      outcome = await onCreateCategory(name, createColor ?? undefined);
+      outcome = await onCreateCategory(name, createColor ?? undefined, createIcon ?? suggestedActivityIconKey(name));
     } catch {
       outcome = { ok: false, error: "Unable to create this activity. Check your connection and try again." };
     }
@@ -584,6 +595,8 @@ export function CategoryPicker({
     setIsCreating(false);
     setCreateName("");
     setCreateColor(null);
+    setCreateIcon(null);
+    setIsIconGridOpen(false);
     setIsColorMenuOpen(false);
     // The new activity is chosen only if the block the list was opened for is still the bar's.
     if (openedScopeRef.current === latestScopeRef.current) onSelect(outcome.category.id);
@@ -652,7 +665,9 @@ export function CategoryPicker({
       event.preventDefault();
       event.stopPropagation();
       event.nativeEvent.stopImmediatePropagation();
-      cancelCreate();
+      // With the icon choices open, Escape closes them and keeps the draft (Codex r2 on #593).
+      if (isIconGridOpen) setIsIconGridOpen(false);
+      else cancelCreate();
     }
   }
 
@@ -663,6 +678,10 @@ export function CategoryPicker({
     ? `ui-floating-surface swiss-category-menu${open ? " is-open" : ""}`
     : "calendar-compact-category-menu";
 
+  const shownCreateIcon = createIcon ?? suggestedActivityIconKey(createName.trim());
+  const focusCreateIcon = (key: string) =>
+    document.getElementById(`${menuId}-create-icons`)?.querySelector<HTMLElement>(`[data-icon="${key}"]`)?.focus();
+  const shownCreateIconOption = DAYFRAME_ACTIVITY_ICONS.find((option) => option.key === shownCreateIcon)!;
   const createForm = (
           <div
             aria-label="Create new activity"
@@ -672,6 +691,12 @@ export function CategoryPicker({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
+              // Escape closes the icon choices first and keeps the draft (Codex r1 on #593).
+              if (isIconGridOpen) {
+                setIsIconGridOpen(false);
+                iconTriggerRef.current?.focus();
+                return;
+              }
               cancelCreate();
             }}
             role="dialog"
@@ -714,8 +739,61 @@ export function CategoryPicker({
                     style={{ background: paletteCssColorFor(effectiveCreateColorOption.key) }}
                   />
                 </button>
+                <button
+                  aria-controls={`${menuId}-create-icons`}
+                  aria-expanded={isIconGridOpen}
+                  aria-label={`Choose activity icon, currently ${shownCreateIconOption.label}`}
+                  className="category-picker-icon-trigger"
+                  data-testid="category-picker-create-icon"
+                  disabled={isCreateBusy}
+                  onClick={() => {
+                    const opening = !isIconGridOpen;
+                    setIsIconGridOpen(opening);
+                    // Focus moves to the checked icon, which also scrolls it into view (Other is last).
+                    if (opening) window.requestAnimationFrame(() => focusCreateIcon(shownCreateIcon));
+                  }}
+                  ref={iconTriggerRef}
+                  type="button"
+                >
+                  <DayframeIcon glyph={shownCreateIconOption.glyph} size={18} />
+                </button>
               </div>
             </div>
+            {isIconGridOpen ? (
+              <div aria-label="Activity icon" className="df-ce-icons category-picker-icon-grid" id={`${menuId}-create-icons`} role="radiogroup">
+                {DAYFRAME_ACTIVITY_ICONS.map((option) => (
+                  <button
+                    aria-checked={option.key === shownCreateIcon}
+                    aria-label={option.label}
+                    data-icon={option.key}
+                    disabled={isCreateBusy}
+                    key={option.key}
+                    onClick={() => {
+                      setCreateIcon(option.key);
+                      setIsIconGridOpen(false);
+                      window.requestAnimationFrame(() => iconTriggerRef.current?.focus());
+                    }}
+                    onKeyDown={(event) => {
+                      // One Tab stop; arrows move the choice, as in the Library editor's icon group.
+                      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+                      if (!step || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const index = DAYFRAME_ACTIVITY_ICONS.findIndex((candidate) => candidate.key === shownCreateIcon);
+                      const next = DAYFRAME_ACTIVITY_ICONS[(index + step + DAYFRAME_ACTIVITY_ICONS.length) % DAYFRAME_ACTIVITY_ICONS.length].key;
+                      setCreateIcon(next);
+                      focusCreateIcon(next);
+                    }}
+                    role="radio"
+                    tabIndex={option.key === shownCreateIcon ? 0 : -1}
+                    title={option.label}
+                    type="button"
+                  >
+                    <DayframeIcon glyph={option.glyph} size={18} />
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <p
               aria-live="assertive"
               className={`category-picker-create-error${createError ? " is-visible" : ""}`}

@@ -32,6 +32,13 @@ vi.mock("react-native", async () => {
   View: "View",
   };
 });
+vi.mock("react-native-reanimated", () => {
+  const builder = () => {
+    const b: any = { duration: () => b, reduceMotion: () => b };
+    return b;
+  };
+  return { default: { View: "ReanimatedView" }, FadeIn: builder(), FadeOut: builder(), ReduceMotion: { Never: "never" } };
+});
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 59 }) }));
 vi.mock("./SwipeDismissSheet", async () => {
   const React = await import("react");
@@ -148,6 +155,28 @@ describe("ActivityPickerSheet", () => {
     act(() => tree.unmount());
   });
 
+  it("creates in one tap with the name's suggested icon, and the icon opens a row to change it (Trello D item 11)", async () => {
+    const onCreate = vi.fn(() => Promise.resolve({ id: "swim" }));
+    const { search, tree } = render({ onCreate });
+    search("Evening swim");
+    const iconButton = () => tree.root.findByProps({ testID: "activity-picker-create-icon" });
+    expect(iconButton().props.accessibilityLabel).toBe("Icon: Swimming");
+    expect(tree.root.findAllByProps({ testID: "activity-picker-create-icons" })).toHaveLength(0);
+    // Tapping the icon opens the shared icons, with the suggestion checked; a pick closes the row.
+    act(() => iconButton().props.onPress());
+    expect(tree.root.findByProps({ testID: "activity-picker-create-icon-swimming" }).props.accessibilityState).toEqual({ checked: true });
+    act(() => tree.root.findByProps({ testID: "activity-picker-create-icon-boat" }).props.onPress());
+    expect(tree.root.findAllByProps({ testID: "activity-picker-create-icons" })).toHaveLength(0);
+    // The pick holds while the name changes.
+    search("Evening swim club");
+    expect(iconButton().props.accessibilityLabel).toBe("Icon: Boat");
+    await act(async () => {
+      await tree.root.findByProps({ testID: "activity-picker-create" }).props.onPress();
+    });
+    expect(onCreate).toHaveBeenCalledWith("Evening swim club", "boat");
+    act(() => tree.unmount());
+  });
+
   it("filters as you type and offers Create for a new name", async () => {
     const onCreate = vi.fn(() => Promise.resolve({ id: "pottery" }));
     const { props, search, texts, tree } = render({ onCreate });
@@ -158,7 +187,8 @@ describe("ActivityPickerSheet", () => {
     await act(async () => {
       await tree.root.findByProps({ testID: "activity-picker-create" }).props.onPress();
     });
-    expect(onCreate).toHaveBeenCalledWith("Pottery");
+    // Nothing in the name suggests an icon: the neutral Other, never the dot (Trello D item 11).
+    expect(onCreate).toHaveBeenCalledWith("Pottery", "other");
     expect(props.onPick).toHaveBeenCalledWith("pottery");
     act(() => tree.unmount());
   });

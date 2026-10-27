@@ -274,7 +274,7 @@ describe("the Activity block opens the shared Activities list", () => {
     expect(within(form).getByRole("button", { name: /Choose activity colour/ })).not.toBeNull();
     await user.click(within(form).getByRole("button", { name: "Create" }));
 
-    await waitFor(() => expect(calls.createCategory).toHaveBeenCalledWith("Reading", undefined));
+    await waitFor(() => expect(calls.createCategory).toHaveBeenCalledWith("Reading", undefined, "learning"));
     await waitFor(() => expect(calls.setTimerDraft).toHaveBeenCalled());
     const update = calls.setTimerDraft.mock.calls.at(-1)![0] as (current: TimerDraft) => TimerDraft;
     expect(update({ categoryId: "", description: "", tagNames: [] }).categoryId).toBe("reading");
@@ -545,7 +545,7 @@ describe("Codex r1 on #402", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     const form = screen.getByRole("dialog", { name: "Create new activity" });
     await user.click(within(form).getByRole("button", { name: "Create" }));
-    expect(createCategory).toHaveBeenCalledWith("Reading", undefined);
+    expect(createCategory).toHaveBeenCalledWith("Reading", undefined, "learning");
 
     const surface = form.closest<HTMLElement>(".df-flist")!;
     const close = within(surface).getByRole("button", { name: "Close activities" }) as HTMLButtonElement;
@@ -591,7 +591,7 @@ describe("Codex r2 on #402: a saving Create keeps its form whatever the Activity
     await user.keyboard("{ArrowDown}{Enter}");
     const form = screen.getByRole("dialog", { name: "Create new activity" });
     await user.click(within(form).getByRole("button", { name: "Create" }));
-    expect(createCategory).toHaveBeenCalledWith("Reading", undefined);
+    expect(createCategory).toHaveBeenCalledWith("Reading", undefined, "learning");
     return { form, settle: (outcome: unknown) => settle(outcome), user };
   }
 

@@ -5083,7 +5083,7 @@ dialog.ui-dialog.df-range-custom {
 .category-picker-create-name-control {
   display: grid;
   box-sizing: border-box;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
   border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
@@ -5123,6 +5123,38 @@ dialog.ui-dialog.df-range-custom {
 .category-picker-create-form .category-picker-color-trigger:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -3px;
+}
+
+.category-picker-create-form .category-picker-icon-trigger {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  grid-column: 3;
+  grid-row: 1;
+  place-items: center;
+  border: 0;
+  border-radius: calc(var(--web-radius-control) - 2px);
+  background: transparent;
+  padding: 0;
+  color: var(--foreground);
+}
+
+.category-picker-create-form .category-picker-icon-trigger:hover,
+.category-picker-create-form .category-picker-icon-trigger[aria-expanded="true"] {
+  background: var(--surface-muted);
+}
+
+.category-picker-create-form .category-picker-icon-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+}
+
+/* The create form's icon choices (Trello D item 11): the Library editor's icon cells, scrolling inside
+   the popover so it stays within a phone viewport. */
+.category-picker-icon-grid {
+  max-height: 188px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .category-picker-color-swatch {
