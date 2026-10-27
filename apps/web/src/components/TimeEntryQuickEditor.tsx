@@ -3,7 +3,7 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ClockFormat, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
+import type { ClockFormat, DayframePaletteKey, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
@@ -55,7 +55,7 @@ type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
   categories: CategoryRow[];
   isTimerBusy: boolean;
-  onCreateCategory?: (name: string) => Promise<CreateCategoryOutcome>;
+  onCreateCategory?: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
   onDismiss: (options: { restoreFocus: boolean }) => void;
   peerEntries: OverlapPeerEntry[];
   taskSuggestions?: RecentActivitySuggestion[];

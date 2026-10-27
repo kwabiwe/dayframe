@@ -54,6 +54,7 @@ export {
   DAYFRAME_LEG_MODE_ICONS,
   activityGroupFor,
   activityIconKeyForName,
+  suggestedActivityIconKey,
   isActivityIconKey,
   resolveActivityIcon,
   type DayframeActivityIconGroup,

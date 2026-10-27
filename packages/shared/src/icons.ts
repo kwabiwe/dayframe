@@ -69,11 +69,14 @@ export const DAYFRAME_ACTIVITY_ICONS = [
   { key: "games", label: "Games", group: "free-time", glyph: "gamepad-2" },
   { key: "tv", label: "TV and film", group: "free-time", glyph: "tv" },
   { key: "photography", label: "Photography", group: "free-time", glyph: "camera" },
-  { key: "outdoors", label: "Outdoors", group: "free-time", glyph: "tent" }
+  { key: "outdoors", label: "Outdoors", group: "free-time", glyph: "tent" },
+  // The neutral pick for an activity whose name suggests no icon (Trello D item 11): it stays
+  // with "your own" activities instead of joining a group.
+  { key: "other", label: "Other", group: null, glyph: "shapes" }
 ] as const satisfies ReadonlyArray<{
   key: string;
   label: string;
-  group: DayframeActivityIconGroup;
+  group: DayframeActivityIconGroup | null;
   glyph: DayframeGlyph;
 }>;
 
@@ -228,6 +231,11 @@ export function activityIconKeyForName(name: string): DayframeActivityIconKey | 
   return null;
 }
 
+/** The icon offered when an activity is created: the name's suggestion, else the neutral "Other". */
+export function suggestedActivityIconKey(name: string): DayframeActivityIconKey {
+  return activityIconKeyForName(name) ?? "other";
+}
+
 /** Stored key first, then the name, then the neutral dot. */
 export function resolveActivityIcon({ icon, name }: { icon?: string | null; name?: string | null }): {
   key: DayframeActivityIconKey | null;
@@ -243,7 +251,7 @@ export function resolveActivityIcon({ icon, name }: { icon?: string | null; name
  */
 export function activityGroupFor({ icon, name }: { icon?: string | null; name?: string | null }): DayframeActivityIconGroup | null {
   const { key } = resolveActivityIcon({ icon, name });
-  return key ? (ACTIVITY_ICON_BY_KEY.get(key)!.group as DayframeActivityIconGroup) : null;
+  return key ? ACTIVITY_ICON_BY_KEY.get(key)!.group : null;
 }
 
 export { DAYFRAME_GLYPHS, type DayframeGlyph };

@@ -66,7 +66,7 @@ describe("time-entry sheet activity chips", () => {
     expect(sheet).toMatch(/<ActivityPickerSheet[\s\S]*?onCreate=\{onCreateActivity\}[\s\S]*?onPick=\{\(activityId\) => \{/);
     expect(dashboard.match(/onCreateActivity=\{createSheetActivity\}/g)).toHaveLength(3);
     const create = dashboard.slice(dashboard.indexOf("async function createSheetActivity("), dashboard.indexOf("async function createTimerSheetTag("));
-    expect(create).toContain("const response = await createCategory(name);");
+    expect(create).toContain("const response = await createCategory(name, icon ? { icon } : {});");
     expect(create).toContain("return { id: response.category.id };");
     // A name taken elsewhere shows the server's message and refreshes so it appears in the list.
     expect(create).toMatch(/if \(error instanceof ActivityNameTakenError\) \{\s*\/\/[^\n]*\n\s*void load\(\);/);
