@@ -99,7 +99,7 @@ export function searchResultCommand(result: GlobalSearchResult): PaletteCommand 
       group: "Start again",
       label: result.label,
       detail: result.detail || undefined,
-      glyph: DAYFRAME_APP_ICONS.startAgain,
+      glyph: DAYFRAME_APP_ICONS.start, // #257: Start again is Play on every web surface
       block: { color: result.categoryColor, name: result.categoryName ?? result.label },
       action: {
         kind: "start",

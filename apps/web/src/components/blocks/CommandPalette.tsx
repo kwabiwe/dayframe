@@ -150,7 +150,8 @@ export function CommandPalette({
                   className={`df-palette-icon${command.block ? " df-block" : ""}`}
                   style={command.block ? blockStyle(command.block.color, command.block.name) : undefined}
                 >
-                  <DayframeIcon glyph={command.glyph} size={16} />
+                  {/* #257: Play (Start, Start again) is the filled glyph, as everywhere on the web. */}
+                  <DayframeIcon glyph={command.glyph} size={16} {...(command.glyph === "play" ? { fill: "currentColor", strokeWidth: 0 } : {})} />
                 </span>
                 <span className="df-palette-text">
                   <b>{command.label}</b>
