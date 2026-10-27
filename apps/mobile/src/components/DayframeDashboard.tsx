@@ -50,7 +50,9 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
-import { useCalendarTimeline } from "@/lib/useCalendarTimeline";
+import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
+import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
+import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
@@ -2053,13 +2055,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void AsyncStorage.setItem(CALENDAR_LAYOUT_KEY, layout).catch(() => undefined);
   }, []);
   // The List's places and trips: the selected day's timeline for this account, read again after each refresh.
-  const calendarTimeline = useCalendarTimeline({
+  // Location timeline corrections still on the phone (step 12) show over the List's timeline at once; each
+  // time the queue shrinks (delivered) the timeline is read again.
+  const correctionQueue = useTimelineCorrectionQueue(
+    authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null
+  );
+  const calendarTimelineRefreshKey = useMemo(
+    () => ({ calendarData, delivered: correctionQueue.delivered }),
+    [calendarData, correctionQueue.delivered]
+  );
+  const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
     enabled: calendarLayout === "list",
     fetchTimeline: fetchLocationTimeline,
     owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
-    refreshKey: calendarData
+    refreshKey: calendarTimelineRefreshKey
   });
+  // Acknowledged corrections stay shown until a timeline asked for after them lands, so nothing flickers back.
+  const { timeline: serverCalendarTimeline, requestedAt: calendarTimelineRequestedAt } = serverCalendarSnapshot;
+  const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
+    correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
+  [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);

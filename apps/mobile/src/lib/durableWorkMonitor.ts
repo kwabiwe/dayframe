@@ -33,6 +33,10 @@ import {
   subscribeTimerStopOutbox
 } from "./timerStopOutbox";
 import { getNativeShortcutPendingCount } from "./shortcuts";
+import {
+  getTimelineCorrectionDiagnostics,
+  subscribeTimelineCorrectionOutbox
+} from "./timelineCorrectionOutbox";
 import { getNativeLocationIntelligenceStatus } from "./location/runtime";
 import { durableTimerMutationCounts } from "./durableWorkCounts";
 
@@ -51,6 +55,8 @@ export type DurableWorkSnapshot = {
   timeEntryQuarantinedCount: number;
   timeEntryDeviceQuarantinedCount: number;
   reviewCount: number;
+  /** Location timeline corrections still on the phone (step 12): sent in the Review lane. */
+  timelineCorrectionCount?: number;
   locationCount: number;
   nativeLocationSignalCount: number;
   pendingCount: number;
@@ -109,6 +115,7 @@ export function startDurableWorkMonitor() {
       subscribeTimerStopOutbox(request),
       subscribeTimeEntryOutbox(request),
       subscribeReviewSync(request),
+      subscribeTimelineCorrectionOutbox(request),
       subscribeLocationStore(locationGate.locationChanged)
     ];
     void readActiveMobileAccount().then(request, request);
@@ -193,6 +200,7 @@ async function refreshOnce() {
   const timeEntries = await getTimeEntryOutboxDiagnostics(owner, {
     correlations: timeEntryCorrelations
   });
+  const corrections = await getTimelineCorrectionDiagnostics(owner);
   const activityDiagnostics = getQueueDiagnostics(queue);
   const queuedActivityCount = queue.filter((event) => event.failureKind !== "permanent").length;
   const activityCount = queuedActivityCount + nativeShortcutCount;
@@ -219,6 +227,7 @@ async function refreshOnce() {
     activityDiagnostics.nextRetryAt,
     timeEntries.nextRetryAt ?? undefined,
     reviewOwned ? review.nextRetryAt ?? undefined : undefined,
+    corrections.nextRetryAt ?? undefined,
     locationOwned ? location.nextRetryAt??undefined : undefined
   ]);
   const nonTimerQueue=queue.filter(event=>!['timer_start','timer_stop'].includes(event.type)&&event.failureKind!=='permanent');
@@ -226,7 +235,13 @@ async function refreshOnce() {
   const retryLanes:SyncDueTimes={
     timer:{pending:timerMutationCount,nextDueAt:timerStopCount||nativeShortcutCount||timerEventCount?null:timeEntries.nextRetryAt??null},
     activity:{pending:nonTimerQueue.length,nextDueAt:activityDue},
-    review:{pending:reviewCount,nextDueAt:review.nextRetryAt},
+    review:{
+      pending:reviewCount+corrections.pendingCount,
+      // Due now when either has work due now; else the earlier of the two.
+      nextDueAt:(reviewCount>0&&!review.nextRetryAt)||(corrections.pendingCount>0&&!corrections.nextRetryAt)
+        ?null
+        :earliestIso([review.nextRetryAt??undefined,corrections.nextRetryAt??undefined])??null
+    },
     location:{pending:locationCount,nextDueAt:nativeLocationSignalCount?null:location.nextRetryAt??null}
   };
   publish({
@@ -249,10 +264,11 @@ async function refreshOnce() {
     timeEntryQuarantinedCount: timeEntries.quarantinedCount,
     timeEntryDeviceQuarantinedCount: timeEntries.deviceQuarantinedCount,
     reviewCount,
+    timelineCorrectionCount: corrections.pendingCount,
     locationCount,
     nativeLocationSignalCount: locationOwned ? nativeLocationSignalCount : 0,
     pendingCount:
-      activityCount + timerStopCount + timeEntries.pendingCount + reviewCount + locationCount,
+      activityCount + timerStopCount + timeEntries.pendingCount + reviewCount + corrections.pendingCount + locationCount,
     nextRetryAt: nextRetryAt ?? null,
     lastError: timeEntries.lastError ??
       (reviewOwned ? review.lastError : null) ??
@@ -284,6 +300,7 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.timeEntryQuarantinedCount === right.timeEntryQuarantinedCount &&
     left.timeEntryDeviceQuarantinedCount === right.timeEntryDeviceQuarantinedCount &&
     left.reviewCount === right.reviewCount &&
+    (left.timelineCorrectionCount ?? 0) === (right.timelineCorrectionCount ?? 0) &&
     left.locationCount === right.locationCount &&
     left.nativeLocationSignalCount === right.nativeLocationSignalCount &&
     left.pendingCount === right.pendingCount &&
