@@ -478,6 +478,13 @@ function iosPlacedInside(placeId: string, evidence: ClassifiedEvidence[], reused
 
 const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
 
+/** Whether the stay's last reading before a silence was moving: the device was leaving, not settled (Codex r3 on #591). */
+function leavingAtLastReading(stay: WorkingStay, input: LocationEngineInput) {
+  const last = stay.evidence.filter(({ evidence }) => pointFor(evidence) && evidence.kind !== "visit").at(-1);
+  const speed = last ? last.evidence.speedMetersPerSecond ?? last.impliedSpeedMetersPerSecond : null;
+  return speed != null && Number.isFinite(speed) && speed >= input.config.movementSpeedThresholdMps;
+}
+
 /** Whether iOS reported leaving the stay's place between two times: a Visit of the stay, or its corroborated arrival, departed then. */
 function departedDuring(stay: WorkingStay, fromMs: number, toMs: number) {
   const departures = [
@@ -1822,7 +1829,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         !hasMeaningfulKnownPlaceWindow(active.startedAt, observedAt, input.config.savedPlaceMinimumDwellMs) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs &&
         strongSavedPoint(item, active.placeId, input) && !edgeOnly(active, input) &&
-        !departedDuring(active, Date.parse(observedAt), atMs) && enteredSavedPlace(active, accepted) &&
+        !departedDuring(active, Date.parse(observedAt), atMs) && !leavingAtLastReading(active, input) && enteredSavedPlace(active, accepted) &&
         !seenElsewhere(accepted, active.placeId!, Date.parse(observedAt), atMs);
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap &&
         !openVisitPresence && !enteredPresence) {
