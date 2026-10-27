@@ -2643,9 +2643,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           transitionToSignedOut();
           return;
         }
-        // Only this edit's own rejection: older sync issues stay in Settings › Sync help.
+        const current = latestData.current;
+        if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
+        // Any rejection reloads, so its block returns as it was; only this edit's own rejection
+        // alerts, as older sync issues stay in Settings › Sync help.
         const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
-        if (result.deliveredCount > 0 || rejected) {
+        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
           await loadRef.current({ silent: true });
         }
         if (rejected) {

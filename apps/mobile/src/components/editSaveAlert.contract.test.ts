@@ -21,7 +21,11 @@ describe("time-entry edit save alert", () => {
     expect(end).toBeGreaterThan(start);
     expect(body).toContain("({ clientCommandId } = await enqueueTimeEntryUpdate({");
     expect(body).toContain("await isTimeEntryCommandRejected(owner, clientCommandId)");
-    expect(body).toContain('"Change not saved"');
-    expect(body).not.toContain("needsAttentionCount");
+    const alert = body.slice(body.indexOf("if (rejected) {"), body.indexOf('"Change not saved"'));
+    expect(alert).toMatch(/^if \(rejected\) \{\s*Alert\.alert\(\s*$/);
+    // The account-wide count may still reload the Dashboard, never raise this alert.
+    expect(body).not.toMatch(/needsAttentionCount > 0\) \{\s*Alert\.alert/);
+    // Feedback belongs to the account that made the edit.
+    expect(body).toContain("if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;");
   });
 });
