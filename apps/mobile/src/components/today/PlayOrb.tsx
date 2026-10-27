@@ -1,6 +1,7 @@
 import { useAppForeground } from "../../lib/appForeground";
 import { useDashboardClockTicks } from "../../lib/dashboardClock";
 import { liveElapsedSecondsAt } from "./liveBlockClock";
+import { formatLiveClock } from "./todayBlocksLayout";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -50,6 +51,9 @@ type PlayOrbProps = {
   onTap: () => void;
   reduceMotion: boolean;
   running: boolean;
+  /** The running block's activity (its bubble is ringed) and title (the bloom's "Now:" line). */
+  runningActivityId?: string | null;
+  runningTitle?: string;
   /**
    * The running block as the live block shows it: its start, stored duration and the Dashboard's elapsed
    * seconds (the floor both clocks take), and the seconds a Stop flight's ghost holds while Stop is saved.
@@ -68,6 +72,8 @@ export const PlayOrb = memo(PlayOrbView, (previous, next) =>
   previous.hidden === next.hidden &&
   previous.reduceMotion === next.reduceMotion &&
   previous.running === next.running &&
+  previous.runningActivityId === next.runningActivityId &&
+  previous.runningTitle === next.runningTitle &&
   previous.runningDurationSeconds === next.runningDurationSeconds &&
   previous.runningElapsedSeconds === next.runningElapsedSeconds &&
   previous.runningHeldSeconds === next.runningHeldSeconds &&
@@ -82,10 +88,12 @@ function PlayOrbView({
   onTap: onTapProp,
   reduceMotion,
   running,
+  runningActivityId,
   runningDurationSeconds,
   runningElapsedSeconds,
   runningHeldSeconds,
   runningStartedAt,
+  runningTitle,
   theme,
 }: PlayOrbProps) {
   const callbacks = useRef({ onChoose: onChooseProp, onTap: onTapProp });
@@ -211,10 +219,23 @@ function PlayOrbView({
           centerY={centerY}
           hotIndex={hotIndex}
           hotName={hotSpot?.activity.name ?? null}
+          hotIsRunning={running && hotSpot !== null && hotSpot.activity.id === runningActivityId}
+          now={
+            running && runningStartedAt !== undefined
+              ? {
+                  durationSeconds: runningDurationSeconds ?? 0,
+                  elapsedSeconds: runningElapsedSeconds ?? 0,
+                  heldSeconds: runningHeldSeconds,
+                  startedAt: runningStartedAt,
+                  title: runningTitle ?? "",
+                }
+              : null
+          }
           onChoose={choose}
           onClose={closeBloom}
           reduceMotion={reduceMotion}
           running={running}
+          runningActivityId={running ? runningActivityId ?? null : null}
           spots={spots}
           sticky={bloom.sticky}
           theme={theme}
@@ -289,25 +310,7 @@ function OrbSecondsRing({
   heldSeconds: number | undefined;
   startedAt: string;
 }) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  // Released from a hold (the Stop was refused or rolled back): read the time in that same render, so the
-  // first frame after it shows the block's seconds, not the time before the hold (Codex r2 on #439).
-  const held = heldSeconds !== undefined;
-  const [wasHeld, setWasHeld] = useState(held);
-  if (held !== wasHeld) {
-    setWasHeld(held);
-    if (!held) setNowMs(Date.now());
-  }
-  const foreground = useAppForeground();
-  useDashboardClockTicks({
-    foreground: foreground && heldSeconds === undefined,
-    needsSecondClock: true,
-    secondAnchorMs: Date.parse(startedAt),
-    setNow: setNowMs,
-  });
-  const progress = orbRingProgress(
-    heldSeconds ?? liveElapsedSecondsAt({ durationSeconds, elapsedSeconds, startedAt }, nowMs)
-  );
+  const progress = orbRingProgress(useOrbRunningSeconds({ durationSeconds, elapsedSeconds, heldSeconds, startedAt }));
   const ringRadius = PLAY_ORB.size / 2 + RING.inset - RING.stroke / 2;
   const circumference = 2 * Math.PI * ringRadius;
   const box = PLAY_ORB.size + RING.inset * 2;
@@ -327,15 +330,55 @@ function OrbSecondsRing({
   );
 }
 
+type OrbRunningClock = { durationSeconds: number; elapsedSeconds: number; heldSeconds: number | undefined; startedAt: string };
+
+/**
+ * The running block's seconds on a 1 s clock anchored to its start, as the live block's is: the ring and the
+ * bloom's "Now:" line each re-render alone on it (no per-frame work). While a Stop flight's ghost holds the
+ * block's time, this holds it too; it stops in the background and reads the time again on return.
+ */
+function useOrbRunningSeconds({ durationSeconds, elapsedSeconds, heldSeconds, startedAt }: OrbRunningClock) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Released from a hold (the Stop was refused or rolled back): read the time in that same render, so the
+  // first frame after it shows the block's seconds, not the time before the hold (Codex r2 on #439).
+  const held = heldSeconds !== undefined;
+  const [wasHeld, setWasHeld] = useState(held);
+  if (held !== wasHeld) {
+    setWasHeld(held);
+    if (!held) setNowMs(Date.now());
+  }
+  const foreground = useAppForeground();
+  useDashboardClockTicks({
+    foreground: foreground && heldSeconds === undefined,
+    needsSecondClock: true,
+    secondAnchorMs: Date.parse(startedAt),
+    setNow: setNowMs,
+  });
+  return heldSeconds ?? liveElapsedSecondsAt({ durationSeconds, elapsedSeconds, startedAt }, nowMs);
+}
+
+/** "Now: {title} · 0:35:37" at the top of the bloom while a block runs (Trello H). */
+function BloomNowLine({ now }: { now: OrbRunningClock & { title: string } }) {
+  const seconds = useOrbRunningSeconds(now);
+  return (
+    <Text numberOfLines={1} style={styles.labelNow} testID="play-orb-bloom-now">
+      {`Now: ${now.title} · ${formatLiveClock(seconds)}`}
+    </Text>
+  );
+}
+
 function BloomLayer({
   centerX,
   centerY,
   hotIndex,
+  hotIsRunning,
   hotName,
+  now,
   onChoose,
   onClose,
   reduceMotion,
   running,
+  runningActivityId,
   spots,
   sticky,
   theme,
@@ -344,11 +387,14 @@ function BloomLayer({
   centerX: number;
   centerY: number;
   hotIndex: number;
+  hotIsRunning: boolean;
   hotName: string | null;
+  now: (OrbRunningClock & { title: string }) | null;
   onChoose: (index: number) => void;
   onClose: () => void;
   reduceMotion: boolean;
   running: boolean;
+  runningActivityId: string | null;
   spots: readonly BloomSpot[];
   sticky: boolean;
   theme: MobileTheme;
@@ -356,7 +402,8 @@ function BloomLayer({
 }) {
   const fadeIn = useMemo(() => FadeIn.duration(reduceMotion ? 90 : 200).reduceMotion(ReduceMotion.Never), [reduceMotion]);
   const fadeOut = useMemo(() => FadeOut.duration(reduceMotion ? 60 : 160).reduceMotion(ReduceMotion.Never), [reduceMotion]);
-  const verb = running ? "switch" : "start";
+  // Over the running activity's own bubble, letting go opens its editor (the orb never starts a duplicate).
+  const verb = hotIsRunning ? "edit" : running ? "switch" : "start";
   // Trello 211: the prototype blurs what's behind the bloom (backdrop blur 10 px under the scrim).
   // Reduce Transparency keeps the plain scrim, made a little more opaque instead.
   const reduceTransparency = useReduceTransparencyPreference();
@@ -373,7 +420,8 @@ function BloomLayer({
         testID="play-orb-scrim"
       />
       <View pointerEvents="none" style={[styles.label, { top: topInset + 120 }]}>
-        <Text style={styles.labelEyebrow}>{running ? "SWITCH TO" : "START"}</Text>
+        {now ? <BloomNowLine now={now} /> : null}
+        <Text style={styles.labelEyebrow}>{hotIsRunning ? "EDIT" : running ? "SWITCH TO" : "START"}</Text>
         <Text numberOfLines={1} style={styles.labelTitle}>{hotName ?? "Slide to a block"}</Text>
         <Text style={styles.labelHint}>
           {sticky ? `Tap one to ${verb} · tap outside to cancel` : `Release to ${verb} · tap outside to cancel`}
@@ -389,6 +437,7 @@ function BloomLayer({
           onPress={() => onChoose(index)}
           reduceMotion={reduceMotion}
           running={running}
+          runningHere={spot.activity.id === runningActivityId}
           spot={spot}
           theme={theme}
         />
@@ -405,6 +454,7 @@ function BloomBubble({
   onPress,
   reduceMotion,
   running,
+  runningHere,
   spot,
   theme,
 }: {
@@ -415,6 +465,8 @@ function BloomBubble({
   onPress: () => void;
   reduceMotion: boolean;
   running: boolean;
+  /** The running block's activity: ringed, and choosing it opens its editor. */
+  runningHere: boolean;
   spot: BloomSpot;
   theme: MobileTheme;
 }) {
@@ -440,8 +492,9 @@ function BloomBubble({
   const half = PLAY_ORB.bubbleSize / 2;
   return (
     <Reanimated.View style={[styles.bubbleSlot, { left: centerX + spot.dx - half, top: centerY + spot.dy - half }, style]}>
+      {runningHere ? <View pointerEvents="none" style={styles.bubbleRunningRing} testID="play-orb-bubble-running-ring" /> : null}
       <Pressable
-        accessibilityLabel={`${running ? "Switch to" : "Start"} ${spot.activity.name}`}
+        accessibilityLabel={runningHere ? `Edit ${spot.activity.name}, running now` : `${running ? "Switch to" : "Start"} ${spot.activity.name}`}
         accessibilityRole="button"
         onPress={onPress}
         style={[styles.bubble, { backgroundColor: colors.fill }]}
@@ -467,9 +520,21 @@ const styles = StyleSheet.create({
   },
   ring: { left: -RING.inset, position: "absolute", top: -RING.inset },
   label: { gap: 6, left: 24, position: "absolute", right: 24 },
+  labelNow: { color: "#FFFFFF", fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "600", marginBottom: 6 },
   labelEyebrow: { color: "rgba(255, 255, 255, 0.7)", fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   labelTitle: { color: "#FFFFFF", fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 40, letterSpacing: -1.2, lineHeight: 42 },
   labelHint: { color: "rgba(255, 255, 255, 0.75)", fontSize: 14 },
+  // The ring sits 4 points outside the bubble, in white: it reads on every tile colour over the dark scrim.
+  bubbleRunningRing: {
+    borderColor: "#FFFFFF",
+    borderRadius: 22,
+    borderWidth: 2.5,
+    bottom: -4,
+    left: -4,
+    position: "absolute",
+    right: -4,
+    top: -4,
+  },
   bubbleSlot: { height: PLAY_ORB.bubbleSize, position: "absolute", width: PLAY_ORB.bubbleSize },
   bubble: {
     alignItems: "center",

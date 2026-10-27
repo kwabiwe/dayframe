@@ -3753,6 +3753,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onTap={onPlayOrbTapStable}
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
+        runningActivityId={hasLiveActiveTimer ? displayedActiveEntry?.categoryId ?? null : null}
+        runningTitle={hasLiveActiveTimer ? todayLivePresentation?.title : undefined}
         runningDurationSeconds={hasLiveActiveTimer ? todayLivePresentation?.durationSeconds : undefined}
         runningElapsedSeconds={hasLiveActiveTimer ? todayLivePresentation?.elapsedSeconds : undefined}
         runningHeldSeconds={orbHeldSeconds}
