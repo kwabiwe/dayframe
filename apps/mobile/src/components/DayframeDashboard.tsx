@@ -206,6 +206,7 @@ import {
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
   enqueueTimeEntryUpdate,
+  isTimeEntryCommandRejected,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
   type TimeEntryCommandHoldLease,
@@ -1801,6 +1802,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
+  // The bloom's "Now:" line names the block: its description, else its activity, never the
+  // live card's "Add a description" prompt (Codex r1 on #592).
+  const bloomRunningTitle = activeTitleIsPlaceholder ? displayedActiveEntry?.categoryName || "Untitled" : activeTitle;
   const stopFlightExit = useStopFlightExit({
     displayedEntryId: displayedActiveEntry?.id ?? null,
     flightEntryId: stopFlight?.entryId ?? null,
@@ -2608,15 +2612,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     const owner = timerStopOwner(bootstrap);
     const persistedId = persistedTimerEntryId(entryId);
+    let clientCommandId: string;
     try {
-      await enqueueTimeEntryUpdate({
+      ({ clientCommandId } = await enqueueTimeEntryUpdate({
         owner,
         target: persistedId
           ? { targetEntryId: persistedId }
           : { optimisticEntryId: entryId },
         patch,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
-      });
+      }));
     } catch {
       Alert.alert(
         errorTitle,
@@ -2641,10 +2646,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           transitionToSignedOut();
           return;
         }
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
+        // Feedback belongs to the account that made the edit, checked again after every wait.
+        const ownerCurrent = () => {
+          const current = latestData.current;
+          return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
+        };
+        if (!ownerCurrent()) return;
+        // Any rejection reloads, so its block returns as it was; only this edit's own rejection
+        // alerts, as older sync issues stay in Settings › Sync help.
+        const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
+        if (!ownerCurrent()) return;
+        if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
           await loadRef.current({ silent: true });
         }
-        if (result.needsAttentionCount > 0) {
+        if (rejected && ownerCurrent()) {
           Alert.alert(
             "Change not saved",
             "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
@@ -3753,6 +3768,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onTap={onPlayOrbTapStable}
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
+        runningActivityId={hasLiveActiveTimer ? displayedActiveEntry?.categoryId ?? null : null}
+        runningTitle={hasLiveActiveTimer ? bloomRunningTitle : undefined}
         runningDurationSeconds={hasLiveActiveTimer ? todayLivePresentation?.durationSeconds : undefined}
         runningElapsedSeconds={hasLiveActiveTimer ? todayLivePresentation?.elapsedSeconds : undefined}
         runningHeldSeconds={orbHeldSeconds}

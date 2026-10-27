@@ -176,6 +176,24 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     phase("owner_lock");
     // The same owner lock as location ingest and replay, so a replay never interleaves with a correction.
     await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [session.workspaceId, session.userId]);
+    // A retry of a correction already made (its reply was lost) gets that correction back, unchanged, before
+    // any check: by then the item may have moved, or a trip be gone (step 12). The owner lock above serialises
+    // the two attempts; the activity_events client id index backs it.
+    const clientEventId = request.clientCorrectionId ? `timeline_correction:${request.clientCorrectionId}` : null;
+    if (clientEventId) {
+      const earlier = await client.query<CorrectionRow | { id: null }>(
+        `select c.id, c.subject, c.kind, c.span_started_at as "spanStartedAt", c.span_stopped_at as "spanStoppedAt", c.target,
+                c.created_at as "createdAt"
+           from activity_events e
+           left join location_timeline_corrections c
+             on c.created_from_event_id = e.id and c.workspace_id = e.workspace_id and c.user_id = e.user_id
+          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
+        [session.workspaceId, session.userId, clientEventId]);
+      const found = earlier.rows[0];
+      if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
+      // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
+      if (found) throw new TimelineCorrectionError("That change was already used for something else. Try again.", 409);
+    }
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
     const row = await lockSegment(client, session, table, request.itemId);
@@ -203,10 +221,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       : correctionSpan(row, itemStartedAt, itemStoppedAt);
     const target = targetFor(request);
     const event = await client.query<{ id: string }>(
-      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
-       values ($1, $2, 'manual_app', 'timeline_correction', now(), 'high', $3::jsonb, 'confirmed')
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
+       values ($1, $2, 'manual_app', 'timeline_correction', now(), 'high', $3::jsonb, 'confirmed', $4)
        returning id`,
-      [session.workspaceId, session.userId, JSON.stringify({ subject: request.subject, kind: request.kind, itemId: request.itemId, target })]);
+      [session.workspaceId, session.userId, JSON.stringify({ subject: request.subject, kind: request.kind, itemId: request.itemId, target }), clientEventId]);
     const inserted = await client.query<CorrectionRow>(
       `insert into location_timeline_corrections
          (workspace_id, user_id, subject, kind, span_started_at, span_stopped_at, target, created_from_event_id)

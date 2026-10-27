@@ -295,6 +295,71 @@ describe("PlayOrb", () => {
     act(() => tree.unmount());
   });
 
+  it("while a block runs, the bloom reads \"Now: {title} · time\" on the 1 s clock and rings the running activity (Trello H)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-15T15:15:07.400"));
+    const startedAt = new Date("2026-10-15T14:39:30.000").toISOString();
+    const { bloom, hold, props, tree } = render({
+      running: true,
+      runningActivityId: "work",
+      runningDurationSeconds: 0,
+      runningStartedAt: startedAt,
+      runningTitle: "Quarterly report",
+    });
+    act(() => {
+      hold().handlers.onBegin({});
+      hold().handlers.onStart({});
+    });
+    expect(bloom()).toBeDefined();
+    const nowLine = () =>
+      tree.root.findByProps({ testID: "play-orb-bloom-now" }).findAllByType("Text" as never).map((node) => node.children.join("")).join("");
+    expect(nowLine()).toBe("Now: Quarterly report · 0:35:37");
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(nowLine()).toBe("Now: Quarterly report · 0:35:38");
+    // Only the title truncates; the time is its own line part, so it always shows in full.
+    const [title, time] = tree.root.findByProps({ testID: "play-orb-bloom-now" }).findAllByType("Text" as never);
+    expect(title.props.style).toContainEqual({ flexShrink: 1 });
+    expect(time.props.style).toEqual(expect.objectContaining({ flexShrink: 0 }));
+    // A new title while the bloom is open shows at once (the comparator lets it through).
+    act(() => tree.update(<PlayOrb {...(props as unknown as Parameters<typeof PlayOrb>[0])} runningTitle="Board pack" />));
+    expect(nowLine()).toBe("Now: Board pack · 0:35:38");
+    // Only the running activity's bubble carries the ring, and it is announced as Edit.
+    expect(tree.root.findAllByProps({ testID: "play-orb-bubble-running-ring" })).toHaveLength(1);
+    expect(tree.root.findByProps({ testID: "play-orb-bubble-work" }).props.accessibilityLabel).toBe("Edit work, running now");
+    expect(tree.root.findByProps({ testID: "play-orb-bubble-gym" }).props.accessibilityLabel).toBe("Switch to gym");
+    // Over the running activity, the header says letting go edits it.
+    const [first] = bloomSpots(activities);
+    const frame = playOrbFrame({ bottomInset: 34, height: 874, width: 402 });
+    const centerX = frame.left + PLAY_ORB.size / 2;
+    const centerY = frame.top + PLAY_ORB.size / 2;
+    act(() => hold().handlers.onUpdate({ absoluteX: centerX + first.dx, absoluteY: centerY + first.dy, translationX: first.dx, translationY: first.dy }));
+    const texts = () => tree.root.findAllByType("Text" as never).map((node) => node.children.join(""));
+    expect(first.activity.id).toBe("work");
+    expect(texts()).toContain("EDIT");
+    expect(texts()).toContain("Release to edit · tap outside to cancel");
+    act(() => {
+      hold().handlers.onEnd({}, true);
+      hold().handlers.onFinalize({}, true);
+    });
+    expect(props.onChoose).toHaveBeenCalledWith("work");
+    act(() => tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("shows no Now line or ring when nothing runs", () => {
+    const { hold, tree } = render({ runningActivityId: "work" });
+    act(() => {
+      hold().handlers.onBegin({});
+      hold().handlers.onStart({});
+    });
+    expect(tree.root.findAllByProps({ testID: "play-orb-bloom-now" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: "play-orb-bubble-running-ring" })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it("stays open to tap when let go without moving, and closes from outside", () => {
     const { bloom, hold, props, tree } = render({ running: true });
     act(() => {
