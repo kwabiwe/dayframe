@@ -23,7 +23,6 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     entry("n", 11, 8 * 60, 9 * 60, null)
   ];
   const model = calendarHeadModel({
-    dayLoggedSeconds: 9 * 3600 + 47 * 60,
     entries: entries as never,
     nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
     selectedDay: day(6),
@@ -31,12 +30,14 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     weekLoggedSeconds: 106 * 3600 + 14 * 60
   });
 
-  it("names the month and says how much was framed on the chosen day", () => {
+  it("names the month and the week's total, with no separate framed line (#259)", () => {
     expect(model.month).toBe("October");
-    // Calendar v3: one short line under the strip; the full date is for assistive tech.
-    expect(model.framedLine).toBe("9h 47m framed");
-    expect(model.framedLabel).toMatch(/^9 hours 47 minutes framed on Tuesday \d+ October$/);
     expect(model.weekTotal).toBe("106h 14m this week");
+    expect(Object.keys(model)).toEqual(["month", "days", "weekTotal"]);
+  });
+
+  it("puts each day's total under its date, a dash for none (#256)", () => {
+    expect(model.days.map((d) => d.total)).toEqual(["–", "7h 30m", "–", "–", "–", "–", "1h"]);
   });
 
   it("gives each day its initial, date, selection, today mark and up to three biggest activities", () => {
@@ -51,7 +52,6 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
 
   it("names a past week by its Monday instead of calling it this week", () => {
     const past = calendarHeadModel({
-      dayLoggedSeconds: 0,
       entries: [],
       nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
       selectedDay: day(1),
@@ -64,7 +64,6 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
 
   it("leaves today out until hydration, so the server render and the browser agree", () => {
     const beforeHydration = calendarHeadModel({
-      dayLoggedSeconds: 0,
       entries: entries as never,
       hydrated: false,
       nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
@@ -76,14 +75,12 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
     expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
     // Totals depend on where the browser's days start, so the server render shows a dash.
-    expect(beforeHydration.framedLine).toBe("– framed");
-    expect(beforeHydration.framedLabel).toMatch(/^Framed on Sunday \d+ October$/);
+    expect(beforeHydration.days.every((d) => d.total === "–")).toBe(true);
     expect(beforeHydration.weekTotal).toBe("– in the week of 5 Oct");
   });
 
   it("marks the server's guess at today (the viewer's zone) until hydration", () => {
     const beforeHydration = calendarHeadModel({
-      dayLoggedSeconds: 0,
       entries: entries as never,
       hydrated: false,
       nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
@@ -96,31 +93,14 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.weekTotal).toBe("– this week");
   });
 
-  it("hides the framed line on an empty day, still saying so with the date (Calendar v3)", () => {
-    const empty = calendarHeadModel({
-      dayLoggedSeconds: 0,
-      entries: [] as never,
+  it("shows a day with under a minute framed (Codex r1 on #583)", () => {
+    const head = calendarHeadModel({
+      entries: [entry("s", 7, 9 * 60, 9 * 60, "work")].map((e) => ({ ...e, stoppedAt: new Date(new Date(e.startedAt).getTime() + 20_000).toISOString() })) as never,
       nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
       selectedDay: day(7),
       weekDays: [5, 6, 7, 8, 9, 10, 11].map(day),
-      weekLoggedSeconds: 0
+      weekLoggedSeconds: 20
     });
-    expect(empty.framedLine).toBe("");
-    expect(empty.framedLabel).toBe("Nothing framed on Wednesday 7 October");
-  });
-
-  it("shows a day with under a minute framed, and says the shown figure (Codex r1 on #583)", () => {
-    const head = (seconds: number) => calendarHeadModel({
-      dayLoggedSeconds: seconds,
-      entries: [] as never,
-      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
-      selectedDay: day(7),
-      weekDays: [5, 6, 7, 8, 9, 10, 11].map(day),
-      weekLoggedSeconds: seconds
-    });
-    expect(head(20).framedLine).toBe("<1m framed");
-    expect(head(20).framedLabel).toBe("under a minute framed on Wednesday 7 October");
-    expect(head(119).framedLine).toBe("1m framed");
-    expect(head(119).framedLabel).toBe("1 minute framed on Wednesday 7 October");
+    expect(head.days[2].total).toBe("<1m");
   });
 });

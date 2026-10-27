@@ -1331,7 +1331,8 @@ export function EntriesTable({
                         onClick={() => continueEntry(entry)}
                         type="button"
                       >
-                        <DayframeIcon glyph="rotate-ccw" size={16} />
+                        {/* #257: Start again is the Play glyph everywhere; Restart (running, from zero) keeps its arrow. */}
+                        {entry.stoppedAt ? <DayframeIcon fill="currentColor" glyph="play" size={14} strokeWidth={0} /> : <DayframeIcon glyph="rotate-ccw" size={16} />}
                       </button>
                       <button
                         className="df-icon-action"

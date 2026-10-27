@@ -11,18 +11,13 @@ export type CalendarHeadDay = {
   isToday: boolean;
   /** Up to three activities with the most time that day, largest first. */
   bars: Array<{ key: string; color: string | null; name: string }>;
+  /** #256: the day's total under its date ("3h 12m"); "–" for none, and before hydration. */
+  total: string;
   accessibleName: string;
 };
 
 export type CalendarHeadModel = {
   month: string;
-  /**
-   * Calendar v3 (owner, 24 Oct 2026): one short line under the week strip, "8h 41m framed"; empty
-   * (hidden) on a day with nothing framed. The strip and the month already show the date.
-   */
-  framedLine: string;
-  /** The same line for assistive tech, with the full date: "8 hours 41 minutes framed on Friday 23 October". */
-  framedLabel: string;
   days: CalendarHeadDay[];
   weekTotal: string;
 };
@@ -32,27 +27,14 @@ const WEEKDAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long" });
 const DAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" });
 const WEEK_OF = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
-/** "8 hours 41 minutes", "1 hour", "5 minutes", "under a minute" for assistive tech: the shown figure's minutes. */
-function spokenDuration(seconds: number) {
-  if (seconds > 0 && seconds < 60) return "under a minute";
-  const minutes = Math.max(0, Math.floor(seconds / 60));
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  const parts = [
-    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : "",
-    rest ? `${rest} minute${rest === 1 ? "" : "s"}` : ""
-  ].filter(Boolean);
-  return parts.join(" ") || "0 minutes";
-}
-
 /**
- * The Calendar page head (Trello: Calendar page improvements, owner-approved): the month as the
- * page heading and a week strip whose days carry small bars of their biggest activities and the
- * week's total, then (Calendar v3) one short "8h 41m framed" line for the chosen day under the strip.
- * Matches the iPhone Calendar head.
+ * The Calendar week strip (Trello: Calendar page improvements, owner-approved): each day carries its
+ * total under its date (#256) and small bars of its biggest activities, then the week's total. The
+ * month is the page's (visually hidden) heading; the period label beside the strip shows the date.
+ * Since #259 (owner, 27 Oct 2026) the strip sits in the one compact toolbar row and the chosen day's
+ * "framed" line is gone (its total is under its date).
  */
 export function calendarHeadModel({
-  dayLoggedSeconds,
   entries,
   hydrated = true,
   nowMs,
@@ -61,7 +43,6 @@ export function calendarHeadModel({
   weekDays,
   weekLoggedSeconds
 }: {
-  dayLoggedSeconds: number;
   entries: readonly TodayEntry[];
   /**
    * Whether the browser has hydrated. "Today" and which day an entry falls on depend on the
@@ -86,11 +67,6 @@ export function calendarHeadModel({
   const total = (seconds: number) => (hydrated ? formatDuration(seconds) : "–");
   return {
     month: MONTH.format(selectedDay),
-    // Empty only with no time at all: a day with 20 seconds framed shows "<1m framed" (Codex r1 on #583).
-    framedLine: hydrated && !(dayLoggedSeconds > 0) ? "" : `${total(dayLoggedSeconds)} framed`,
-    framedLabel: hydrated
-      ? `${dayLoggedSeconds > 0 ? spokenDuration(dayLoggedSeconds) : "Nothing"} framed on ${DAY_LONG.format(selectedDay)}`
-      : `Framed on ${DAY_LONG.format(selectedDay)}`,
     days: weekDays.map((day, index) => {
       const key = toTimelineDateKey(day);
       const end = index + 1 < weekDays.length ? weekDays[index + 1] : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
@@ -105,6 +81,7 @@ export function calendarHeadModel({
         selected: key === selectedKey,
         isToday: key === todayKey,
         bars: totals.slice(0, 3).map((total) => ({ key: total.key, color: total.color, name: total.name })),
+        total: hydrated && seconds > 0 ? formatDuration(seconds) : "–",
         accessibleName: hydrated
           ? `${DAY_LONG.format(day)}, ${seconds > 0 ? `${formatDuration(seconds)} framed` : "nothing framed"}`
           : DAY_LONG.format(day)

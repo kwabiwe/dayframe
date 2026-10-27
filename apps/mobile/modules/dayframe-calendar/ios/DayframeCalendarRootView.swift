@@ -17,11 +17,10 @@ struct DayframeCalendarRootView: View {
           .padding(.horizontal, 18)
         weekStrip(presentation: presentation, theme: theme)
           .padding(.horizontal, 12)
-        framedLine(presentation: presentation, theme: theme)
       }
       .padding(.top, 4)
       .padding(.bottom, 4)
-      // In List the app sizes this view to its header, week strip and framed line, and draws the List under it.
+      // In List the app sizes this view to its header and week strip, and draws the List under it.
       .background(GeometryReader { geometry in
         Color.clear
           .onAppear { actions.reportHeaderHeight(Double(geometry.size.height)) }
@@ -100,25 +99,6 @@ struct DayframeCalendarRootView: View {
       Label { Text(title) } icon: { Image(uiImage: image) }
     } else {
       Text(title)
-    }
-  }
-
-  /// Calendar v3 (owner, 24 Oct 2026): one short secondary line under the week strip, "8h 41m framed",
-  /// hidden on a day with nothing framed. The strip and the month already show the date; VoiceOver
-  /// reads the line with the full date.
-  @ViewBuilder
-  private func framedLine(presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme) -> some View {
-    if !presentation.framedLabel.isEmpty {
-      Text(presentation.framedLabel)
-        .font(.footnote.weight(.semibold))
-        .monospacedDigit()
-        .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
-        .dynamicTypeSize(.xSmall ... .xxxLarge)
-        .accessibilityLabel(presentation.framedAccessibilityLabel)
     }
   }
 
@@ -385,7 +365,7 @@ private struct DayframeCalendarNowMarker: View {
         .lineLimit(1)
         .minimumScaleFactor(0.8)
         .padding(.horizontal, 6)
-        .frame(height: 18)
+        .frame(height: CGFloat(DayframeCalendarNowPillMath.pillHeight))
         .background(Capsule(style: .continuous).fill(red))
         .frame(width: max(0, hourLabelWidth - 6), alignment: .trailing)
     }
@@ -475,11 +455,13 @@ private struct DayframeCalendarHourGrid: View {
   let clockFormat: String
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
-  /// Today's now line: an hour label within 12 points of it is hidden under the time pill.
+  /// Today's now line: an hour label the time pill covers is hidden under it (#255: only then).
   let nowY: CGFloat?
   let theme: DayframeCalendarTheme
   let timelineHeight: CGFloat
   @Environment(\.displayScale) private var displayScale
+  /// The hour labels' digit height (caption2 cap height), following Dynamic Type.
+  @ScaledMetric(relativeTo: .caption2) private var labelGlyphHeight: CGFloat = 8
 
   var body: some View {
     ForEach(0...24, id: \.self) { hour in
@@ -493,7 +475,9 @@ private struct DayframeCalendarHourGrid: View {
         .frame(width: hourLabelWidth - 8, alignment: .trailing)
         .position(x: (hourLabelWidth - 8) / 2, y: labelTop)
         // Compared where the label is drawn (clamped inside the day at 00:00 and 24:00), not its line.
-        .opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)
+        .opacity(nowY.map {
+          DayframeCalendarNowPillMath.coversHourLabel(nowY: Double($0), labelCenterY: Double(labelTop), labelGlyphHeight: Double(labelGlyphHeight))
+        } == true ? 0 : 1)
         .accessibilityHidden(true)
 
       Rectangle()

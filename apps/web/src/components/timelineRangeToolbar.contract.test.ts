@@ -16,7 +16,7 @@ const queries = source("../lib/queries.ts");
 
 describe("Calendar range and toolbar contract", () => {
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
-    expect(timeline.match(/className="timeline-range-toolbar"/g)).toHaveLength(1);
+    expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
     expect(timeline).toContain("timelineHref(searchParams.toString(), state, nextState)");
     expect(timeline).toContain('window.history.pushState(null, "", href)');
@@ -64,28 +64,31 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain("data.weekEntries");
     expect(timeline).toContain("data.entries");
     expect(timeline).toContain('state.scope === "day" ? visibleDayEntries : visibleWeekEntries');
-    // The Day · Week totals row became the page head's "framed on" line and week total, both
-    // still opening their reports (Trello: Calendar page improvements).
+    // The Day · Week totals row became the week strip's day totals and week total (#256, #259); the
+    // week total still opens its report.
     expect(timeline).not.toContain('className="timeline-range-totals"');
-    expect(timeline).toContain("dayLoggedSeconds: dayAnalysis.totalLoggedSeconds");
+    expect(timeline).not.toContain("dayLoggedSeconds");
     expect(timeline).toContain("weekLoggedSeconds: weekAnalysis.totalLoggedSeconds");
-    expect(timeline).toContain("dayReportHref={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}");
     expect(timeline).toContain("weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}");
-    expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Calendar period and view controls"');
-    // Calendar v3: one round view button opening Calendar and List (no Multi Day).
-    expect(timeline).toContain("<CalendarViewMenu disabled={isDateLoading} onChange={updateView} value={state.view} />");
-    expect(timeline).not.toContain('ariaLabel="Calendar view"');
+    // #259: one compact row — the period, the week strip, then Day | Week and Calendar | List.
+    const toolbar = timeline.slice(timeline.indexOf('className="timeline-range-toolbar df-cal-toolbar"'), timeline.indexOf('className="timeline-view-stage"'));
+    expect(toolbar.indexOf('className="timeline-range-navigation"')).toBeLessThan(toolbar.indexOf("<CalendarHead"));
+    expect(toolbar.indexOf("<CalendarHead")).toBeLessThan(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}'));
+    expect(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}')).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar view"'));
+    // Card C item 5: a visible Calendar | List switch on web; the round icon menu is the iPhone's only.
+    expect(timeline).not.toContain("CalendarViewMenu");
+    expect(timeline).toContain('{ id: "calendar", label: "Calendar" }');
+    expect(timeline).toContain('{ id: "list", label: "List" }');
     // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
-    expect(timeline).toContain('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}');
     expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
     expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
     expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
-    expect(timeline).toContain('aria-label={isList ? "Today, not used in List" : undefined}');
-    // Today is always shown in List, greyed and inert, even for the current period (Codex r2 on #584).
-    expect(timeline).toContain("{showsToday && !isList ? null : (");
+    // Card C (27 Oct): List has no second Today button; the grid shows one away from today.
+    expect(timeline).toContain("{showsToday || isList ? null : (");
+    expect(timeline).not.toContain("Today, not used in List");
     // Location days belong to the owner and the selected week (Codex r2 on #584).
     expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);");
     // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).

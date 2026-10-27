@@ -214,7 +214,9 @@ export function CheckQuestionRow({
           <small>{detail}</small>
           {outing ? <small>With its trips: {outingSummary(outing)}. Your answer covers them too.</small> : null}
           <div className="timeline-check-answers">
-            <button className="ui-button ui-button-primary is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
+            {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
+                stays for Play/Stop and live recording. */}
+            <button className="ui-button timeline-check-log is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
               {trip ? "Yes" : `Log ${reviewDefaultName(item)}`}
             </button>
             {trip && onEdit ? (

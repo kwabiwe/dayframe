@@ -128,9 +128,9 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(html).not.toContain("calendar-now-line");
     expect(html).not.toMatch(/\b(23|00):(30|45)\b/);
     expect(html).toContain('data-calendar-day-key="2026-10-12"');
-    // Calendar v3: the framed line under the strip, its date for assistive tech.
-    expect(html).toContain("– framed");
-    expect(html).toContain('aria-label="Framed on Monday 12 October"');
+    // #256: each day's total under its date waits for hydration (a dash), as the week total does.
+    expect(html).toContain('<span aria-hidden="true" class="df-cal-day-total df-tnum">–</span>');
+    expect(html).not.toContain("df-cal-framed");
 
     expect(recoverable).toEqual([]);
     const monday = container.querySelector('[data-calendar-day-key="2026-10-12"]')!;
@@ -151,6 +151,8 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(container.querySelector(".calendar-grid-scroller")?.hasAttribute("aria-busy")).toBe(false);
     // 45 minutes on Monday (London) and an hour on Wednesday.
     expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m this week");
+    // Day totals, as the bars, count time up to the test's now (00:45 on Monday, London).
+    expect([...container.querySelectorAll(".df-cal-day-total")].map((total) => total.textContent)).toEqual(["15m", "–", "–", "–", "–", "–", "–"]);
     await unmount();
   });
 
