@@ -55,7 +55,10 @@ describe("the List's queued corrections (location v4 step 12)", () => {
     await flush();
     expect(seen!.pending.map((item) => item.clientCorrectionId)).toEqual([queued.clientCorrectionId]);
     // A refusal shows from the queue, but the timeline is read again only for an acknowledgement (Codex r2 on #598).
+    // Saved, refused, saved in one pass: one read of the timeline (Codex r3 on #598).
+    const savedFirst = await outbox.enqueueTimelineCorrection(OWNER, { kind: "delete", subject: "trip", itemId: "trip-0" });
     const refusedThenSaved = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "in a block" }), { status: 409 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", refusedThenSaved);
@@ -63,8 +66,9 @@ describe("the List's queued corrections (location v4 step 12)", () => {
     await outbox.synchroniseTimelineCorrections({ owner: OWNER });
     await flush();
     expect(seen!.delivered).toBe(1);
-    expect(seen!.acknowledged.map((item) => item.clientCorrectionId)).toEqual([second.clientCorrectionId]);
-    expect(seen!.pending).toEqual([expect.objectContaining({ clientCorrectionId: queued.clientCorrectionId, failureKind: "permanent" })]);
+    // In order: the first queued is saved, the next refused, the last saved.
+    expect(seen!.acknowledged.map((item) => item.clientCorrectionId)).toEqual([queued.clientCorrectionId, second.clientCorrectionId]);
+    expect(seen!.pending).toEqual([expect.objectContaining({ clientCorrectionId: savedFirst.clientCorrectionId, failureKind: "permanent" })]);
     // Signed out: nothing of the last account's.
     await act(async () => { tree.update(createElement(Probe, { owner: null })); });
     expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 0 });

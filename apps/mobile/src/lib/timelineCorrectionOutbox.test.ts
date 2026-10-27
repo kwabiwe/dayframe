@@ -165,6 +165,21 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toHaveLength(1);
   });
 
+  it("never marks a refusal when the account changes while the queue is being written (Codex r3 on #598)", async () => {
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => json(404, { error: "gone" })));
+    const realGet = vi.mocked(AsyncStorage.getItem).getMockImplementation()!;
+    let reads = 0;
+    vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
+      // The queue read inside the refusal's write: the account leaves then.
+      if (key === "dayframe.timelineCorrectionOutbox.v1" && ++reads === 2) await account.activateMobileAccount(OWNER_B);
+      return realGet(key);
+    });
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "session_changed", refused: [] });
+    vi.mocked(AsyncStorage.getItem).mockImplementation(realGet);
+    expect((await outbox.readPendingTimelineCorrections(OWNER_A))[0]).not.toHaveProperty("failureKind");
+  });
+
   it("sends nothing when the app leaves while the session is read (Codex r2 on #598)", async () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
     let foreground = true;

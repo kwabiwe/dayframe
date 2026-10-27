@@ -54,6 +54,12 @@ export type TimelineCorrectionSyncResult = {
 export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
+/** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
+let refreshRevision = 0;
+
+export function readTimelineCorrectionRefreshRevision() {
+  return refreshRevision;
+}
 
 const listeners = new Set<() => void>();
 const inFlightByOwner = new Map<string, Promise<TimelineCorrectionSyncResult>>();
@@ -124,7 +130,11 @@ async function updateAll(
   keepUnknown: (record: unknown) => boolean = () => true
 ) {
   const stored = await readStore();
-  const next = [...change(stored.items), ...stored.unknown.filter(keepUnknown)];
+  await writeStore(stored, change(stored.items), keepUnknown);
+}
+
+async function writeStore(stored: Stored, items: PendingTimelineCorrection[], keepUnknown: (record: unknown) => boolean = () => true) {
+  const next = [...items, ...stored.unknown.filter(keepUnknown)];
   if (next.length === 0) await AsyncStorage.removeItem(TIMELINE_CORRECTION_OUTBOX_KEY);
   else await AsyncStorage.setItem(TIMELINE_CORRECTION_OUTBOX_KEY, JSON.stringify(next));
 }
@@ -260,6 +270,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
   const refused: PendingTimelineCorrection[] = [];
   const finish = async (reason: TimelineCorrectionSyncResult["reason"]) => {
     const waitingCount = (await readPendingTimelineCorrections(input.owner)).filter((item) => item.failureKind !== "permanent").length;
+    if (deliveredCount > 0) refreshRevision += 1;
     if (deliveredCount > 0 || refused.length > 0) notify();
     return { deliveredCount, waitingCount, refused, reason };
   };
@@ -295,7 +306,9 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
       // An answer for a session that has since changed: not this correction's fault (Codex r1 on #598).
       if (error instanceof StaleMobileSessionResponseError || !await stillCurrent()) return finish("session_changed");
       const retryable = input.signal?.aborted || error instanceof MobileRequestTimeoutError || isMobileTransportFailure(error);
-      const kept = await recordFailure(next.clientCorrectionId, attemptedAt, !retryable, error instanceof Error ? error.message : "Network request failed.");
+      const kept = await recordFailure(next.clientCorrectionId, attemptedAt, !retryable,
+        error instanceof Error ? error.message : "Network request failed.", stillCurrent);
+      if (kept === "session_changed") return finish("session_changed");
       if (retryable) return finish("retryable_failure");
       if (kept) refused.push(kept);
       continue;
@@ -317,17 +330,36 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     }
     const permanent = PERMANENT_STATUS_CODES.has(response.status);
     const message = await responseMessage(response);
-    // The account may have changed while the reply was read: then this correction is not touched (Codex r2 on #598).
-    if (!await stillCurrent()) return finish("session_changed");
-    const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, response.status);
+    // The account may have changed while the reply was read or the queue written: then this correction is not
+    // touched (Codex r2 and r3 on #598).
+    const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, stillCurrent, response.status);
+    if (kept === "session_changed") return finish("session_changed");
     if (!permanent) return finish("retryable_failure");
     if (kept) refused.push(kept);
   }
 }
 
-async function recordFailure(clientCorrectionId: string, attemptedAt: string, permanent: boolean, message: string, statusCode?: number) {
+/**
+ * Records a failed send. `stillCurrent` is checked inside the write, after the queue is read: a correction is
+ * never marked for an account that has just left (Codex r3 on #598). Null when it was not recorded.
+ */
+async function recordFailure(
+  clientCorrectionId: string,
+  attemptedAt: string,
+  permanent: boolean,
+  message: string,
+  stillCurrent: () => Promise<boolean>,
+  statusCode?: number
+): Promise<PendingTimelineCorrection | "session_changed" | null> {
   let kept: PendingTimelineCorrection | null = null;
-  await withMutation(() => updateAll((items) => items.map((item) => {
+  let changed = false;
+  await withMutation(async () => {
+    const stored = await readStore();
+    if (!await stillCurrent()) {
+      changed = true;
+      return;
+    }
+    await writeStore(stored, stored.items.map((item) => {
       if (item.clientCorrectionId !== clientCorrectionId) return item;
       const attemptCount = item.attemptCount + 1;
       kept = {
@@ -339,7 +371,9 @@ async function recordFailure(clientCorrectionId: string, attemptedAt: string, pe
         ...(permanent ? {} : { nextAttemptAt: nextRetryAt(attemptedAt, attemptCount) })
       };
       return kept;
-    })));
+    }));
+  });
+  if (changed) return "session_changed";
   notify();
   return kept as PendingTimelineCorrection | null;
 }
@@ -361,6 +395,7 @@ async function responseMessage(response: Response) {
 
 export function __resetTimelineCorrectionOutboxForTests() {
   acknowledged = [];
+  refreshRevision = 0;
   listeners.clear();
   inFlightByOwner.clear();
   mutationTail = Promise.resolve();
