@@ -7,7 +7,7 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
-  it("shows the Calendar v3 header: month title, one round Day / List menu, no − / +, and the framed line under the week strip", () => {
+  it("shows the Calendar v3 header: month title, one round Day / List menu, no − / +, and no framed line under the week strip", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const header = rootView.slice(
       rootView.indexOf("private func calendarHeader("),
@@ -29,10 +29,9 @@ describe("native Calendar production contract", () => {
     expect(rootView).not.toContain('"Zoom in" : "Zoom out"');
     expect(rootView).toContain(".accessibilityAdjustableAction { direction in");
     expect(rootView).toContain("case .increment: model.requestZoom(direction: 1)");
-    // The framed line: one secondary line, hidden when empty, read with the full date.
-    expect(header).toContain("if !presentation.framedLabel.isEmpty {");
-    expect(header).toContain(".accessibilityLabel(presentation.framedAccessibilityLabel)");
-    expect(rootView.indexOf("weekStrip(presentation: presentation, theme: theme)")).toBeLessThan(rootView.indexOf("framedLine(presentation: presentation, theme: theme)"));
+    // Card C item 1 (owner, 25 Oct 2026): no "framed" line under the strip; the day heading says "logged".
+    expect(rootView).not.toContain("framedLine(");
+    expect(rootView).not.toContain("framedLabel");
     expect(header).not.toContain("coveredLabel");
     expect(rootView).not.toContain("private func calendarPanel(");
   });
@@ -77,8 +76,10 @@ describe("native Calendar production contract", () => {
     expect(marker).toContain("Color(dayframeCSS: light ? theme.dangerText : theme.danger)");
     expect(marker).toContain(".background(Capsule(style: .continuous).fill(red))");
     expect(marker).not.toContain("Circle()");
-    // The hour label under the pill is hidden.
-    expect(rootView).toContain(".opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)");
+    // #255: an hour label hides only where the pill actually covers its digits (DayframeCalendarNowPillMath).
+    expect(rootView).toContain("DayframeCalendarNowPillMath.coversHourLabel(nowY: Double($0), labelCenterY: Double(labelTop), labelGlyphHeight: Double(labelGlyphHeight))");
+    expect(rootView).toContain("@ScaledMetric(relativeTo: .caption2) private var labelGlyphHeight: CGFloat = 8");
+    expect(rootView).not.toContain("abs($0 - labelTop) < 12");
   });
 
   it("removes the React pinch, temporary transform, and outer-scroll ownership", () => {

@@ -157,8 +157,11 @@ describe("TodayTimerSurface (Blocks)", () => {
     const prompt = text("What are you working on?");
     expect(prompt.props.maxFontSizeMultiplier).toBe(1.35);
     expect(flatStyle(prompt.props.style).fontFamily).toBe("BricolageGrotesque-Bold");
-    const headers = tree.root.findAllByType("Text" as never).filter((node) => node.children.join("") === "Start a block");
+    // Card D item 10: the activities section is "Your activities"; only the coral pill says "Start a block".
+    const headers = tree.root.findAllByType("Text" as never).filter((node) => node.children.join("") === "Your activities");
     expect(headers.some((node) => node.props.accessibilityRole === "header")).toBe(true);
+    expect(tree.root.findAllByType("Text" as never).filter((node) => node.children.join("") === "Start a block")
+      .every((node) => node.props.accessibilityRole !== "header")).toBe(true);
     expect(flatStyle(byLabel("Start a block").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
     expect(flatStyle(byLabel("Add past time").props.style({ pressed: false })).minHeight).toBe(44);
 

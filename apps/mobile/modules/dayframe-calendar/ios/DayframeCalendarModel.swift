@@ -186,8 +186,6 @@ struct DayframeCalendarPresentation: Equatable {
   let dayStartMs: Double
   let emptyState: String
   let entries: [DayframeCalendarEntry]
-  let framedLabel: String
-  let framedAccessibilityLabel: String
   let hapticsEnabled: Bool
   /// Calendar › Grid or List (location v4 step 9): in List the view draws only its header and week
   /// strip, and the app draws the List under it.
@@ -220,8 +218,6 @@ struct DayframeCalendarPresentation: Equatable {
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState
     entries = record.entries.map(DayframeCalendarEntry.init)
-    framedLabel = record.framedLabel
-    framedAccessibilityLabel = record.framedAccessibilityLabel ?? record.framedLabel
     hapticsEnabled = record.hapticsEnabled
     isList = record.layout == "list"
     clockFormat = record.clockFormat == "12h" ? "12h" : "24h"
