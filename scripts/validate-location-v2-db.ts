@@ -1875,7 +1875,7 @@ async function validateTimeAwayReview() {
     "select id from categories where workspace_id = $1 and starter_key = 'travel'", [WORKSPACE_ID]);
   assert.equal(travel.rowCount, 1, "Offering a Move did not create the Travel activity.");
   assert.deepEqual(reviews.rows.map(({ title, suggestedCategoryId, reason, route }) => ({ title, suggestedCategoryId, reason, route })),
-    [{ title: "Trip", suggestedCategoryId: travel.rows[0].id, reason: "same_place_outing", route: `Round trip from ${home.name}` }],
+    [{ title: "Getting around", suggestedCategoryId: travel.rows[0].id, reason: "same_place_outing", route: `Round trip from ${home.name}` }],
     "A short drive to a shop and back was not offered as a round trip from Home.");
   await resolveLocationReviewAction(reviews.rows[0].id, { action: "confirm" }, session);
   const entry = await pool.query<{ categoryId: string | null; description: string | null }>(
@@ -2412,7 +2412,7 @@ async function validateLearnedNames() {
     const first = await offer();
     travelCategory = first.categoryId;
     assert(travelCategory, "The fixture's Move suggested no activity.");
-    assert.equal(first.title, "Trip", "The fixture's Move was not titled Trip.");
+    assert.equal(first.title, "Getting around", "The fixture's Move was not titled Getting around.");
     assert(first.key && /^[0-9a-f]{64}$/.test(first.key), "The Move's pattern key was not a hash.");
     await resolveLocationReviewAction(first.id, { action: "confirm" }, session);
     assert.deepEqual(await patterns(), [], "Confirming Dayframe's own title was learned.");
@@ -2450,7 +2450,7 @@ async function validateLearnedNames() {
     // "Stop suggesting this" forgets it.
     assert.equal(await forgetLearnedNameForEntry(pool, session, resetDecision.entryId), 2, "Stop suggesting this did not forget every band.");
     assert.deepEqual(await patterns(), [], "Stop suggesting this left the learned name.");
-    assert.equal((await offer()).title, "Trip", "A forgotten name still named the card.");
+    assert.equal((await offer()).title, "Getting around", "A forgotten name still named the card.");
 
     // After two uses a learned name also names a Log automatically block (D17 visits).
     const acceptance = locationAcceptanceFixture();
