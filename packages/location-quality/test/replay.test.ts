@@ -99,7 +99,23 @@ describe("replay", () => {
         .flatMap((segment) => segment.kind === "commute" ? (segment.legs ?? []).map((leg) => leg.mode) : []);
     };
     expect(parseBroadReadingTimes(seen, { algorithmVersion: "v", minimumAccuracyMeters: 200, maximumAccuracyMeters: 500 })).toEqual([Date.parse(time(33)), Date.parse(time(36))]);
-    expect(modes(quiet)).toContain("underground");
-    expect(modes(seen)).not.toContain("underground");
+    // Relative positions sit nowhere near a station, so a silence alone is never a leg (card A): one drive.
+    expect(modes(quiet)).toEqual(["automotive"]);
+    expect(modes(seen)).toEqual(["automotive"]);
+  });
+
+  it("uses the bundled stations only when given the export's exact reference point", () => {
+    const around = projectionAround(45, 7);
+    expect(around.toLongitude(0)).toBe(7);
+    expect(around.toLatitude(0)).toBe(45);
+    expect(projectionAround(45).toLongitude(0)).toBe(0);
+    const seen: boolean[] = [];
+    const engine = { ...sharedEngine, run: (input: Parameters<typeof sharedEngine.run>[0]) => {
+      seen.push(input.config.tripStationsEnabled);
+      return sharedEngine.run(input);
+    } };
+    replay(engine, [], [], "2026-03-02T09:05:00Z");
+    replay(engine, [], [], "2026-03-02T09:05:00Z", [], { stations: true });
+    expect(seen).toEqual([false, true]);
   });
 });

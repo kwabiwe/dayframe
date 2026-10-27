@@ -10,7 +10,10 @@ owner's Mac only.
   any of them inside this repository, so they cannot be committed by accident.
 - Evidence and place rows are relative metres (east/north of an origin); replay projects them back
   around `--origin-latitude`, which a replay must give: the value the rows were exported with (kept in
-  the private notes beside them, never in Git). The projection moves distances by a few metres, so a
+  the private notes beside them, never in Git). With `--origin-longitude` as well (the export's exact
+  reference point, equally private) positions come back where they were and replay uses the bundled
+  stations, so Underground and train legs are scored; without it the station list is off and a silence
+  is never a leg (PRD D21, card A). The projection moves distances by a few metres, so a
   different value changes route lengths. Saved runs and reports hold times, counts, metres and anonymous
   place labels (`P4`) only: no names, addresses or coordinates; a saved run read back is rebuilt from an
   allowlist of fields, and a file that is not valid JSON is reported without quoting it.

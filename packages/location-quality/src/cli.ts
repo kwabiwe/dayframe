@@ -17,6 +17,8 @@ Replay main's engine over private evidence rows and score it:
     --rows <evidence.psv> --places <places.psv> --from <ISO> --to <ISO> [--at <ISO>]
 
 Replay needs --origin-latitude <deg>: the latitude the private rows were exported around.
+With --origin-longitude <deg> too (the export's exact reference point) positions come back where they
+were and the bundled stations are used; without it they are off.
 Score a saved run instead:     --segments <segments.json> [--home-place P4]
 Replay another checkout:       --engine <checkout>/packages/shared/src/location
 Write the run or the scores:   --save-segments <file.json>  --summary-json <file.json>
@@ -139,6 +141,8 @@ async function main() {
       // The latitude the private rows were exported around. Rows are relative metres, but the
       // projection still moves distances by a few metres, so a replay must use the export's own value.
       "origin-latitude": { type: "string" },
+      // The export's reference longitude (private): with it, replay uses the bundled stations.
+      "origin-longitude": { type: "string" },
       "drop-motion": { type: "boolean", default: false },
       "drop-places": { type: "string" },
       "received-until": { type: "string" },
@@ -171,7 +175,11 @@ async function main() {
     const engine = values.engine ? await loadEngine(callerPath(values.engine)) : sharedEngine;
     const originLatitude = Number(values["origin-latitude"]);
     if (!Number.isFinite(originLatitude) || Math.abs(originLatitude) >= 90) throw new HarnessError("--origin-latitude must be a latitude in degrees.");
-    const projection = projectionAround(originLatitude);
+    const originLongitude = values["origin-longitude"] == null ? null : Number(values["origin-longitude"]);
+    if (originLongitude != null && !(Number.isFinite(originLongitude) && Math.abs(originLongitude) <= 180)) {
+      throw new HarnessError("--origin-longitude must be a longitude in degrees.");
+    }
+    const projection = projectionAround(originLatitude, originLongitude ?? 0);
     const dropped = new Set((values["drop-places"] ?? "").split(",").filter(Boolean));
     const places = parsePlaceRows(readPrivateText(values.places!, ROLES.places), projection)
       .filter((place) => !dropped.has(place.label));
@@ -186,7 +194,8 @@ async function main() {
     const broadReadingTimes = parseBroadReadingTimes(rowText, { ...rowOptions, minimumAccuracyMeters: engine.config.maxAcceptedHorizontalAccuracyMeters,
       maximumAccuracyMeters: (engine.config as { tripUnseenObservedAccuracyMeters?: number }).tripUnseenObservedAccuracyMeters ?? 500 });
     // The same allowlist as a saved run, so a replay can never carry more than one would.
-    segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to, broadReadingTimes));
+    segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to, broadReadingTimes,
+      { stations: originLongitude != null }));
   }
   if (values["save-segments"]) {
     writePrivateText(values["save-segments"], ROLES["save-segments"], `${JSON.stringify(segments, null, 1)}\n`);
