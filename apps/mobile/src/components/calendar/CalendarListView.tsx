@@ -509,7 +509,8 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
 
 /**
  * A "?"'s question under its row (mock-up #ios-list): what it asks, why, and one-tap answers in 44-point
- * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen). A
+ * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen; a trip:
+ * Yes, Edit on its own screen, Not now, card A). A
  * suggestion without a complete time cannot be answered here: it says so and offers "Open it" instead.
  * Card D item 9 (owner, 25 Oct 2026): one style with the web — the standard inset surface, "Log it" a
  * neutral dark pill (textPrimary fill, background text), the others surfaceMuted; coral stays for
@@ -518,6 +519,8 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
 function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
   onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
 }) {
+  // A trip (card A): Yes, Edit (its own screen), Not now.
+  const edit = question.moreLabel === "Edit";
   return (
     <View style={[styles.question, { backgroundColor: theme.surfaceInset }]} testID="calendar-list-question">
       <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
@@ -527,6 +530,13 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
           <Pressable accessibilityRole="button" onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
             style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.background }]}>{question.logLabel}</Text>
+          </Pressable>
+        ) : null}
+        {edit && onMore ? (
+          <Pressable accessibilityHint="Opens the trip on its own screen to edit it" accessibilityRole="button" onPress={onMore}
+            testID="calendar-list-answer-edit"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.moreLabel}</Text>
           </Pressable>
         ) : null}
         {question.skipLabel ? (
@@ -541,7 +551,7 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
           </Pressable>
         ) : null}
-        {onMore ? (
+        {!edit && onMore ? (
           <Pressable accessibilityHint="Pick or name another place" accessibilityRole="button" onPress={onMore} testID="calendar-list-answer-more"
             style={({ pressed }) => [styles.answer, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textSecondary }]}>More…</Text>

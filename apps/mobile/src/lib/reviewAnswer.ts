@@ -33,8 +33,10 @@ export type ReviewAnswerQuestion = {
   skipLabel: string | null;
   /** No complete window: it is answered on its own screen ("Open it") instead of here. */
   opens: boolean;
-  /** A place can be picked or named on the suggestion's own screen ("More…"). */
+  /** A place can be picked or named on the suggestion's own screen ("More…"), a trip edited there ("Edit"). */
   more: boolean;
+  /** The words on that button when they are not "More…". */
+  moreLabel?: string;
 };
 
 export function reviewAnswerQuestion(
@@ -74,8 +76,12 @@ function reviewAnswerWords(
   if (options.outing) {
     return { question: `Log ${title} with the trips there and back${at}?`, detail: "One answer for the whole outing.", logLabel: "Log it", skipLabel: "Skip", more: false, opens: false };
   }
+  // A trip asks by its own title, "Getting around, 14:44–16:31?" (card A, owner feedback 25 Oct): Yes logs it,
+  // Edit opens it on its own screen, Not now leaves it.
   if (item.eventType === "commute_detected") {
-    return { question: `Log the trip${at}?`, detail: title === "this" ? null : title, logLabel: "Log it", skipLabel: "Not a trip", more: false, opens: false };
+    const name = title === "this" ? "Getting around" : title;
+    return { question: `${name}${at}?`, detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
+      logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
   }
   // A place: logged as suggested here; picking or naming another place happens on its own screen.
   const place = isLocationReviewItem(item);

@@ -197,6 +197,29 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onOpenCheck).toHaveBeenCalledTimes(1);
   });
 
+  it("asks a trip Yes, Edit, Not now, and Edit opens the trip on its own screen (card A)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenCheck = vi.fn();
+    const { tree } = render({
+      checks: [{ id: "c-trip", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
+      checkTitles: new Map([["c-trip", "Getting around"]]),
+      checkQuestions: new Map([["c-trip", { question: "Getting around, 12:00–13:00?", detail: null, logLabel: "Yes", skipLabel: "Not now",
+        more: true, moreLabel: "Edit", opens: false }]]),
+      onAnswerCheck,
+      onOpenCheck
+    });
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    const answers = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-") &&
+      typeof node.props.onPress === "function").map((node) => node.props.testID);
+    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-edit", "calendar-list-answer-skip"]);
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
+    const edit = tree.root.findByProps({ testID: "calendar-list-answer-edit" });
+    expect(edit.findByType("Text" as never).props.children).toBe("Edit");
+    act(() => { edit.props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
+    expect(onAnswerCheck).not.toHaveBeenCalled();
+  });
+
   it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
     const { AccessibilityInfo } = await import("react-native");
     vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();

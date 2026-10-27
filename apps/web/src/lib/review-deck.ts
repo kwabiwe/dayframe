@@ -64,8 +64,8 @@ export function reviewConfidence(confidence: string) {
 /** The card's heading: what the moment is, never an address. */
 export function reviewTitle(item: Pick<ReviewItemRow, "title" | "eventSource" | "eventType" | "rawPayload" | "placeName">) {
   const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
-  // Stays and Moves carry the server's title (PRD D19): "Peak Gym", "Drive", "Commute", "Trip".
-  if (item.eventType === "commute_detected") return item.title?.trim() || "Trip";
+  // Stays and Moves carry the server's title (PRD D19, D21): "Peak Gym", "Commute", "Getting around".
+  if (item.eventType === "commute_detected") return item.title?.trim() || "Getting around";
   const visit = item.eventType === "learned_place_visit" || item.eventType === "geofence_exit" || evidenceKind === "learned_place";
   return item.title?.trim() || (visit && item.placeName) || "Suggestion";
 }

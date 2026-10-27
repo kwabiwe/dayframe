@@ -67,7 +67,7 @@ describe("Review deck helpers", () => {
       rawPayload: { routeLabel: "Home → Peak Gym" } });
     expect(reviewTitle(drive)).toBe("Drive");
     expect(reviewRoute(drive)).toBe("Home → Peak Gym");
-    expect(reviewTitle(item({ title: "", eventSource: "location_learning", eventType: "commute_detected", rawPayload: {} }))).toBe("Trip");
+    expect(reviewTitle(item({ title: "", eventSource: "location_learning", eventType: "commute_detected", rawPayload: {} }))).toBe("Getting around");
     expect(reviewRoute(item({ title: "Morning walk" }))).toBeNull();
     // A Stay is called by its place, never "Visit to …".
     expect(reviewTitle(item({ ...v2, title: "Peak Gym", placeName: "Peak Gym" }))).toBe("Peak Gym");
