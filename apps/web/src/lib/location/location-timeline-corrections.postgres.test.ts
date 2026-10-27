@@ -146,7 +146,18 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
 
   it("takes a trip that wasn't one off the timeline, with its open Review suggestion", async () => {
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
-    await correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-2" }, session);
+    const clientCorrectionId = "66000000-0000-4000-8000-0000000000c1";
+    const deleted = await correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-2", clientCorrectionId }, session);
+    // Its reply lost, the app sends it again: the same correction, not a 404 for a trip already gone, and no
+    // second event (step 12).
+    const again = await correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-2", clientCorrectionId }, session);
+    expect(again.correction).toEqual(deleted.correction);
+    const events = await database!.query(
+      `select count(*)::int as n from activity_events where workspace_id = $1 and client_event_id = $2`,
+      [workspaceId, `timeline_correction:${clientCorrectionId}`]);
+    expect(events.rows[0].n).toBe(1);
+    // Without its id, the same request is a new one: the trip is gone.
+    await expect(correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-2" }, session)).rejects.toMatchObject({ status: 404 });
     const trip = await database!.query(`select status from commute_segments where client_segment_id = 'trip-2' and workspace_id = $1`, [workspaceId]);
     expect(trip.rows[0].status).toBe("superseded");
     const review = await database!.query(

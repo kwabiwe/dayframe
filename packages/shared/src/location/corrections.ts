@@ -20,6 +20,11 @@ export type TimelineCorrectionKind = (typeof TIMELINE_CORRECTION_KINDS)[number];
 const LEG_MODES = ["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram"] as const satisfies readonly TripLegMode[];
 const instant = z.string().datetime({ offset: true });
 const itemId = z.string().min(1).max(200);
+/**
+ * The app's own id for one correction, so a retry after a lost reply is answered with the correction it
+ * already made instead of being applied again (the iPhone's correction queue, step 12). Optional.
+ */
+const clientCorrectionId = z.string().uuid().optional();
 
 /** One correction the app sends: the item it is about (its timeline id) and what the person set. */
 export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
@@ -27,6 +32,7 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     kind: z.literal("place"),
     subject: z.literal("place"),
     itemId,
+    clientCorrectionId,
     placeId: z.string().uuid().nullable(),
     learnedPlaceId: z.string().uuid().nullable()
   }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." }),
@@ -34,14 +40,16 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     kind: z.literal("times"),
     subject: z.enum(["place", "trip"]),
     itemId,
+    clientCorrectionId,
     startedAt: instant,
     stoppedAt: instant
   }).refine((value) => Date.parse(value.stoppedAt) > Date.parse(value.startedAt), { message: "The end must be after the start." }),
-  z.object({ kind: z.literal("delete"), subject: z.literal("trip"), itemId }),
+  z.object({ kind: z.literal("delete"), subject: z.literal("trip"), itemId, clientCorrectionId }),
   z.object({
     kind: z.literal("leg_mode"),
     subject: z.literal("leg"),
     itemId,
+    clientCorrectionId,
     legStartedAt: instant,
     legStoppedAt: instant,
     mode: z.enum(LEG_MODES)
