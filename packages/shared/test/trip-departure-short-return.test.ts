@@ -256,4 +256,29 @@ describe("a trip ends on arrival through a quiet phone at home (card E part 2, 2
     const homes = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID);
     expect(homes.every((stay) => stay.stoppedAt == null ? minutes(stay.startedAt)! > 44 + 60 : minutes(stay.stoppedAt)! < 44 + 100)).toBe(true);
   });
+
+  it("keeps a stay of five minutes or more before a silence its own, as before (Codex r1 on #591)", () => {
+    // Home from the entry for ten minutes, three hours of silence, then inside again: two stays, so a decided
+    // first one is never folded into a new open one.
+    const { input } = quietHome();
+    input.evidence = [...input.evidence, fix("home-q-4", 44 + 26, { north: 5 }, 8), fix("home-q-5", 44 + 30, { north: 6 }, 8)];
+    const homes = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID)
+      .filter((stay) => minutes(stay.startedAt)! > 60);
+    expect(homes).toHaveLength(2);
+  });
+
+  it("judges many short arrivals and same-place callbacks in bounded time (Codex r1 on #591)", () => {
+    const evidence: LocationEvidence[] = [];
+    for (let visit = 0; visit < 300; visit += 1) {
+      const start = visit * 25;
+      evidence.push(crossing(`enter-${visit}`, start, "geofence_enter", HOME_ID), fix(`in-${visit}-0`, start + 0.5, { north: 5 }, 8),
+        fix(`in-${visit}-1`, start + 2, { north: 6 }, 8), fix(`in-${visit}-2`, start + 15, { north: 4 }, 8),
+        crossing(`exit-${visit}`, start + 16, "geofence_exit", HOME_ID), fix(`out-${visit}`, start + 17, { north: 900 }, 8, { speedMetersPerSecond: 9 }));
+    }
+    const input: LocationEngineInput = { ...morning(), evidence, processingAt: at(300 * 25 + 60) };
+    const started = performance.now();
+    runLocationEngine(input);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
 });
+

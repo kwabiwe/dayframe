@@ -487,22 +487,51 @@ function departedDuring(stay: WorkingStay, fromMs: number, toMs: number) {
   return departures.some((departedMs) => departedMs >= fromMs && departedMs < toMs);
 }
 
+/** Each saved place's genuine geofence transitions in time order, built once per pass. */
+const genuineTransitionsByPass = new WeakMap<readonly ClassifiedEvidence[], Map<string, ClassifiedEvidence[]>>();
+
+/**
+ * A saved place's genuine transitions: never simulated, never half of a registration snapshot pair (an
+ * entry and an exit within `GEOFENCE_SNAPSHOT_PAIR_MS`). Sorted once, so pairing looks at neighbours only.
+ */
+function genuineTransitions(accepted: readonly ClassifiedEvidence[], placeId: string) {
+  let byPlace = genuineTransitionsByPass.get(accepted);
+  if (!byPlace) {
+    byPlace = new Map();
+    const all = new Map<string, Array<{ item: ClassifiedEvidence; atMs: number }>>();
+    for (const item of accepted) {
+      const { kind, savedPlaceId, isSimulated, occurredAt } = item.evidence;
+      if ((kind !== "geofence_enter" && kind !== "geofence_exit") || !savedPlaceId || isSimulated === true) continue;
+      all.set(savedPlaceId, [...(all.get(savedPlaceId) ?? []), { item, atMs: Date.parse(occurredAt) }]);
+    }
+    for (const [id, list] of all) {
+      list.sort((a, b) => a.atMs - b.atMs);
+      const paired = (index: number, other: number) => other >= 0 && other < list.length &&
+        list[other].item.evidence.kind !== list[index].item.evidence.kind && Math.abs(list[other].atMs - list[index].atMs) <= GEOFENCE_SNAPSHOT_PAIR_MS;
+      byPlace.set(id, list.filter((_entry, index) => {
+        for (let other = index - 1; other >= 0 && list[index].atMs - list[other].atMs <= GEOFENCE_SNAPSHOT_PAIR_MS; other -= 1) if (paired(index, other)) return false;
+        for (let other = index + 1; other < list.length && list[other].atMs - list[index].atMs <= GEOFENCE_SNAPSHOT_PAIR_MS; other += 1) if (paired(index, other)) return false;
+        return true;
+      }).map(({ item }) => item));
+    }
+    genuineTransitionsByPass.set(accepted, byPlace);
+  }
+  return byPlace.get(placeId) ?? [];
+}
+
 /**
  * Whether iOS itself reported entering a saved stay's place during the stay: a genuine entry among its
- * evidence (never a simulated one or half of a registration snapshot pair) with no exit for the place
- * after it in the journal.
+ * evidence with no exit for the place after it, up to the stay's last observation.
  */
-function enteredSavedPlace(stay: WorkingStay, accepted: ClassifiedEvidence[]) {
-  const transitions = accepted.filter(({ evidence: callback }) =>
-    (callback.kind === "geofence_enter" || callback.kind === "geofence_exit") && callback.savedPlaceId === stay.placeId &&
-    callback.isSimulated !== true);
-  const genuine = transitions.filter((item) => !transitions.some((other) => other.evidence.kind !== item.evidence.kind &&
-    Math.abs(Date.parse(other.evidence.occurredAt) - Date.parse(item.evidence.occurredAt)) <= GEOFENCE_SNAPSHOT_PAIR_MS));
+function enteredSavedPlace(stay: WorkingStay, accepted: readonly ClassifiedEvidence[]) {
+  if (!stay.placeId) return false;
+  const genuine = genuineTransitions(accepted, stay.placeId);
   const entry = genuine.filter((item) => item.evidence.kind === "geofence_enter" && stay.evidence.includes(item)).at(-1);
   if (!entry) return false;
+  const enteredMs = Date.parse(entry.evidence.occurredAt);
   const lastObservedMs = latestObservationMs(stay);
   return !genuine.some((item) => item.evidence.kind === "geofence_exit" &&
-    Date.parse(item.evidence.occurredAt) > Date.parse(entry.evidence.occurredAt) && Date.parse(item.evidence.occurredAt) <= lastObservedMs);
+    Date.parse(item.evidence.occurredAt) > enteredMs && Date.parse(item.evidence.occurredAt) <= lastObservedMs);
 }
 
 /**
@@ -1752,14 +1781,18 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         active.arrivalPresence === true &&
         (active.arrivalPresenceUntilAt == null || atMs <= Date.parse(active.arrivalPresenceUntilAt)) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
-      // After iOS's own entry into a saved place, with no exit or outside reading since, a silence ends where
-      // it began only if the device is seen elsewhere: back strongly inside the same place, it never left
-      // (card E, 25 Oct: home at 11:13, the phone quiet until 14:26, the trip ran to 14:26).
+      // An arrival too short to be a stay yet (under `savedPlaceMinimumDwellMs`) after iOS's own entry into a
+      // saved place, with no exit or outside reading since, is not ended by a silence when the device is next
+      // seen strongly inside the same place: it never left (card E, 25 Oct: home at 11:13, the phone quiet
+      // until 14:26, the trip ran to 14:26). Being too short, it was never a segment, so no decided history
+      // can lie inside it (Codex r1 on #591). Judged last, only when no other rule carries the silence.
       const enteredPresence = observationGapMs > input.config.maxContinuityGapMs &&
-        active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 && !edgeOnly(active, input) &&
-        enteredSavedPlace(active, accepted) && strongSavedPoint(item, active.placeId, input) &&
-        !departedDuring(active, Date.parse(observedAt), atMs) &&
-        atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
+        !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence &&
+        active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
+        !hasMeaningfulKnownPlaceWindow(active.startedAt, observedAt, input.config.savedPlaceMinimumDwellMs) &&
+        atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs &&
+        strongSavedPoint(item, active.placeId, input) && !edgeOnly(active, input) &&
+        !departedDuring(active, Date.parse(observedAt), atMs) && enteredSavedPlace(active, accepted);
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap &&
         !openVisitPresence && !enteredPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
