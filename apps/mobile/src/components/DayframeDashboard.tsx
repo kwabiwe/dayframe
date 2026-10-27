@@ -206,6 +206,7 @@ import {
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
   enqueueTimeEntryUpdate,
+  isTimeEntryCommandRejected,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
   type TimeEntryCommandHoldLease,
@@ -2608,15 +2609,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     const owner = timerStopOwner(bootstrap);
     const persistedId = persistedTimerEntryId(entryId);
+    let clientCommandId: string;
     try {
-      await enqueueTimeEntryUpdate({
+      ({ clientCommandId } = await enqueueTimeEntryUpdate({
         owner,
         target: persistedId
           ? { targetEntryId: persistedId }
           : { optimisticEntryId: entryId },
         patch,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
-      });
+      }));
     } catch {
       Alert.alert(
         errorTitle,
@@ -2641,10 +2643,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           transitionToSignedOut();
           return;
         }
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
+        // Only this edit's own rejection: older sync issues stay in Settings › Sync help.
+        const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
+        if (result.deliveredCount > 0 || rejected) {
           await loadRef.current({ silent: true });
         }
-        if (result.needsAttentionCount > 0) {
+        if (rejected) {
           Alert.alert(
             "Change not saved",
             "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
