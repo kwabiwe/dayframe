@@ -69,28 +69,24 @@ describe("saved-place arrival boundary V1 synthetic contract", () => {
     expect(inboundCommute?.maximumObservationGapSeconds).toBeLessThanOrEqual(LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs / 1000);
   });
 
-  it("suppresses only the conflicting spanning commute when full support is unavailable", () => {
+  it("starts the stay at iOS's entry when readings inside resume after a silence, so the trip ends on arrival (card E part 2)", () => {
+    // Entry 11:33:26 and two readings inside, 45 minutes of silence, readings inside again from 12:21: the
+    // same shape as with the Visit, which already showed the arrival.
     const result = output({ includeVisit: false });
-    const gymStays = result.segmentUpserts.filter(
-      (segment) => segment.kind === "stay" && segment.placeId === ARRIVAL_BOUNDARY_PLACE.id
-    );
-    const inbound = result.segmentUpserts.filter(
-      (segment) => segment.kind === "commute" && segment.toPlaceId === ARRIVAL_BOUNDARY_PLACE.id
-    );
-    const returnCommute = result.segmentUpserts.find(
-      (segment) => segment.kind === "commute" && segment.fromPlaceId === ARRIVAL_BOUNDARY_PLACE.id
-    );
-
-    expect(gymStays).toHaveLength(1);
-    expect(gymStays[0].startedAt).toBe("2026-09-17T12:21:00.000Z");
-    expect(inbound).toEqual([]);
-    expect(returnCommute).toBeDefined();
+    const gym = gymStay(result);
+    expect(gym?.startedAt).toBe("2026-09-17T11:33:26.000Z");
+    const inbound = result.segmentUpserts.filter((segment): segment is CommuteSegment =>
+      segment.kind === "commute" && segment.toPlaceId === ARRIVAL_BOUNDARY_PLACE.id);
+    expect(inbound.map((trip) => trip.stoppedAt)).toEqual(["2026-09-17T11:33:26.000Z"]);
   });
 
   it("still suppresses an unsupported destination arrival when only the origin is inferred", () => {
     const fixture = savedPlaceArrivalBoundaryFixture({ includeVisit: false });
     const result = runLocationEngine(fixture);
-    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    // A destination stay that begins only after the silence, as before an entry carried the stay across it
+    // (card E part 2): the arrival evidence at 11:33 is then unsupported by it.
+    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay")
+      .map((stay) => stay.placeId === ARRIVAL_BOUNDARY_PLACE.id ? { ...stay, startedAt: "2026-09-17T12:21:00.000Z" } : stay);
     const { witnesses } = analyseSavedPlaceArrivalEvidence(result.acceptedEvidence, fixture);
     const options = { arrivalWitnesses: witnesses, savedPlaces: fixture.savedPlaces };
     const derive = (inferredBoundaryStayIds: Set<string>, arrivalWitnesses = witnesses) =>

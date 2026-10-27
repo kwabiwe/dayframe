@@ -236,11 +236,12 @@ describe("the start of a same-place round trip", () => {
     expect(times(commutes(value))).toEqual([[at(30.2), at(backAt + 0.3), 0]]);
   });
 
-  it("claims no stationary Home time when the Home stay begins half an hour after the return (review finding)", () => {
+  it("claims no stationary Home time when Home is next seen half an hour after the return (review finding)", () => {
     const { value, backAt } = lateReturn(30, 5);
     const stays = runLocationEngine(value).segmentUpserts.filter((segment) => segment.kind === "stay");
-    // The Home stay does begin late here, so a trip to it would include 30 minutes at Home.
-    expect(stays.at(-1)!.startedAt >= at(backAt + 29)).toBe(true);
+    // iOS's entry at the return and the still readings half an hour later are one stay at Home (card E
+    // part 2): it begins at the entry, never half an hour late.
+    expect(Date.parse(stays.at(-1)!.startedAt)).toBeLessThanOrEqual(Date.parse(at(backAt + 1)));
     expect(commutes(value).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
   });
 

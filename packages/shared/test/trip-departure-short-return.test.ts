@@ -226,3 +226,34 @@ describe("a two-minute drive home Core Motion saw (card E, 25 Oct)", () => {
     expect(minutes(lastHome.startedAt)).toBeCloseTo(63.1, 0);
   });
 });
+
+describe("a trip ends on arrival through a quiet phone at home (card E part 2, 25 Oct)", () => {
+  /** Home at the entry, readings inside for three and a half minutes, three hours of silence, then inside again. */
+  function quietHome() {
+    const input = morning();
+    const homeAgainAt = 44;
+    // iOS's arrival Visit was too broad to use (161 m), as on 25 Oct: only the entry and the readings place the phone.
+    input.evidence = [...input.evidence.filter((item) => !item.clientEvidenceId.startsWith("home-pm-"))
+      .map((item) => item.clientEvidenceId === "home-visit" ? { ...item, horizontalAccuracyMeters: 161 } : item),
+      fix("home-q-0", homeAgainAt + 19.3, { north: 10 }, 19), fix("home-q-1", homeAgainAt + 19.7, { north: 14 }, 27),
+      fix("home-q-2", homeAgainAt + 21.0, { north: 3 }, 7), fix("home-q-3", homeAgainAt + 22.8, { north: 12 }, 19),
+      fix("home-late-0", homeAgainAt + 195, { north: 6 }, 9), fix("home-late-1", homeAgainAt + 200, { north: 4 }, 8)];
+    input.processingAt = at(homeAgainAt + 210);
+    return { input, arrivedAt: homeAgainAt + 19.4 };
+  }
+
+  it("starts Home at the entry and ends the drive home there, not when the phone is next heard from", () => {
+    const { input, arrivedAt } = quietHome();
+    const home = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID).at(-1)!;
+    expect(minutes(home.startedAt)).toBeLessThanOrEqual(arrivedAt);
+    const [drive] = commutes(input).filter((trip) => trip.fromPlaceId === SCHOOL_ID && trip.toPlaceId === HOME_ID);
+    expect(minutes(drive.stoppedAt)).toBeLessThanOrEqual(arrivedAt);
+  });
+
+  it("still ends Home when iOS reported leaving during the silence", () => {
+    const { input } = quietHome();
+    input.evidence = [...input.evidence, crossing("home-exit-quiet", 44 + 60, "geofence_exit", HOME_ID)];
+    const homes = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID);
+    expect(homes.every((stay) => stay.stoppedAt == null ? minutes(stay.startedAt)! > 44 + 60 : minutes(stay.stoppedAt)! < 44 + 100)).toBe(true);
+  });
+});
