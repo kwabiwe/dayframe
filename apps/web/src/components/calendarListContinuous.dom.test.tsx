@@ -289,8 +289,9 @@ describe("Calendar › List days (Codex r1 on #584)", () => {
     expect(headings).toEqual([localDay(2026, 10, 23).getTime(), thursday.getTime(), localDay(2026, 10, 21).getTime()]);
     const thursdayHeading = rows.findIndex((row) => (row as HTMLElement).dataset.dayStartMs === String(thursday.getTime()));
     expect(thursdayHeading).toBeGreaterThan(at("Block friday"));
-    expect(at("not in a block")).toBeGreaterThan(thursdayHeading);
-    expect(at("not in a block")).toBeLessThan(at("Block wednesday"));
+    const unknown = text.findIndex((value) => value.startsWith("Unknown place"));
+    expect(unknown).toBeGreaterThan(thursdayHeading);
+    expect(unknown).toBeLessThan(at("Block wednesday"));
   });
 });
 
