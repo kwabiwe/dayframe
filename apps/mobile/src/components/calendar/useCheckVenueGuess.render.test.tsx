@@ -207,4 +207,31 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     await settle();
     expect(mocks.search).toHaveBeenCalledTimes(3);
   });
+
+  it("gives no guess when the evidence read again still describes the earlier suggestion", async () => {
+    const moved = { ...stay, suggestedStartedAt: "2026-10-27T09:10:00.000Z" } as MobileReviewItem;
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.revalidate.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    mocks.search.mockImplementation(bakery);
+    await act(async () => { create(<Probe item={moved} />); });
+    await settle();
+    expect(mocks.revalidate).toHaveBeenCalledWith(expect.objectContaining({ reviewItemId: "item-1" }), { fresh: true });
+    expect(mocks.search).not.toHaveBeenCalled();
+    expect(venueOf(seen)).toEqual({ venue: null, searching: false });
+  });
+
+  it("reads the evidence again from the server when only the suggestion's segment changed", async () => {
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.revalidate.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    mocks.search.mockImplementation(bakery);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe item={stay} />); });
+    await settle();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+    await act(async () => { tree.update(<Probe item={{ ...stay, rawPayload: { clientSegmentId: "seg-2" } } as MobileReviewItem} />); });
+    await settle();
+    expect(mocks.revalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidate.mock.calls[0][1]).toEqual({ fresh: true });
+    expect(mocks.search).toHaveBeenCalledTimes(2);
+  });
 });
