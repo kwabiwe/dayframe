@@ -52,9 +52,15 @@ describe("reviewAnswerMutation (the deck's and the List's one rule, step 14 part
 });
 
 describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
-  it("asks a place, with More… for picking another on its own screen", () => {
+  it("asks whether you visited the place, with its times, and Yes / Edit / Not now (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, categoryName: "Reading" }, "24h")).toEqual({
-      question: "Log Exampleton Library, 10:00–11:30?", detail: "As Reading.", logLabel: "Log it", skipLabel: "Not now", more: true, opens: false
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+    });
+  });
+
+  it("asks where you were when it cannot name the place: Edit names it, there is no Yes (card B)", () => {
+    expect(reviewAnswerQuestion({ ...locationV2, title: "Unknown place" }, "24h")).toEqual({
+      question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
     });
   });
 
@@ -77,8 +83,9 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
       .toBe("Commute, 10:00–11:30?");
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: undefined }), "24h").question)
       .toBe("Getting around, 10:00–11:30?");
-    expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toMatchObject({
-      question: "Log Exampleton Library with the trips there and back, 10:00–11:30?", logLabel: "Log it", skipLabel: "Skip"
+    // An outing asks about its place alone; its trips there and back are decided with it (card B).
+    expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toEqual({
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
     });
   });
 

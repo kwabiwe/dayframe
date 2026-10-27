@@ -1,7 +1,7 @@
 // Location v4 step 14, iPhone part 3b: a suggestion is answered where it sits, on its row in Calendar ›
 // List, with exactly the effects the Review deck's "Log it" and "Skip" have. Both call the one rule here,
 // so a choice saves the same mutation wherever it is made.
-import { formatClockTime, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
+import { formatClockTime, placeQuestion, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
 import type { MobileReviewItem } from "./api";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "./review";
 import { reviewDeckOutingMutation } from "./reviewDeckOutings";
@@ -73,9 +73,7 @@ function reviewAnswerWords(
     const activity = item.categoryName?.trim() || "Workout";
     return { question: `Log the workout${at}?`, detail: "From Apple Health.", logLabel: `Log as ${activity}`, skipLabel: "Not a workout", more: false, opens: false };
   }
-  if (options.outing) {
-    return { question: `Log ${title} with the trips there and back${at}?`, detail: "One answer for the whole outing.", logLabel: "Log it", skipLabel: "Skip", more: false, opens: false };
-  }
+
   // A trip asks by its own title, "Getting around, 14:44–16:31?" (card A, owner feedback 25 Oct): Yes logs it,
   // Edit opens it on its own screen, Not now leaves it.
   if (item.eventType === "commute_detected") {
@@ -83,14 +81,21 @@ function reviewAnswerWords(
     return { question: `${name}${at}?`, detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
       logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
   }
-  // A place: logged as suggested here; picking or naming another place happens on its own screen.
-  const place = isLocationReviewItem(item);
+  // A place asks "Visited {guess}?" with its times, or "Where were you?" (card B): Yes confirms the place it
+  // names (an outing's trips there and back with it), Edit opens it on its own screen to pick or name another,
+  // Not now leaves it. With no guess, only Edit names it.
+  if (options.outing || isLocationReviewItem(item)) {
+    const { question, guess } = placeQuestion(item.title);
+    const edit = hasV2LocationEvidence(item);
+    return { question, detail: window, logLabel: guess ? "Yes" : null, skipLabel: "Not now", more: edit,
+      ...(edit ? { moreLabel: "Edit" } : {}), opens: false };
+  }
   return {
     question: `Log ${title}${at}?`,
     detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
     logLabel: "Log it",
-    skipLabel: place ? "Not now" : "Skip",
-    more: place && hasV2LocationEvidence(item),
+    skipLabel: "Skip",
+    more: false,
     opens: false
   };
 }

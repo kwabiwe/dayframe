@@ -267,7 +267,6 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
           <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>
           <span className="timeline-task-details">
             <span className="timeline-task-primary-line"><b>{label}</b></span>
-            <span className="timeline-location-secondary">{formatDuration(row.unloggedSeconds)} not in a block</span>
           </span>
         </div>
       </td>
