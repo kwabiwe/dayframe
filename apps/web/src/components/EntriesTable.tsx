@@ -336,6 +336,9 @@ export function EntriesTable({
   const [focusedCheck, setOpenCheck] = useState<string | null>(null);
   // A trip's editor under its question ("Edit", card A); one at a time, closed with its question.
   const [editingCheck, setEditingCheck] = useState<string | null>(null);
+  // The question open now, for a trip editor's save that finishes after the person moved on (Codex r2 on #590).
+  const openCheckNow = useRef<string | null>(null);
+  useEffect(() => { openCheckNow.current = focusedCheck; }, [focusedCheck]);
   /** Opening, closing or answering a question closes any trip editor (Codex r1 on #590). */
   const setFocusedCheck = (next: string | null | ((current: string | null) => string | null)) => {
     setOpenCheck(next);
@@ -539,11 +542,13 @@ export function EntriesTable({
               <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
                 onClose={() => applyTimelineRegroup(() => setEditingCheck(null))}
                 onResolved={() => {
+                  void onChanged?.();
+                  // Saved after the person opened another question: that one, and its editor, stay as they are.
+                  if (openCheckNow.current !== item.id) return;
                   // Saved in the editor: as an answer, focus goes to the next "?" down the List.
                   const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
                   applyTimelineRegroup(() => setFocusedCheck(null));
                   focusCheck(following?.key ?? null);
-                  void onChanged?.();
                 }}
                 reviewItemId={item.id} />
             ) : undefined}

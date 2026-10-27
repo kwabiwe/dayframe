@@ -99,6 +99,16 @@ describe("timeline corrections (location v4 step 11)", () => {
       .toEqual([["bus", at(60), at(70)], ["train", at(70), at(90)]]);
   });
 
+  it("applies a later correction over its whole span, across the parts an earlier one joined (Codex r2 on #590)", () => {
+    // Walk 60–70 + Drive 70–90; the walk set to Drive makes one Drive 60–90; that leg then set to Bus.
+    const result = applyTimelineCorrections(segments, [
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 90, 2)
+    ], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt, setByYou }) =>
+      [mode, startedAt, stoppedAt, setByYou])).toEqual([["bus", at(60), at(90), true]]);
+  });
+
   it("makes a corrected leg one leg with a neighbour of the same mode, set by you", () => {
     const result = applyTimelineCorrections(segments, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70)], NOW);
     expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs)

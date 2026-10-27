@@ -97,25 +97,29 @@ function legPart(leg: TripLeg, fromMs: number, toMs: number): TripLeg {
 }
 
 /**
- * A trip's leg with the person's mode: the leg overlapping the corrected span most, its other fields kept.
- * A leg wider than the span (consecutive legs of one mode are one leg, card A) takes the mode only over the
- * span, clamped to the leg; the rest keeps the engine's mode (Codex r1 on #590).
+ * A trip's legs with the person's mode over the corrected span: every leg the span covers takes the mode
+ * there, clamped to the leg, and keeps the engine's mode outside it (consecutive legs of one mode are one
+ * leg, card A, so a later correction can cover parts of earlier ones; Codex r1–r2 on #590). Nothing changes
+ * unless the legs cover at least half of the span, as a correction's item always must.
  */
 function legsWithMode(legs: readonly TripLeg[] | undefined, correction: TimelineCorrection): TripLeg[] | undefined {
   if (!legs?.length || !correction.target.mode) return legs ? [...legs] : undefined;
-  const leg = bestOverlap(legs, correction, Number.POSITIVE_INFINITY);
-  if (!leg) return [...legs];
-  const legFrom = ms(leg.startedAt);
-  const legTo = ms(leg.stoppedAt);
-  const from = Math.max(legFrom, ms(correction.spanStartedAt));
-  const to = Math.min(legTo, ms(correction.spanStoppedAt));
-  const { runnerUp: _runnerUp, ...rest } = legPart(leg, from, to);
-  const corrected: TripLeg = { ...rest, mode: correction.target.mode, confidence: "sure", setByYou: true };
-  return legs.flatMap((other) => other !== leg ? [other] : [
-    ...(from > legFrom ? [legPart(leg, legFrom, from)] : []),
-    corrected,
-    ...(to < legTo ? [legPart(leg, to, legTo)] : [])
-  ]);
+  if (!bestOverlap(legs, correction, Number.POSITIVE_INFINITY)) return [...legs];
+  const spanFrom = ms(correction.spanStartedAt);
+  const spanTo = ms(correction.spanStoppedAt);
+  return legs.flatMap((leg) => {
+    const legFrom = ms(leg.startedAt);
+    const legTo = ms(leg.stoppedAt);
+    const from = Math.max(legFrom, spanFrom);
+    const to = Math.min(legTo, spanTo);
+    if (!(to > from)) return [leg];
+    const { runnerUp: _runnerUp, ...rest } = legPart(leg, from, to);
+    return [
+      ...(from > legFrom ? [legPart(leg, legFrom, from)] : []),
+      { ...rest, mode: correction.target.mode!, confidence: "sure" as const, setByYou: true as const },
+      ...(to < legTo ? [legPart(leg, to, legTo)] : [])
+    ];
+  });
 }
 
 /**
