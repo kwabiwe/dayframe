@@ -73,6 +73,30 @@ describe("the evidence map's plain words (owner feedback, 27 Oct 2026)", () => {
   });
 });
 
+describe("the evidence map frames a whole trip (step 12)", () => {
+  it("fits the route's ends, the stays either side, not only the readings (Codex r2 on #599)", () => {
+    const trip = {
+      ...stay,
+      segment: { ...stay.segment, kind: "commute" },
+      map: {
+        ...stay.map, centre: null, stayRadiusMeters: null,
+        acceptedSamples: [10.02, 10.03].map((latitude, index) => ({ id: `s${index}`, point: { type: "Point", coordinates: [20, latitude] },
+          occurredAt: "2026-08-20T08:00:00.000Z", accuracyMeters: 10, kind: "location", role: null })),
+        route: { type: "LineString", coordinates: [[20, 10], [20, 10.02], [20, 10.03], [20, 10.05]] }
+      }
+    } as unknown as LocationReviewEvidenceDto;
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#000" dangerColor="#f00" evidence={trip} showDetails={false}
+        surfaceColor="#fff" textColor="#111" />);
+    });
+    const region = tree.root.findByType("MapView" as never).props.initialRegion;
+    expect(region.latitude).toBeCloseTo(10.025, 6);
+    expect(region.latitude - region.latitudeDelta / 2).toBeLessThan(10);
+    expect(region.latitude + region.latitudeDelta / 2).toBeGreaterThan(10.05);
+  });
+});
+
 describe("the evidence map shows the chosen place's pin with the stay's area", () => {
   it("leaves the camera alone for the opening choice, a re-render and new evidence (Codex r3 on #482)", () => {
     const map = mount();

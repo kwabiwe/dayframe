@@ -66,6 +66,12 @@ export function LocationEvidenceMap({
       ? [{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }]
       : [])
   ];
+  // What the opening view frames: everything above and the drawn route, whose ends are the stays either side
+  // and can lie beyond the readings (Codex r2 on #599).
+  const framed = [
+    ...coordinates,
+    ...(evidence.map.route?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? [])
+  ];
   // A stay centres on its place; anything else on the middle of what it shows, not its first reading, so a whole
   // trip fits (step 12 Simulator check).
   const centre = evidence.map.centre
@@ -73,14 +79,14 @@ export function LocationEvidenceMap({
         latitude: evidence.map.centre.coordinates[1],
         longitude: evidence.map.centre.coordinates[0]
       }
-    : coordinates.length
+    : framed.length
       ? {
-          latitude: midpoint(coordinates.map((point) => point.latitude)),
-          longitude: midpoint(coordinates.map((point) => point.longitude))
+          latitude: midpoint(framed.map((point) => point.latitude)),
+          longitude: midpoint(framed.map((point) => point.longitude))
         }
       : undefined;
-  const latitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.latitude)) * 1.6);
-  const longitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.longitude)) * 1.6);
+  const latitudeDelta = Math.max(0.004, spread(framed.map((point) => point.latitude)) * 1.6);
+  const longitudeDelta = Math.max(0.004, spread(framed.map((point) => point.longitude)) * 1.6);
   const initialRegion = centre ? { ...centre, latitudeDelta, longitudeDelta } : null;
   const stayRadiusMeters = evidence.map.centre ? evidence.map.stayRadiusMeters ?? 0 : 0;
 
