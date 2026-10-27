@@ -117,6 +117,7 @@ export function CategoryPicker({
   // null: the new activity's icon follows the typed name (else the neutral Other; Trello D item 11).
   const [createIcon, setCreateIcon] = useState<string | null>(null);
   const [isIconGridOpen, setIsIconGridOpen] = useState(false);
+  const iconTriggerRef = useRef<HTMLButtonElement>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const [colorMenuPosition, setColorMenuPosition] = useState<CSSProperties | null>(null);
@@ -676,6 +677,8 @@ export function CategoryPicker({
     : "calendar-compact-category-menu";
 
   const shownCreateIcon = createIcon ?? suggestedActivityIconKey(createName.trim());
+  const focusCreateIcon = (key: string) =>
+    document.getElementById(`${menuId}-create-icons`)?.querySelector<HTMLElement>(`[data-icon="${key}"]`)?.focus();
   const shownCreateIconOption = DAYFRAME_ACTIVITY_ICONS.find((option) => option.key === shownCreateIcon)!;
   const createForm = (
           <div
@@ -686,6 +689,12 @@ export function CategoryPicker({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
+              // Escape closes the icon choices first and keeps the draft (Codex r1 on #593).
+              if (isIconGridOpen) {
+                setIsIconGridOpen(false);
+                iconTriggerRef.current?.focus();
+                return;
+              }
               cancelCreate();
             }}
             role="dialog"
@@ -736,14 +745,12 @@ export function CategoryPicker({
                   data-testid="category-picker-create-icon"
                   disabled={isCreateBusy}
                   onClick={() => {
-                    setIsIconGridOpen((open) => !open);
-                    // The checked icon may sit below the grid's fold (Other is last).
-                    window.requestAnimationFrame(() =>
-                      document.getElementById(`${menuId}-create-icons`)
-                        ?.querySelector<HTMLElement>('[aria-pressed="true"]')
-                        ?.scrollIntoView?.({ block: "nearest" })
-                    );
+                    const opening = !isIconGridOpen;
+                    setIsIconGridOpen(opening);
+                    // Focus moves to the checked icon, which also scrolls it into view (Other is last).
+                    if (opening) window.requestAnimationFrame(() => focusCreateIcon(shownCreateIcon));
                   }}
+                  ref={iconTriggerRef}
                   type="button"
                 >
                   <DayframeIcon glyph={shownCreateIconOption.glyph} size={18} />
@@ -751,19 +758,32 @@ export function CategoryPicker({
               </div>
             </div>
             {isIconGridOpen ? (
-              <div aria-label="Activity icon" className="df-ce-icons category-picker-icon-grid" id={`${menuId}-create-icons`} role="group">
+              <div aria-label="Activity icon" className="df-ce-icons category-picker-icon-grid" id={`${menuId}-create-icons`} role="radiogroup">
                 {DAYFRAME_ACTIVITY_ICONS.map((option) => (
                   <button
+                    aria-checked={option.key === shownCreateIcon}
                     aria-label={option.label}
-                    aria-pressed={option.key === shownCreateIcon}
                     data-icon={option.key}
                     disabled={isCreateBusy}
                     key={option.key}
                     onClick={() => {
                       setCreateIcon(option.key);
                       setIsIconGridOpen(false);
-                      window.requestAnimationFrame(() => nameInputRef.current?.focus());
+                      window.requestAnimationFrame(() => iconTriggerRef.current?.focus());
                     }}
+                    onKeyDown={(event) => {
+                      // One Tab stop; arrows move the choice, as in the Library editor's icon group.
+                      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+                      if (!step || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const index = DAYFRAME_ACTIVITY_ICONS.findIndex((candidate) => candidate.key === shownCreateIcon);
+                      const next = DAYFRAME_ACTIVITY_ICONS[(index + step + DAYFRAME_ACTIVITY_ICONS.length) % DAYFRAME_ACTIVITY_ICONS.length].key;
+                      setCreateIcon(next);
+                      focusCreateIcon(next);
+                    }}
+                    role="radio"
+                    tabIndex={option.key === shownCreateIcon ? 0 : -1}
                     title={option.label}
                     type="button"
                   >

@@ -129,9 +129,24 @@ describe("CategoryPicker", () => {
     expect(iconTrigger().getAttribute("aria-label")).toBe("Choose activity icon, currently Other");
     await user.click(iconTrigger());
     expect(iconTrigger().getAttribute("aria-expanded")).toBe("true");
-    expect(within(dialog).getByRole("button", { name: "Other" }).getAttribute("aria-pressed")).toBe("true");
-    await user.click(within(dialog).getByRole("button", { name: "Boat" }));
-    expect(within(dialog).queryByRole("group", { name: "Activity icon" })).toBeNull();
+    // A radio group with one Tab stop: focus lands on the checked icon; arrows move the choice
+    // (wrapping), and Escape closes the icons first, keeping the draft (Codex r1 on #593).
+    const other = within(dialog).getByRole("radio", { name: "Other" });
+    await waitFor(() => expect(document.activeElement).toBe(other));
+    expect(other.getAttribute("aria-checked")).toBe("true");
+    expect(within(dialog).getAllByRole("radio").filter((radio) => radio.tabIndex === 0)).toEqual([other]);
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(within(dialog).getByRole("radio", { name: "Work" }));
+    expect(within(dialog).getByRole("radio", { name: "Work" }).getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(other);
+    await user.keyboard("{Escape}");
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
+    expect(document.activeElement).toBe(iconTrigger());
+    expect((input as HTMLInputElement).value).toBe("Zorblax");
+    await user.click(iconTrigger());
+    await user.click(within(dialog).getByRole("radio", { name: "Boat" }));
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
     expect(iconTrigger().getAttribute("aria-label")).toBe("Choose activity icon, currently Boat");
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
     await waitFor(() => expect(create).toHaveBeenCalledWith("Zorblax", undefined, "boat"));

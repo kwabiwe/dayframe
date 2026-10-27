@@ -5157,11 +5157,6 @@ dialog.ui-dialog.df-range-custom {
   overscroll-behavior: contain;
 }
 
-.df-ce-icons button[aria-pressed="true"] {
-  background: var(--text-primary);
-  color: var(--surface);
-}
-
 .category-picker-color-swatch {
   display: block;
   width: 20px;
