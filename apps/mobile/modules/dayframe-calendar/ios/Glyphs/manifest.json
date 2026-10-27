@@ -479,6 +479,16 @@
       "activity-route@3x.png": "73e1401e4feef417a9beeeab469dd7a61f190c1541d942f92f7af5e2862099f5"
     }
   },
+  "activity-shapes": {
+    "glyph": "shapes",
+    "points": 24,
+    "svgSha256": "b88718b01522dc39a449e5b6c5b1431bc972228c5db2dce1765fa944e60106e7",
+    "images": {
+      "activity-shapes.png": "ffc90836aed8b3516f57b24a8e94ec21ed2134ea4f4ae04d7004b38d1ccc4bfd",
+      "activity-shapes@2x.png": "1052fcd723833fc9b6e50ef6977201da7dae628cdbe699f48cb36d7ed125ffed",
+      "activity-shapes@3x.png": "b63606abde1bc83f95cb8ec92eb1bb9967ab6e8d9d750b159935f22454f3768f"
+    }
+  },
   "activity-ship": {
     "glyph": "ship",
     "points": 24,

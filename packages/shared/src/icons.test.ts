@@ -7,21 +7,33 @@ import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_GLYPHS,
   activityIconKeyForName,
+  activityGroupFor,
   isActivityIconKey,
-  resolveActivityIcon
+  resolveActivityIcon,
+  suggestedActivityIconKey
 } from "./index";
 
 describe("Dayframe icon set", () => {
-  it("offers the approved 54 activity icons in six groups, each drawn from the shared geometry", () => {
-    expect(DAYFRAME_ACTIVITY_ICONS).toHaveLength(54);
-    expect(new Set(DAYFRAME_ACTIVITY_ICONS.map((icon) => icon.key)).size).toBe(54);
+  it("offers the approved 54 activity icons in six groups plus the neutral Other, each drawn from the shared geometry", () => {
+    expect(DAYFRAME_ACTIVITY_ICONS).toHaveLength(55);
+    expect(new Set(DAYFRAME_ACTIVITY_ICONS.map((icon) => icon.key)).size).toBe(55);
     expect(DAYFRAME_ACTIVITY_ICON_GROUPS.map((group) => group.label)).toEqual([
       "Work and study", "Body and mind", "Home and life", "People", "Getting around", "Free time"
     ]);
     for (const icon of DAYFRAME_ACTIVITY_ICONS) {
       expect(DAYFRAME_GLYPHS[icon.glyph], icon.key).toBeDefined();
+      if (icon.key === "other") continue;
       expect(DAYFRAME_ACTIVITY_ICON_GROUPS.some((group) => group.id === icon.group), icon.key).toBe(true);
     }
+  });
+
+  it("suggests the name's icon for a new activity, else the neutral Other, which stays with your own (Trello D item 11)", () => {
+    expect(suggestedActivityIconKey("Morning gym")).toBe("gym");
+    expect(suggestedActivityIconKey("Zorblax")).toBe("other");
+    expect(resolveActivityIcon({ icon: "other", name: "Zorblax" })).toEqual({ glyph: "shapes", key: "other" });
+    expect(activityGroupFor({ icon: "other", name: "Zorblax" })).toBeNull();
+    // A stored Other wins over the name, as any picked icon does.
+    expect(activityGroupFor({ icon: "other", name: "Gym" })).toBeNull();
   });
 
   it("draws Swimming with the Dayframe swimmer and the starters with their approved glyphs", () => {

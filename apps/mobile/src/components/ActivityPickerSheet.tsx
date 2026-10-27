@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { DAYFRAME_APP_ICONS, blockColorsFor } from "@dayframe/shared";
+import Reanimated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
+import { DAYFRAME_ACTIVITY_ICONS, DAYFRAME_APP_ICONS, blockColorsFor, suggestedActivityIconKey } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "./SwipeDismissSheet";
 import { ActivityIcon, DayframeIcon } from "./icons/DayframeIcon";
 import { activityPickerSections, canCreateActivity, type ChoosableActivity } from "../lib/activityChoice";
@@ -14,6 +15,9 @@ const ROW_BLOCK = 34;
  * "All activities" (Blocks prototype openActivityPicker): a tall sheet over the entry sheet with
  * a focused search field and Cancel. Without a query it lists Recent, then the groups A–Z; with
  * one it lists matches, earliest first, and offers "Create “q”" when no activity has that name.
+ * The Create row shows the icon the new activity gets (the name's suggestion, else the neutral
+ * Other) and creates with one tap; tapping the icon opens a row of the shared icons to change it
+ * (Trello D item 11).
  * A pick (or a created activity) is handed back and the sheet leaves. `SwipeDismissSheet` owns
  * the presentation, dismissal and Reduce Motion path. The search field takes focus once the sheet
  * has landed, so the keyboard never covers its rise, and gives it up as soon as the sheet starts
@@ -33,8 +37,12 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
 }: {
   activities: readonly T[];
   onClose: () => void;
-  /** Creates the activity; resolves to its id, or a message to show when it could not be created. */
-  onCreate?: (name: string) => Promise<{ id: string } | { error: string }>;
+  /**
+   * Creates the activity with the Create row's icon key; resolves to its id, or a message to show
+   * when it could not be created. Callers that pass it through typed as `(name) => …` still hand
+   * the icon on at run time.
+   */
+  onCreate?: (name: string, icon?: string) => Promise<{ id: string } | { error: string }>;
   onPick: (activityId: string) => void;
   recentIds: readonly string[];
   reduceMotion: boolean;
@@ -48,10 +56,14 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // null: the icon follows the typed name; a pick holds while the name changes.
+  const [pickedIcon, setPickedIcon] = useState<string | null>(null);
+  const [iconRowOpen, setIconRowOpen] = useState(false);
   const done = useRef(false);
   const sections = useMemo(() => activityPickerSections(activities, query, recentIds), [activities, query, recentIds]);
   const offerCreate = Boolean(onCreate) && canCreateActivity(activities, query);
   const trimmed = query.trim();
+  const createIcon = pickedIcon ?? suggestedActivityIconKey(trimmed);
   const noMatches = Boolean(trimmed) && sections.every((section) => section.rows.length === 0);
 
   function finish(activityId: string) {
@@ -65,7 +77,7 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
     if (!onCreate || creating || !trimmed || done.current) return;
     setCreating(true);
     setCreateError(null);
-    const result = await onCreate(trimmed).catch(() => ({ error: `Couldn't create "${trimmed}". Check your connection and try again.` }));
+    const result = await onCreate(trimmed, createIcon).catch(() => ({ error: `Couldn't create "${trimmed}". Check your connection and try again.` }));
     // Cancelled (or picked) while creating: never change the entry after the sheet was dismissed.
     if (done.current) return;
     setCreating(false);
@@ -180,25 +192,78 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
               </Text>
             ) : null}
             {offerCreate ? (
-              <Pressable
-                accessibilityLabel={`Create ${trimmed}`}
-                accessibilityRole="button"
-                disabled={creating}
-                onPress={() => void create()}
-                style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
-                testID="activity-picker-create"
-              >
-                <View style={[styles.rowBlock, { backgroundColor: theme.surfaceMuted }]}>
+              <View style={styles.createRow}>
+                <Pressable
+                  accessibilityHint="Shows the icons to choose from"
+                  accessibilityLabel={`Icon: ${iconLabel(createIcon)}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: iconRowOpen }}
+                  disabled={creating}
+                  hitSlop={5}
+                  onPress={() => setIconRowOpen((open) => !open)}
+                  style={({ pressed }) => [styles.rowBlock, { backgroundColor: theme.surfaceMuted }, pressed ? styles.pressed : null]}
+                  testID="activity-picker-create-icon"
+                >
                   {creating ? (
                     <ActivityIndicator color={theme.textSecondary} size="small" />
                   ) : (
-                    <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+                    <ActivityIcon color={theme.textPrimary} icon={createIcon} size={18} />
                   )}
-                </View>
-                <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.rowName, { color: theme.textPrimary }]}>
-                  Create “{trimmed}”
-                </Text>
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`Create ${trimmed}`}
+                  accessibilityRole="button"
+                  disabled={creating}
+                  onPress={() => void create()}
+                  style={({ pressed }) => [styles.createName, pressed ? styles.pressed : null]}
+                  testID="activity-picker-create"
+                >
+                  <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.rowName, { color: theme.textPrimary }]}>
+                    Create “{trimmed}”
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {offerCreate && iconRowOpen && !creating ? (
+              <Reanimated.View
+                entering={reduceMotion ? undefined : FadeIn.duration(160).reduceMotion(ReduceMotion.Never)}
+                exiting={reduceMotion ? undefined : FadeOut.duration(120).reduceMotion(ReduceMotion.Never)}
+              >
+                <ScrollView
+                  accessibilityLabel="Icon"
+                  accessibilityRole="radiogroup"
+                  contentContainerStyle={styles.iconRow}
+                  horizontal
+                  keyboardShouldPersistTaps="handled"
+                  showsHorizontalScrollIndicator={false}
+                  testID="activity-picker-create-icons"
+                >
+                  {DAYFRAME_ACTIVITY_ICONS.map((option) => {
+                    const selected = option.key === createIcon;
+                    return (
+                      <Pressable
+                        accessibilityLabel={option.label}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: selected }}
+                        key={option.key}
+                        onPress={() => {
+                          setPickedIcon(option.key);
+                          setIconRowOpen(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.iconCell,
+                          { backgroundColor: theme.surfaceInset },
+                          selected ? { borderColor: theme.textPrimary, borderWidth: 2 } : null,
+                          pressed ? styles.pressed : null,
+                        ]}
+                        testID={`activity-picker-create-icon-${option.key}`}
+                      >
+                        <ActivityIcon color={theme.textPrimary} icon={option.key} size={20} />
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </Reanimated.View>
             ) : null}
             {createError ? (
               <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={[styles.empty, { color: theme.dangerText }]}>
@@ -210,6 +275,10 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
       </View>
     </Modal>
   );
+}
+
+function iconLabel(key: string) {
+  return DAYFRAME_ACTIVITY_ICONS.find((option) => option.key === key)?.label ?? "Other";
 }
 
 function PickerRow({
@@ -259,6 +328,10 @@ const styles = StyleSheet.create({
   row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 4, paddingVertical: 6 },
   rowBlock: { alignItems: "center", borderRadius: 10, height: ROW_BLOCK, justifyContent: "center", width: ROW_BLOCK },
   rowName: { flex: 1, fontSize: 15, fontWeight: "600" },
+  createRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 4, paddingVertical: 6 },
+  createName: { alignSelf: "stretch", flex: 1, justifyContent: "center", minHeight: 44 },
+  iconRow: { gap: 8, paddingHorizontal: 4, paddingVertical: 6 },
+  iconCell: { alignItems: "center", borderRadius: 12, height: 44, justifyContent: "center", width: 44 },
   empty: { fontSize: 14, lineHeight: 20, paddingHorizontal: 4, paddingVertical: 10 },
   pressed: { opacity: 0.7 },
 });

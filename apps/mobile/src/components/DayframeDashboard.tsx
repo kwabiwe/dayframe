@@ -2398,11 +2398,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
-  // The entry sheet's All-activities picker creates an activity (the server picks its colour) and
+  // The entry sheet's All-activities picker creates an activity with the icon its Create row shows
+  // (the server picks its colour) and
   // adds it to the cached bootstrap so the sheet can select it at once.
-  async function createSheetActivity(name: string): Promise<{ id: string } | { error: string }> {
+  async function createSheetActivity(name: string, icon?: string): Promise<{ id: string } | { error: string }> {
     try {
-      const response = await createCategory(name);
+      const response = await createCategory(name, icon ? { icon } : {});
       updateDashboardData((current) => current
         ? { ...current, categories: [...current.categories.filter((category) => category.id !== response.category.id), response.category] }
         : current);
