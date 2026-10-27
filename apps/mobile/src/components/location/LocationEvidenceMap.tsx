@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker, Polyline, type MapPressEvent, type Region } from "react-native-maps";
-import type { LocationReviewEvidenceDto } from "@dayframe/shared";
+import { evidencePlainSummary, formatClockTime, type ClockFormat, type LocationReviewEvidenceDto } from "@dayframe/shared";
 
 type Props = {
   /** The map follows Dayframe's theme, so neutral overlays read on it (not the system's). */
   appearance?: "light" | "dark";
-  evidence: LocationReviewEvidenceDto;
+  /** A Review item's or a timeline item's evidence (step 12): only what the map draws and says. */
+  evidence: Pick<LocationReviewEvidenceDto, "map" | "segment" | "stops" | "evidenceExpired" | "rawEvidenceAvailable">;
+  /** The viewer's clock, for the map's words ("25 readings · No readings 18:06–19:21"). */
+  clockFormat: ClockFormat;
   accentColor: string;
   surfaceColor: string;
   textColor: string;
@@ -25,6 +28,7 @@ type Props = {
 
 export function LocationEvidenceMap({
   appearance,
+  clockFormat,
   evidence,
   accentColor,
   surfaceColor,
@@ -43,6 +47,8 @@ export function LocationEvidenceMap({
   // The opening token is already shown by the opening view; a replayed effect sees it as handled.
   const handledRevealRef = useRef(revealChoiceToken);
   const samples = evidence.map.acceptedSamples;
+  // Plain words, not the server's diagnostic summary (owner feedback, 27 Oct 2026).
+  const summary = evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   // Time away has no route line, so its readings are the evidence to inspect.
   const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
@@ -60,14 +66,27 @@ export function LocationEvidenceMap({
       ? [{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }]
       : [])
   ];
+  // What the opening view frames: everything above and the drawn route, whose ends are the stays either side
+  // and can lie beyond the readings (Codex r2 on #599).
+  const framed = [
+    ...coordinates,
+    ...(evidence.map.route?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? [])
+  ];
+  // A stay centres on its place; anything else on the middle of what it shows, not its first reading, so a whole
+  // trip fits (step 12 Simulator check).
   const centre = evidence.map.centre
     ? {
         latitude: evidence.map.centre.coordinates[1],
         longitude: evidence.map.centre.coordinates[0]
       }
-    : coordinates[0];
-  const latitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.latitude)) * 1.6);
-  const longitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.longitude)) * 1.6);
+    : framed.length
+      ? {
+          latitude: midpoint(framed.map((point) => point.latitude)),
+          longitude: midpoint(framed.map((point) => point.longitude))
+        }
+      : undefined;
+  const latitudeDelta = Math.max(0.004, spread(framed.map((point) => point.latitude)) * 1.6);
+  const longitudeDelta = Math.max(0.004, spread(framed.map((point) => point.longitude)) * 1.6);
   const initialRegion = centre ? { ...centre, latitudeDelta, longitudeDelta } : null;
   const stayRadiusMeters = evidence.map.centre ? evidence.map.stayRadiusMeters ?? 0 : 0;
 
@@ -95,9 +114,7 @@ export function LocationEvidenceMap({
   if (!centre || !initialRegion) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
-        {showDetails ? (
-          <Text style={[styles.fallbackText, { color: textColor }]}>{evidence.textualSummary}</Text>
-        ) : null}
+        <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
         <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
       </View>
     );
@@ -117,13 +134,14 @@ export function LocationEvidenceMap({
   return (
     <View>
       <MapView
-        accessibilityLabel={showDetails
-          ? `Location evidence map. ${evidence.textualSummary}`
+        // The plain words are always heard, whether or not the details show (Codex r1 on #599).
+        accessibilityLabel={`${showDetails
+          ? "Location evidence map."
           : evidence.segment.timeAway
             ? "Map of readings while you were away."
             : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
-            : "Map showing the detected visit location."}
+            : "Map showing the detected visit location."} ${summary}`}
         initialRegion={initialRegion}
         ref={mapRef}
         userInterfaceStyle={appearance}
@@ -248,6 +266,9 @@ export function LocationEvidenceMap({
       {usesApproximateFallback ? (
         <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
       ) : null}
+      {/* The map's plain words, always (owner feedback, 27 Oct 2026; Codex r1 on #599); the map already says them. */}
+      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.routeCaption, { color: textColor }]}
+        testID="location-evidence-summary">{summary}</Text>
       {showDetails ? (
         <>
           <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
@@ -255,7 +276,6 @@ export function LocationEvidenceMap({
             <Text style={[styles.legendText, { color: textColor }]}>Outlined area · saved place</Text>
             <Text style={[styles.legendText, { color: textColor }]}>Dashed line · evidence gap</Text>
           </View>
-          <Text style={[styles.summary, { color: textColor }]}>{evidence.textualSummary}</Text>
           {evidence.map.rejectedSamples.length ? (
             <Text style={[styles.legendText, { color: textColor }]}>Excluded noisy or invalid samples: {evidence.map.rejectedSamples.length}</Text>
           ) : null}
@@ -286,6 +306,10 @@ function regionContains(region: Region, point: { latitude: number; longitude: nu
   return circleExtent(point, radiusMeters).every((corner) =>
     Math.abs(corner.latitude - region.latitude) <= region.latitudeDelta * 0.45
     && Math.abs(corner.longitude - region.longitude) <= region.longitudeDelta * 0.45);
+}
+
+function midpoint(values: number[]) {
+  return (Math.min(...values) + Math.max(...values)) / 2;
 }
 
 function spread(values: number[]) {

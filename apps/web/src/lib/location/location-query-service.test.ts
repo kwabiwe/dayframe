@@ -4,7 +4,7 @@ const query = vi.hoisted(() => vi.fn());
 
 vi.mock("../db", () => ({ query }));
 
-const { getLocationReviewEvidence } = await import("./location-query-service");
+const { getLocationReviewEvidence, getTimelineItemEvidence } = await import("./location-query-service");
 const { locationEvidenceCaption, locationEvidenceMapMode } = await import("./location-evidence-presentation");
 
 const session = {
@@ -13,6 +13,30 @@ const session = {
   authMode: "provider" as const,
   scopes: ["app:read"]
 };
+
+describe("a timeline item's evidence (location v4 step 12)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("finds the segment by the timeline's item id, never a superseded one, and builds the same map", async () => {
+    query.mockImplementationOnce(() => Promise.resolve({ rows: [{ ...reviewRow(), reviewItemId: null, eventId: null, title: "Unknown place" }] }));
+    query.mockImplementation(() => Promise.resolve({ rows: [] }));
+    const evidence = await getTimelineItemEvidence("seg-client-1", session, { kind: "place", startedAt: "2026-08-20T08:00:00.000Z" });
+    expect(evidence).toMatchObject({ itemId: "seg-client-1", reviewItemId: null, eventId: null, segment: { kind: "stay" } });
+    const [sql, params] = query.mock.calls[0];
+    expect(String(sql)).toContain("client_segment_id = wanted.item");
+    expect(String(sql)).toContain("status <> 'superseded'");
+    expect(params).toEqual([session.workspaceId, session.userId, "seg-client-1", "place", "2026-08-20T08:00:00.000Z"]);
+    // A client segment id is unique per device only: the item's kind and start pick it (Codex r1 on #599).
+    expect(String(sql)).toContain("st.started_at = $5::timestamptz");
+  });
+
+  it("says when the item is no longer in the day", async () => {
+    query.mockResolvedValue({ rows: [] });
+    await expect(getTimelineItemEvidence("gone", session, { kind: "trip", startedAt: "2026-08-20T08:00:00.000Z" })).rejects.toMatchObject({ status: 404 });
+  });
+});
 
 describe("Location Review evidence query", () => {
   beforeEach(() => {
