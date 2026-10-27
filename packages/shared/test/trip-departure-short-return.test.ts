@@ -257,6 +257,13 @@ describe("a trip ends on arrival through a quiet phone at home (card E part 2, 2
     expect(homes.every((stay) => stay.stoppedAt == null ? minutes(stay.startedAt)! > 44 + 60 : minutes(stay.stoppedAt)! < 44 + 100)).toBe(true);
   });
 
+  it("never carries Home across readings elsewhere, even ones too broad to count as outside (Codex r2 on #591)", () => {
+    const { input, arrivedAt } = quietHome();
+    input.evidence = [...input.evidence, fix("away-broad-0", 44 + 60, { north: 1_500 }, 66), fix("away-broad-1", 44 + 90, { north: 2_500 }, 66)];
+    const home = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID).at(-1)!;
+    expect(minutes(home.startedAt)).toBeGreaterThan(arrivedAt + 60);
+  });
+
   it("keeps a stay of five minutes or more before a silence its own, as before (Codex r1 on #591)", () => {
     // Home from the entry for ten minutes, three hours of silence, then inside again: two stays, so a decided
     // first one is never folded into a new open one.

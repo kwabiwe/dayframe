@@ -487,6 +487,35 @@ function departedDuring(stay: WorkingStay, fromMs: number, toMs: number) {
   return departures.some((departedMs) => departedMs >= fromMs && departedMs < toMs);
 }
 
+/** The pass's accepted positional readings (and Visits) in time order, built once per pass. */
+const positionalByPass = new WeakMap<readonly ClassifiedEvidence[], Array<{ atMs: number; item: ClassifiedEvidence }>>();
+
+/**
+ * Whether anything placed the device somewhere other than a saved place between two times: an accepted
+ * reading or Visit, whatever its accuracy, not matched to the place (Codex r2 on #591). A reading too broad
+ * to count as outside still says the device was not seen there.
+ */
+function seenElsewhere(accepted: readonly ClassifiedEvidence[], placeId: string, fromMs: number, toMs: number) {
+  let timeline = positionalByPass.get(accepted);
+  if (!timeline) {
+    timeline = accepted.flatMap((item) => pointFor(item.evidence) && item.evidence.isSimulated !== true
+      ? [{ atMs: Date.parse(item.evidence.occurredAt), item }] : []).sort((a, b) => a.atMs - b.atMs);
+    positionalByPass.set(accepted, timeline);
+  }
+  let low = 0;
+  let high = timeline.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (timeline[middle].atMs <= fromMs) low = middle + 1;
+    else high = middle;
+  }
+  for (let index = low; index < timeline.length && timeline[index].atMs < toMs; index += 1) {
+    const { item } = timeline[index];
+    if (item.evidence.savedPlaceId !== placeId && item.match?.placeId !== placeId) return true;
+  }
+  return false;
+}
+
 /** Each saved place's genuine geofence transitions in time order, built once per pass. */
 const genuineTransitionsByPass = new WeakMap<readonly ClassifiedEvidence[], Map<string, ClassifiedEvidence[]>>();
 
@@ -1784,15 +1813,17 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       // An arrival too short to be a stay yet (under `savedPlaceMinimumDwellMs`) after iOS's own entry into a
       // saved place, with no exit or outside reading since, is not ended by a silence when the device is next
       // seen strongly inside the same place: it never left (card E, 25 Oct: home at 11:13, the phone quiet
-      // until 14:26, the trip ran to 14:26). Being too short, it was never a segment, so no decided history
-      // can lie inside it (Codex r1 on #591). Judged last, only when no other rule carries the silence.
+      // until 14:26, the trip ran to 14:26). Nothing in the silence may place it elsewhere, a reading too broad
+      // to count as outside included, so no other segment (a physical stop, a trip) can lie inside it (Codex
+      // r1–r2 on #591). Judged last, only when no other rule carries the silence.
       const enteredPresence = observationGapMs > input.config.maxContinuityGapMs &&
         !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence &&
         active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
         !hasMeaningfulKnownPlaceWindow(active.startedAt, observedAt, input.config.savedPlaceMinimumDwellMs) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs &&
         strongSavedPoint(item, active.placeId, input) && !edgeOnly(active, input) &&
-        !departedDuring(active, Date.parse(observedAt), atMs) && enteredSavedPlace(active, accepted);
+        !departedDuring(active, Date.parse(observedAt), atMs) && enteredSavedPlace(active, accepted) &&
+        !seenElsewhere(accepted, active.placeId!, Date.parse(observedAt), atMs);
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap &&
         !openVisitPresence && !enteredPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
