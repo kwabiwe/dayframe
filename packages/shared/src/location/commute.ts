@@ -947,17 +947,25 @@ export function deriveCommutes(
     // it began. Dropping the time before it left an outing with no segment and a one-minute drive
     // after it. A longer time back is time at the place, and a loop out and back with no stop (a
     // walk, then the drive) is its own outing: the next trip starts when it left again.
-    // The excursion just before the latest departure, the one whose pass home that departure ends (an
-    // earlier one that does not qualify never hides it; Codex r4 on #589).
-    const latestMs = latestFromSupport ? Date.parse(latestFromSupport.evidence.occurredAt) : null;
-    const away = latestMs == null ? null : clearlyAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, originalStartedAtMs, config)
-      .filter((excursion) => excursion.awayMs < latestMs).at(-1) ?? null;
-    const backMs = away != null ? firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, away.awayMs, config) : null;
-    // Its stop away and its pass back through the origin were never stays, so the trip carries no
-    // `stops`: it stands at low confidence, offered in Review as a trip with a stop is (PRD D19), never
-    // logged automatically (Codex r1 on #589).
-    const firstLeftMs = away != null && backMs != null && latestMs != null && latestMs - backMs < config.savedPlaceMinimumDwellMs &&
-      stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, away.leftMs, backMs, config) ? away.awayMs : null;
+    // Back from the latest departure, excursion by excursion: each one whose pass home that departure
+    // ended within `savedPlaceMinimumDwellMs`, with a stop of its own, joins the trip; a long time back or
+    // an excursion without a stop ends the walk (Codex r4–r5 on #589). Its stops away and its passes back
+    // through the origin were never stays, so the trip carries no `stops`: it stands at low confidence,
+    // offered in Review as a trip with a stop is (PRD D19), never logged automatically (Codex r1 on #589).
+    let firstLeftMs: number | null = null;
+    if (latestFromSupport) {
+      let departureMs = Date.parse(latestFromSupport.evidence.occurredAt);
+      const excursions = clearlyAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, originalStartedAtMs, config);
+      for (let index = excursions.length - 1; index >= 0; index -= 1) {
+        const away = excursions[index];
+        if (away.awayMs >= departureMs) continue;
+        const backMs = firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, away.awayMs, config);
+        if (backMs == null || backMs > departureMs || departureMs - backMs >= config.savedPlaceMinimumDwellMs ||
+          !stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, away.leftMs, backMs, config)) break;
+        firstLeftMs = away.awayMs;
+        departureMs = away.leftMs;
+      }
+    }
     const throughOrigin = firstLeftMs != null;
     if (firstLeftMs != null) {
       latestFromSupport = latestDepartureSupport(from, fromEvidence,
