@@ -43,7 +43,7 @@ describe("time away on the mobile evidence map", () => {
     expect(tree.root.findAllByType("Circle" as never)).toHaveLength(2);
     expect(tree.root.findAllByType("Polyline" as never)).toHaveLength(0);
     expect(tree.root.findAllByType("Marker" as never)).toHaveLength(0);
-    expect(tree.root.findByType("MapView" as never).props.accessibilityLabel).toBe("Map of readings while you were away.");
+    expect(tree.root.findByType("MapView" as never).props.accessibilityLabel).toMatch(/^Map of readings while you were away\. \d+ reading/);
   });
 });
 

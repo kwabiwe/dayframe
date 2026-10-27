@@ -66,12 +66,19 @@ export function LocationEvidenceMap({
       ? [{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }]
       : [])
   ];
+  // A stay centres on its place; anything else on the middle of what it shows, not its first reading, so a whole
+  // trip fits (step 12 Simulator check).
   const centre = evidence.map.centre
     ? {
         latitude: evidence.map.centre.coordinates[1],
         longitude: evidence.map.centre.coordinates[0]
       }
-    : coordinates[0];
+    : coordinates.length
+      ? {
+          latitude: midpoint(coordinates.map((point) => point.latitude)),
+          longitude: midpoint(coordinates.map((point) => point.longitude))
+        }
+      : undefined;
   const latitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.latitude)) * 1.6);
   const longitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.longitude)) * 1.6);
   const initialRegion = centre ? { ...centre, latitudeDelta, longitudeDelta } : null;
@@ -101,9 +108,7 @@ export function LocationEvidenceMap({
   if (!centre || !initialRegion) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
-        {showDetails ? (
-          <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
-        ) : null}
+        <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
         <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
       </View>
     );
@@ -123,13 +128,14 @@ export function LocationEvidenceMap({
   return (
     <View>
       <MapView
-        accessibilityLabel={showDetails
-          ? `Location evidence map. ${summary}`
+        // The plain words are always heard, whether or not the details show (Codex r1 on #599).
+        accessibilityLabel={`${showDetails
+          ? "Location evidence map."
           : evidence.segment.timeAway
             ? "Map of readings while you were away."
             : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
-            : "Map showing the detected visit location."}
+            : "Map showing the detected visit location."} ${summary}`}
         initialRegion={initialRegion}
         ref={mapRef}
         userInterfaceStyle={appearance}
@@ -254,6 +260,9 @@ export function LocationEvidenceMap({
       {usesApproximateFallback ? (
         <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
       ) : null}
+      {/* The map's plain words, always (owner feedback, 27 Oct 2026; Codex r1 on #599); the map already says them. */}
+      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.routeCaption, { color: textColor }]}
+        testID="location-evidence-summary">{summary}</Text>
       {showDetails ? (
         <>
           <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
@@ -261,7 +270,6 @@ export function LocationEvidenceMap({
             <Text style={[styles.legendText, { color: textColor }]}>Outlined area · saved place</Text>
             <Text style={[styles.legendText, { color: textColor }]}>Dashed line · evidence gap</Text>
           </View>
-          <Text style={[styles.summary, { color: textColor }]}>{summary}</Text>
           {evidence.map.rejectedSamples.length ? (
             <Text style={[styles.legendText, { color: textColor }]}>Excluded noisy or invalid samples: {evidence.map.rejectedSamples.length}</Text>
           ) : null}
@@ -292,6 +300,10 @@ function regionContains(region: Region, point: { latitude: number; longitude: nu
   return circleExtent(point, radiusMeters).every((corner) =>
     Math.abs(corner.latitude - region.latitude) <= region.latitudeDelta * 0.45
     && Math.abs(corner.longitude - region.longitude) <= region.longitudeDelta * 0.45);
+}
+
+function midpoint(values: number[]) {
+  return (Math.min(...values) + Math.max(...values)) / 2;
 }
 
 function spread(values: number[]) {

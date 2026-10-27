@@ -48,6 +48,7 @@ function mount(reduceMotion = false) {
     });
   });
   return {
+    tree: () => tree!,
     animateToRegion,
     fitToCoordinates,
     moves: () => fitToCoordinates.mock.calls.length + animateToRegion.mock.calls.length,
@@ -63,6 +64,14 @@ function mount(reduceMotion = false) {
 const far = { latitude: 10.0032, longitude: 20 };
 const near = { latitude: 10.0002, longitude: 20.0002 };
 const opening = { ...centre, latitudeDelta: 0.004, longitudeDelta: 0.004 };
+
+describe("the evidence map's plain words (owner feedback, 27 Oct 2026)", () => {
+  it("shows and says them with its details off, as the review screen and the sheets draw it (Codex r1 on #599)", () => {
+    const map = mount();
+    expect(map.tree().root.findByProps({ testID: "location-evidence-summary" }).props.children).toBe("1 reading");
+    expect(map.tree().root.findByType("MapView" as never).props.accessibilityLabel).toBe("Map showing the detected visit location. 1 reading");
+  });
+});
 
 describe("the evidence map shows the chosen place's pin with the stay's area", () => {
   it("leaves the camera alone for the opening choice, a re-render and new evidence (Codex r3 on #482)", () => {

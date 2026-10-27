@@ -209,7 +209,15 @@ async function buildLocationReviewEvidence(
  * timeline names (its client segment id; never a superseded segment), with no Review item needed. Its open
  * Review item and event come along when it has them.
  */
-export async function getTimelineItemEvidence(itemId: string, session: RequestSession): Promise<TimelineItemEvidenceDto> {
+export async function getTimelineItemEvidence(
+  itemId: string,
+  session: RequestSession,
+  /**
+   * Which item exactly: a client segment id is unique per device only, so the timeline's kind and start pick
+   * the one the person is looking at (Codex r1 on #599).
+   */
+  match: { kind: "place" | "trip"; startedAt: string }
+): Promise<TimelineItemEvidenceDto> {
   const startedAt = Date.now();
   const timings: LocationEvidenceTimings = {};
   try {
@@ -217,15 +225,20 @@ export async function getTimelineItemEvidence(itemId: string, session: RequestSe
     const found = await query<ReviewSegmentRow>(
       `select open_ri.id as "reviewItemId",
               coalesce(st.created_from_event_id, cs.created_from_event_id) as "eventId",
-              coalesce(${placeDisplayNameSql("pl")}, case when st.id is not null then 'Unknown place' else 'Trip' end) as title,
+              case when st.id is not null
+                then coalesce(case when st.place_id is not null then ${placeDisplayNameSql("pl")} end, learned.name, 'Unknown place')
+                else 'Trip' end as title,
               null::text as notes,
               ${SEGMENT_COLUMNS}
        from (select $3::text as item) wanted
        left join stay_segments st
-         on st.workspace_id = $1 and st.user_id = $2 and st.client_segment_id = wanted.item and st.status <> 'superseded'
+         on $4::text = 'place' and st.workspace_id = $1 and st.user_id = $2 and st.client_segment_id = wanted.item
+        and st.status <> 'superseded' and st.started_at = $5::timestamptz
        left join commute_segments cs
-         on st.id is null and cs.workspace_id = $1 and cs.user_id = $2 and cs.client_segment_id = wanted.item and cs.status <> 'superseded'
+         on $4::text = 'trip' and cs.workspace_id = $1 and cs.user_id = $2 and cs.client_segment_id = wanted.item
+        and cs.status <> 'superseded' and cs.started_at = $5::timestamptz
        ${SEGMENT_JOINS}
+       left join learned_places learned on learned.id = st.learned_place_id and learned.workspace_id = $1
        left join lateral (
          select ri.id from review_items ri
           where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = coalesce(st.id, cs.id) and ri.status = 'open'
@@ -235,7 +248,7 @@ export async function getTimelineItemEvidence(itemId: string, session: RequestSe
        where st.id is not null or cs.id is not null
        order by coalesce(st.updated_at, cs.updated_at) desc
        limit 1`,
-      [session.workspaceId, session.userId, itemId]
+      [session.workspaceId, session.userId, itemId, match.kind, match.startedAt]
     );
     timings.reviewLookupMs = Date.now() - lookupStartedAt;
     const segment = found.rows[0];

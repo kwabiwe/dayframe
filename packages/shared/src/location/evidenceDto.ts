@@ -139,7 +139,7 @@ export function evidencePlainSummary(
   const parts = [count === 0 ? "No readings" : `${count} reading${count === 1 ? "" : "s"}`];
   for (const stop of evidence.stops ?? []) {
     const minutes = Math.max(1, Math.round(stop.durationSeconds / 60));
-    parts.push(`Stopped ${minutes} min ${time(stop.startedAt)}–${time(stop.stoppedAt)}`);
+    parts.push(`Stopped ${stop.approximate ? "about " : ""}${minutes} min ${time(stop.startedAt)}–${time(stop.stoppedAt)}`);
   }
   for (const gap of evidence.map.gaps) parts.push(`No readings ${time(gap.startedAt)}–${time(gap.stoppedAt)}`);
   return parts.join(" · ");

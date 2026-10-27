@@ -21,6 +21,9 @@ describe("the map's words (location v4 step 12)", () => {
       stops: [{ startedAt: "2026-10-27T09:05:00.000Z", stoppedAt: "2026-10-27T09:21:00.000Z", durationSeconds: 960, approximate: false }] } as never;
     expect(evidencePlainSummary(stop, time)).toBe("1 reading · Stopped 16 min 09:05–09:21");
     expect(evidencePlainSummary({ ...(base as object), segment: { evidenceCount: 0 }, map: { gaps: [] } } as never, time)).toBe("No readings");
+    // An approximate stop says so (Codex r1 on #599).
+    const roughly = { ...(stop as object), stops: [{ startedAt: "2026-10-27T09:05:00.000Z", stoppedAt: "2026-10-27T09:21:00.000Z", durationSeconds: 960, approximate: true }] } as never;
+    expect(evidencePlainSummary(roughly, time)).toBe("1 reading · Stopped about 16 min 09:05–09:21");
     expect(evidencePlainSummary({ ...(base as object), evidenceExpired: true } as never, time)).toBe("Its readings have been deleted; only the times remain.");
   });
 });

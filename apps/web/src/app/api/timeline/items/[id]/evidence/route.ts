@@ -9,17 +9,22 @@ const PRIVATE_LOCATION_HEADERS = {
 };
 
 /**
- * GET /api/timeline/items/{id}/evidence (location v4 step 12): the map for a place or trip on the location
- * timeline (`{id}` is the timeline's item id), as a Review item's evidence is, for the correction sheets.
+ * GET /api/timeline/items/{id}/evidence?kind=place|trip&startedAt=ISO (location v4 step 12): the map for a place
+ * or trip on the location timeline (`{id}` is the timeline's item id, with its kind and start as the timeline
+ * gives them), as a Review item's evidence is, for the correction sheets.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const session = await resolveRequestSession(request);
     const { id } = await context.params;
-    if (!id || id.length > 200) {
+    // The item's kind and start pick it exactly: a client segment id is unique per device only (Codex r1 on #599).
+    const url = new URL(request.url);
+    const kind = url.searchParams.get("kind");
+    const startedAt = url.searchParams.get("startedAt");
+    if (!id || id.length > 200 || (kind !== "place" && kind !== "trip") || !startedAt || !Number.isFinite(Date.parse(startedAt))) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400, headers: PRIVATE_LOCATION_HEADERS });
     }
-    const result = await getTimelineItemEvidence(id, session);
+    const result = await getTimelineItemEvidence(id, session, { kind, startedAt: new Date(startedAt).toISOString() });
     return NextResponse.json(result, { headers: PRIVATE_LOCATION_HEADERS });
   } catch (error) {
     const authResponse = authErrorResponse(error);
