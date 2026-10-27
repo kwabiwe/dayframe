@@ -143,6 +143,11 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
+  /**
+   * Deprecated (card C item 1, 27 Oct 2026: no "framed" line). Always empty: a native Calendar built
+   * before this change requires the key and hides an empty line (Codex r1 on #588).
+   */
+  framedLabel: "";
   hapticsEnabled: boolean;
   /** Calendar › Grid or List (location v4 step 9): in List the native view draws only its header and week strip. */
   layout?: "grid" | "list";
@@ -403,6 +408,7 @@ export function buildNativeCalendarBridgeState({
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "Nothing framed yet.",
+      framedLabel: "",
       hapticsEnabled,
       clockFormat,
       entries: entries.map((entry) => serializeCalendarEntry(

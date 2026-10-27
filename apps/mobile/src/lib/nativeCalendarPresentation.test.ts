@@ -617,7 +617,8 @@ describe("native Calendar Blocks presentation", () => {
     const fullDate = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" });
 
     expect(state.model.monthTitle).toBe(new Date(now).toLocaleDateString(undefined, { month: "long" }));
-    expect(state.model).not.toHaveProperty("framedLabel");
+    // Kept, always empty, for a native Calendar built before card C (it requires the key, hides "").
+    expect(state.model.framedLabel).toBe("");
     expect(state.model).not.toHaveProperty("framedAccessibilityLabel");
     // The selected day in the strip reads its full date; today says so.
     const friday = state.model.weekDays.find((day) => day.isSelected);
