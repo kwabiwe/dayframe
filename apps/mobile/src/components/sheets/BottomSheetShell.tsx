@@ -76,6 +76,7 @@ export function BottomSheetShell({
   disabled = false,
   fixedHeader,
   testID,
+  commitRef,
   children,
 }: {
   rootHosted: boolean;
@@ -96,6 +97,11 @@ export function BottomSheetShell({
   fixedHeader?: React.ReactNode;
   /** The sheet's test id; its body, scroll and action are `${testID}-body`, `-scroll`, `-action`. */
   testID: string;
+  /**
+   * Set to the action's own commit, so a control in the sheet (the trip sheet's "This wasn't a trip") can
+   * close it as the action does: `onApply` runs, then the sheet leaves with its usual exit.
+   */
+  commitRef?: { current: (() => void) | null };
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -175,6 +181,13 @@ export function BottomSheetShell({
   };
 
   const requestDiscard = () => sheetRef.current?.dismiss();
+  useEffect(() => {
+    if (!commitRef) return;
+    commitRef.current = requestCommit;
+    return () => {
+      if (commitRef.current === requestCommit) commitRef.current = null;
+    };
+  });
 
   const overlay = (
     <View style={s.modal}>

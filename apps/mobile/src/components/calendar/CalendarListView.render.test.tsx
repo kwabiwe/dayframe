@@ -427,3 +427,34 @@ describe("CalendarListView modes line (card D item 12)", () => {
 });
 
 
+
+describe("CalendarListView correction sheets (location v4 step 12)", () => {
+  it("opens a place's sheet from its row when it has no question and no block, and a trip's at a leg", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenTripLeg = vi.fn();
+    const { tree } = render({ onOpenPlace, onOpenTripLeg });
+    const unknown = tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" });
+    expect(unknown.props.accessibilityHint).toBe("Opens it to change the place or its times");
+    act(() => { unknown.props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Unknown place");
+    // The commute's legs, opened: each opens its trip's sheet at that leg.
+    act(() => { tree.root.findByProps({ accessibilityLabel: "Show the legs of Commute" }).props.onPress(); });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-leg-1" }).props.onPress(); });
+    expect(onOpenTripLeg).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-trip", route: "Home → Office" }), 1);
+  });
+
+  it("never opens a sheet for a place in a block or one with a question", () => {
+    const onOpenPlace = vi.fn();
+    const inBlock = { ...timeline, items: timeline.items.map((item) => item.id === "seg-unknown" ? { ...item, blockIds: ["b"] } : item) } as LocationTimeline;
+    const { tree } = render({ onOpenPlace, timeline: inBlock });
+    const showAll = tree.root.findAll((node) => node.props.accessibilityRole === "button" && typeof node.props.onPress === "function" &&
+      JSON.stringify(node.props.children ?? "").includes("Show Home and every place"));
+    if (showAll[0]) act(() => { showAll[0].props.onPress(); });
+    const rows = tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-unknown" && typeof node.props.onPress === "function");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.props.disabled).toBe(true);
+    // Office is in a block too; Home has none and opens.
+    const home = tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-home" && typeof node.props.onPress === "function");
+    expect(home.map((node) => node.props.disabled)).toEqual([false]);
+  });
+});

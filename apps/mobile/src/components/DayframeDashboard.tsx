@@ -53,6 +53,7 @@ import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
+import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
@@ -2076,6 +2077,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  // The List's place, trip and leg correction sheets (step 12).
+  const locationCorrections = useLocationCorrections({
+    clockFormat,
+    data: authState === "authenticated" ? data : null,
+    pending: correctionQueue.pending,
+    reduceMotion,
+    showNotice: (message) => showTodayNotice(message, null),
+    theme,
+    timeline: calendarTimeline
+  });
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
@@ -3655,6 +3666,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     reviewItemId
                   ) as never)}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
+                  onOpenPlace={locationCorrections.openPlace}
+                  onOpenTripLeg={locationCorrections.openTripLeg}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
@@ -3663,6 +3676,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   theme={theme}
                   timeline={calendarTimeline}
                 />
+                {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
           </View>
