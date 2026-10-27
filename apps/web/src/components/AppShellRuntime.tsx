@@ -76,7 +76,7 @@ type RuntimeContext = {
   clearDateLoadError: () => void;
   clearTimerError: () => void;
   closeManualEntry: () => void;
-  createCategory: (name: string, color?: DayframePaletteKey) => Promise<CategoryMutationOutcome>;
+  createCategory: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CategoryMutationOutcome>;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   deleteActiveTimer: () => Promise<MutationOutcome>;
   data: BootstrapData | null;
@@ -1264,13 +1264,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const createCategory = useCallback(async (
     name: string,
-    color?: DayframePaletteKey
+    color?: DayframePaletteKey,
+    icon?: string
   ): Promise<CategoryMutationOutcome> => {
     try {
       const response = await clientFetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, color })
+        body: JSON.stringify({ name, color, icon })
       });
       if (!response.ok) {
         return {
