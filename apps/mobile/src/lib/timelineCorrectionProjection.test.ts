@@ -1,0 +1,70 @@
+import { describe, expect, it } from "vitest";
+import type { LocationTimeline, TimelineCorrectionRequest, TimelinePlace, TimelineTrip } from "@dayframe/shared";
+import { projectTimelineCorrections } from "./timelineCorrectionProjection";
+import type { PendingTimelineCorrection } from "./timelineCorrectionOutbox";
+
+// Location v4 step 12: synthetic ids, names and times only.
+const at = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
+const PLACE_ID = "6f000000-0000-4000-8000-000000000001";
+const place = (id: string, start: number, stop: number): TimelinePlace => ({
+  kind: "place", id, status: "finalised", startedAt: at(start), stoppedAt: at(stop), placeId: null, learnedPlaceId: null, name: null,
+  role: null, matchKind: "unknown", confidence: "low", blockIds: []
+});
+const trip: TimelineTrip = {
+  kind: "trip", id: "trip-1", status: "finalised", startedAt: at(60), stoppedAt: at(100), fromId: "seg-a", toId: "seg-b", mode: "automotive",
+  legs: [
+    { startedAt: at(60), stoppedAt: at(70), mode: "walking", confidence: "sure", distanceMeters: 700 },
+    { startedAt: at(70), stoppedAt: at(100), mode: "automotive", confidence: "unsure", runnerUp: "bus", distanceMeters: 9000 }
+  ],
+  stopIds: [], distanceMeters: 9700, confidence: "medium", reason: null, blockIds: []
+};
+const timeline: LocationTimeline = {
+  date: "2026-10-27", timeZone: "UTC", dayStart: at(-480), dayEnd: at(960),
+  items: [place("seg-a", 0, 60), trip, place("seg-b", 100, 200)], openTrip: null, gaps: []
+};
+let n = 0;
+const queued = (request: TimelineCorrectionRequest, extra: Partial<PendingTimelineCorrection> = {}): PendingTimelineCorrection => ({
+  userId: "u", workspaceId: "w", clientCorrectionId: `id-${++n}`, request: { ...request, clientCorrectionId: `id-${n}` } as PendingTimelineCorrection["request"],
+  createdAt: at(0), attemptCount: 0, ...extra
+});
+
+describe("the List with the corrections the phone still holds (location v4 step 12)", () => {
+  it("names a place with the picked place, set by you", () => {
+    const projected = projectTimelineCorrections(timeline, [
+      queued({ kind: "place", subject: "place", itemId: "seg-a", placeId: PLACE_ID, learnedPlaceId: null }, { preview: { name: "Exampleton Library", role: null } })
+    ])!;
+    expect(projected.items[0]).toMatchObject({ placeId: PLACE_ID, name: "Exampleton Library", matchKind: "saved", setByYou: true });
+    expect(projected.items[2]).toEqual(timeline.items[2]);
+  });
+
+  it("leaves a place unknown, moves times, and takes a trip that wasn't one off the List", () => {
+    const named = { ...timeline, items: [{ ...place("seg-a", 0, 60), placeId: PLACE_ID, name: "Home", role: "home", matchKind: "saved" as const }, trip] };
+    const projected = projectTimelineCorrections(named, [
+      queued({ kind: "place", subject: "place", itemId: "seg-a", placeId: null, learnedPlaceId: null }),
+      queued({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(5), stoppedAt: at(55) }),
+      queued({ kind: "delete", subject: "trip", itemId: "trip-1" })
+    ])!;
+    expect(projected.items).toEqual([expect.objectContaining({ id: "seg-a", placeId: null, name: null, role: null, matchKind: "unknown",
+      startedAt: at(5), stoppedAt: at(55), setByYou: true })]);
+  });
+
+  it("sets a leg's mode, sure and set by you, joining it with a neighbour of the same mode", () => {
+    const projected = projectTimelineCorrections(timeline, [
+      queued({ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: at(70), legStoppedAt: at(100), mode: "walking" })
+    ])!;
+    expect((projected.items[1] as TimelineTrip).legs).toEqual([
+      expect.objectContaining({ startedAt: at(60), stoppedAt: at(100), mode: "walking" })
+    ]);
+    const bus = projectTimelineCorrections(timeline, [
+      queued({ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: at(70), legStoppedAt: at(100), mode: "bus" })
+    ])!;
+    expect((bus.items[1] as TimelineTrip).legs[1]).toEqual({ startedAt: at(70), stoppedAt: at(100), mode: "bus", confidence: "sure", distanceMeters: 9000, setByYou: true });
+  });
+
+  it("leaves a refused correction out, so its row is back as it was", () => {
+    expect(projectTimelineCorrections(timeline, [
+      queued({ kind: "delete", subject: "trip", itemId: "trip-1" }, { failureKind: "permanent", lastError: "This trip is already in a block." })
+    ])).toBe(timeline);
+    expect(projectTimelineCorrections(null, [queued({ kind: "delete", subject: "trip", itemId: "trip-1" })])).toBeNull();
+  });
+});
