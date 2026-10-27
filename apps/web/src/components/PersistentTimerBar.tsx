@@ -35,6 +35,7 @@ import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
+import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
 
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
@@ -145,6 +146,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const durationSeconds = active
     ? Math.max(active.durationSeconds, Math.floor((now - activeStartedAtMs) / 1000))
     : 0;
+  useRunningTabTitle(active ? runningTabTitle(durationSeconds) : null);
   const taskSuggestions = useMemo(() => data?.taskSuggestions ?? [], [data?.taskSuggestions]);
   const taskSuggestionCandidates = data?.taskSuggestionCandidates;
   const visibleTaskSuggestions = useMemo(() => {

@@ -899,7 +899,7 @@ function TodayBlockRow({
             onClick={onStartAgain}
             type="button"
           >
-            <DayframeIcon glyph="rotate-ccw" size={16} />
+            <DayframeIcon fill="currentColor" glyph="play" size={14} strokeWidth={0} />
           </button>
         ) : null}
         <button
