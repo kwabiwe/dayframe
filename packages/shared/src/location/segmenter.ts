@@ -478,6 +478,98 @@ function iosPlacedInside(placeId: string, evidence: ClassifiedEvidence[], reused
 
 const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
 
+/** Whether the stay's last reading before a silence was moving: the device was leaving, not settled (Codex r3 on #591). */
+function leavingAtLastReading(stay: WorkingStay, input: LocationEngineInput) {
+  const last = stay.evidence.filter(({ evidence }) => pointFor(evidence) && evidence.kind !== "visit").at(-1);
+  const speed = last ? last.evidence.speedMetersPerSecond ?? last.impliedSpeedMetersPerSecond : null;
+  return speed != null && Number.isFinite(speed) && speed >= input.config.movementSpeedThresholdMps;
+}
+
+/** Whether iOS reported leaving the stay's place between two times: a Visit of the stay, or its corroborated arrival, departed then. */
+function departedDuring(stay: WorkingStay, fromMs: number, toMs: number) {
+  const departures = [
+    ...stay.evidence.flatMap(({ evidence }) => evidence.kind === "visit" && evidence.endedAt ? [Date.parse(evidence.endedAt)] : []),
+    ...(stay.arrivalPresenceUntilAt ? [Date.parse(stay.arrivalPresenceUntilAt)] : [])
+  ];
+  return departures.some((departedMs) => departedMs >= fromMs && departedMs < toMs);
+}
+
+/** The pass's accepted positional readings (and Visits) in time order, built once per pass. */
+const positionalByPass = new WeakMap<readonly ClassifiedEvidence[], Array<{ atMs: number; item: ClassifiedEvidence }>>();
+
+/**
+ * Whether anything placed the device somewhere other than a saved place between two times: an accepted
+ * reading or Visit, whatever its accuracy, not matched to the place (Codex r2 on #591). A reading too broad
+ * to count as outside still says the device was not seen there.
+ */
+function seenElsewhere(accepted: readonly ClassifiedEvidence[], placeId: string, fromMs: number, toMs: number) {
+  let timeline = positionalByPass.get(accepted);
+  if (!timeline) {
+    timeline = accepted.flatMap((item) => pointFor(item.evidence) && item.evidence.isSimulated !== true
+      ? [{ atMs: Date.parse(item.evidence.occurredAt), item }] : []).sort((a, b) => a.atMs - b.atMs);
+    positionalByPass.set(accepted, timeline);
+  }
+  let low = 0;
+  let high = timeline.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (timeline[middle].atMs <= fromMs) low = middle + 1;
+    else high = middle;
+  }
+  for (let index = low; index < timeline.length && timeline[index].atMs < toMs; index += 1) {
+    const { item } = timeline[index];
+    if (item.evidence.savedPlaceId !== placeId && item.match?.placeId !== placeId) return true;
+  }
+  return false;
+}
+
+/** Each saved place's genuine geofence transitions in time order, built once per pass. */
+const genuineTransitionsByPass = new WeakMap<readonly ClassifiedEvidence[], Map<string, ClassifiedEvidence[]>>();
+
+/**
+ * A saved place's genuine transitions: never simulated, never half of a registration snapshot pair (an
+ * entry and an exit within `GEOFENCE_SNAPSHOT_PAIR_MS`). Sorted once, so pairing looks at neighbours only.
+ */
+function genuineTransitions(accepted: readonly ClassifiedEvidence[], placeId: string) {
+  let byPlace = genuineTransitionsByPass.get(accepted);
+  if (!byPlace) {
+    byPlace = new Map();
+    const all = new Map<string, Array<{ item: ClassifiedEvidence; atMs: number }>>();
+    for (const item of accepted) {
+      const { kind, savedPlaceId, isSimulated, occurredAt } = item.evidence;
+      if ((kind !== "geofence_enter" && kind !== "geofence_exit") || !savedPlaceId || isSimulated === true) continue;
+      all.set(savedPlaceId, [...(all.get(savedPlaceId) ?? []), { item, atMs: Date.parse(occurredAt) }]);
+    }
+    for (const [id, list] of all) {
+      list.sort((a, b) => a.atMs - b.atMs);
+      const paired = (index: number, other: number) => other >= 0 && other < list.length &&
+        list[other].item.evidence.kind !== list[index].item.evidence.kind && Math.abs(list[other].atMs - list[index].atMs) <= GEOFENCE_SNAPSHOT_PAIR_MS;
+      byPlace.set(id, list.filter((_entry, index) => {
+        for (let other = index - 1; other >= 0 && list[index].atMs - list[other].atMs <= GEOFENCE_SNAPSHOT_PAIR_MS; other -= 1) if (paired(index, other)) return false;
+        for (let other = index + 1; other < list.length && list[other].atMs - list[index].atMs <= GEOFENCE_SNAPSHOT_PAIR_MS; other += 1) if (paired(index, other)) return false;
+        return true;
+      }).map(({ item }) => item));
+    }
+    genuineTransitionsByPass.set(accepted, byPlace);
+  }
+  return byPlace.get(placeId) ?? [];
+}
+
+/**
+ * Whether iOS itself reported entering a saved stay's place during the stay: a genuine entry among its
+ * evidence with no exit for the place after it, up to the stay's last observation.
+ */
+function enteredSavedPlace(stay: WorkingStay, accepted: readonly ClassifiedEvidence[]) {
+  if (!stay.placeId) return false;
+  const genuine = genuineTransitions(accepted, stay.placeId);
+  const entry = genuine.filter((item) => item.evidence.kind === "geofence_enter" && stay.evidence.includes(item)).at(-1);
+  if (!entry) return false;
+  const enteredMs = Date.parse(entry.evidence.occurredAt);
+  const lastObservedMs = latestObservationMs(stay);
+  return !genuine.some((item) => item.evidence.kind === "geofence_exit" &&
+    Date.parse(item.evidence.occurredAt) > enteredMs && Date.parse(item.evidence.occurredAt) <= lastObservedMs);
+}
+
 /**
  * A saved-place stay with still GPS fixes, none of them inside the place's
  * circle (still matches only in the tolerance band or beyond), without a
@@ -1725,13 +1817,28 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         active.arrivalPresence === true &&
         (active.arrivalPresenceUntilAt == null || atMs <= Date.parse(active.arrivalPresenceUntilAt)) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
-      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence) {
+      // An arrival too short to be a stay yet (under `savedPlaceMinimumDwellMs`) after iOS's own entry into a
+      // saved place, with no exit or outside reading since, is not ended by a silence when the device is next
+      // seen strongly inside the same place: it never left (card E, 25 Oct: home at 11:13, the phone quiet
+      // until 14:26, the trip ran to 14:26). Nothing in the silence may place it elsewhere, a reading too broad
+      // to count as outside included, so no other segment (a physical stop, a trip) can lie inside it (Codex
+      // r1–r2 on #591). Judged last, only when no other rule carries the silence.
+      const enteredPresence = observationGapMs > input.config.maxContinuityGapMs &&
+        !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence &&
+        active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
+        !hasMeaningfulKnownPlaceWindow(active.startedAt, observedAt, input.config.savedPlaceMinimumDwellMs) &&
+        atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs &&
+        strongSavedPoint(item, active.placeId, input) && !edgeOnly(active, input) &&
+        !departedDuring(active, Date.parse(observedAt), atMs) && !leavingAtLastReading(active, input) && enteredSavedPlace(active, accepted) &&
+        !seenElsewhere(accepted, active.placeId!, Date.parse(observedAt), atMs);
+      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap &&
+        !openVisitPresence && !enteredPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
         completed.push(active);
         active = null;
       } else if (observationGapMs > input.config.maxContinuityGapMs) {
         active.continuityStatus = "uncertain_gap";
-        if (boundedSavedGap || openVisitPresence) active.inferredContinuity = true;
+        if (boundedSavedGap || openVisitPresence || enteredPresence) active.inferredContinuity = true;
       }
     }
 

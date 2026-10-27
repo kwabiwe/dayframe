@@ -226,3 +226,73 @@ describe("a two-minute drive home Core Motion saw (card E, 25 Oct)", () => {
     expect(minutes(lastHome.startedAt)).toBeCloseTo(63.1, 0);
   });
 });
+
+describe("a trip ends on arrival through a quiet phone at home (card E part 2, 25 Oct)", () => {
+  /** Home at the entry, readings inside for three and a half minutes, three hours of silence, then inside again. */
+  function quietHome() {
+    const input = morning();
+    const homeAgainAt = 44;
+    // iOS's arrival Visit was too broad to use (161 m), as on 25 Oct: only the entry and the readings place the phone.
+    input.evidence = [...input.evidence.filter((item) => !item.clientEvidenceId.startsWith("home-pm-"))
+      .map((item) => item.clientEvidenceId === "home-visit" ? { ...item, horizontalAccuracyMeters: 161 } : item),
+      fix("home-q-0", homeAgainAt + 19.3, { north: 10 }, 19), fix("home-q-1", homeAgainAt + 19.7, { north: 14 }, 27),
+      fix("home-q-2", homeAgainAt + 21.0, { north: 3 }, 7), fix("home-q-3", homeAgainAt + 22.8, { north: 12 }, 19),
+      fix("home-late-0", homeAgainAt + 195, { north: 6 }, 9), fix("home-late-1", homeAgainAt + 200, { north: 4 }, 8)];
+    input.processingAt = at(homeAgainAt + 210);
+    return { input, arrivedAt: homeAgainAt + 19.4 };
+  }
+
+  it("starts Home at the entry and ends the drive home there, not when the phone is next heard from", () => {
+    const { input, arrivedAt } = quietHome();
+    const home = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID).at(-1)!;
+    expect(minutes(home.startedAt)).toBeLessThanOrEqual(arrivedAt);
+    const [drive] = commutes(input).filter((trip) => trip.fromPlaceId === SCHOOL_ID && trip.toPlaceId === HOME_ID);
+    expect(minutes(drive.stoppedAt)).toBeLessThanOrEqual(arrivedAt);
+  });
+
+  it("still ends Home when iOS reported leaving during the silence", () => {
+    const { input } = quietHome();
+    input.evidence = [...input.evidence, crossing("home-exit-quiet", 44 + 60, "geofence_exit", HOME_ID)];
+    const homes = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID);
+    expect(homes.every((stay) => stay.stoppedAt == null ? minutes(stay.startedAt)! > 44 + 60 : minutes(stay.stoppedAt)! < 44 + 100)).toBe(true);
+  });
+
+  it("never carries Home across readings elsewhere, even ones too broad to count as outside (Codex r2 on #591)", () => {
+    const { input, arrivedAt } = quietHome();
+    input.evidence = [...input.evidence, fix("away-broad-0", 44 + 60, { north: 1_500 }, 66), fix("away-broad-1", 44 + 90, { north: 2_500 }, 66)];
+    const home = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID).at(-1)!;
+    expect(minutes(home.startedAt)).toBeGreaterThan(arrivedAt + 60);
+  });
+
+  it("never carries Home when its last reading before the silence was moving: the phone was leaving (Codex r3 on #591)", () => {
+    const { input, arrivedAt } = quietHome();
+    input.evidence = input.evidence.map((item) => item.clientEvidenceId === "home-q-3" ? { ...item, speedMetersPerSecond: 10 } : item);
+    const home = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID).at(-1)!;
+    expect(minutes(home.startedAt)).toBeGreaterThan(arrivedAt + 60);
+  });
+
+  it("keeps a stay of five minutes or more before a silence its own, as before (Codex r1 on #591)", () => {
+    // Home from the entry for ten minutes, three hours of silence, then inside again: two stays, so a decided
+    // first one is never folded into a new open one.
+    const { input } = quietHome();
+    input.evidence = [...input.evidence, fix("home-q-4", 44 + 26, { north: 5 }, 8), fix("home-q-5", 44 + 30, { north: 6 }, 8)];
+    const homes = segments(input).filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID)
+      .filter((stay) => minutes(stay.startedAt)! > 60);
+    expect(homes).toHaveLength(2);
+  });
+
+  it("judges many short arrivals and same-place callbacks in bounded time (Codex r1 on #591)", () => {
+    const evidence: LocationEvidence[] = [];
+    for (let visit = 0; visit < 300; visit += 1) {
+      const start = visit * 25;
+      evidence.push(crossing(`enter-${visit}`, start, "geofence_enter", HOME_ID), fix(`in-${visit}-0`, start + 0.5, { north: 5 }, 8),
+        fix(`in-${visit}-1`, start + 2, { north: 6 }, 8), fix(`in-${visit}-2`, start + 15, { north: 4 }, 8),
+        crossing(`exit-${visit}`, start + 16, "geofence_exit", HOME_ID), fix(`out-${visit}`, start + 17, { north: 900 }, 8, { speedMetersPerSecond: 9 }));
+    }
+    const input: LocationEngineInput = { ...morning(), evidence, processingAt: at(300 * 25 + 60) };
+    const started = performance.now();
+    runLocationEngine(input);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+

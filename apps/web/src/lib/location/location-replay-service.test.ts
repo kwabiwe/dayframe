@@ -58,6 +58,31 @@ describe("Location replay timing observation", () => {
     expect(server.diagnostics).toEqual(local.diagnostics);
   });
 
+  it("holds an open replacement that overlaps protected accepted or ignored evidence (Codex r3 on #591)", async () => {
+    const fixture = journeyIdentityFixture();
+    const local = runLocationEngine(fixture);
+    const open = local.segmentUpserts.find((segment) => segment.kind === "stay" && segment.stoppedAt == null)!;
+    expect(open).toBeDefined();
+    const shared = fixture.evidence.find((item) => open.evidenceIds.includes(item.clientEvidenceId) &&
+      (item.kind === "standard_location" || item.kind === "significant_change") && Date.parse(item.occurredAt) > Date.parse(open.startedAt))!;
+    const query = journeyReplayQuery(fixture, [{
+      clientSegmentId: "previous-decided-segment",
+      clientEvidenceId: shared.clientEvidenceId,
+      kind: shared.kind,
+      occurredAt: shared.occurredAt,
+      startedAt: open.startedAt,
+      stoppedAt: new Date(Date.parse(shared.occurredAt) + 60_000).toISOString()
+    }]);
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(server.segments.some((segment) => segment.clientSegmentId === open.clientSegmentId)).toBe(false);
+  });
+
   it("holds a changed-ID replacement that overlaps protected accepted or ignored evidence", async () => {
     const fixture = journeyIdentityFixture();
     const local = runLocationEngine(fixture);

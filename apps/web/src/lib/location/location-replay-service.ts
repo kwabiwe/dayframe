@@ -319,10 +319,11 @@ type ProtectedSourceLink = {
 /** Exact provenance plus the occupied portion, never name/time proximity alone. */
 function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceLink) {
   if (segment.clientSegmentId === link.clientSegmentId) return false;
+  // An open segment runs on to now: an open replacement can overlap decided history too (Codex r3 on #591).
   const start = Date.parse(iso(link.startedAt)!);
-  const stop = link.stoppedAt ? Date.parse(iso(link.stoppedAt)!) : NaN;
+  const stop = link.stoppedAt ? Date.parse(iso(link.stoppedAt)!) : Number.POSITIVE_INFINITY;
   const nextStart = Date.parse(segment.startedAt);
-  const nextStop = segment.stoppedAt ? Date.parse(segment.stoppedAt) : NaN;
+  const nextStop = segment.stoppedAt ? Date.parse(segment.stoppedAt) : Number.POSITIVE_INFINITY;
   if (!(Math.min(stop, nextStop) > Math.max(start, nextStart))) return false;
   // A long Visit reused after departure cannot claim the later episode.
   if (link.kind === "visit") return start === nextStart;

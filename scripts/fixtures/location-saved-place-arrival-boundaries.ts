@@ -334,18 +334,23 @@ async function validateFallback() {
     const expectedReturn = expected.segmentUpserts.find(
       (segment) => segment.kind === "commute" && segment.fromPlaceId === fixtureInput.targetPlaceId
     );
-    assert(expectedTarget, "Synthetic fallback fixture produced no later target stay.");
+    assert(expectedTarget, "Synthetic fallback fixture produced no target stay.");
     assert(expectedReturn, "Synthetic fallback fixture produced no return commute.");
-    assert(!expected.segmentUpserts.some(
+    // Card E part 2: iOS's entry and the readings inside before and after the silence are one stay, so the
+    // inbound trip ends where it begins, on arrival, and nothing spans the silence.
+    const inbound = expected.segmentUpserts.filter(
       (segment) => segment.kind === "commute" && segment.toPlaceId === fixtureInput.targetPlaceId
-    ), "Fallback fixture still produced the conflicting spanning commute.");
+    );
+    assert.equal(inbound.length, 1, "Fallback fixture did not end the inbound trip on arrival.");
+    assert.equal(inbound[0].stoppedAt, expectedTarget.startedAt, "The inbound trip spans the silence instead of ending on arrival.");
     await replay(owner, fixtureInput.processingAt);
-    const conflicting = await pool.query(
-      `select 1 from commute_segments
+    const arrivals = await pool.query<{ stoppedAt: Date }>(
+      `select stopped_at as "stoppedAt" from commute_segments
        where workspace_id = $1 and user_id = $2 and to_place_id = $3 and status <> 'superseded'`,
       [owner.session.workspaceId, owner.session.userId, fixtureInput.targetPlaceId]
     );
-    assert.equal(conflicting.rowCount, 0, "Server replay persisted the suppressed spanning commute.");
+    assert.deepEqual(arrivals.rows.map((row) => iso(row.stoppedAt)), [expectedTarget.startedAt],
+      "Server replay did not persist the inbound trip ending on arrival.");
     const rows = await segmentRows(owner);
     assert(rows.some((row) => row.clientSegmentId === expectedTarget.clientSegmentId), "Later target stay was lost.");
     assert(rows.some((row) => row.clientSegmentId === expectedReturn.clientSegmentId), "Return commute was lost.");
