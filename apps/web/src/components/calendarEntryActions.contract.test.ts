@@ -135,7 +135,7 @@ describe("shared web time-entry quick editor", () => {
 
   it("puts Start again and Delete as header icons before Close, leaves Cancel and Save in the footer, and neutral selection in shared controls (owner 21 Oct 2026, UIA-205)", () => {
     const icons = quick.slice(quick.indexOf('className="calendar-compact-editor-icons"'), quick.indexOf('aria-label="Close editor"'));
-    expect(icons).toMatch(/data-tip="Start again"[\s\S]*?<DayframeIcon glyph="rotate-ccw"[\s\S]*?data-tip=\{isRunning \? "Discard" : "Delete"\}[\s\S]*?<DayframeIcon glyph="trash-2"/);
+    expect(icons).toMatch(/data-tip="Start again"[\s\S]*?<DayframeIcon fill="currentColor" glyph="play"[\s\S]*?data-tip=\{isRunning \? "Discard" : "Delete"\}[\s\S]*?<DayframeIcon glyph="trash-2"/);
     expect(icons).toContain("aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}");
     expect(icons).toContain("aria-label={`Start again: ${title}`}");
     expect(quick).toContain('className="calendar-compact-icon-action is-close"');
