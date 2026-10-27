@@ -17,6 +17,10 @@
 		DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
 		DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */; };
 		DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */; };
+		DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */; };
+		DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */; };
+		DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */; };
+		DFB0200001BC49B8811A0004 /* DayframeThreadSampler.c in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */; };
 		DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
 		DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */; };
 		DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */; };
@@ -33,10 +37,6 @@
 		DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
 		DFB0100001BC49B8811A0001 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
 		DFB0100001BC49B8811A0002 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
-		DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */; };
-		DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */; };
-		DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */; };
-		DFB0200001BC49B8811A0004 /* DayframeThreadSampler.c in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */; };
 		DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */; };
 		DFB2000001BC49B8811A0005 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
@@ -91,6 +91,11 @@
 		DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityController.swift; path = Dayframe/DayframeLiveActivityController.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityModule.swift; path = Dayframe/DayframeLiveActivityModule.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeLiveActivityModuleBridge.m; path = Dayframe/DayframeLiveActivityModuleBridge.m; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnosticsCore.swift; path = Dayframe/DayframeDiagnosticsCore.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnostics.swift; path = Dayframe/DayframeDiagnostics.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeDiagnosticsModuleBridge.m; path = Dayframe/DayframeDiagnosticsModuleBridge.m; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = DayframeThreadSampler.c; path = Dayframe/DayframeThreadSampler.c; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0015 /* DayframeThreadSampler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = DayframeThreadSampler.h; path = Dayframe/DayframeThreadSampler.h; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeLiveActivityBundle.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeTimerLiveActivity.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -103,11 +108,6 @@
 		DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetQAHarness.swift; sourceTree = "<group>"; };
 		DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedStorageConfiguration.swift; path = Dayframe/DayframeSharedStorageConfiguration.swift; sourceTree = "<group>"; };
 		DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedFileLock.swift; path = Dayframe/DayframeSharedFileLock.swift; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnosticsCore.swift; path = Dayframe/DayframeDiagnosticsCore.swift; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnostics.swift; path = Dayframe/DayframeDiagnostics.swift; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeDiagnosticsModuleBridge.m; path = Dayframe/DayframeDiagnosticsModuleBridge.m; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = DayframeThreadSampler.c; path = Dayframe/DayframeThreadSampler.c; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0015 /* DayframeThreadSampler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = DayframeThreadSampler.h; path = Dayframe/DayframeThreadSampler.h; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-Bold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-ExtraBold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-ExtraBold.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -474,7 +474,6 @@
 			);
 			inputPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Dayframe/Pods-Dayframe-resources.sh",
-				"${PODS_CONFIGURATION_BUILD_DIR}/DayframeCalendar/DayframeCalendarGlyphs.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXApplication/ExpoApplication_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
@@ -489,7 +488,6 @@
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/DayframeCalendarGlyphs.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoApplication_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXConstants.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoConstants_privacy.bundle",
