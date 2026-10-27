@@ -7,6 +7,7 @@ import type { ClockFormat, RecentActivitySuggestion, RecentActivitySuggestionCan
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
+import { blockStyle } from "@/lib/block-style";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -659,6 +660,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     cancelDiscardPrompt,
     categoryButtonRef,
     commitTemporalField,
+    selectedCategory,
     confirmDiscard,
     controlsDisabled,
     canSplit: Boolean(bounds) && !hasUnsavedChanges,
@@ -903,7 +905,8 @@ export function TimeEntryQuickEditorPanel({
       </div>
 
       {controller.splitAtMs != null && controller.splitBounds ? (
-        <SplitLine bounds={controller.splitBounds} atMs={controller.splitAtMs} clock={clock} disabled={controlsDisabled}
+        <SplitLine bounds={controller.splitBounds} atMs={controller.splitAtMs} clock={clock} color={controller.selectedCategory?.color}
+          colorName={controller.selectedCategory?.name} disabled={controlsDisabled}
           onCancel={() => {
             controller.cancelSplit();
             window.requestAnimationFrame(() => splitButtonRef.current?.focus({ preventScroll: true }));
@@ -1290,10 +1293,13 @@ function formatEyebrowDate(value: string) {
  * move it a minute at a time), both halves as they will be, Split and Keep as one. It appears at once in the
  * editor (no movement of its own); focus goes to the line, and back to Split when it closes.
  */
-function SplitLine({ atMs, bounds, clock, disabled, onCancel, onConfirm, onMove }: {
+function SplitLine({ atMs, bounds, clock, color, colorName, disabled, onCancel, onConfirm, onMove }: {
   atMs: number;
   bounds: SplitBounds;
   clock: ClockFormat;
+  /** The block's activity colour (the bar is drawn in it, as the block is). */
+  color?: string | null;
+  colorName?: string;
   disabled: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1303,14 +1309,24 @@ function SplitLine({ atMs, bounds, clock, disabled, onCancel, onConfirm, onMove 
   useEffect(() => { lineRef.current?.focus({ preventScroll: true }); }, []);
   const time = (ms: number) => formatTime(new Date(ms), clock);
   const minutes = (fromMs: number, toMs: number) => formatDuration(Math.round((toMs - fromMs) / 1000));
-  const share = ((atMs - bounds.startMs) / (bounds.stopMs - bounds.startMs)) * 100;
+  const share = (atMs - bounds.startMs) / (bounds.stopMs - bounds.startMs);
   return (
     <div className="calendar-compact-split" role="group" aria-label="Split this block">
-      <div className="calendar-compact-split-bar" style={{ "--split-at": `${share}%` } as CSSProperties}>
+      {/* The block as a tall bar, earliest at the top as on the time grid, with the line across it and each
+          half's times inside it, updating as the line moves (card G; Toggl's "Split time log"). */}
+      <div className="calendar-compact-split-bar"
+        style={{ ...(color ? blockStyle(color, colorName) : {}), "--split-at": String(share) } as CSSProperties}>
+        <span aria-hidden="true" className="calendar-compact-split-half is-first">
+          {minutes(bounds.startMs, atMs)} · {time(bounds.startMs)}–{time(atMs)}
+        </span>
+        <span aria-hidden="true" className="calendar-compact-split-half is-second">
+          {minutes(atMs, bounds.stopMs)} · {time(atMs)}–{time(bounds.stopMs)}
+        </span>
+        <span aria-hidden="true" className="calendar-compact-split-mark" />
         <input
           ref={lineRef}
           aria-label="Split at"
-          aria-valuetext={time(atMs)}
+          aria-valuetext={`${time(atMs)}: ${minutes(bounds.startMs, atMs)} then ${minutes(atMs, bounds.stopMs)}`}
           className="calendar-compact-split-line"
           disabled={disabled}
           max={bounds.maxMs}
@@ -1325,10 +1341,6 @@ function SplitLine({ atMs, bounds, clock, disabled, onCancel, onConfirm, onMove 
           value={atMs}
         />
       </div>
-      <p className="calendar-compact-split-halves">
-        <span>{time(bounds.startMs)}–{time(atMs)} · {minutes(bounds.startMs, atMs)}</span>
-        <span>{time(atMs)}–{time(bounds.stopMs)} · {minutes(atMs, bounds.stopMs)}</span>
-      </p>
       <div className="calendar-compact-split-actions">
         <button className="ui-button ui-button-primary is-compact" disabled={disabled} onClick={onConfirm} type="button">Split at {time(atMs)}</button>
         <button className="ui-button ui-button-ghost is-compact" disabled={disabled} onClick={onCancel} type="button">Keep as one</button>
