@@ -60,6 +60,7 @@ export function CalendarListView({
   nowMs,
   onAnswerCheck,
   onOpenCheck,
+  onOpenCheckChange,
   onOpenEntry,
   onScrolledToFirstCheck,
   scrollToFirstCheck,
@@ -91,6 +92,8 @@ export function CalendarListView({
   /** Each suggestion's question and answers (reviewAnswerQuestion). */
   checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   onOpenEntry: (entry: NativeCalendarPresentationEntry) => void;
+  /** Which "?" has its question open (card B part 2: only that one looks for a place nearby). */
+  onOpenCheckChange?: (reviewItemId: string | null) => void;
   /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?". */
   scrollToFirstCheck?: number;
   /** The request was used, so a List shown again later does not jump. */
@@ -134,6 +137,9 @@ export function CalendarListView({
   // back to the day or the row coming back does not reopen it (Codex r2 on #582).
   const shownOpenCheckId = openCheckId && checkRows.some((row) => row.id === openCheckId) ? openCheckId : null;
   if (openCheckId && !shownOpenCheckId) setOpenCheckId(null);
+  useEffect(() => {
+    onOpenCheckChange?.(shownOpenCheckId);
+  }, [onOpenCheckChange, shownOpenCheckId]);
   // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
   // A request stays pending until its "?" has laid out, then is used once (Codex r1 on #573): a List
   // mounting fresh from Grid, a day change or places arriving later all still land on it. "N to check"

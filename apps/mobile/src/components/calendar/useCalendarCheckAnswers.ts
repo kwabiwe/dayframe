@@ -5,14 +5,18 @@ import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
-import { reviewAnswerMutation } from "../../lib/reviewAnswer";
+import { reviewAnswerMutation, type ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
 
 /** A held answer, with the account that gave it. */
-type HeldAnswer = ReviewDeckHeldDecision & { owner: string | null };
+type HeldAnswer = ReviewDeckHeldDecision & {
+  owner: string | null;
+  /** The Apple place a Yes names (card B part 2): recorded there once. */
+  venue?: ReviewAnswerVenue | null;
+};
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
 type Saving = { owner: string | null; ids: ReadonlySet<string>; awaiting: ReadonlySet<string> };
 /** Copies brought back (Undo, a failed or refused save) for suggestions the loaded data no longer lists. */
@@ -216,7 +220,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     void enqueueReviewMutation({
       bootstrap: current,
       item,
-      mutation: reviewAnswerMutation(item, decision.logged, { outingMemberIds: members.length ? ids.slice(1) : undefined }),
+      mutation: reviewAnswerMutation(item, decision.logged, {
+        outingMemberIds: members.length ? ids.slice(1) : undefined,
+        venue: (decision as HeldAnswer).venue ?? null
+      }),
       clientMutationId: createReviewClientMutationId(),
       ...(members.length ? { affectedItems: affected } : {})
     }).then(() => {
@@ -285,7 +292,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   }, [hold]);
 
   /** "Log it" (true) or "Skip" (false) on a "?"; a new answer saves the one held before it. */
-  const answer = useCallback((itemId: string, logged: boolean) => {
+  const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null) => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return;
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
@@ -326,6 +333,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       seconds: 0,
       proposal: reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
+      ...(logged && venue && !members.length ? { venue } : {}),
       ...(members.length && outingKey ? {
         outing: { key: outingKey, members: members.map((member) => ({ key: member.id, itemId: member.id, proposal: reviewDeckProposalSignature(member) })) }
       } : {})

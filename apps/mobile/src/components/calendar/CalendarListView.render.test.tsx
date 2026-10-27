@@ -427,3 +427,19 @@ describe("CalendarListView modes line (card D item 12)", () => {
 });
 
 
+
+describe("CalendarListView's open question (card B part 2)", () => {
+  it("says which question is open, so only that one looks for a place nearby", () => {
+    const onOpenCheckChange = vi.fn();
+    const { tree } = render({
+      checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
+      checkTitles: new Map([["c-place", "Unknown place"]]),
+      checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheckChange
+    });
+    expect(onOpenCheckChange).toHaveBeenLastCalledWith(null);
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    expect(onOpenCheckChange).toHaveBeenLastCalledWith("c-place");
+  });
+});

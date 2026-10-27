@@ -70,6 +70,20 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     });
   });
 
+  it("asks about the Apple place guessed nearby, with its street and times, and Yes records it there once (card B part 2)", () => {
+    const venue = { name: "Exampleton Bakery", street: "12 Example Street", applePlaceId: "I1234567890ABCDEF" };
+    const unnamed = { ...locationV2, title: "Unknown place" };
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue })).toEqual({
+      question: "Visited Exampleton Bakery?", detail: "12 Example Street · 10:00–11:30", logLabel: "Yes", skipLabel: "Not now",
+      more: true, moreLabel: "Edit", opens: false
+    });
+    expect(reviewAnswerMutation(unnamed, true, { venue })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" });
+    expect(reviewAnswerMutation(unnamed, true, { venue: { ...venue, applePlaceId: null } })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery" });
+    // Not now leaves it, as ever; an outing keeps its own question and answer.
+    expect(reviewAnswerMutation(unnamed, false, { venue })).toEqual({ action: "ignore_once_location" });
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true }).question).toBe("Where were you?");
+  });
+
   it("asks Apple Health in its own words", () => {
     expect(reviewAnswerQuestion(item({ eventType: "health_sleep_import", title: "Sleep" }), "24h")).toMatchObject({
       question: "Log your sleep, 10:00–11:30?", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false

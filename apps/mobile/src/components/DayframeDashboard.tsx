@@ -249,6 +249,7 @@ import {
 import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -1953,14 +1954,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
-  const calendarChecks = useMemo(() => {
+  // The open suggestions the List asks about, and the outings it folds (their trips asked with their stay).
+  const calendarCheckBase = useMemo(() => {
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
     // answers held for Undo or saving (part 3b).
     const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
       && !checkAnswers.hiddenIds.has(item.id));
+    return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, locallyDecidedIds, reviewSyncStateIds]);
+  // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
+  const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);
+  const openCalendarCheck = openCalendarCheckId
+    ? shownCalendarData?.reviewItems.find((item) => item.id === openCalendarCheckId) ?? null
+    : null;
+  const openCheckVenue = useCheckVenueGuess({
+    item: openCalendarCheck,
+    outing: Boolean(openCalendarCheck?.id && calendarCheckBase.outings.has(openCalendarCheck.id)),
+    owner: authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null
+  });
+  const calendarChecks = useMemo(() => {
     // An outing is folded, asked once on its stay, counted and saved by one map: the deck's grouping and
     // eligibility (Codex r2 on #582).
-    const { outings, folded } = calendarCheckOutings(open, reviewSyncStateIds);
+    const { open, outings, folded } = calendarCheckBase;
     // A suggestion without a start still sits on its place's row; it has no row, or count, of its own.
     const items = open.filter((item) => !folded.has(item.id) && (item.suggestedStartedAt || typeof item.rawPayload?.clientSegmentId === "string"));
     return {
@@ -1973,10 +1988,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
       questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, {
         outing: outings.has(item.id),
-        pendingChange: reviewSyncStateIds.has(item.id)
+        pendingChange: reviewSyncStateIds.has(item.id),
+        venue: item.id === openCalendarCheckId ? openCheckVenue.venue : null
       })] as const))
     };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, clockFormat, locallyDecidedIds, reviewSyncStateIds]);
+  }, [calendarCheckBase, clockFormat, reviewSyncStateIds, openCalendarCheckId, openCheckVenue.venue]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
   const checkCounts = useMemo(() => {
@@ -3632,7 +3648,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
                   // Without a backend identity the outbox's record is not read here, so an answer could never
                   // hand over: there a "?" opens the suggestion instead (Codex r9 on #582).
-                  onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}
+                  onAnswerCheck={scopedOwnerKey
+                    // Yes to "Visited {Apple place}?" records it there once (card B part 2).
+                    ? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)
+                    : undefined}
+                  onOpenCheckChange={setOpenCalendarCheckId}
                   // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
                   onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(
                     shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
