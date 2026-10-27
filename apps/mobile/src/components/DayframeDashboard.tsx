@@ -2643,15 +2643,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           transitionToSignedOut();
           return;
         }
-        const current = latestData.current;
-        if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
+        // Feedback belongs to the account that made the edit, checked again after every wait.
+        const ownerCurrent = () => {
+          const current = latestData.current;
+          return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
+        };
+        if (!ownerCurrent()) return;
         // Any rejection reloads, so its block returns as it was; only this edit's own rejection
         // alerts, as older sync issues stay in Settings › Sync help.
         const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
+        if (!ownerCurrent()) return;
+        if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
           await loadRef.current({ silent: true });
         }
-        if (rejected) {
+        if (rejected && ownerCurrent()) {
           Alert.alert(
             "Change not saved",
             "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
