@@ -93,6 +93,21 @@ describe("trip legs, part 2 (location v4 step 7)", () => {
     expect(legs(mixed, [], 17).find((leg) => leg.unobserved)).toMatchObject({ mode: "underground", confidence: "unsure", runnerUp: "train" });
   });
 
+  it("reads each silence by its own anchors (Codex r1 on #590)", () => {
+    // Rail station → Underground station, a wait there, Underground station → rail station: either, not a train.
+    const [tube, rail] = mixedPair();
+    const other = packed.find((station) => station.kind === "r" && station !== rail && !nearestStation(station, ["underground"], config.tripStationRadiusMeters) &&
+      distanceMeters(station, tube) >= 6_000 && distanceMeters(station, tube) <= 12_000)!;
+    const there = [reading(0, rail, 1.2), reading(13, tube, 0), reading(15, tube, 0), reading(28, other, 1.2)];
+    expect(legs(there, [], 28).filter((leg) => leg.unobserved).map(({ mode, confidence, runnerUp }) => ({ mode, confidence, runnerUp })))
+      .toEqual([{ mode: "underground", confidence: "unsure", runnerUp: "train" }]);
+    // A silence between rail stations inside a longer trip (walks either side): a train.
+    const [from, to] = pairOf("r", ["underground"]);
+    const padded = [reading(1, toward(from, to, -0.01), 1.3), reading(3, from, 1.2), reading(16, to, 1.2), reading(18, toward(to, from, -0.01), 1.3)];
+    expect(legs(padded, [[0, "walking"], [3, "unknown"], [16, "walking"]], 20).find((leg) => leg.unobserved))
+      .toMatchObject({ mode: "train", confidence: "likely" });
+  });
+
   it("never guesses a mode from a silence alone: without a station near both ends it joins the leg around it (card A, 24 Oct)", () => {
     // Two drives with a 1.8 km silence between them, beyond the northernmost bundled station: one drive.
     const north = packed.reduce((best, station) => station.latitude > best.latitude ? station : best);

@@ -53,7 +53,7 @@ import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListR
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { hasV2Evidence, reviewPicture } from "@/lib/review-deck";
+import { hasV2Evidence } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
@@ -333,9 +333,14 @@ export function EntriesTable({
   const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
   // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
   // arrive after the bootstrap (Codex r1 on #572).
-  const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
+  const [focusedCheck, setOpenCheck] = useState<string | null>(null);
   // A trip's editor under its question ("Edit", card A); one at a time, closed with its question.
   const [editingCheck, setEditingCheck] = useState<string | null>(null);
+  /** Opening, closing or answering a question closes any trip editor (Codex r1 on #590). */
+  const setFocusedCheck = (next: string | null | ((current: string | null) => string | null)) => {
+    setOpenCheck(next);
+    setEditingCheck(null);
+  };
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   // One timeline per shown day: the day's location read, or (without it) an empty day so its checks still
   // show on rows of their own (Codex r1 on #568).
@@ -534,15 +539,15 @@ export function EntriesTable({
               <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
                 onClose={() => applyTimelineRegroup(() => setEditingCheck(null))}
                 onResolved={() => {
-                  applyTimelineRegroup(() => {
-                    setEditingCheck(null);
-                    setFocusedCheck(null);
-                  });
+                  // Saved in the editor: as an answer, focus goes to the next "?" down the List.
+                  const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
+                  applyTimelineRegroup(() => setFocusedCheck(null));
+                  focusCheck(following?.key ?? null);
                   void onChanged?.();
                 }}
                 reviewItemId={item.id} />
             ) : undefined}
-            onEdit={reviewPicture(item) === "commute" && hasV2Evidence(item)
+            onEdit={item.eventType === "commute_detected" && hasV2Evidence(item)
               ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
             onAnswer={(kind) => {
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).

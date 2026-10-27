@@ -144,11 +144,28 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(clientFetch.mock.calls.some(([url]) => url === `/api/review/${TRIP}/location-evidence`)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Close location evidence" }));
     expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
+    // Focus goes back to Edit (Codex r1 on #590).
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit" }));
+    // Closing the question closes its editor: reopening it shows the question alone (Codex r1 on #590).
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("false");
     // Yes logs it as the deck's Log it does.
     fireEvent.click(screen.getByRole("button", { name: "Yes" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     const posted = clientFetch.mock.calls.find(([url, init]) => url === `/api/review/${TRIP}` && init?.body);
     expect(JSON.parse(posted![1].body).mutation).toEqual({ action: "confirm" });
+  });
+
+  it("asks a round trip from a place as a trip too, with Yes and Edit (Codex r1 on #590)", () => {
+    const round = { ...reviewItems[1], title: "Getting around", rawPayload: { clientSegmentId: "seg-trip", qualificationReason: "same_place_outing" } };
+    render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], round, reviewItems[2]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
+    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
   it("moves from one check to the next with the chip", async () => {

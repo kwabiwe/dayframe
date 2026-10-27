@@ -29,6 +29,7 @@ import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, Tr
  */
 
 type Label = MotionTravelMode | "still" | "unseen";
+type GapStations = "underground" | "rail" | "mixed";
 type SpeedClass = "still" | "foot" | "mid" | "vehicle";
 type Slice = {
   fromMs: number;
@@ -175,8 +176,13 @@ export function deriveTripLegs({
   const broadTimes = broadReadingTimes.filter((atMs) => atMs >= startMs && atMs <= endMs).sort((a, b) => a - b);
   let observedFrom = 0;
   let broadFrom = 0;
-  const stationNear = (point: { latitude: number; longitude: number }) =>
-    config.tripStationsEnabled && nearestStation(point, ["underground", "rail"], config.tripStationRadiusMeters) != null;
+  const near = (point: { latitude: number; longitude: number }, kinds: readonly StationKind[]) =>
+    config.tripStationsEnabled && nearestStation(point, kinds, config.tripStationRadiusMeters) != null;
+  /** What a silence's two anchors are near: Underground stations, rail stations, one of each, or no station at one end. */
+  const gapStations = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): GapStations | null =>
+    near(a, ["underground"]) && near(b, ["underground"]) ? "underground"
+      : near(a, ["rail"]) && near(b, ["rail"]) ? "rail"
+        : near(a, ["underground", "rail"]) && near(b, ["underground", "rail"]) ? "mixed" : null;
   // Unseen stretches: nothing much observed between two distant genuine fixes, at train or Underground speed.
   const unseen = fixes.slice(1).flatMap((next, index) => {
     const before = fixes[index];
@@ -191,10 +197,10 @@ export function deriveTripLegs({
     const mps = meters / (gapMs / 1_000);
     // Underground or train only with a station near both ends (card A, 24 Oct: a 1.8 km silence between
     // two drives read "Underground or train?"): otherwise the gap joins the leg around it.
-    return gapMs >= config.tripUnseenLegMinimumMs && meters >= config.tripUnseenLegMinimumMeters &&
-      mps >= config.tripUnseenLegMinimumSpeedMps && mps <= config.tripUnseenLegMaximumSpeedMps &&
-      stationNear(before.point) && stationNear(next.point)
-      ? [{ fromMs: before.atMs, toMs: next.atMs }] : [];
+    const stations = gapMs >= config.tripUnseenLegMinimumMs && meters >= config.tripUnseenLegMinimumMeters &&
+      mps >= config.tripUnseenLegMinimumSpeedMps && mps <= config.tripUnseenLegMaximumSpeedMps
+      ? gapStations(before.point, next.point) : null;
+    return stations ? [{ fromMs: before.atMs, toMs: next.atMs, stations }] : [];
   });
   // Elementary slices between every change of any input.
   const cuts = [...new Set([startMs, endMs, ...labels.flatMap((item) => [item.fromMs, item.toMs]),
@@ -379,12 +385,13 @@ export function deriveTripLegs({
       const gapToMs = slices[run.last].toMs;
       // Unseen runs merged across a stop keep every gap's anchors in their distance.
       const distance = pathMeters(gapFromMs, gapToMs);
-      // Between Underground stations it is the Underground; between rail stations a train; between one of
-      // each, either (every gap has a station near both ends).
-      if (bothAt(gapFromMs, gapToMs, ["underground"])) {
+      // Each silence by its own two anchors (Codex r1 on #590): all between Underground stations, the
+      // Underground; all between rail stations, a train; otherwise either.
+      const kinds = new Set(unseen.filter((gap) => gap.fromMs < gapToMs && gap.toMs > gapFromMs).map((gap) => gap.stations));
+      if (kinds.size === 1 && kinds.has("underground")) {
         return { startedAt, stoppedAt, mode: "underground", confidence: "sure", unobserved: true, distanceMeters: distance };
       }
-      if (bothAt(gapFromMs, gapToMs, ["rail"])) {
+      if (kinds.size === 1 && kinds.has("rail")) {
         return { startedAt, stoppedAt, mode: "train", confidence: "likely", unobserved: true, distanceMeters: distance };
       }
       return { startedAt, stoppedAt, mode: "underground", confidence: "unsure", runnerUp: "train", unobserved: true, distanceMeters: distance };
@@ -438,7 +445,8 @@ export function deriveTripLegs({
  * Consecutive legs of one mode are one leg (card A, owner feedback 25 Oct: "Underground 52m", not four
  * Underground rows): a silence and a ride between Underground stations, or a train either side of a wait.
  * The merged leg keeps the confidence (and runner-up) of the part that lasted longest, the earlier on a tie,
- * is unobserved only when every part was, and adds up the parts' known distances.
+ * is unobserved only when every part was, and adds up the parts' known distances. A part the person set
+ * makes the leg theirs: sure, set by you, with no runner-up.
  */
 export function mergeSameModeLegs(legs: readonly TripLeg[]): TripLeg[] {
   const merged: TripLeg[] = [];
@@ -451,14 +459,15 @@ export function mergeSameModeLegs(legs: readonly TripLeg[]): TripLeg[] {
       longestMs = legMs;
       continue;
     }
-    const { runnerUp: _runnerUp, unobserved: _unobserved, ...rest } = previous;
+    const { runnerUp: _runnerUp, unobserved: _unobserved, setByYou: _setByYou, ...rest } = previous;
     const lead = legMs > longestMs ? leg : previous;
+    const yours = previous.setByYou || leg.setByYou;
     const distances = [previous.distanceMeters, leg.distanceMeters].filter((value): value is number => value != null);
     merged[merged.length - 1] = {
       ...rest,
       stoppedAt: leg.stoppedAt,
-      confidence: lead.confidence,
-      ...(lead.runnerUp ? { runnerUp: lead.runnerUp } : {}),
+      confidence: yours ? "sure" : lead.confidence,
+      ...(yours ? { setByYou: true as const } : lead.runnerUp ? { runnerUp: lead.runnerUp } : {}),
       ...(previous.unobserved && leg.unobserved ? { unobserved: true as const } : {}),
       distanceMeters: distances.length ? distances.reduce((sum, value) => sum + value, 0) : null
     };

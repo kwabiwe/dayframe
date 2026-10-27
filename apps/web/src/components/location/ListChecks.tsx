@@ -190,8 +190,17 @@ export function CheckQuestionRow({
   const span = reviewWindow(item);
   const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
   const picture = reviewPicture(item);
-  const trip = picture === "commute";
-  const question = picture === "place"
+  // Every Move is a trip here, a round trip from a place too (Codex r1 on #590).
+  const trip = item.eventType === "commute_detected";
+  const editRef = useRef<HTMLButtonElement>(null);
+  const editing = Boolean(editor);
+  const wasEditing = useRef(editing);
+  // Closing the editor gives focus back to Edit (Codex r1 on #590).
+  useEffect(() => {
+    if (wasEditing.current && !editing) editRef.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+  const question = !trip && picture === "place"
     ? `Where were you${when ? `, ${when}` : ""}?`
     : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
   const detail = span ? `${formatDuration(Math.round((span.stopMs - span.startMs) / 1000))} · ${reviewSourceLabel(picture)}` : reviewSourceLabel(picture);
@@ -209,7 +218,7 @@ export function CheckQuestionRow({
               {trip ? "Yes" : `Log ${reviewDefaultName(item)}`}
             </button>
             {trip && onEdit ? (
-              <button aria-expanded={Boolean(editor)} className="ui-button ui-button-secondary is-compact" onClick={onEdit} type="button">Edit</button>
+              <button aria-expanded={editing} className="ui-button ui-button-secondary is-compact" onClick={onEdit} ref={editRef} type="button">Edit</button>
             ) : null}
             {onPickPlace ? <button className="ui-button ui-button-secondary is-compact" onClick={onPickPlace} type="button">Pick a place…</button> : null}
             <button className="ui-button ui-button-ghost is-compact" onClick={() => onAnswer("skip")} type="button">Not now</button>

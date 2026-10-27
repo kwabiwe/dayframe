@@ -84,6 +84,27 @@ describe("timeline corrections (location v4 step 11)", () => {
       unobserved: true, distanceMeters: 9_000, setByYou: true }]);
   });
 
+  it("sets the mode only over its own span when consecutive legs of one mode are one leg (card A; Codex r1 on #590)", () => {
+    // A correction saved on the first of two Underground legs, 60–70, after the engine merged them into 60–90.
+    const merged = [trip("m", 60, 90, [{ startedAt: at(60), stoppedAt: at(90), mode: "underground", confidence: "sure", unobserved: true, distanceMeters: 9_000 }])];
+    const [corrected] = applyTimelineCorrections(merged, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 70)], NOW);
+    expect((corrected as CommuteSegment).tripLegs).toEqual([
+      { startedAt: at(60), stoppedAt: at(70), mode: "bus", confidence: "sure", unobserved: true, distanceMeters: 3_000, setByYou: true },
+      { startedAt: at(70), stoppedAt: at(90), mode: "underground", confidence: "sure", unobserved: true, distanceMeters: 6_000 }
+    ]);
+    // Two corrections on its two parts both hold.
+    const [both] = applyTimelineCorrections(merged, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 70, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "train" } }, 70, 90, 2)], NOW);
+    expect((both as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt }) => [mode, startedAt, stoppedAt]))
+      .toEqual([["bus", at(60), at(70)], ["train", at(70), at(90)]]);
+  });
+
+  it("makes a corrected leg one leg with a neighbour of the same mode, set by you", () => {
+    const result = applyTimelineCorrections(segments, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70)], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs)
+      .toEqual([{ startedAt: at(60), stoppedAt: at(90), mode: "automotive", confidence: "sure", distanceMeters: 9_700, setByYou: true }]);
+  });
+
   it("finds each correction's item among the engine's own spans, so a shortened item is still found (Codex r1 on #566)", () => {
     const result = applyTimelineCorrections(segments, [
       correction({ subject: "place", kind: "times", target: { startedAt: at(0), stoppedAt: at(10) } }, 0, 60, 1),

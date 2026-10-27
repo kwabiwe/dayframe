@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mergeSameModeLegs } from "./legs";
 import type { CommuteSegment, LocationSegment, StaySegment, TripLeg, TripLegMode } from "./types";
 
 /**
@@ -88,16 +89,33 @@ function placeMatchKindFor(target: TimelineCorrection["target"]): StaySegment["p
   return target.placeId ? "saved" : target.learnedPlaceId ? "learned" : "unknown";
 }
 
-/** A trip's leg with the person's mode: the leg overlapping the corrected span most, its other fields kept. */
+/** Part of a leg, [fromMs, toMs] inside it, with its share of the leg's distance. */
+function legPart(leg: TripLeg, fromMs: number, toMs: number): TripLeg {
+  const total = ms(leg.stoppedAt) - ms(leg.startedAt);
+  return { ...leg, startedAt: new Date(fromMs).toISOString(), stoppedAt: new Date(toMs).toISOString(),
+    distanceMeters: leg.distanceMeters == null || !(total > 0) ? leg.distanceMeters : Math.round(leg.distanceMeters * (toMs - fromMs) / total) };
+}
+
+/**
+ * A trip's leg with the person's mode: the leg overlapping the corrected span most, its other fields kept.
+ * A leg wider than the span (consecutive legs of one mode are one leg, card A) takes the mode only over the
+ * span, clamped to the leg; the rest keeps the engine's mode (Codex r1 on #590).
+ */
 function legsWithMode(legs: readonly TripLeg[] | undefined, correction: TimelineCorrection): TripLeg[] | undefined {
   if (!legs?.length || !correction.target.mode) return legs ? [...legs] : undefined;
   const leg = bestOverlap(legs, correction, Number.POSITIVE_INFINITY);
   if (!leg) return [...legs];
-  return legs.map((other) => {
-    if (other !== leg) return other;
-    const { runnerUp: _runnerUp, ...rest } = other;
-    return { ...rest, mode: correction.target.mode!, confidence: "sure", setByYou: true };
-  });
+  const legFrom = ms(leg.startedAt);
+  const legTo = ms(leg.stoppedAt);
+  const from = Math.max(legFrom, ms(correction.spanStartedAt));
+  const to = Math.min(legTo, ms(correction.spanStoppedAt));
+  const { runnerUp: _runnerUp, ...rest } = legPart(leg, from, to);
+  const corrected: TripLeg = { ...rest, mode: correction.target.mode, confidence: "sure", setByYou: true };
+  return legs.flatMap((other) => other !== leg ? [other] : [
+    ...(from > legFrom ? [legPart(leg, legFrom, from)] : []),
+    corrected,
+    ...(to < legTo ? [legPart(leg, to, legTo)] : [])
+  ]);
 }
 
 /**
@@ -149,6 +167,10 @@ export function applyTimelineCorrections(segments: readonly LocationSegment[], c
       if (!engine || !trip?.tripLegs?.length) continue;
       trips.set(engine, { ...trip, tripLegs: legsWithMode(trip.tripLegs, correction) });
     }
+  }
+  // A corrected mode can match the leg beside it: they are one leg too.
+  for (const [engine, trip] of trips) {
+    if (trip?.tripLegs && trip.tripLegs !== engine.tripLegs) trips.set(engine, { ...trip, tripLegs: mergeSameModeLegs(trip.tripLegs) });
   }
   const out: LocationSegment[] = [...stays.values(), ...[...trips.values()].filter((trip): trip is CommuteSegment => trip != null)];
   return out.sort((a, b) => ms(a.startedAt) - ms(b.startedAt) || a.kind.localeCompare(b.kind));
