@@ -43,6 +43,14 @@ describe("splitting a block (card G)", () => {
     expect(ids[0]).toBe(ids[1]);
     const gone = vi.fn<Fetcher>(async () => { throw new TypeError("Failed to fetch"); });
     expect(await splitTimeEntry(gone, block(), ms("2026-03-02T10:30:00.000Z"))).toMatchObject({ ok: false, changed: true });
+    // A server error may follow a commit: the same command once more, then an unknown outcome (Codex r2 on #596).
+    const lost = vi.fn<Fetcher>().mockResolvedValueOnce(new Response("", { status: 502 })).mockResolvedValueOnce(ok());
+    expect(await duplicateTimeEntry(lost, block())).toEqual({ ok: true });
+    const lostIds = lost.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["X-Dayframe-Client-Command-Id"]);
+    expect(lostIds[0]).toBe(lostIds[1]);
+    const down = vi.fn<Fetcher>(async () => new Response("", { status: 504 }));
+    expect(await duplicateTimeEntry(down, block())).toMatchObject({ ok: false, changed: true });
+    expect(down).toHaveBeenCalledTimes(2);
   });
 
   it("says when the block changed elsewhere, so the day shows again, and passes a refusal on", async () => {

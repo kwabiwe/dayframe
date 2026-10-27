@@ -6453,6 +6453,8 @@ dialog.ui-dialog.df-range-custom {
 /* Each half's label centred in its half (it meets the line only when that half is a few minutes). */
 .calendar-compact-split-half.is-first { top: max(2px, calc(var(--split-y) / 2 - 9px)); }
 .calendar-compact-split-half.is-second { top: min(calc(100% - 20px), calc(var(--split-y) + (100% - var(--split-y)) / 2 - 9px)); }
+.calendar-compact-split-half.is-first.is-beside { top: calc(var(--split-y) + 8px); }
+.calendar-compact-split-half.is-second.is-beside { top: calc(var(--split-y) - 26px); }
 
 /* The line, with a grip at each end. */
 .calendar-compact-split-mark {

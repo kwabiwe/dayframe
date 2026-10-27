@@ -114,7 +114,7 @@ describe("POST /api/time-entries", () => {
   it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     const { TimeEntryConflictError, TimeEntryValidationError } = await import("@/lib/event-service");
-    mocks.splitFinishedEntry.mockRejectedValueOnce(new TimeEntryConflictError("changed"));
+    mocks.splitFinishedEntry.mockRejectedValueOnce(new TimeEntryConflictError());
     const conflict = await POST(jsonRequest({ mode: "split", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toMatchObject({ code: "time_entry_details_conflict", entry: { id: entryId } });

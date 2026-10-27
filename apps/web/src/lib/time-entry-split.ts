@@ -43,23 +43,27 @@ export type BlockMutationOutcome = { ok: true } | { ok: false; error: string; ch
 
 const CHANGED_ELSEWHERE = "This block changed somewhere else. Open it again to see it as it is now.";
 
+const UNKNOWN = "Couldn't confirm this with Dayframe, so it may or may not have saved. Check the day before trying again.";
+
 async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string): Promise<BlockMutationOutcome> {
   const init: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: `web-${body.mode}-${crypto.randomUUID()}` },
     body: JSON.stringify(body)
   };
-  let response: Response;
-  try {
-    response = await fetcher("/api/time-entries", init);
-  } catch {
-    // The connection dropped: the same command again is safe (the server answers a repeat with what it did).
+  // A dropped connection or a server error (5xx) may follow a commit: the same command once more is safe, as
+  // the server answers a repeat with what it already did (Codex r1 and r2 on #596).
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       response = await fetcher("/api/time-entries", init);
     } catch {
-      return { ok: false, error: "Couldn't reach Dayframe, so this may not have saved. Check the day before trying again.", changed: true };
+      response = null;
+      continue;
     }
+    if (response.status < 500) break;
   }
+  if (!response || response.status >= 500) return { ok: false, error: UNKNOWN, changed: true };
   if (response.ok) return { ok: true };
   if (response.status === 409) return { ok: false, error: CHANGED_ELSEWHERE, changed: true };
   const json = await response.json().catch(() => null) as { error?: unknown } | null;

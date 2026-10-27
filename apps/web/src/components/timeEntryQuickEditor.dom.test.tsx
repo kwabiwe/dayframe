@@ -91,6 +91,17 @@ describe("TimeEntryQuickEditorModal", () => {
     expect((screen.getByRole("button", { name: /^Split / }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("closes the description's suggestions when Split opens, so they never sit over its row (card G)", async () => {
+    const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
+    render(createElement(TimeEntryQuickEditorModal, {
+      ...modalProps({ sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, tagNames: [], tags: [] }) }), onSplit
+    }));
+    expect(await screen.findByRole("listbox", { name: "Suggestions" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Split / }));
+    expect(screen.getByRole("slider", { name: "Split at" })).toBeTruthy();
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+  });
+
   it("closes only the split row on Escape from any of its controls, and never splits over unsaved edits (Codex r1 on #596)", async () => {
     const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
     const onClose = vi.fn();

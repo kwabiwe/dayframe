@@ -565,6 +565,8 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   function openSplit() {
     if (!bounds || busyRef.current) return;
     setSplitAtMs((current) => current == null ? defaultSplit(bounds) : null);
+    // The description's suggestions would sit over the split row (it opens above the fields).
+    setSuggestionsOpen(false);
     setError(null);
   }
 
@@ -920,7 +922,10 @@ export function TimeEntryQuickEditorPanel({
           (@starting-style) and kept until its close has finished, so the fields below move, not jump. */}
       {splitShownAtMs != null && controller.splitBounds ? (
         <div className="calendar-compact-split-wrap" data-open={splitOpen} inert={!splitOpen}
-          onTransitionEnd={(event) => { if (event.target === event.currentTarget && !splitOpen) setSplitShownAtMs(null); }}>
+          onTransitionEnd={(event) => {
+            // The height ends last (the fade is shorter): only then is the row gone (Codex r2 on #596).
+            if (event.target === event.currentTarget && event.propertyName === "grid-template-rows" && !splitOpen) setSplitShownAtMs(null);
+          }}>
           <div className="calendar-compact-split-body">
             <SplitLine bounds={controller.splitBounds} atMs={controller.splitAtMs ?? splitShownAtMs} canConfirm={controller.canSplit} clock={clock}
               color={controller.selectedCategory?.color} colorName={controller.selectedCategory?.name} disabled={controlsDisabled}
@@ -1313,6 +1318,9 @@ function formatEyebrowDate(value: string) {
  * move it a minute at a time), both halves as they will be, Split and Keep as one. It appears at once in the
  * editor (no movement of its own); focus goes to the line, and back to Split when it closes.
  */
+/** The share of the bar a half needs to hold its label (about 26 px of 144). */
+const SPLIT_LABEL_ROOM = 0.14;
+
 function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled, onCancel, onConfirm, onMove, open }: {
   atMs: number;
   bounds: SplitBounds;
@@ -1343,10 +1351,11 @@ function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled
           half's times inside it, updating as the line moves (card G; Toggl's "Split time log"). */}
       <div className="calendar-compact-split-bar"
         style={{ ...(color ? blockStyle(color, colorName) : {}), "--split-at": String(share) } as CSSProperties}>
-        <span aria-hidden="true" className="calendar-compact-split-half is-first">
+        {/* A half too short for its label shows it just past the line instead (Codex r2 on #596). */}
+        <span aria-hidden="true" className={`calendar-compact-split-half is-first${share < SPLIT_LABEL_ROOM ? " is-beside" : ""}`}>
           {minutes(bounds.startMs, atMs)} · {time(bounds.startMs)}–{time(atMs)}
         </span>
-        <span aria-hidden="true" className="calendar-compact-split-half is-second">
+        <span aria-hidden="true" className={`calendar-compact-split-half is-second${share > 1 - SPLIT_LABEL_ROOM ? " is-beside" : ""}`}>
           {minutes(atMs, bounds.stopMs)} · {time(atMs)}–{time(bounds.stopMs)}
         </span>
         <span aria-hidden="true" className="calendar-compact-split-mark" />
