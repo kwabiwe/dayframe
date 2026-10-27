@@ -6382,6 +6382,71 @@ dialog.ui-dialog.df-range-custom {
   padding: 12px var(--calendar-compact-horizontal-inset);
 }
 
+/* Card G: Split a block. Its time bar, split at a line the person drags (a minute-step slider), the two
+   halves under it, then Split / Cancel. Neutral surfaces; the line uses the text colour; the global
+   neutral focus ring marks the slider. */
+.calendar-compact-split {
+  display: grid;
+  gap: 8px;
+  padding: 12px var(--calendar-compact-horizontal-inset) 0;
+}
+
+.calendar-compact-split-bar {
+  position: relative;
+  height: 44px;
+  border-radius: 10px;
+  background:
+    linear-gradient(to right, var(--surface-muted) 0 var(--split-at), var(--surface-inset) var(--split-at) 100%);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.calendar-compact-split-line {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.calendar-compact-split-line::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+.calendar-compact-split-line::-moz-range-track { height: 100%; background: transparent; }
+
+.calendar-compact-split-line::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 44px;
+  border-radius: 2px;
+  background: var(--text-primary);
+}
+
+.calendar-compact-split-line::-moz-range-thumb {
+  width: 4px;
+  height: 44px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--text-primary);
+}
+
+.calendar-compact-split-halves {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-compact-split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .calendar-compact-editor-fields label,
 .calendar-compact-editor-description {
   display: grid;
@@ -12491,6 +12556,24 @@ dialog.ui-dialog.df-palette {
 .calendar-compact-editor-icons > .is-close:not(:first-child) {
   /* 8 px plus the row's 2 px gap: 10 px before ✕ (Codex r1 on #505). */
   margin-left: 8px;
+}
+
+/* Card G: with Split and Duplicate a finished block has five icons. On a phone that leaves the heading
+   no room, so the icons take their own row at the top right and the heading runs full width under them. */
+@media (max-width: 480px) {
+  .calendar-compact-editor-header.df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) > div:first-child {
+    order: 1;
+    flex: 1 0 100%;
+  }
+
+  .df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) .calendar-compact-editor-icons {
+    margin-left: auto;
+  }
 }
 
 .calendar-compact-editor-panel .calendar-compact-editor-fields {

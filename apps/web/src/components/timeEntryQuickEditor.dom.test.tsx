@@ -43,6 +43,51 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 
+  it("splits a finished block at a line moved a minute at a time, and duplicates it (card G)", async () => {
+    const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
+    const onDuplicate = vi.fn(async () => ({ ok: true as const }));
+    const onClose = vi.fn();
+    render(createElement(TimeEntryQuickEditorModal, { ...modalProps({ onClose }), onSplit, onDuplicate }));
+    await screen.findByTestId("time-entry-quick-editor");
+    const split = screen.getByRole("button", { name: "Split Plan release" });
+    expect(split.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(split);
+    expect(split.getAttribute("aria-expanded")).toBe("true");
+    const line = screen.getByRole("slider", { name: "Split at" }) as HTMLInputElement;
+    // The line starts in the middle, has focus, and moves on whole minutes, never closer than a minute to an end.
+    await waitFor(() => expect(document.activeElement).toBe(line));
+    expect(Number(line.value)).toBe(Date.parse("2026-08-04T09:30:00.000Z"));
+    expect(Number(line.step)).toBe(60_000);
+    expect(Number(line.min)).toBe(Date.parse("2026-08-04T09:01:00.000Z"));
+    expect(Number(line.max)).toBe(Date.parse("2026-08-04T09:59:00.000Z"));
+    fireEvent.change(line, { target: { value: String(Date.parse("2026-08-04T09:24:00.000Z")) } });
+    expect(screen.getByRole("group", { name: "Split this block" }).textContent).toMatch(/24m.*36m/);
+    // "Keep as one" closes it and gives focus back to Split.
+    fireEvent.click(screen.getByRole("button", { name: "Keep as one" }));
+    expect(screen.queryByRole("slider", { name: "Split at" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(split));
+    fireEvent.click(split);
+    fireEvent.change(screen.getByRole("slider", { name: "Split at" }), { target: { value: String(Date.parse("2026-08-04T09:40:00.000Z")) } });
+    fireEvent.click(screen.getByRole("button", { name: /^Split at / }));
+    await waitFor(() => expect(onSplit).toHaveBeenCalledWith(Date.parse("2026-08-04T09:40:00.000Z")));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    cleanup();
+    render(createElement(TimeEntryQuickEditorModal, { ...modalProps({}), onSplit, onDuplicate }));
+    fireEvent.click(await screen.findByRole("button", { name: "Duplicate Plan release" }));
+    await waitFor(() => expect(onDuplicate).toHaveBeenCalledTimes(1));
+  });
+
+  it("offers no split while a block is running, and keeps it shut while the editor has unsaved changes (card G)", async () => {
+    const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
+    const running = render(createElement(TimeEntryQuickEditorModal, { ...modalProps({ sourceEntry: timeEntry({ stoppedAt: null }) }), onSplit }));
+    await screen.findByTestId("time-entry-quick-editor");
+    expect(screen.queryByRole("button", { name: /^Split / })).toBeNull();
+    running.unmount();
+    render(createElement(TimeEntryQuickEditorModal, { ...modalProps({}), onSplit }));
+    fireEvent.change(await screen.findByLabelText("Description"), { target: { value: "Plan the launch" } });
+    expect((screen.getByRole("button", { name: /^Split / }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("says where an auto-logged visit's block came from, and nothing for other blocks (PRD D17)", async () => {
     const auto = renderModal({ sourceEntry: timeEntry({ source: "location_auto_log", placeName: "Gym" } as Partial<TimeEntryRow>) });
     expect((await screen.findByTestId("time-entry-source")).textContent).toBe("Logged automatically · Gym");
