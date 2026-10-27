@@ -804,9 +804,9 @@ function originCircle(stay: StaySegment, place: SavedPlaceForMatching | null, co
 /**
  * When the device was first clearly away from a stay's place after it ended: the first of two
  * independent accurate readings (more than `MIRROR_WINDOW_MS` apart, so never one observation and its
- * copy) at least `commuteSamePlaceMinimumExcursionMeters`
- * from its circle's centre net of their accuracy, or `LEAVING_MARGIN_METRES` beyond its radius if that is
- * farther. Null when it never was.
+ * copy) at least `commuteSamePlaceMinimumExcursionMeters` from its circle's centre net of their accuracy,
+ * or `LEAVING_MARGIN_METRES` beyond its radius if that is farther, with no sign of being back at the place
+ * between them (both belong to one excursion; Codex r2 on #589). Null when it never was.
  */
 function clearlyAwayFromOriginMs(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
   snapshots: ReadonlySet<ClassifiedEvidence>, config: LocationEngineConfig) {
@@ -814,9 +814,13 @@ function clearlyAwayFromOriginMs(stay: StaySegment, place: SavedPlaceForMatching
   if (!circle) return null;
   let firstMs: number | null = null;
   for (const item of gapEvidence) {
+    if (snapshots.has(item) || item.evidence.isSimulated === true) continue;
+    if (atOrigin(item, stay, circle, config)) {
+      firstMs = null;
+      continue;
+    }
     const point = evidencePoint(item);
-    if (snapshots.has(item) || point == null || !accurateFix(item, config) || item.evidence.isSimulated === true ||
-      evidenceMatchesStay(item, stay)) continue;
+    if (point == null || !accurateFix(item, config) || evidenceMatchesStay(item, stay)) continue;
     if (distanceMeters(circle.centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < circle.awayMetres) continue;
     const atMs = Date.parse(item.evidence.occurredAt);
     if (firstMs == null) firstMs = atMs;
@@ -840,21 +844,24 @@ function stoppedAwayFromOrigin(stay: StaySegment, place: SavedPlaceForMatching |
 }
 
 /**
- * When the device was first back at a stay's place after `afterMs`: a crossing into it or a sign
- * matched to it, a Visit or an accurate fix inside its circle net of accuracy. Null when it never was.
+ * A sign of being at a stay's place: a crossing into it or a sign matched to it, or a Visit or an
+ * accurate fix inside its circle net of accuracy. An exit is leaving, never presence.
  */
+function atOrigin(item: ClassifiedEvidence, stay: StaySegment, circle: ReturnType<typeof originCircle>, config: LocationEngineConfig) {
+  if (item.evidence.kind === "geofence_exit") return false;
+  if (evidenceMatchesStay(item, stay)) return true;
+  const point = evidencePoint(item);
+  if (!circle || !point || !(item.evidence.kind === "visit" || accurateFix(item, config))) return false;
+  return distanceMeters(circle.centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) <= circle.radius;
+}
+
+/** When the device was first back at a stay's place after `afterMs`, or null when it never was. */
 function firstBackAtOriginMs(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
   snapshots: ReadonlySet<ClassifiedEvidence>, afterMs: number, config: LocationEngineConfig) {
   const circle = originCircle(stay, place, config);
-  for (const item of gapEvidence) {
-    const atMs = Date.parse(item.evidence.occurredAt);
-    if (atMs <= afterMs || snapshots.has(item) || item.evidence.isSimulated === true || item.evidence.kind === "geofence_exit") continue;
-    if (evidenceMatchesStay(item, stay)) return atMs;
-    const point = evidencePoint(item);
-    if (!circle || !point || !(item.evidence.kind === "visit" || accurateFix(item, config))) continue;
-    if (distanceMeters(circle.centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) <= circle.radius) return atMs;
-  }
-  return null;
+  const back = gapEvidence.find((item) => Date.parse(item.evidence.occurredAt) > afterMs && !snapshots.has(item) &&
+    item.evidence.isSimulated !== true && atOrigin(item, stay, circle, config));
+  return back ? Date.parse(back.evidence.occurredAt) : null;
 }
 
 /** The catalogue place a known stay matched, or null when it is unknown or absent. */

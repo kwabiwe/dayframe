@@ -121,6 +121,15 @@ describe("a trip starts at departure (card E, 25 Oct)", () => {
     expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
   });
 
+  it("needs both readings away before the pass home, never one before it and one after (Codex r2 on #589)", () => {
+    const input = morning();
+    input.evidence = [...input.evidence.filter((item) => !["stop-1", "back-0", "back-1", "out-2"].includes(item.clientEvidenceId)),
+      fix("after-0", 48.5, { north: 750 }, 8)];
+    const toSchool = commutes(input).filter((trip) => trip.fromPlaceId === HOME_ID && trip.toPlaceId === SCHOOL_ID);
+    expect(toSchool).toHaveLength(1);
+    expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
+  });
+
   it("keeps the trip between its stays: it starts when Home ends at the latest and ends where the shop stay begins", () => {
     const all = segments(morning());
     const stays = all.filter((segment): segment is StaySegment => segment.kind === "stay");
