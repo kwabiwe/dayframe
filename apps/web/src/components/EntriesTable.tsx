@@ -25,6 +25,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { duplicateTimeEntry, splitTimeEntry } from "@/lib/time-entry-split";
 import { timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, ReviewItemRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
@@ -1512,6 +1513,24 @@ export function EntriesTable({
             return outcome;
           }}
           onStartAgain={editingEntry.stoppedAt ? () => continueEntry(editingEntry, "editor") : undefined}
+          onSplit={async (atMs) => {
+            const outcome = await splitTimeEntry(clientFetch, editingEntry, atMs);
+            // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
+            if (outcome.ok || outcome.changed) {
+              await onChanged?.();
+              startTransition(() => router.refresh());
+            }
+            return outcome;
+          }}
+          onDuplicate={async () => {
+            const outcome = await duplicateTimeEntry(clientFetch, editingEntry);
+            // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
+            if (outcome.ok || outcome.changed) {
+              await onChanged?.();
+              startTransition(() => router.refresh());
+            }
+            return outcome;
+          }}
           peerEntries={entries}
           taskSuggestions={shellData?.taskSuggestions ?? []}
           taskSuggestionCandidates={shellData?.taskSuggestionCandidates}

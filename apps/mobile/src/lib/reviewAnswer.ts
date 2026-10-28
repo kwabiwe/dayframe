@@ -8,6 +8,12 @@ import { reviewDeckOutingMutation } from "./reviewDeckOutings";
 import type { ReviewLogAsEdit } from "./reviewLogAs";
 
 /**
+ * An Apple Maps place the iPhone guessed for an unnamed visit (card B part 2): the venue ranker's confident pick
+ * near the stay, its street from Apple's address line, and its Place ID when iOS gives one.
+ */
+export type ReviewAnswerVenue = { name: string; street: string | null; applePlaceId: string | null };
+
+/**
  * What an answer saves. An outing (its Moves' ids) is one `confirm_outing` / `ignore_outing`; "Log it"
  * with a real "Log as" change is `edit_and_confirm`; otherwise Location V2 evidence confirms or ignores
  * once, and every other suggestion accepts or ignores once.
@@ -15,10 +21,15 @@ import type { ReviewLogAsEdit } from "./reviewLogAs";
 export function reviewAnswerMutation(
   item: MobileReviewItem,
   logged: boolean,
-  options: { edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[] } = {}
+  options: { edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null } = {}
 ): ReviewMutation {
   const edit = logged ? options.edit ?? null : null;
   if (options.outingMemberIds?.length) return reviewDeckOutingMutation(options.outingMemberIds, logged, edit);
+  // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
+  // a one-time place, never a saved place or a rule (card B part 2).
+  if (logged && options.venue && hasV2LocationEvidence(item)) {
+    return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}) };
+  }
   if (edit) return { action: "edit_and_confirm", edit };
   if (logged) return hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" };
   return hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" };
@@ -42,7 +53,7 @@ export type ReviewAnswerQuestion = {
 export function reviewAnswerQuestion(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
-  options: { outing?: boolean; pendingChange?: boolean } = {}
+  options: { outing?: boolean; pendingChange?: boolean; venue?: ReviewAnswerVenue | null } = {}
 ): ReviewAnswerQuestion {
   const question = reviewAnswerWords(item, clockFormat, options);
   // A waiting or rejected change of its own: the deck locks the card, so it opens instead (Codex r10 on #582).
@@ -59,7 +70,7 @@ export function reviewAnswerQuestion(
 function reviewAnswerWords(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
-  options: { outing?: boolean }
+  options: { outing?: boolean; venue?: ReviewAnswerVenue | null }
 ): ReviewAnswerQuestion {
   const window = hasSuggestedTimeWindow(item)
     ? `${formatClockTime(new Date(item.suggestedStartedAt!), clockFormat)}–${formatClockTime(new Date(item.suggestedStoppedAt!), clockFormat)}`
@@ -84,6 +95,12 @@ function reviewAnswerWords(
   // A place asks "Visited {guess}?" with its times, or "Where were you?" (card B): Yes confirms the place it
   // names (an outing's trips there and back with it), Edit opens it on its own screen to pick or name another,
   // Not now leaves it. With no guess, only Edit names it.
+  // An unnamed visit with an Apple place the iPhone guessed nearby (card B part 2): "Visited {place}?", its
+  // street and times under it; Yes records it there once.
+  if (!options.outing && options.venue && hasV2LocationEvidence(item)) {
+    return { question: `Visited ${options.venue.name}?`, detail: [options.venue.street, window].filter(Boolean).join(" · ") || null,
+      logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
+  }
   if (options.outing || isLocationReviewItem(item)) {
     const { question, guess } = placeQuestion(item.title);
     const edit = hasV2LocationEvidence(item);

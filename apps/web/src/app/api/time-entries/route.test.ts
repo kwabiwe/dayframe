@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   processActivityEvent: vi.fn(),
   createManualEntry: vi.fn(),
   splitActiveEntry: vi.fn(),
+  splitFinishedEntry: vi.fn(),
+  duplicateFinishedEntry: vi.fn(),
   scheduleLiveActivityNotification: vi.fn()
 }));
 
@@ -23,6 +25,11 @@ vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
   createManualEntry: mocks.createManualEntry,
   splitActiveEntry: mocks.splitActiveEntry,
+  splitFinishedEntry: mocks.splitFinishedEntry,
+  duplicateFinishedEntry: mocks.duplicateFinishedEntry,
+  TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {},
+  TimeEntryConflictError: class TimeEntryConflictError extends Error {},
+  TimeEntryValidationError: class TimeEntryValidationError extends Error {},
   TimerStopBeforeStartError: class TimerStopBeforeStartError extends Error {
     status = 422;
     code = "timer_stop_before_start";
@@ -45,6 +52,8 @@ vi.mock("@/lib/event-service", () => ({
     }
   }
 }));
+
+vi.mock("@/lib/queries", () => ({ getTimeEntryById: vi.fn(async () => ({ id: "11111111-1111-4111-8111-111111111111" })) }));
 
 vi.mock("@/lib/live-activity-post-response", () => ({
   scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
@@ -81,12 +90,46 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("splits or duplicates a finished block by id, fenced and with its command id, and keeps a bare split for the timer (card G)", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: false });
+    const split = await POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": "web-split-1" },
+      body: JSON.stringify({ mode: "split", entryId, splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: "2026-07-04T11:00:00.000Z" })
+    }));
+    expect(split.status).toBe(201);
+    expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
+      { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: "2026-07-04T11:00:00.000Z", clientCommandId: "web-split-1" }, session);
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+    mocks.duplicateFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: true });
+    const duplicate = await POST(jsonRequest({ mode: "duplicate", entryId }));
+    expect(duplicate.status).toBe(200);
+    expect(mocks.duplicateFinishedEntry).toHaveBeenCalledWith(entryId, { expectedUpdatedAt: undefined, clientCommandId: undefined }, session);
+    expect((await POST(jsonRequest({ mode: "duplicate" }))).status).toBe(400);
+    await POST(jsonRequest({ mode: "split" }));
+    expect(mocks.splitActiveEntry).toHaveBeenCalledWith(session);
+  });
+
+  it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const { TimeEntryConflictError, TimeEntryValidationError } = await import("@/lib/event-service");
+    mocks.splitFinishedEntry.mockRejectedValueOnce(new TimeEntryConflictError());
+    const conflict = await POST(jsonRequest({ mode: "split", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "time_entry_details_conflict", entry: { id: entryId } });
+    mocks.duplicateFinishedEntry.mockRejectedValueOnce(new TimeEntryValidationError("That would end in the future."));
+    const future = await POST(jsonRequest({ mode: "duplicate", entryId }));
+    expect(future.status).toBe(422);
+    expect(await future.json()).toEqual({ error: "That would end in the future." });
+  });
+
   it("rejects an unknown mode instead of treating it as a timer start", async () => {
     const response = await POST(jsonRequest({ mode: "restart" }));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, or split."
+      error: "mode must be one of start, stop, manual, split, or duplicate."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();
