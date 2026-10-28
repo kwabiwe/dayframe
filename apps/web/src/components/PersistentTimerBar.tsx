@@ -537,7 +537,14 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
     const swatch = selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined;
     const outcome = await splitActiveTimer(atMs);
-    if (!outcome.ok) return outcome.error;
+    if (!outcome.ok) {
+      // Nothing runs any more (the block went meanwhile): the dialog goes with it, so the reason is a notice.
+      if (!readShellData()?.activeEntry) {
+        setSplitDialogOpen(false);
+        announce(outcome.error);
+      }
+      return outcome.error;
+    }
     setSplitDialogOpen(false);
     // Back to "…" without its tip or ring, so at phone width the tip never covers Stop (owner, 28 Oct 2026).
     window.requestAnimationFrame(() => focusQuietly(timerActionsTriggerRef.current));

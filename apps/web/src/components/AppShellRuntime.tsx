@@ -1075,7 +1075,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
     await mutationGateRef.current.whenIdle();
-    let carried = false;
     const result = await mutationGateRef.current.run(async (): Promise<MutationOutcome> => {
       // Edits typed into the second part and not saved yet would be lost by the join (Codex r2 on #607).
       const shownActive = dataRef.current?.activeEntry;
@@ -1087,20 +1086,25 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       refreshRequestRef.current += 1;
       try {
         const draftAtSend = draftRef.current;
-        carried = false;
+        let carried = false;
         const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
         if (outcome.ok) {
           // Typed while the Undo was on its way: the text goes on to the joined block (saved as its edit), never
           // reset by the change of block (Codex r3 on #607).
-          if (!timerDraftsEqual(draftRef.current, draftAtSend)) {
-            rollbackDraftRef.current = { draft: draftRef.current, entryId: split.entryId };
-            carried = true;
-          }
+          const typed = draftRef.current;
+          carried = !timerDraftsEqual(typed, draftAtSend);
+          if (carried) rollbackDraftRef.current = { draft: typed, entryId: split.entryId };
           // A Stop asked for the second part while the Undo ran stops the joined block (Codex r1 on #607).
           splitSuccessorsRef.current.set(split.newEntryId, split.entryId);
           // Shown joined at once, as the server has it, so a failed reload never leaves the gone part running.
           const shown = dataRef.current;
           if (shown) commitData(applyServerTimerBlocks(shown, outcome.entry ? [outcome.entry] : [], [split.newEntryId]), "optimistic");
+          // Saved here, inside the gate, so a Stop pressed meanwhile waits for it and stops the block with the
+          // text (its autosave may have been turned away while the gate was held) (Codex r4, r5 on #607).
+          const joined = dataRef.current;
+          if (carried && outcome.entry && joined?.activeEntry?.id === split.entryId) {
+            await saveActiveDetails(joined, draftRef.current, timerDraftForEntry(outcome.entry));
+          }
         }
         // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
         if (outcome.ok || outcome.changed) await refresh({ force: true });
@@ -1109,13 +1113,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
-    // The carried text is saved once the gate is free: its autosave may have been turned away while the Undo
-    // held the gate, and nothing would arm it again (Codex r4 on #607).
-    const shown = dataRef.current;
-    if (carried && shown?.activeEntry && serverEntryId(shown.activeEntry.id) === split.entryId
-      && timerDraftEditedFields(draftRef.current, baseFor(shown.activeEntry)).length) {
-      await saveActiveDetails(shown, draftRef.current);
-    }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId]);
 

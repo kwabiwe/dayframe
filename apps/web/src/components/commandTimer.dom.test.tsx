@@ -302,6 +302,23 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     await act(async () => { finish?.({ ok: false, error: "Offline" }); });
   });
 
+  it("says why when the split leaves nothing running: the dialog goes and a notice stays (Codex r5 on #607)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ description: "Plan launch" }), description: "Plan launch" });
+    (runtime.splitActiveTimer as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      (runtime.readShellData as ReturnType<typeof vi.fn>).mockReturnValue({ ...(runtime.shellData as BootstrapData), activeEntry: null });
+      return { ok: false, error: "This block was already split and put back together." };
+    });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm); });
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("already split and put back together");
+  });
+
   it("can't split a block under two minutes yet", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T09:01:30.000Z"));
@@ -344,6 +361,7 @@ function runtimeFixture(overrides: {
     isManualEntryOpen: false,
     isTimerBusy: false,
     openManualEntry: vi.fn(),
+    readShellData: vi.fn(() => data),
     setTimerDraft: vi.fn(),
     shellData: data,
     startTimer: vi.fn().mockResolvedValue({ ok: true }),

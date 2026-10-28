@@ -263,6 +263,51 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${FIRST}` && request.body?.description === "Typed, not saved")).toBe(true));
   });
 
+  it("a Stop pressed while the carried text saves waits for it, then stops the joined block (Codex r5 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    let releasePatch: (() => void) | undefined;
+    const patchPending = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const requests = server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    mocks.clientFetch.mockImplementation(((original) => async (url: string, options?: RequestInit) => {
+      if (url === `/api/time-entries/${FIRST}`) {
+        const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+        requests.push({ url, ...(body ? { body } : {}) });
+        await patchPending;
+        return response({ ok: true, id: FIRST, updatedAt: "2026-08-17T05:01:00.000Z" });
+      }
+      return original(url, options);
+    })(mocks.clientFetch.getMockImplementation()!));
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${FIRST}`)).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(requests.some((request) => request.url === "/api/events")).toBe(false);
+    await act(async () => { releasePatch?.(); await patchPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === "/api/events")).toBe(true));
+    const save = requests.findIndex((request) => request.url === `/api/time-entries/${FIRST}`);
+    const stop = requests.findIndex((request) => request.url === "/api/events");
+    expect(save).toBeLessThan(stop);
+    expect(requests[save].body).toMatchObject({ description: "Typed, not saved" });
+    expect(requests[stop].body).toEqual(expect.objectContaining({ rawPayload: { origin: "web_timer", stopScope: "entry", targetEntryId: FIRST } }));
+  });
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
