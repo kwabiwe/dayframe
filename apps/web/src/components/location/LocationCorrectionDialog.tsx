@@ -321,7 +321,8 @@ export function LocationCorrectionDialog({
       <b>{question.text}</b>
       <div className="location-correction-question-answers">
         {question.yesLabel ? (
-          <Button disabled={busy} onClick={() => { question.onAnswer(true); onClose(); }} variant="primary">{question.yesLabel}</Button>
+          // Card D item 9: the answer is the neutral dark pill; coral stays for Play/Stop and live recording.
+          <button className="ui-button timeline-check-log is-compact" disabled={busy} onClick={() => { question.onAnswer(true); onClose(); }} type="button">{question.yesLabel}</button>
         ) : null}
         <Button disabled={busy} onClick={() => { question.onAnswer(false); onClose(); }}>{question.noLabel}</Button>
       </div>
