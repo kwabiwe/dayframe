@@ -111,7 +111,8 @@ import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
-import { cancelAnswerAfterCorrections, holdAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
+import { cancelAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
+import { waitForItemCorrections } from "@/lib/afterCorrections";
 import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
 import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
@@ -2168,14 +2169,35 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
         yesLabel: question.logLabel ?? null,
         noLabel: question.skipLabel ?? "Not now",
-        onAnswer: (yes) => { checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null); },
-        // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
-        // before the corrections are queued, and goes to the Review outbox only once the server has every one of them.
-        // No Apple place with it: the corrections say where it was.
-        answerAfter: async (yes, ids) => {
-          if (!correctionOwner) throw new Error("No account.");
+        // No changes in the sheet: still never ahead of a correction queued for its place or trip from an earlier Done
+        // (Codex r6 on #610) — the shared registration says whether it waits; with nothing queued it is held at once.
+        onAnswer: (yes) => {
+          const owner = correctionOwner;
+          const venue = check.id === openCalendarCheckId ? openCheckVenue.venue : null;
+          if (!owner || !check.segmentId) {
+            checkAnswers.answer(check.id, yes, venue);
+            return;
+          }
           const id = createReviewClientMutationId();
-          await holdAnswerAfterCorrections(correctionOwner, { id, reviewItemId: check.id, logged: yes, waitsFor: ids });
+          void waitForItemCorrections(owner, { id, itemId: check.segmentId, newIds: [],
+            action: { kind: "answer", reviewItemId: check.id, logged: yes } }).then((record) => {
+            if (!record) {
+              checkAnswers.answer(check.id, yes, venue);
+              return;
+            }
+            if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+          }, () => showTodayNotice("That answer wasn't saved. Try again.", null));
+        },
+        // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
+        // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
+        // to the Review outbox only once the server has every one of them. No Apple place with it: the corrections say
+        // where it was.
+        answerAfter: async (yes, ids) => {
+          if (!correctionOwner || !check.segmentId) throw new Error("No account.");
+          const id = createReviewClientMutationId();
+          const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
+            action: { kind: "answer", reviewItemId: check.id, logged: yes } });
+          if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
               if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);

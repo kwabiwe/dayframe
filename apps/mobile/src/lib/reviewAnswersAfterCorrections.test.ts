@@ -16,6 +16,7 @@ vi.mock("./secure-session", () => ({
 const account = await import("./mobileAccount");
 const outbox = await import("./timelineCorrectionOutbox");
 const answers = await import("./reviewAnswersAfterCorrections");
+const shared = await import("./afterCorrections");
 
 // Codex r2 on #610: synthetic ids only.
 const OWNER_A = { userId: "user-a", workspaceId: "workspace-a" };
@@ -134,6 +135,60 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     expect(result.dropped.map((item) => item.id)).toEqual([C2]);
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
     expect(sent.map((body) => body.kind)).not.toContain("log_place");
+  });
+
+  it("a Yes from a reopened sheet with no new changes waits for the correction queued earlier; its refusal keeps the \"?\" (Codex r6 on #610)", async () => {
+    // A place correction saved offline, still queued.
+    await outbox.enqueueTimelineCorrections(OWNER_A, [correction("seg-a", C1)]);
+    // Reopened, Yes with nothing new: the shared registration makes it wait.
+    const record = await shared.waitForItemCorrections(OWNER_A, { id: "m-yes", itemId: "seg-a", newIds: [],
+      action: { kind: "answer", reviewItemId: "ri-1", logged: true } });
+    expect(record).toMatchObject({ waitsFor: [C1], acknowledged: [] });
+    await answers.commitAnswerAfterCorrections("m-yes");
+    expect((await releaseWith()).release).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", vi.fn(async () => json(409, { error: "This place is already in a block." })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    const { release, dropped } = await releaseWith();
+    expect(release).not.toHaveBeenCalled();
+    expect(dropped.map((item) => item.reviewItemId)).toEqual(["ri-1"]);
+    // With nothing queued for its item, it needn't wait: answered at once.
+    expect(await shared.waitForItemCorrections(OWNER_A, { id: "m-now", itemId: "seg-z", newIds: [],
+      action: { kind: "answer", reviewItemId: "ri-2", logged: false } })).toBeNull();
+  });
+
+  it("registers atomically: an acknowledgement arriving during registration is never lost, and the log still goes (Codex r6 on #610)", async () => {
+    let acknowledging: Promise<void> | null = null;
+    const queue = {
+      readPending: async () => {
+        // The server acknowledges C1 while the queue is being read: its mark waits for the record's write.
+        acknowledging = answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
+        return [{ clientCorrectionId: C1, request: { kind: "place", itemId: "seg-a" } }];
+      },
+      readAcknowledged: () => []
+    };
+    await answers.registerAfterCorrections(OWNER_A, { id: "log-1", reviewItemId: "", logged: true,
+      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [], itemIds: ["seg-a"] }, queue);
+    await acknowledging;
+    expect((await answers.readAnswersAfterCorrections(OWNER_A))[0].acknowledged).toEqual([C1]);
+    await answers.commitAnswerAfterCorrections("log-1");
+    // C1 has left the queue: acknowledged, so the log goes.
+    const release = vi.fn(async (): Promise<Outcome> => "released");
+    await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [], release });
+    expect(release).toHaveBeenCalledWith(expect.objectContaining({ id: "log-1", log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" } }));
+    // Already acknowledged in the queue's memory when registering (still in its stored copy): recorded as such at once.
+    const remembered = await answers.registerAfterCorrections(OWNER_A, { id: "log-2", reviewItemId: "", logged: true, newIds: [], itemIds: ["seg-b"] },
+      { readPending: async () => [{ clientCorrectionId: C2, request: { kind: "times", itemId: "seg-b" } }], readAcknowledged: () => [{ clientCorrectionId: C2 }] });
+    expect(remembered?.acknowledged).toEqual([C2]);
+  });
+
+  it("counts a dependency that just left the queue, still in its memory, as accepted when releasing, never refused (Codex r6 on #610)", async () => {
+    await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-4", reviewItemId: "ri-4", logged: true, waitsFor: [C1] });
+    await answers.commitAnswerAfterCorrections("m-4");
+    const release = vi.fn(async (): Promise<Outcome> => "released");
+    const result = await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [],
+      readAcknowledged: () => [{ clientCorrectionId: C1 }], release });
+    expect(release).toHaveBeenCalledOnce();
+    expect(result.dropped).toEqual([]);
   });
 
   it("is kept on the phone: a relaunch still releases it once its corrections are acknowledged", async () => {

@@ -16,19 +16,13 @@ import { REVIEW_DECK_UNDO_MS } from "../../lib/reviewDeckHold";
 import {
   createTimelineCorrectionId,
   enqueueTimelineCorrections,
-  readAcknowledgedTimelineCorrections,
-  readPendingTimelineCorrections,
   removeTimelineCorrections,
   synchroniseTimelineCorrections,
   type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
-import {
-  cancelAnswerAfterCorrections,
-  commitAnswerAfterCorrections,
-  holdAnswerAfterCorrections,
-  noteTimelineCorrectionAcknowledged
-} from "../../lib/reviewAnswersAfterCorrections";
+import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { waitForItemCorrections } from "../../lib/afterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
 // Each sheet belongs to the account it opened for (Codex r1 on #602).
@@ -314,17 +308,10 @@ export function useLocationCorrections({
     newIds: readonly string[]) => {
     if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
-    const earlier = (await readPendingTimelineCorrections(owner))
-      .filter((item) => item.request.itemId === placeItemId && item.request.kind !== "log_place")
-      .map((item) => item.clientCorrectionId);
-    const waitsFor = [...new Set([...newIds, ...earlier])];
-    if (!waitsFor.length) return null;
+    // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
-    await holdAnswerAfterCorrections(owner, { id, reviewItemId: "", logged: true, log: { itemId: placeItemId, categoryId }, waitsFor });
-    // One acknowledged between the read and the record: marked from the queue's own memory of it, so it never looks
-    // refused.
-    const acknowledgedNow = new Set(readAcknowledgedTimelineCorrections(owner).map((item) => item.clientCorrectionId));
-    for (const earlierId of earlier) if (acknowledgedNow.has(earlierId)) await noteTimelineCorrectionAcknowledged(owner, earlierId);
+    const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId } });
+    if (!record) return null;
     return {
       start: () => {
         logTokens.current += 1;

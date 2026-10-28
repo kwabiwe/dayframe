@@ -13,6 +13,7 @@ import {
 import { enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
 import {
   enqueueTimelineCorrections,
+  readAcknowledgedTimelineCorrections,
   readPendingTimelineCorrections,
   subscribeTimelineCorrectionOutbox,
   synchroniseTimelineCorrections
@@ -93,7 +94,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
         return;
       }
       draining = true;
-      void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections, release: releaseRef.current ?? viaReviewOutbox,
+      void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections,
+        readAcknowledged: (owner) => readAcknowledgedTimelineCorrections(owner), release: releaseRef.current ?? viaReviewOutbox,
         onDropped: (record) => { if (live && record.reviewItemId) droppedRef.current?.(record.reviewItemId); } })
         .catch(() => undefined)
         .finally(() => {

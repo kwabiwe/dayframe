@@ -25,6 +25,7 @@ vi.mock("../../lib/timelineCorrectionOutbox", () => ({
   enqueueTimelineCorrections: outbox.enqueue,
   synchroniseTimelineCorrections: outbox.synchronise,
   readPendingTimelineCorrections: async () => outbox.pending,
+  readAcknowledgedTimelineCorrections: () => [],
   subscribeTimelineCorrectionOutbox: (listener: () => void) => { outbox.listeners.add(listener); return () => outbox.listeners.delete(listener); }
 }));
 const review = vi.hoisted(() => ({ enqueueReviewMutation: vi.fn(async (_input: Record<string, unknown>) => undefined), synchroniseReviewMutations: vi.fn(async () => undefined) }));

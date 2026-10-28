@@ -107,7 +107,14 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
 describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #610)", () => {
   it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
-    expect(dashboard).toContain("await holdAnswerAfterCorrections(correctionOwner, { id, reviewItemId: check.id, logged: yes, waitsFor: ids });");
+    // Every sheet answer, with or without new changes, through the one shared registration (Codex r6 on #610).
+    expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
+    expect(dashboard).toContain("void waitForItemCorrections(owner, { id, itemId: check.segmentId, newIds: [],");
+    expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
+    // And every Logs as path in the place sheets.
+    const corrections = source("./useLocationCorrections.tsx");
+    expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
+    expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     expect(dashboard).toContain("checkAnswers.answer(check.id, yes, null, { afterCorrections: id })");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemId) => checkAnswers.restoreAnswered([reviewItemId]) });");

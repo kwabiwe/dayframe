@@ -140,6 +140,45 @@ export async function holdAnswerAfterCorrections(owner: MobileAccountOwner,
   return record;
 }
 
+/** The correction queue as a waiting record reads it (its stored copy, and its memory of recent acknowledgements). */
+export type AfterCorrectionsQueue = {
+  readPending: (owner: MobileAccountOwner) => Promise<ReadonlyArray<{ clientCorrectionId: string; failureKind?: string;
+    request: { kind: string; itemId: string } }>>;
+  readAcknowledged: (owner: MobileAccountOwner) => ReadonlyArray<{ clientCorrectionId: string }>;
+};
+
+/**
+ * Registers an answer or a Logs as that waits for corrections (Codex r6 on #610): this sheet's new ones (`newIds`,
+ * about to be queued) and every correction still queued for its items (`itemIds`: the place's or trip's own, from an
+ * earlier Done too). In one step of the store's own chain it reads the queue, takes as acknowledged any it already
+ * has, and writes the record once, before anyone is told; an acknowledgement arriving meanwhile waits for that write
+ * and then finds it. Held for Undo. Null when there is nothing to wait for (answer or log at once).
+ */
+export async function registerAfterCorrections(owner: MobileAccountOwner,
+  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: { itemId: string; categoryId: string };
+    newIds: readonly string[]; itemIds: readonly string[] },
+  queue: AfterCorrectionsQueue, now = new Date()) {
+  const record = await serialised(async () => {
+    const pending = await queue.readPending(owner);
+    const earlier = pending
+      .filter((item) => answer.itemIds.includes(item.request.itemId) && item.request.kind !== "log_place")
+      .map((item) => item.clientCorrectionId);
+    const waitsFor = [...new Set([...answer.newIds, ...earlier])];
+    if (!waitsFor.length) return null;
+    const acknowledgedNow = new Set(queue.readAcknowledged(owner).map((item) => item.clientCorrectionId));
+    const next: AnswerAfterCorrections = {
+      userId: owner.userId, workspaceId: owner.workspaceId, id: answer.id, reviewItemId: answer.reviewItemId, logged: answer.logged,
+      ...(answer.venue ? { venue: answer.venue } : {}), ...(answer.log ? { log: answer.log } : {}), waitsFor,
+      acknowledged: waitsFor.filter((id) => acknowledgedNow.has(id)), held: { run }, createdAt: now.toISOString()
+    };
+    const items = await readAll();
+    await writeAll([...items.filter((item) => item.id !== next.id), next]);
+    return next;
+  });
+  if (record) notify();
+  return record;
+}
+
 /** Its Undo window ended: it may go once its corrections are acknowledged. */
 export async function commitAnswerAfterCorrections(id: string) {
   await update((items) => items.map((item) => {
@@ -182,6 +221,11 @@ export type AnswerAfterCorrectionsRelease = (record: AnswerAfterCorrections) => 
 export async function releaseAnswersAfterCorrections(input: {
   owner: MobileAccountOwner;
   readPending: (owner: MobileAccountOwner) => Promise<ReadonlyArray<{ clientCorrectionId: string; failureKind?: string }>>;
+  /**
+   * The queue's memory of what it just had acknowledged: one that has just left the queue counts as accepted, never
+   * refused (Codex r6 on #610).
+   */
+  readAcknowledged?: (owner: MobileAccountOwner) => ReadonlyArray<{ clientCorrectionId: string }>;
   release: AnswerAfterCorrectionsRelease;
   onDropped?: (record: AnswerAfterCorrections) => void;
 }) {
@@ -190,6 +234,7 @@ export async function releaseAnswersAfterCorrections(input: {
   let changed = false;
   await serialised(async () => {
     const pending = await input.readPending(input.owner);
+    const acknowledgedNow = new Set((input.readAcknowledged?.(input.owner) ?? []).map((item) => item.clientCorrectionId));
     const items = await readAll();
     const keep: AnswerAfterCorrections[] = [];
     for (const item of items) {
@@ -199,7 +244,7 @@ export async function releaseAnswersAfterCorrections(input: {
       }
       // Killed during its Undo window: never answered, as a held answer isn't.
       if (item.held && item.held.run !== run) continue;
-      const outstanding = item.waitsFor.filter((id) => !item.acknowledged.includes(id));
+      const outstanding = item.waitsFor.filter((id) => !item.acknowledged.includes(id) && !acknowledgedNow.has(id));
       const refused = item.refused || outstanding.some((id) => {
         const queued = pending.find((each) => each.clientCorrectionId === id);
         return !queued || queued.failureKind === "permanent";

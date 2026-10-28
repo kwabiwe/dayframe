@@ -43,6 +43,15 @@ const waiting = vi.hoisted(() => ({
   noteTimelineCorrectionAcknowledged: vi.fn(async (..._args: unknown[]) => undefined)
 }));
 vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
+// The shared registration (afterCorrections.ts), as the queue in `mocks.queued` would answer it.
+const register = vi.hoisted(() => ({
+  waitForItemCorrections: vi.fn(async (_owner: unknown, input: { id: string; itemId: string; newIds: readonly string[] }) => {
+    const earlier = mocks.queued.filter((item) => item.request.itemId === input.itemId && item.request.kind !== "log_place").map((item) => item.clientCorrectionId);
+    const waitsFor = [...new Set([...input.newIds, ...earlier])];
+    return waitsFor.length ? { id: input.id, waitsFor } : null;
+  })
+}));
+vi.mock("../../lib/afterCorrections", () => register);
 
 const { useLocationCorrections } = await import("./useLocationCorrections");
 
@@ -290,7 +299,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     vi.useFakeTimers();
     try {
       mocks.enqueue.mockClear();
-      waiting.holdAnswerAfterCorrections.mockClear();
+      register.waitForItemCorrections.mockClear();
       waiting.commitAnswerAfterCorrections.mockClear();
       waiting.cancelAnswerAfterCorrections.mockClear();
       let tree!: ReturnType<typeof create>;
@@ -299,9 +308,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> };
       let handle!: { start: () => void; cancel: () => Promise<void> };
       await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
-      expect(waiting.holdAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ reviewItemId: "", log: { itemId: "seg-a", categoryId: "cat-errands" }, waitsFor: ["cid-1"] }));
-      const recordId = (waiting.holdAnswerAfterCorrections.mock.calls[0][1] as { id: string }).id;
+      expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+      const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       act(() => { handle.start(); });
       expect(api!.heldLog?.title).toBe("Unknown place as Errands");
       await act(async () => { vi.advanceTimersByTime(4_800); });
@@ -335,9 +344,10 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       act(() => { api!.openPlace(place, "Unknown place"); });
       const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
       await act(async () => { logAs.onLog("cat-errands"); });
-      expect(waiting.holdAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ log: { itemId: "seg-a", categoryId: "cat-errands" }, waitsFor: ["earlier-1"] }));
-      const recordId = (waiting.holdAnswerAfterCorrections.mock.calls[0][1] as { id: string }).id;
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["earlier-1"] });
+      expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands" } }));
+      const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       expect(api!.heldLog?.afterCorrections).toBe(recordId);
       await act(async () => { vi.advanceTimersByTime(4_800); });
       // Never queued from here: only once the earlier correction is acknowledged (a refusal logs nothing).
@@ -345,9 +355,8 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(mocks.enqueue).not.toHaveBeenCalled();
       // Nothing waiting for the place: held and queued at once, as before.
       mocks.queued = [];
-      waiting.holdAnswerAfterCorrections.mockClear();
       await act(async () => { logAs.onLog("cat-errands"); });
-      expect(waiting.holdAnswerAfterCorrections).not.toHaveBeenCalled();
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toBeNull();
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
         [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
@@ -357,23 +366,20 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     }
   });
 
-  it("adds the place's earlier queued corrections to a sheet's own, and marks one acknowledged meanwhile (Codex r5 on #610)", async () => {
-    waiting.holdAnswerAfterCorrections.mockClear();
-    waiting.noteTimelineCorrectionAcknowledged.mockClear();
+  it("registers every Logs as through the one shared helper, with the sheet's new corrections and its place (Codex r6 on #610)", async () => {
+    register.waitForItemCorrections.mockClear();
     mocks.queued = [{ clientCorrectionId: "earlier-1", request: { kind: "times", itemId: "seg-a" } }];
-    mocks.acknowledgedNow = [{ clientCorrectionId: "earlier-1" }];
     try {
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<Probe data={account("a")} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
       const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<unknown> };
       await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"]); });
-      expect(waiting.holdAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ waitsFor: ["new-1", "earlier-1"] }));
-      expect(waiting.noteTimelineCorrectionAcknowledged).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, "earlier-1");
+      expect(register.waitForItemCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["new-1", "earlier-1"] });
     } finally {
       mocks.queued = [];
-      mocks.acknowledgedNow = [];
     }
   });
 
