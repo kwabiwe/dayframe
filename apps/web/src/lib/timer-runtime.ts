@@ -582,6 +582,28 @@ export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string)
   return replaceEntryCollections({ ...data, activeEntry: null }, entry);
 }
 
+/**
+ * A split or its Undo, as the server answered it (owner 28 Oct 2026): `blocks` as they are now, and `removedIds`
+ * gone. The running block is the one of them that runs; one of them that ran before and runs no longer leaves
+ * nothing running. Shown at once, so a failed reload never leaves a gone or ended block running on screen.
+ */
+export function applyServerTimerBlocks(data: BootstrapData, blocks: readonly TimeEntryRow[], removedIds: readonly string[] = []) {
+  const removed = new Set(removedIds);
+  const without = (entries: TimeEntryRow[]) => entries.filter((entry) => !removed.has(entry.id));
+  const touched = new Set([...removedIds, ...blocks.map((block) => block.id)]);
+  const running = blocks.find((block) => !block.stoppedAt) ?? null;
+  let next: BootstrapData = {
+    ...data,
+    activeEntry: running ?? (data.activeEntry && touched.has(data.activeEntry.id) ? null : data.activeEntry),
+    entries: without(data.entries),
+    historyEntries: without(data.historyEntries),
+    dayEntries: without(data.dayEntries),
+    weekEntries: without(data.weekEntries)
+  };
+  for (const block of blocks) next = replaceEntryCollections(next, block);
+  return next;
+}
+
 export function applyOptimisticTimerDelete(data: BootstrapData) {
   if (!data.activeEntry) return data;
   const activeId = data.activeEntry.id;

@@ -443,6 +443,12 @@ input:is([type="checkbox"], [type="radio"], [type="range"], [type="color"]):focu
   box-shadow: none;
 }
 
+/* Focus an action gave back on its own (focusQuietly) shows no ring until the keyboard is used. */
+button[data-tip-quiet]:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
 button:focus:not(:focus-visible),
 a:focus:not(:focus-visible),
 summary:focus:not(:focus-visible),
@@ -4402,6 +4408,16 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-muted);
 }
 
+/* The running block's menu: Split is an ordinary action beside Discard's danger one. */
+.swiss-timer-actions-menu button:not(.is-danger) {
+  color: var(--text-primary);
+}
+
+.swiss-timer-actions-menu button[aria-disabled="true"] {
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
 .swiss-compact-time-editor {
   display: grid;
   gap: 12px;
@@ -6554,6 +6570,24 @@ dialog.ui-dialog.df-range-custom {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Split for the running block (owner 28 Oct 2026): card G's split bar, taller, in a compact dialog. */
+.running-split-dialog {
+  --calendar-compact-horizontal-inset: 0px;
+}
+
+.running-split-dialog .calendar-compact-split {
+  padding-top: 0;
+}
+
+.running-split-dialog .calendar-compact-split-bar {
+  height: min(240px, 40vh);
+}
+
+.running-split-dialog-note {
+  margin: 0;
+  color: var(--text-secondary);
 }
 
 .calendar-compact-editor-fields label,

@@ -17,6 +17,27 @@ type Tip = { text: string; left: number; top: number; placement: "above" | "belo
  * technology. It is a manual popover in the top layer, fixed to the viewport and clamped inside it,
  * so no dialog covers it, no scrolling container clips it and it never widens the page.
  */
+const QUIET_FOCUS_ATTRIBUTE = "data-tip-quiet";
+
+/**
+ * Gives focus back to `element` after an action finished (the running block's Split, owner 28 Oct 2026),
+ * without its tip or a focus ring: the browser may count a programmatic focus as keyboard focus, and at
+ * phone width the "…" tip would cover Stop. Keyboard focus that arrives later shows the tip as usual.
+ */
+export function focusQuietly(element: HTMLElement | null) {
+  if (!element) return;
+  element.setAttribute(QUIET_FOCUS_ATTRIBUTE, "");
+  // Quiet until it loses focus or the keyboard is used: then its ring (and next time its tip) show as usual.
+  const end = () => {
+    element.removeAttribute(QUIET_FOCUS_ATTRIBUTE);
+    element.removeEventListener("blur", end);
+    document.removeEventListener("keydown", end, true);
+  };
+  element.addEventListener("blur", end);
+  document.addEventListener("keydown", end, true);
+  element.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
+}
+
 export function TooltipHost() {
   const [tip, setTip] = useState<Tip | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +118,8 @@ export function TooltipHost() {
       // Keyboard focus only (a pointer press focuses too; it does not need a tip). A text field's tip
       // shows on hover only, so it never covers what is being typed.
       if (!target.matches(":focus-visible") || target.matches("input, textarea, [contenteditable]")) return;
+      // Focus an action gave back on its own (focusQuietly): no tip, so it never covers a control beside it.
+      if (target.hasAttribute(QUIET_FOCUS_ATTRIBUTE)) return;
       hide();
       fromFocusRef.current = true;
       showFor(target);
