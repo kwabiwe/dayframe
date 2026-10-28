@@ -216,6 +216,11 @@ export type CommuteSegment = {
   /** The engine's span the person's corrections of this trip are tied to (its times before any correction). */
   correctionSpan?: { startedAt: string; stoppedAt: string };
   /**
+   * A correction joined this trip or moved one of its ends ("I wasn't here", "I didn't leave"). Never persisted;
+   * replay keeps such a trip as corrected rather than deriving it again between decided stays.
+   */
+  shapedByCorrection?: true;
+  /**
    * Set when Motion & Fitness activity, not GPS, showed the movement that qualified
    * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.
    */

@@ -23,7 +23,8 @@ import { formatDuration, formatTime } from "@/lib/format";
  * the person leaves alone stays as Dayframe made it.
  */
 export type LocationCorrectionTarget =
-  | { kind: "place"; place: TimelinePlace; label: string }
+  /** `joinsTrips`: a trip comes into the place and one leaves it, so "I wasn't here" can join them (step 12 part 4). */
+  | { kind: "place"; place: TimelinePlace; label: string; joinsTrips?: boolean }
   | { kind: "leg"; tripId: string; leg: TripLeg; index: number; count: number };
 
 export type CorrectionPlace = { id: string; name: string; role: string | null };
@@ -90,6 +91,8 @@ export function LocationCorrectionDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "I wasn't here", asked once in place before the place comes off the day.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   // The place chosen: a saved place, the learned place it already is, or unknown.
   const original = target.kind === "place" ? target.place.placeId ? `saved:${target.place.placeId}`
     : target.place.learnedPlaceId ? `learned:${target.place.learnedPlaceId}` : "unknown" : "unknown";
@@ -167,6 +170,23 @@ export function LocationCorrectionDialog({
     onClose();
   }
 
+  /** "I wasn't here": the place leaves the day and the trips either side become one (step 12 part 4). */
+  async function removePlace() {
+    if (target.kind !== "place") return;
+    setBusy(true);
+    setError(null);
+    const failure = await sendCorrection({ kind: "delete", subject: "place", itemId: target.place.id })
+      .catch(() => "Couldn't save that. Check your connection and try again.");
+    if (failure) {
+      setBusy(false);
+      setError(failure);
+      return;
+    }
+    await onCorrected();
+    setBusy(false);
+    onClose();
+  }
+
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>
@@ -235,6 +255,24 @@ export function LocationCorrectionDialog({
             </div>
           </>
         )}
+        {!open && target.joinsTrips ? (
+          <>
+            <span className="location-correction-label" id="location-correction-shape">Fix the shape</span>
+            <div aria-labelledby="location-correction-shape" className="location-correction-shape" role="group">
+              {confirmingRemove ? (
+                <div className="location-correction-confirm">
+                  <p>Take this place off your day? The trips either side become one trip.</p>
+                  <div className="location-correction-confirm-actions">
+                    <Button disabled={busy} onClick={() => void removePlace()} variant="danger">Take it off your day</Button>
+                    <Button disabled={busy} onClick={() => setConfirmingRemove(false)}>Keep it</Button>
+                  </div>
+                </div>
+              ) : (
+                <Button disabled={busy} onClick={() => setConfirmingRemove(true)}>I wasn&apos;t here</Button>
+              )}
+            </div>
+          </>
+        ) : null}
         {error ? <p className="location-correction-error" role="alert">{error}</p> : null}
       </div>
     </ModalDialog>

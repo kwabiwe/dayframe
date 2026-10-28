@@ -345,4 +345,95 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-d", placeId: null, learnedPlaceId: null }, session);
     expect((await db.query(`select title from review_items where location_segment_id = $1`, [stayId])).rows[0].title).toBe("Unknown place");
   });
+
+  // Step 12 part 4, on a later day: Home, a drive to a place the person wasn't at, a walk on to Home, a trip
+  // they didn't take, Home again, and a drive to an unknown place.
+  it("joins the trips around a place you weren't at, and the visits around a trip you didn't take", async () => {
+    const db = database!;
+    const base = 3_000;
+    const stay = async (segmentId: string, start: number, stop: number | null, placeId: string | null) => (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, place_id, sample_count, centre, metadata)
+       values ($1, $2, $3, 'device-1', 'finalised', $4, $5, $6, 3, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb) returning id`,
+      [workspaceId, userId, segmentId, at(base + start), stop == null ? null : at(base + stop), placeId])).rows[0].id;
+    const trip = async (segmentId: string, start: number, stop: number, from: string, to: string, mode: string) => (await db.query<{ id: string }>(
+      `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
+         from_stay_segment_id, to_stay_segment_id, route_distance_m, route_sample_count, max_gap_seconds, continuity_status, confidence, metadata)
+       values ($1, $2, 'device-1', $3, 'location-v2.0', 'finalised', $4, $5, $6, $7, 1000, 4, 60, 'continuous', 'medium', $8::jsonb) returning id`,
+      [workspaceId, userId, segmentId, at(base + start), at(base + stop), from, to, JSON.stringify({ travelMode: mode, qualificationReason: "same_place_meaningful_round_trip",
+        legs: [{ startedAt: at(base + start), stoppedAt: at(base + stop), mode, confidence: "sure", distanceMeters: 1000 }] })])).rows[0].id;
+    const home1 = await stay("j-home-1", 0, 60, homeId);
+    const notHere = await stay("j-x", 80, 95, null);
+    const home2 = await stay("j-home-2", 120, 150, homeId);
+    const home3 = await stay("j-home-3", 160, 200, homeId);
+    const last = await stay("j-last", 230, 300, null);
+    const t1 = await trip("j-t1", 60, 80, home1, notHere, "automotive");
+    const t2 = await trip("j-t2", 95, 120, notHere, home2, "walking");
+    const t3 = await trip("j-t3", 150, 160, home2, home3, "walking");
+    const t4 = await trip("j-t4", 200, 230, home3, last, "automotive");
+    // The place's own open suggestion, and the trip in's.
+    const suggest = async (segmentRowId: string, clientSegmentId: string, type: string, from: number, to: number) => {
+      const event = (await db.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+         values ($1, $2, 'location_learning', $3, $4, 'low', $5::jsonb, 'needs_review') returning id`,
+        [workspaceId, userId, type === "commute" ? "commute_detected" : "unknown_stay", at(base + from), JSON.stringify({ clientSegmentId })])).rows[0].id;
+      await db.query(`insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at, suggested_stopped_at)
+        values ($1, $2, $3, $4, $5, 'Suggested', 'open', $6, $7)`, [workspaceId, userId, event, segmentRowId, type, at(base + from), at(base + to)]);
+    };
+    await suggest(notHere, "j-x", "unknown_stay", 80, 95);
+    await suggest(t1, "j-t1", "commute", 60, 80);
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+
+    // Refused: no trip after the last place; a trip between Home and an unknown place; a place beside a block.
+    await expect(correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-last" }, session)).rejects.toMatchObject({ status: 422 });
+    await expect(correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t4" }, session)).rejects.toMatchObject({ status: 422 });
+    const blockEvent = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, 'location_learning', 'commute_detected', $3, 'medium', '{"clientSegmentId":"j-t4"}'::jsonb) returning id`,
+      [workspaceId, userId, at(base + 200)])).rows[0].id;
+    const block = (await db.query<{ id: string }>(`insert into time_entries (workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
+       values ($1, $2, 'location_learning', $3, $4, $5) returning id`, [workspaceId, userId, at(base + 200), at(base + 230), blockEvent])).rows[0].id;
+    await expect(correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-home-3" }, session)).rejects.toMatchObject({ status: 409 });
+    await db.query(`delete from time_entries where id = $1`, [block]);
+    expect((await db.query(`select count(*)::int as n from location_timeline_corrections where workspace_id = $1 and span_started_at >= $2`,
+      [workspaceId, at(base)])).rows[0].n).toBe(0);
+
+    // I wasn't here: one trip from Home to Home, low, set by you; the place and the trip out leave the day.
+    const notHereCorrection = await correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-x" }, session);
+    expect(notHereCorrection.correction).toMatchObject({ subject: "place", kind: "delete", spanStartedAt: at(base + 80), spanStoppedAt: at(base + 95) });
+    const joinedTrip = (await db.query(
+      `select stopped_at as "stoppedAt", to_stay_segment_id as "toStayId", route_distance_m as "distance", route_sample_count as "samples",
+              confidence, metadata from commute_segments where id = $1`, [t1])).rows[0];
+    expect(joinedTrip).toMatchObject({ toStayId: home2, distance: 2000, samples: 8, confidence: "low", metadata: { setByYou: true } });
+    expect(new Date(joinedTrip.stoppedAt).toISOString()).toBe(at(base + 120));
+    expect(joinedTrip.metadata.legs.map((leg: { mode: string }) => leg.mode)).toEqual(["automotive", "walking"]);
+    expect(joinedTrip.metadata).not.toHaveProperty("travelMode");
+    expect(joinedTrip.metadata).not.toHaveProperty("qualificationReason");
+    const gone = await db.query(`select id, status from stay_segments where id = $1 union all select id, status from commute_segments where id = $2`, [notHere, t2]);
+    expect(gone.rows.map((row) => row.status)).toEqual(["superseded", "superseded"]);
+    const suggestions = await db.query(`select location_segment_id as "segmentId", status, notes, suggested_stopped_at as "stoppedAt"
+      from review_items where location_segment_id = any($1::uuid[]) order by suggested_started_at`, [[notHere, t1]]);
+    // The trip in's suggestion described the old trip: replay offers the one trip afresh (Codex r1 on #603).
+    expect(suggestions.rows[0]).toMatchObject({ segmentId: t1, status: "ignored", notes: "You said you weren't here." });
+    expect(suggestions.rows[1]).toMatchObject({ segmentId: notHere, status: "ignored", notes: "You said you weren't here." });
+    expect(joinedTrip.metadata.correctionSpan).toEqual({ startedAt: at(base + 60), stoppedAt: at(base + 80) });
+
+    // I didn't leave: the two visits to Home are one stay, and the drive after leaves it. The one stay is as
+    // finished as its last part (Codex r1 on #603).
+    await db.query(`update stay_segments set status = 'closed', metadata = '{"openTrip":{"startedAt":"x"}}'::jsonb where id = $1`, [home3]);
+    await correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t3" }, session);
+    const merged = (await db.query(`select stopped_at as "stoppedAt", sample_count as "samples", status, metadata from stay_segments where id = $1`, [home2])).rows[0];
+    expect(new Date(merged.stoppedAt).toISOString()).toBe(at(base + 200));
+    expect(merged).toMatchObject({ samples: 6, status: "closed", metadata: { setByYou: true,
+      correctionSpan: { startedAt: at(base + 120), stoppedAt: at(base + 150) } } });
+    expect((await db.query(`select status, metadata from stay_segments where id = $1`, [home3])).rows[0]).toEqual({ status: "superseded", metadata: {} });
+    expect(merged.metadata.openTrip).toEqual({ startedAt: "x" });
+    expect((await db.query(`select status from commute_segments where id = $1`, [t3])).rows[0].status).toBe("superseded");
+    expect((await db.query(`select from_stay_segment_id as "fromStayId" from commute_segments where id = $1`, [t4])).rows[0].fromStayId).toBe(home2);
+
+    // The timeline shows the corrected day.
+    const { getLocationTimeline } = await import("./location-timeline-service");
+    const timeline = await getLocationTimeline(session, { date: at(base).slice(0, 10), timeZone: "UTC", now: new Date(at(base + 400)) });
+    const ids = timeline.items.map((item) => item.id).filter((id) => id.startsWith("j-"));
+    expect(ids).toEqual(["j-home-1", "j-t1", "j-home-2", "j-t4", "j-last"]);
+  });
 });

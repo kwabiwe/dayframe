@@ -327,7 +327,13 @@ export function EntriesTable({
   const [showEveryPlace, setShowEveryPlace] = useState(false);
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
-  const correctPlace = (place: TimelinePlace, label: string) => setCorrection({ kind: "place", place, label });
+  // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
+  const correctPlace = (place: TimelinePlace, label: string) => {
+    const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
+      .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
+    const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
+    setCorrection({ kind: "place", place, label, joinsTrips });
+  };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
