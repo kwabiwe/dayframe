@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import Animated from "react-native-reanimated";
+import Animated, { runOnJS } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SHOW_ALL_PLACES_STORAGE_KEY } from "../../lib/calendarPrototype";
 import {
@@ -59,6 +60,7 @@ export function CalendarListView({
   checkTitles,
   checkTotal,
   onNextCheck,
+  onSwipeDay,
   openCheckRequest = null,
   prototype = false,
   clockFormat,
@@ -89,6 +91,11 @@ export function CalendarListView({
   checkTotal?: number;
   /** Calendar prototype: "N to check" opens the next one after the open one, oldest first, across days. */
   onNextCheck?: (openCheckId: string | null) => void;
+  /**
+   * Calendar prototype (Q3): a sideways swipe on the List moves a day, as on the Grid (left: the next day). Vertical
+   * scrolling wins any gesture that starts vertical.
+   */
+  onSwipeDay?: (days: number) => void;
   /** Calendar prototype: open this "?" (by id) once its row is here, and scroll to it. A new request each time. */
   openCheckRequest?: { id: string; request: number } | null;
   /** The Calendar prototype's List (owner, 28 Oct 2026): one dot, the row opens it, covered places hidden. */
@@ -289,6 +296,14 @@ export function CalendarListView({
     tryScroll();
   });
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
+  const swipeDay = useMemo(() => Gesture.Pan()
+    .enabled(Boolean(onSwipeDay))
+    .activeOffsetX([-24, 24])
+    .failOffsetY([-12, 12])
+    .onEnd((event) => {
+      "worklet";
+      if (onSwipeDay && (Math.abs(event.translationX) > 64 || Math.abs(event.velocityX) > 700)) runOnJS(onSwipeDay)(event.translationX < 0 ? 1 : -1);
+    }), [onSwipeDay]);
   const toggleLegs = (id: string) => setOpenLegs((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
@@ -305,6 +320,7 @@ export function CalendarListView({
       testID="calendar-list"
     >
       {/* The content's own view: rows are measured against it (a native ref, as Fabric needs; Codex r4 on #573). */}
+      <GestureDetector gesture={swipeDay}>
       <View collapsable={false} ref={content} style={styles.contentInner}>
       <View style={styles.dayLine}>
         <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={[styles.dayTitle, { color: theme.textPrimary }]}>
@@ -383,6 +399,7 @@ export function CalendarListView({
         </Pressable>
       ) : null}
       </View>
+      </GestureDetector>
     </ScrollView>
   );
 }

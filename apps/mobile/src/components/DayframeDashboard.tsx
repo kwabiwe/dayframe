@@ -3742,6 +3742,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   checkTitles={calendarChecks.titles}
                   checkTotal={CALENDAR_PROTOTYPE ? askingChecks.length : undefined}
                   onNextCheck={CALENDAR_PROTOTYPE ? openNextCheck : undefined}
+                  onSwipeDay={CALENDAR_PROTOTYPE ? shiftSelectedCalendarDay : undefined}
                   openCheckRequest={CALENDAR_PROTOTYPE ? calendarCheckTarget : null}
                   prototype={CALENDAR_PROTOTYPE}
                   clockFormat={clockFormat}

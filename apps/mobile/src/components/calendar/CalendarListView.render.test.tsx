@@ -27,7 +27,17 @@ vi.mock("react-native", async () => {
   View: "View",
   };
 });
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" }, runOnJS: (fn: unknown) => fn }));
+// The Calendar prototype's day swipe (a horizontal pan on the List).
+vi.mock("react-native-gesture-handler", () => {
+  function Pan() {
+    const pan: Record<string, unknown> = {};
+    for (const method of ["enabled", "activeOffsetX", "failOffsetY", "onEnd"]) pan[method] = () => pan;
+    return pan;
+  }
+  return { Gesture: { Pan }, GestureDetector: ({ children }: { children: unknown }) => children };
+});
+vi.mock("@react-native-async-storage/async-storage", () => ({ default: { getItem: async () => null, setItem: async () => undefined } }));
 vi.mock("../../lib/motion", () => ({
   localLayoutTransition: () => undefined, localPresenceEntering: () => undefined, localPresenceExiting: () => undefined
 }));
