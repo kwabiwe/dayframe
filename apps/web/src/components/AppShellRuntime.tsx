@@ -866,7 +866,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // A details save this Stop waited for and that was refused or failed: its notice is carried
     // into the Stop's own (which otherwise clears it), so the lost edit is never silent.
     const earlier = detailsOutcomeRef.current;
-    const carried = earlier.seq > outcomeSeq && earlier.entryId === requested.id && earlier.error ? earlier : null;
+    // The block stopped is the one running now: the requested one, or what a split or its Undo moved it to, whose
+    // own save's failure is this Stop's to report too (Codex r6 on #607).
+    const stoppingId = dataRef.current?.activeEntry?.id ?? requested.id;
+    const carried = earlier.seq > outcomeSeq && (earlier.entryId === requested.id || earlier.entryId === stoppingId) && earlier.error ? earlier : null;
     const snapshot = dataRef.current!;
     const activeEntry = snapshot.activeEntry!;
     const targetId = serverEntryId(activeEntry.id);
@@ -1016,6 +1019,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
 
+  /**
+   * Inside the gate, as a split or its Undo ends: the running block's edits not saved yet are saved now. Its
+   * autosave was turned away while the gate was held, and nothing would arm it again (Codex r4, r6 on #607).
+   */
+  const saveLeftoverEdits = useCallback(async () => {
+    const now = dataRef.current;
+    const active = now?.activeEntry;
+    if (!now || !active || !serverEntryId(active.id)) return;
+    if (timerDraftEditedFields(draftRef.current, baseFor(active)).length) await saveActiveDetails(now, draftRef.current);
+  }, [baseFor, saveActiveDetails, serverEntryId]);
+
   const splitActiveTimer = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
     const requested = dataRef.current?.activeEntry;
     if (!requested) return { ok: false, error: "There is no running block to split." };
@@ -1039,6 +1053,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
+      const draftAtSend = draftRef.current;
       try {
         const outcome = await splitRunningTimeEntry(clientFetch, {
           entryId: targetId, atMs, expectedUpdatedAt: current?.id === entry.id ? versionOf(current) : undefined
@@ -1055,6 +1070,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (running) {
           splitSuccessorsRef.current.set(entry.id, newEntryId);
           splitSuccessorsRef.current.set(targetId, newEntryId);
+          // Typed while the split was on its way: the text goes on to the running second part.
+          if (!timerDraftsEqual(draftRef.current, draftAtSend)) rollbackDraftRef.current = { draft: draftRef.current, entryId: newEntryId };
         }
         const shown = dataRef.current;
         // A part the answer leaves out is gone (deleted elsewhere meanwhile): never left running on screen (Codex r3 on #607).
@@ -1064,6 +1081,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
         await refresh({ force: true });
+        await saveLeftoverEdits();
         if (!newEntryId) return { ok: false, error: "This block was already split and put back together." };
         return { ok: true, entryId: targetId, newEntryId, running };
       } finally {
@@ -1071,7 +1089,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
     });
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [commitData, refresh, saveActiveDetails, serverEntryId, versionOf]);
+  }, [commitData, refresh, saveActiveDetails, saveLeftoverEdits, serverEntryId, versionOf]);
 
   const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
     await mutationGateRef.current.whenIdle();
@@ -1108,13 +1126,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
         // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
         if (outcome.ok || outcome.changed) await refresh({ force: true });
+        if (outcome.ok) await saveLeftoverEdits();
         return outcome.ok ? outcome : { ok: false, error: outcome.error };
       } finally {
         setIsTimerBusy(false);
       }
     });
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId]);
+  }, [baseFor, commitData, refresh, saveActiveDetails, saveLeftoverEdits, serverEntryId]);
 
   const updateActiveDetails = useCallback(async (
     draft: TimerDraft,

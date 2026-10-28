@@ -308,6 +308,74 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     expect(requests[stop].body).toEqual(expect.objectContaining({ rawPayload: { origin: "web_timer", stopScope: "entry", targetEntryId: FIRST } }));
   });
 
+  function slowUndo(first: TimeEntryRow, options: { patch?: () => Promise<Response>; bootstrap?: () => Promise<Response> }) {
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    mocks.clientFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+      requests.push({ url, ...(body ? { body } : {}) });
+      if (url === "/api/time-entries" && body?.mode === "join") {
+        await joinPending;
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } });
+      }
+      if (url === `/api/time-entries/${FIRST}`) return options.patch ? options.patch() : response({ ok: true, id: FIRST, updatedAt: "2026-08-17T05:01:00.000Z" });
+      if (url === "/api/events") return response({ eventId: "stop", stopOutcome: "stopped" }, 201);
+      if (url.startsWith("/api/bootstrap")) return options.bootstrap ? options.bootstrap() : response({ error: "down" }, 503);
+      if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+      return response({}, 500);
+    });
+    return { requests, release: async () => { await act(async () => { releaseJoin?.(); await joinPending; }); } };
+  }
+
+  it("saves text typed on during the Undo's slow reload once the reload ends, even when it fails (Codex r6 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseReload: (() => void) | undefined;
+    const reloadPending = new Promise<void>((resolve) => { releaseReload = resolve; });
+    let reloads = 0;
+    const undo = slowUndo(first, {
+      bootstrap: async () => { reloads += 1; if (reloads > 0) await reloadPending; return response({ error: "down" }, 503); }
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(undo.requests.some((request) => request.body?.mode === "join")).toBe(true));
+    await undo.release();
+    await waitFor(() => expect(reloads).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Type more" }));
+    await act(async () => { releaseReload?.(); await reloadPending; });
+    await waitFor(() => expect(undo.requests.some((request) => request.url === `/api/time-entries/${FIRST}` && request.body?.description === "Typed more")).toBe(true));
+  });
+
+  it("a Stop queued during the Undo still reports that the carried text was not saved (Codex r6 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    const undo = slowUndo(first, {
+      patch: async () => response({ error: "changed", code: "time_entry_details_conflict", entry: { ...first, stoppedAt: null, description: "Elsewhere" } }, 409)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(undo.requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await undo.release();
+    await waitFor(() => expect(undo.requests.some((request) => request.url === "/api/events")).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("error").textContent).toMatch(/^Stopped\./));
+  });
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
@@ -332,12 +400,14 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
 });
 
 function Harness({ initial }: { initial: BootstrapData }) {
-  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer, timerDraft } = useAppShellRuntime();
+  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer, timerDraft, timerError } = useAppShellRuntime();
   const [undo, setUndo] = useState("");
   return <>
     <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed, not saved" }))}>Type</button>
     <output data-testid="undo">{undo}</output>
     <output data-testid="draft">{timerDraft.description}</output>
+    <output data-testid="error">{timerError ?? ""}</output>
+    <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed more" }))}>Type more</button>
     <button onClick={() => hydrate(initial)}>Hydrate</button>
     <button onClick={() => void splitActiveTimer(SPLIT_AT)}>Split</button>
     <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND }).then((outcome) => setUndo(outcome.ok ? "ok" : outcome.error))}>Undo split</button>
