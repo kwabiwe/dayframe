@@ -13,13 +13,16 @@ export type CheckProjection = { hiddenIds: ReadonlySet<string>; revived: readonl
 
 const EMPTY: CheckProjection = { hiddenIds: new Set(), revived: [] };
 let projection: CheckProjection = EMPTY;
+/** Whose projection it is: the List that published it last. */
+let owner: object | null = null;
 const listeners = new Set<() => void>();
 
 function sameIds(a: ReadonlySet<string>, b: ReadonlySet<string>) {
   return a.size === b.size && [...a].every((id) => b.has(id));
 }
 
-export function publishCheckProjection(next: CheckProjection) {
+export function publishCheckProjection(next: CheckProjection, by: object | null = null) {
+  owner = by;
   const same = sameIds(projection.hiddenIds, next.hiddenIds) && projection.revived.length === next.revived.length &&
     projection.revived.every((item, index) => item === next.revived[index]);
   if (same) return;
@@ -27,7 +30,9 @@ export function publishCheckProjection(next: CheckProjection) {
   for (const listener of listeners) listener();
 }
 
-export function clearCheckProjection() {
+/** Clears it: everyone's (an owner change), or only `by`'s, if no other List has published since. */
+export function clearCheckProjection(by?: object) {
+  if (by && owner !== by) return;
   publishCheckProjection(EMPTY);
 }
 

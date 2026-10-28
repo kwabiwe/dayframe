@@ -62,7 +62,7 @@ export function useListChecks({
     const over = openItemsAtConflict.current;
     if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition);
+  const { state, decide, undo, clearError, settle } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition);
   // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
   // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
@@ -117,13 +117,34 @@ export function useListChecks({
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
 
-  // Shared with the badge and Today's chip, so they count what the List shows through answer, Undo and failure.
+  // Shared with the badge and Today's chip, so they count what the List shows through answer, Undo and failure:
+  // the same held outing members as `memberIds` above, with its exception for a stay the server says is decided
+  // (its open trips then stand alone, and count; Codex r3 on #609).
+  const [projectionToken] = useState(() => ({}));
   useEffect(() => {
-    const hiddenIds = new Set([...state.hiddenIds, ...closedByServer.keys(), ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId))
-      .flatMap(([, members]) => members.map((member) => member.id))]);
-    publishCheckProjection({ hiddenIds, revived: [...revived.values()].filter((item) => !loadedIds.has(item.id)) });
-  }, [closedByServer, heldOutings, loadedIds, revived, state.hiddenIds]);
-  useEffect(() => () => clearCheckProjection(), []);
+    const hiddenIds = new Set([...state.hiddenIds, ...closedByServer.keys(),
+      ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
+        .flatMap(([, members]) => members.map((member) => member.id))]);
+    publishCheckProjection({ hiddenIds, revived: [...revived.values()].filter((item) => !loadedIds.has(item.id)) }, projectionToken);
+  }, [closedByServer, heldOutings, loadedIds, projectionToken, revived, state.hiddenIds]);
+  // Leaving the List sends a held answer at once: its "?" stay away from the badge until every save has settled
+  // and the data is refreshed, never counted again before the server answered (Codex r3 on #609). An owner change
+  // clears it (AppShell), and a List opened meanwhile owns the projection from then on.
+  const settleRef = useRef({ settle, refresh });
+  useLayoutEffect(() => {
+    settleRef.current = { settle, refresh };
+  });
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const { settle: settleNow, refresh: refreshNow } = settleRef.current;
+      void settleNow().then(() => refreshNow()).catch(() => undefined).finally(() => {
+        if (!mounted.current) clearCheckProjection(projectionToken);
+      });
+    };
+  }, [projectionToken]);
 
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);

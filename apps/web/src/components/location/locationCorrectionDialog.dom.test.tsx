@@ -33,7 +33,13 @@ const evidence = (nearbySavedPlaces: Array<{ id: string; distanceMeters: number 
   reviewItemId: null, eventId: null,
   map: { centre: { type: "Point", coordinates: [-0.1, 51.5] }, stayRadiusMeters: 80, nearbySavedPlaces }
 });
-const sent = () => clientFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+const bodies = () => clientFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+/** What was sent, without the per-correction receipt id (checked on its own). */
+const sent = () => bodies().map((body) => {
+  const { clientCorrectionId, ...rest } = body;
+  void clientCorrectionId;
+  return rest;
+});
 
 describe("correcting the location timeline on the web (location v4 step 13)", () => {
   beforeEach(() => {
@@ -358,5 +364,50 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     fireEvent.click(screen.getByRole("button", { name: "Take it off your day" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
     expect(sent()).toEqual([{ kind: "delete", subject: "trip", itemId: "trip-1" }]);
+  });
+  it("sends each correction with one id, reused when it is retried, so a lost reply's receipt comes back (Codex r3 on #609)", async () => {
+    clientFetch.mockReset()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
+      places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Check your connection");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const [first, retry] = bodies();
+    expect(first.clientCorrectionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retry).toEqual(first);
+  });
+
+  it("keeps the open leg when its trip refreshes, and goes back to the trip when that leg is gone (Codex r3 on #609)", () => {
+    const walk: TripLeg = { startedAt: at(8), stoppedAt: at(8, 12), mode: "walking", confidence: "sure", distanceMeters: 800 };
+    const trip = (legs: TripLeg[]) => ({ kind: "trip" as const, id: "trip-1", status: "finalised" as const, startedAt: at(8), stoppedAt: at(8, 40),
+      fromId: "seg-home", toId: "seg-cafe", legs, blockIds: [] }) as never;
+    const view = render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "trip", trip: trip([walk, leg]), route: "Home → Corner café" }} />);
+    fireEvent.click(screen.getByRole("button", { name: /Underground\?/ }));
+    expect(screen.getByRole("dialog").textContent).toContain("Leg 2 of 2");
+    // A leg added before it: the same leg, now the third.
+    const early: TripLeg = { ...walk, startedAt: at(7, 50), stoppedAt: at(8) };
+    view.rerender(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "trip", trip: trip([early, walk, leg]), route: "Home → Corner café" }} />);
+    expect(screen.getByRole("dialog").textContent).toContain("Leg 3 of 3");
+    // The legs merged into one: that leg is gone, so the dialog is the trip again.
+    view.rerender(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "trip", trip: trip([{ ...walk, stoppedAt: at(8, 40) }]), route: "Home → Corner café" }} />);
+    expect(screen.getByRole("group", { name: "Legs" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "All legs" })).toBeNull();
+  });
+
+  it("reads the map again when a refresh moves the place's end (Codex r3 on #609)", () => {
+    const view = render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    expect(evidenceFetch).toHaveBeenCalledTimes(1);
+    view.rerender(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place({ stoppedAt: at(10, 30) }), label: "Unknown place" }} />);
+    expect(evidenceFetch).toHaveBeenCalledTimes(2);
   });
 });

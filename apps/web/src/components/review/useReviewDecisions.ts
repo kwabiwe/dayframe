@@ -100,6 +100,8 @@ export function useReviewDecisions(
     state,
     decide: useCallback((request: Parameters<ReviewDecisionController["decide"]>[0]) => controller.decide(request), [controller]),
     undo: useCallback(() => controller.undo(), [controller]),
+    /** Saves a held decision now and resolves once every save in flight has settled. */
+    settle: useCallback(() => controller.flushAndSettle(), [controller]),
     clearError: useCallback(() => controller.clearError(), [controller])
   };
 }

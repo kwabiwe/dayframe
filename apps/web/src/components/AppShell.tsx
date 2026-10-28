@@ -20,7 +20,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
-import { projectReviewItems, useCheckProjection } from "@/lib/check-projection-store";
+import { clearCheckProjection, projectReviewItems, useCheckProjection } from "@/lib/check-projection-store";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -101,6 +101,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const todayStartMs = useLocalDayStartMs();
   // As the List shows them: its held answers away, its revived ones back (Codex r2 on #609).
   const projection = useCheckProjection();
+  // Another workspace or person: the List's pending answers were the previous owner's (Codex r3 on #609).
+  const projectionOwner = data ? `${data.workspace.id}:${data.user.id}` : null;
+  const seenProjectionOwner = useRef(projectionOwner);
+  useEffect(() => {
+    if (projectionOwner === seenProjectionOwner.current) return;
+    const previous = seenProjectionOwner.current;
+    seenProjectionOwner.current = projectionOwner;
+    if (previous !== null) clearCheckProjection();
+  }, [projectionOwner]);
   const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectReviewItems(data.reviewItems, projection), todayStartMs) : null,
     [data, projection, todayStartMs]);
   const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;

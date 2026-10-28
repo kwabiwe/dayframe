@@ -133,7 +133,8 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
-    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" });
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands",
+      clientCorrectionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -196,5 +197,31 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     fireEvent.click(screen.getByRole("button", { name: "q2" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Visited Boots?" })).getByRole("button", { name: "Not now" }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("scroller")));
+  });
+  it("moves focus on when a saved Logs as removes the opener (Codex r3 on #609)", async () => {
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e1"], resolvedReviewItemIds: ["q1"] } }),
+      { status: 200 }));
+    function Lane() {
+      const [items, setItems] = useState([suggestion("q1", {}), suggestion("q2", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) })]);
+      const grid = useGridCorrection({ activities: [{ id: "cat-errands", name: "Errands" }], clock: "24h", owner: "w1:u1", places: [], reviewItems: items,
+        refresh: async () => setItems((current) => current.filter((item) => item.id !== "q1")),
+        timelines: new Map([["2026-10-27", timeline()]]), todayStartMs: TODAY });
+      return (
+        <div className="calendar-grid-scroller" tabIndex={0}>
+          {items.map((item) => (
+            <button className="calendar-places-item is-asking" key={item.id} onClick={() => grid.open(cafe, timeline(), item.id)} type="button">{item.id}</button>
+          ))}
+          {grid.dialog}
+        </div>
+      );
+    }
+    render(<Lane />);
+    const first = screen.getByRole("button", { name: "q1" });
+    first.focus();
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "q2" })));
   });
 });

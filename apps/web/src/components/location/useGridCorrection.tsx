@@ -34,7 +34,8 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
     ? new Map(asking.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : [])) : null, [asking]);
   const outings = useMemo(() => reviewOutings(reviewItems.filter((item) => item.status === "open")), [reviewItems]);
   const [opened, setOpened] = useState<Opened | null>(null);
-  // The control that opened the dialog, and whether an answer closed it: focus then moves on (Codex r2 on #609).
+  // The control that opened the dialog, and whether an answer or a saved correction closed it: focus then moves
+  // on (Codex r2, r3 on #609).
   const opener = useRef<HTMLElement | null>(null);
   const answered = useRef(false);
 
@@ -84,7 +85,8 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
 
   const dialog = current ? (
     <LocationCorrectionDialog activities={activities} clock={clock} key={`${current.owner}:${targetId}`} onClose={() => setOpened(null)}
-      onCorrected={async () => { await refresh(); }} places={places} question={question} target={current.target} />
+      // A saved correction (Logs as, Save this place, a fix) can remove the opener too: focus moves on as after an answer (Codex r3 on #609).
+      onCorrected={async () => { answered.current = true; await refresh(); }} places={places} question={question} target={current.target} />
   ) : null;
   return { askingBySegment, dialog, open };
 }

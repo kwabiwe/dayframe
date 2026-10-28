@@ -577,7 +577,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
-    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands" });
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands",
+      clientCorrectionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
     expect(onChanged).toHaveBeenCalled();
     // The refresh no longer lists the closed "?": its row and count go.
     rerender(<EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={reviewItems.filter((item) => item.id !== PLACE)} />);
@@ -686,5 +687,47 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(sleepRow()).toBeTruthy();
     expect(chip(3)).toBeTruthy();
     expect(badge()).toBe(3);
+  });
+  it("counts an outing's open trip in the badge too when the server says its stay is decided (Codex r3 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const [stay, walk] = outingPair();
+    function Badge() {
+      const projection = useCheckProjection();
+      return <output data-testid="badge">{askingChecks(projectReviewItems([stay, walk], projection), clock.todayStartMs).length}</output>;
+    }
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
+    render(<><Badge /><EntriesTable {...baseProps()} reviewItems={[stay, walk]} /></>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(chip(1)).toBeTruthy();
+    expect(screen.getByTestId("badge").textContent).toBe("1");
+  });
+
+  it("keeps a sent answer out of the badge after leaving the List, until it settles (Codex r3 on #609)", async () => {
+    let answerSave: (response: Response) => void = () => undefined;
+    clientFetch.mockImplementation((url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+      answerSave = () => resolve(new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
+    }));
+    function Badge() {
+      const projection = useCheckProjection();
+      return <output data-testid="badge">{askingChecks(projectReviewItems(reviewItems, projection), clock.todayStartMs).length}</output>;
+    }
+    const onChanged = vi.fn(async () => undefined);
+    const view = render(<><Badge /><EntriesTable {...baseProps()} onChanged={onChanged} reviewItems={reviewItems} /></>);
+    const badge = () => screen.getByTestId("badge").textContent;
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(badge()).toBe("2");
+    // Leaving sends it at once; while it is unanswered the badge keeps it away.
+    view.rerender(<><Badge /></>);
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    expect(badge()).toBe("2");
+    // Saved, and the data refreshed: then the List's projection is gone (the refreshed data no longer lists it).
+    await act(async () => { answerSave(new Response()); });
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await waitFor(() => expect(badge()).toBe("3"));
   });
 });

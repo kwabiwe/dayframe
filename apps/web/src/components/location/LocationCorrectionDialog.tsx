@@ -53,9 +53,10 @@ export type CorrectionActivity = { id: string; name: string };
  * The map for a place or trip (location v4 step 15: the map first on every sheet), read once per open
  * dialog from `GET /api/timeline/items/{id}/evidence`. Null while loading; "unavailable" when it can't be read.
  */
-function useItemEvidence(item: { id: string; kind: "place" | "trip"; startedAt: string } | null) {
+function useItemEvidence(item: { id: string; kind: "place" | "trip"; startedAt: string; stoppedAt: string | null } | null) {
   const [evidence, setEvidence] = useState<{ key: string; value: TimelineItemEvidenceDto | "unavailable" } | null>(null);
-  const key = item ? `${item.kind}:${item.id}:${item.startedAt}` : null;
+  // Its whole span: a refresh that moves either end reads the map again (Codex r3 on #609).
+  const key = item ? `${item.kind}:${item.id}:${item.startedAt}:${item.stoppedAt ?? ""}` : null;
   useEffect(() => {
     if (!item || !key) return;
     const controller = new AbortController();
@@ -150,13 +151,38 @@ export function LocationCorrectionDialog({
   target: LocationCorrectionTarget;
 }) {
   // A trip's leg opens inside its dialog, with a way back (the iPhone sheet's push, as a swap here).
-  const [legOfTrip, setLegOfTrip] = useState<number | null>(null);
+  // The leg is kept by its span, so a refresh that changes the trip's legs finds it again, or (gone, or the legs
+  // merged or split around it) goes back to the trip (Codex r3 on #609).
+  const [openedLeg, setOpenedLeg] = useState<{ startedAt: string; stoppedAt: string } | null>(null);
+  const legIndex = openedLeg && initialTarget.kind === "trip"
+    ? initialTarget.trip.legs.findIndex((leg) => leg.startedAt === openedLeg.startedAt && leg.stoppedAt === openedLeg.stoppedAt) : -1;
+  if (openedLeg && legIndex < 0) setOpenedLeg(null);
+  const legOfTrip = openedLeg && legIndex >= 0 ? legIndex : null;
+  const setLegOfTrip = (index: number | null) => setOpenedLeg(index === null || initialTarget.kind !== "trip" ? null
+    : { startedAt: initialTarget.trip.legs[index].startedAt, stoppedAt: initialTarget.trip.legs[index].stoppedAt });
   const target: Exclude<LocationCorrectionTarget, { kind: "trip" }> | Extract<LocationCorrectionTarget, { kind: "trip" }> =
     initialTarget.kind === "trip" && legOfTrip !== null
       ? { kind: "leg", tripId: initialTarget.trip.id, leg: initialTarget.trip.legs[legOfTrip], index: legOfTrip, count: initialTarget.trip.legs.length }
       : initialTarget;
-  const evidence = useItemEvidence(initialTarget.kind === "place" ? { id: initialTarget.place.id, kind: "place", startedAt: initialTarget.place.startedAt }
-    : initialTarget.kind === "trip" ? { id: initialTarget.trip.id, kind: "trip", startedAt: initialTarget.trip.startedAt } : null);
+  const evidence = useItemEvidence(initialTarget.kind === "place"
+    ? { id: initialTarget.place.id, kind: "place", startedAt: initialTarget.place.startedAt, stoppedAt: initialTarget.place.stoppedAt }
+    : initialTarget.kind === "trip" ? { id: initialTarget.trip.id, kind: "trip", startedAt: initialTarget.trip.startedAt, stoppedAt: initialTarget.trip.stoppedAt } : null);
+  // One id per logical correction (Codex r3 on #609): made when it is first sent and reused on each retry, so a
+  // retry after a lost reply gets the saved receipt back instead of a refusal.
+  const correctionIds = useRef(new Map<string, string>());
+  const send = (correction: TimelineCorrectionRequest) => {
+    const signature = JSON.stringify(correction);
+    let id = correctionIds.current.get(signature);
+    if (!id) {
+      id = crypto.randomUUID();
+      correctionIds.current.set(signature, id);
+    }
+    // Saved, it is done: the same change made again later is a new correction with a new id.
+    return sendCorrection({ ...correction, clientCorrectionId: id }).then((failure) => {
+      if (!failure) correctionIds.current.delete(signature);
+      return failure;
+    });
+  };
   const [logAs, setLogAs] = useState<string | null>(null);
   // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
   // dialog that is gone (Codex r1 on #609).
@@ -259,7 +285,7 @@ export function LocationCorrectionDialog({
     setError(null);
     let savedAny = false;
     for (const correction of pending) {
-      const failure = await sendCorrection(correction).catch(() => "Couldn't save that. Check your connection and try again.");
+      const failure = await send(correction).catch(() => "Couldn't save that. Check your connection and try again.");
       if (!alive.current) return;
       if (failure) {
         // What did save is the new starting point, and the List shows it.
@@ -312,7 +338,7 @@ export function LocationCorrectionDialog({
     if (initialTarget.kind !== "trip") return;
     setBusy(true);
     setError(null);
-    const failure = await sendCorrection(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
+    const failure = await send(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
       : { kind: "delete", subject: "trip", itemId: initialTarget.trip.id })
       .catch(() => "Couldn't save that. Check your connection and try again.");
     if (!alive.current) return;
@@ -353,7 +379,7 @@ export function LocationCorrectionDialog({
       }
       setCreatedPlaceId(placeId);
     }
-    const failure = await sendCorrection({ kind: "place", subject: "place", itemId: target.place.id, placeId, learnedPlaceId: null })
+    const failure = await send({ kind: "place", subject: "place", itemId: target.place.id, placeId, learnedPlaceId: null })
       .catch(() => "Couldn't save that. Check your connection and try again.");
     if (!alive.current) return;
     await onCorrected();
@@ -371,7 +397,7 @@ export function LocationCorrectionDialog({
     if (target.kind !== "place") return;
     setBusy(true);
     setError(null);
-    const failure = await sendCorrection({ kind: "delete", subject: "place", itemId: target.place.id })
+    const failure = await send({ kind: "delete", subject: "place", itemId: target.place.id })
       .catch(() => "Couldn't save that. Check your connection and try again.");
     if (!alive.current) return;
     if (failure) {
