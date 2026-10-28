@@ -1,11 +1,18 @@
 "use client";
 
+import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { askingChecks } from "@/lib/calendar-checks";
+import { CalendarLegStrip, CalendarPlacesLane, placesLaneWidth } from "@/components/location/CalendarPlacesLane";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
+import { LocationCorrectionDialog, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
+import { checkQuestionWords } from "@/components/location/ListChecks";
+import { reviewMutationFor } from "@/lib/review-deck";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -413,6 +420,41 @@ export function TimeReviewViews({
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
     data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);
+  // Location v4 steps 16–17: the Grid's days' places and trips, for trip leg strips and the Places lane.
+  const gridDayKeys = isList ? NO_DAY_KEYS
+    : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));
+  const gridTimelines = useLocationTimelines(gridDayKeys, gridDayKeys, data, listRefreshToken,
+    `${listOwner}|grid|${toTimelineDateKey(ranges.week.start)}`, !isList);
+  const todayStartMs = useLocalDayStartMs();
+  const gridAsking = useMemo(() => todayStartMs !== null
+    ? new Map(askingChecks(data.reviewItems, todayStartMs).flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []))
+    : null, [data.reviewItems, todayStartMs]);
+  // Owner item A: a Grid item opens its dialog here, its "?" asked at the top and answered with the deck's mutation.
+  const gridClock = useClockFormat();
+  const [gridCorrection, setGridCorrection] = useState<{ target: LocationCorrectionTarget; checkId: string | null } | null>(null);
+  const openGridItem = useCallback((item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => {
+    const names = new Map(timeline.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
+    if (item.kind === "trip") {
+      setGridCorrection({ checkId, target: { kind: "trip", trip: item,
+        route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` } });
+      return;
+    }
+    const trips = timeline.items.filter((each) => each.kind === "trip");
+    const review = checkId ? data.reviewItems.find((each) => each.id === checkId) : undefined;
+    setGridCorrection({ checkId, target: { kind: "place", place: item, label: item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
+      joinsTrips: trips.some((trip) => trip.toId === item.id) && trips.some((trip) => trip.fromId === item.id),
+      closeChecks: review ? [{ id: review.id, mutation: reviewMutationFor(review, "skip", undefined) }] : [] } });
+  }, [data.reviewItems]);
+  const gridQuestion = (() => {
+    const review = gridCorrection?.checkId ? data.reviewItems.find((each) => each.id === gridCorrection.checkId) : undefined;
+    if (!review) return null;
+    const words = checkQuestionWords(review, gridClock);
+    return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now", onAnswer: (yes: boolean) => {
+      void clientFetch(`/api/review/${review.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: reviewMutationFor(review, yes ? "log" : "skip", undefined) }) })
+        .catch(() => null).then(() => refreshData());
+    } };
+  })();
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -605,7 +647,12 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+            locations={{ timelines: gridTimelines, asking: gridAsking ?? new Map(), onOpen: openGridItem }}
           />
+        ) : null}
+        {gridCorrection ? (
+          <LocationCorrectionDialog activities={data.categories} clock={gridClock} onClose={() => setGridCorrection(null)}
+            onCorrected={async () => { await refreshData(); }} places={correctionPlaces} question={gridQuestion} target={gridCorrection.target} />
         ) : null}
         {state.view === "list" ? (
           <EntriesTable
@@ -702,7 +749,8 @@ export function CalendarReview({
   tags,
   todayKeyHint = null,
   undoToastVisible = false,
-  visibleDays
+  visibleDays,
+  locations
 }: {
   calendarHoursMode: CalendarHoursMode;
   capturedNow: Date;
@@ -723,7 +771,14 @@ export function CalendarReview({
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
+  /** Location v4 steps 16–17: each shown day's places and trips, and the "?" still asking by segment. */
+  locations?: { timelines: ReadonlyMap<string, LocationTimeline>; asking: ReadonlyMap<string, string>;
+    /** Owner item A: a Grid item (a lane item, or a "?") opens its own dialog. */
+    onOpen: (item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => void };
 }) {
+  // Step 16: every shown day's trips by the blocks made from them, for the leg strip.
+  const tripsByBlock = useMemo(() => new Map([...(locations?.timelines.values() ?? [])].flatMap((timeline) => [...tripsByBlockId(timeline)])),
+    [locations]);
   const clock = useClockFormat();
   const router = useRouter();
   const {
@@ -1631,7 +1686,10 @@ export function CalendarReview({
             const dayBrackets = calendarBrackets.byDay.get(dayKey) ?? [];
             // Day view's rail holds the pattern's name written level; Week view's keeps the bare bracket.
             const dayView = visibleDays.length === 1;
-            const railPx = dayBrackets.length ? (dayView ? calendarBracketDayRailPx : calendarBracketRailPx) : 0;
+            // Step 17: a Places lane on the left of a day with any place besides Home, about a fifth of it.
+            const dayPlaces = locations?.timelines.get(dayKey) ?? null;
+            const lanePx = dayPlaces ? placesLaneWidth(dayPlaces, dayBodyWidth) : 0;
+            const railPx = lanePx + (dayBrackets.length ? (dayView ? calendarBracketDayRailPx : calendarBracketRailPx) : 0);
             // The drag ghost and the draft slot start where a full-width block does, right of any
             // bracket rail (CSS keeps its 8 px inset on a day without one).
             const draftInsets = railPx ? { left: calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 }, railPx).left } : {};
@@ -1866,14 +1924,28 @@ export function CalendarReview({
                   const label = denseBlockLabel(height, false, 0);
                   return (
                     <Link
-                      aria-label={`${item.title}, needs review, ${range}. Open Review.`}
-                      className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
+                      aria-label={`${item.title}, needs a look, ${range}.`}
+                      className={["calendar-review-block", "is-v4", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
                       data-calendar-block-key={key}
                       data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
-                      href={`/review#review-${item.id}`}
+                      // Step 15: a "?" on the grid opens its dialog (below), or its question in the List, never Review.
+                      href={`/timeline?view=list&scope=day&date=${toTimelineDateKey(new Date(item.fromMs))}&check=${encodeURIComponent(item.id)}`}
                       key={key}
                       tabIndex={visibleSelectedTarget ? -1 : undefined}
                       onClick={(event) => {
+                        // Owner item A: a "?" whose place or trip is on the Grid opens its dialog.
+                        if (locations && !visibleSelectedTarget) {
+                          const payload = reviewItems.find((review) => review.id === item.id)?.rawPayload;
+                          const segmentId = typeof payload?.clientSegmentId === "string" ? payload.clientSegmentId : null;
+                          for (const timeline of locations.timelines.values()) {
+                            const found = segmentId ? timeline.items.find((each) => each.id === segmentId) : undefined;
+                            if (found) {
+                              event.preventDefault();
+                              locations.onOpen(found, timeline, item.id);
+                              return;
+                            }
+                          }
+                        }
                         // A press an open editor took for its own dismissal (and any discard
                         // prompt) only dismisses, as on blank time: it never also leaves Calendar.
                         const pointer = reviewLinkPointerRef.current;
@@ -1902,7 +1974,7 @@ export function CalendarReview({
                     >
                       {/* Padding inside the query container, so its width thresholds match a block's. */}
                       <span className="calendar-review-content">
-                        <span className="calendar-entry-title"><span className="calendar-review-mark" aria-hidden="true">?</span><CalendarTitleWords text={item.title} /></span>
+                        <span className="calendar-entry-title"><CalendarTitleWords text={item.title} /></span>
                       </span>
                     </Link>
                   );
@@ -1932,6 +2004,8 @@ export function CalendarReview({
                     startedAt: activeDraft?.startedAt ?? entry.startedAt,
                     stoppedAt: activeDraft?.stoppedAt ?? entry.stoppedAt
                   };
+                  // Step 16: a trip block from 44 px tall shows its legs down its left edge.
+                  const legTrip = blockPositionStyle.height >= 44 ? tripsByBlock.get(entry.id) ?? null : null;
                   const hasInlineActionSlot = Boolean(
                     entry.stoppedAt && density.canShowInlineAction
                   );
@@ -1955,6 +2029,7 @@ export function CalendarReview({
                         label.compact ? "is-dense-compact" : "",
                         label.detail ? "has-detail-room" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
+                        legTrip ? "has-leg-strip" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
@@ -2052,6 +2127,10 @@ export function CalendarReview({
                           onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                         />
                       ) : null}
+                      {legTrip ? (
+                        <CalendarLegStrip fromMs={Date.parse(displayEntry.startedAt)} legs={legTrip.legs}
+                          toMs={displayEntry.stoppedAt ? Date.parse(displayEntry.stoppedAt) : capturedNow.getTime()} />
+                      ) : null}
                     </article>
                   );
                 });
@@ -2062,6 +2141,15 @@ export function CalendarReview({
                 blocks.forEach((block, index) => byEntry.set(block.entry.id, blockElements[index]));
                 return [...suggestionBlocks, ...dayEntries.map((entry) => byEntry.get(entry.id) ?? null)];
               })()}
+              {dayPlaces && lanePx ? (
+                <CalendarPlacesLane asking={locations?.asking ?? new Map()} clock={clock}
+                  onOpen={(item, checkId) => locations?.onOpen(item, dayPlaces, checkId)}
+                  geometry={(startedAt, stoppedAt) => {
+                    const box = calendarBlockStyle({ startedAt, stoppedAt }, null, day, rowHeight, calendarHeight, calendarHours, capturedNow);
+                    return box ? { top: box.top, height: box.height } : null;
+                  }}
+                  timeline={dayPlaces} widthPx={lanePx} />
+              ) : null}
             </div>
             );
           })}

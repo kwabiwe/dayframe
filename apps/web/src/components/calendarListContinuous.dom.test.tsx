@@ -14,6 +14,9 @@ vi.mock("@/components/AppShellRuntime", () => ({
 }));
 const clientFetch = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
+// The viewer's today is 20 Oct (the List's focus day), so the 14th's "?" still ask: a "?" asks for today and the
+// 6 days before (owner, 28 Oct 2026).
+vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => new Date(2026, 9, 20).getTime(), useMediaQuery: () => false }));
 
 const { useCalendarListWeeks, LIST_EMPTY_WEEKS_BEFORE_END } = await import("./useCalendarListWeeks");
 const { useLocationTimelines, LOCATION_TIMELINE_CONCURRENCY } = await import("./location/LocationListRows");
@@ -435,7 +438,7 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     expect(older().getBoundingClientRect().top).toBe(0);
   });
 
-  it("keeps an open question in place when its day's places replace its own row (Codex r8 on #584)", () => {
+  it("keeps a \"?\" in place when its day's places replace its own row (Codex r8 on #584)", () => {
     const iso = (hour: number) => new Date(2026, 9, 14, hour).toISOString();
     const cafe = { kind: "place" as const, id: "seg-cafe", status: "finalised" as const, startedAt: iso(10), stoppedAt: iso(11), placeId: null,
       learnedPlaceId: null, name: null, role: null, matchKind: "unknown" as const, confidence: "medium" as const, blockIds: [] };
@@ -454,10 +457,11 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
         entries={days(10, 20)} reviewItems={[question]} onChanged={vi.fn(async () => undefined)}
         onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
-    // Before the 14th's places arrive, the suggestion is a "?" row of its own; open its question.
+    // Before the 14th's places arrive, the suggestion is a "?" row of its own.
     const { rerender } = render(view([]));
-    fireEvent.click(screen.getByRole("button", { name: "Check Exampleton cafe" }));
-    const open = () => document.querySelector<HTMLElement>('tr[data-question-for="q-cafe"]')!;
+    expect(screen.getByRole("button", { name: /^Exampleton cafe, .+\. Needs a look$/ })).toBeTruthy();
+    const open = () => document.querySelector<HTMLElement>('tr[data-suggestion-id="q-cafe"]')!;
+    expect(open().dataset.locationRow).toBe("check-q-cafe");
     const root = document.querySelector(".timeline-list-scroll")!;
     root.scrollTop += open().getBoundingClientRect().top;
     rerender(view([]));
@@ -465,6 +469,7 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     // The places arrive: the "?" moves onto the cafe's place row, and another place shows above it.
     rerender(view([{ date: "2026-10-14", timeZone: "", dayStart: fourteenth.start.toISOString(), dayEnd: fourteenth.end.toISOString(), gaps: [],
       items: [cafe, library], openTrip: null }]));
+    expect(open().dataset.locationRow).toBe("seg-cafe");
     expect(open().getBoundingClientRect().top).toBe(0);
   });
 

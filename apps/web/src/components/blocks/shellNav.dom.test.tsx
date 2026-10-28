@@ -37,8 +37,23 @@ describe("Blocks sidebar navigation", () => {
   it("badges Calendar with the things to check, and says so (location v4 step 14)", () => {
     setReducedMotion(false);
     render(<ShellSidebarNav activeId="today" checkCount={3} reviewCount={0} />);
-    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check" });
+    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check in the last 7 days. Opens the oldest." });
     expect(calendar.querySelector(".df-nav-count")?.textContent).toBe("3");
+    // With no oldest question to open, the badge keeps Calendar's own link.
+    expect(calendar.getAttribute("href")).toBe("/timeline");
+  });
+
+  it("opens the oldest question from the badge, in the sidebar and the tab bar (owner, 28 Oct 2026)", () => {
+    setReducedMotion(false);
+    const href = "/timeline?view=list&scope=day&date=2026-10-24&check=r1";
+    render(<ShellSidebarNav activeId="today" calendarHref={href} checkCount={2} reviewCount={0} />);
+    const calendar = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." });
+    expect(calendar.getAttribute("href")).toBe(href);
+    // Review stays in the nav, on its own link, until step 15 removes it.
+    expect(screen.getByRole("link", { name: "Review" }).getAttribute("href")).toBe("/review");
+    cleanup();
+    render(<ShellTabBar activeId="today" calendarHref={href} checkCount={2} reviewCount={0} />);
+    expect(screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." }).getAttribute("href")).toBe(href);
   });
 
   it("places the thumb without travel first, then springs it, and fades it out on Settings", () => {

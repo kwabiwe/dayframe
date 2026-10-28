@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
-import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
+import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
 import { formatDuration, formatTime } from "@/lib/format";
@@ -152,8 +152,10 @@ export function useListChecks({
 export function ChecksChip({ count, onNext }: { count: number; onNext: () => void }) {
   if (!count) return null;
   return (
-    <div className="timeline-checks-bar">
-      <button className="timeline-checks-chip" data-tip="Go to the next one" onClick={onNext} type="button">
+    <div className="timeline-checks-bar is-sticky">
+      {/* Every "?" from the last 7 days, oldest first, across days (owner, 28 Oct 2026, concern 4). */}
+      <button aria-label={`${count} to check, oldest first`} className="timeline-checks-chip"
+        data-tip="Go to the next one, oldest first" onClick={onNext} type="button">
         <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
         {count} to check
       </button>
@@ -162,38 +164,24 @@ export function ChecksChip({ count, onNext }: { count: number; onNext: () => voi
 }
 
 /**
- * A suggestion's question under its row, with the deck's answers. A trip asks by its title, "Getting
- * around, 14:44–16:31?", with Yes, Edit (its editor, opened under the question) and Not now (card A); a
- * place asks "Visited {guess}?" (or "Where were you?") with its times, and the same answers (card B).
+ * A suggestion's question under its row, with the deck's answers in compact pills. Since the owner's approval
+ * (28 Oct 2026) only a "?" with no dialog asks here (Apple Health, or a trip the day's places don't have);
+ * places and trips ask at the top of their dialog.
  */
 export function CheckQuestionRow({
   clock,
-  editor,
   item,
-  onAnswer,
-  onEdit
+  onAnswer
 }: {
   clock: ClockFormat;
-  /** The trip's or place's editor while it is open, under the question. */
-  editor?: ReactNode;
   item: ReviewItemRow;
   onAnswer: (kind: ReviewDecisionKind) => void;
-  /** Open (or close) the trip's or place's editor. */
-  onEdit?: () => void;
 }) {
   const span = reviewWindow(item);
   const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
   const picture = reviewPicture(item);
   // Every Move is a trip here, a round trip from a place too (Codex r1 on #590).
   const trip = item.eventType === "commute_detected";
-  const editRef = useRef<HTMLButtonElement>(null);
-  const editing = Boolean(editor);
-  const wasEditing = useRef(editing);
-  // Closing the editor gives focus back to Edit (Codex r1 on #590).
-  useEffect(() => {
-    if (wasEditing.current && !editing) editRef.current?.focus();
-    wasEditing.current = editing;
-  }, [editing]);
   // A place asks "Visited {guess}?" (or "Where were you?") with its times under it (card B); anything
   // else asks by its title with its times.
   const place = !trip && picture === "place";
@@ -213,7 +201,8 @@ export function CheckQuestionRow({
       <td colSpan={4}>
         <div className="timeline-check-question" role="group" aria-label={question}>
           <b>{question}</b>
-          <small>{detail}</small>
+          {/* The row already shows the times (owner item I), so a place's question doesn't repeat them. */}
+          {visited ? null : <small>{detail}</small>}
           <div className="timeline-check-answers">
             {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
                 stays for Play/Stop and live recording. An outing's trips there and back are logged with it. */}
@@ -222,50 +211,79 @@ export function CheckQuestionRow({
                 {(trip || visited) && !legacyUnnamed ? "Yes" : `Log ${reviewDefaultName(item)}`}
               </button>
             ) : null}
-            {(trip || visited) && onEdit ? (
-              <button aria-expanded={editing} className="ui-button ui-button-secondary is-compact" onClick={onEdit} ref={editRef} type="button">Edit</button>
-            ) : null}
             <button className="ui-button ui-button-ghost is-compact" onClick={() => onAnswer("skip")} type="button">Not now</button>
           </div>
-          {editor}
         </div>
       </td>
     </tr>
   );
 }
 
+/**
+ * Owner items A and B (28 Oct 2026): a "?"'s words for its dialog and its row's Yes pill — what it asks, and the
+ * one-tap answer when there is a confident one (a trip, or a place with a guess).
+ */
+export function checkQuestionWords(item: ReviewItemRow, clock: ClockFormat) {
+  const span = reviewWindow(item);
+  const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
+  const picture = reviewPicture(item);
+  const trip = item.eventType === "commute_detected";
+  const visited = !trip && picture === "place" ? placeQuestion(reviewTitle(item)) : null;
+  const question = visited ? visited.question : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
+  const yesLabel = !span ? null : trip || visited?.guess ? "Yes" : visited ? null : `Log ${reviewDefaultName(item)}`;
+  return { question, yesLabel, confident: Boolean(span && (trip || visited?.guess)) };
+}
+
 /** A "?" with no place row: a trip not yet in a block, Apple Health, or another suggestion, at its time. */
-export function CheckRowView({ check, clock, item, row }: {
+export function CheckRowView({ check, clock, item, onOpen, onYes, row }: {
   check: { expanded: boolean; onToggle: () => void };
+  /** A trip's row opens its dialog (owner item A); anything else (Apple Health) opens its question under it. */
+  onOpen?: () => void;
+  /** The one-tap Yes on the row (owner item B). */
+  onYes?: () => void;
   clock: ClockFormat;
   item: ReviewItemRow;
   row: Extract<LocationListRow, { kind: "check" }>;
 }) {
   const span = reviewWindow(item);
   const title = reviewTitle(item);
+  // Owner concern 1 (28 Oct 2026): its own icon (a trip's route, Apple Health's heart, a place's pin) with the
+  // amber dot; the whole row opens its question.
+  const picture = reviewPicture(item);
+  const glyph = picture === "commute" ? DAYFRAME_APP_ICONS.openTrip : picture === "sleep" || picture === "workout"
+    ? DAYFRAME_APP_ICONS.sourceHealth : DAYFRAME_APP_ICONS.places;
+  const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : "";
   return (
-    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={row.key} data-suggestion-id={item.id}>
-      <td className="px-3 py-3">
-        <div className="timeline-task-cell is-single">
-          <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>
+    <tr className="timeline-list-row timeline-location-row align-middle is-v4" data-location-row={row.key} data-suggestion-id={item.id}>
+      <td className="px-3 py-3" colSpan={2}>
+        <LocationRowButton asking checkKey={row.key} expanded={onOpen ? undefined : check.expanded}
+          hint={onOpen ? "Opens the trip" : check.expanded ? "Hides the question" : "Shows the question"}
+          label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={onOpen ?? check.onToggle}>
+          <LocationMark asking glyph={glyph} />
           <span className="timeline-task-details">
             <span className="timeline-task-primary-line"><b>{title}</b></span>
             {row.trip?.legs.length ? <TripModesLine legs={row.trip.legs} route={row.trip.route} />
-              : <span className="timeline-location-secondary">{reviewSourceLabel(reviewPicture(item))}</span>}
+              : <span className="timeline-location-secondary">{reviewSourceLabel(picture)}</span>}
           </span>
-        </div>
-      </td>
-      <td className="tabular px-3 py-3">
-        <div className="timeline-list-time-content">
-          {span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null}
-        </div>
+          {span ? <StackedTimes clock={clock} fromMs={span.startMs} toMs={span.stopMs} /> : null}
+        </LocationRowButton>
       </td>
       <td className="tabular px-3 py-3 timeline-list-duration">
         <div className="timeline-list-duration-content">{span ? formatDuration(Math.round((span.stopMs - span.startMs) / 1000)) : null}</div>
       </td>
       <td className="px-3 py-3">
-        <div className="timeline-list-actions"><CheckToggle checkKey={row.key} expanded={check.expanded} label={title} onToggle={check.onToggle} /></div>
+        {onYes ? <button className="ui-button timeline-check-log is-compact timeline-row-yes" onClick={onYes} type="button">Yes</button> : null}
       </td>
     </tr>
+  );
+}
+
+/** Start over end, as a block's row shows its times (owner item D). */
+export function StackedTimes({ clock, fromMs, toMs }: { clock: ClockFormat; fromMs: number; toMs: number | null }) {
+  return (
+    <span className="tabular timeline-location-span is-stacked">
+      <span>{formatTime(new Date(fromMs), clock)}</span>
+      <span>{toMs == null ? "now" : formatTime(new Date(toMs), clock)}</span>
+    </span>
   );
 }

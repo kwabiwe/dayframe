@@ -18,6 +18,8 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -93,7 +95,12 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // Review cards: an outing counts once (PRD D19, PR 12c).
   const reviewCount = data?.stats.reviewCardCount ?? 0;
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
-  const checkCount = data?.stats.checkCount ?? 0;
+  // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
+  // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
+  const todayStartMs = useLocalDayStartMs();
+  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(data.reviewItems, todayStartMs) : null, [data, todayStartMs]);
+  const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
+  const calendarHref = asking?.length ? oldestCheckHref(asking) : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -266,7 +273,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} reviewCount={reviewCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -337,7 +344,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} reviewCount={reviewCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

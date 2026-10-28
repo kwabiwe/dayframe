@@ -1,38 +1,29 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 const search = vi.hoisted(() => ({ params: "" }));
+const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => router,
   useSearchParams: () => new URLSearchParams(search.params)
 }));
 vi.mock("@/components/AppShellRuntime", () => ({
   useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
 }));
 const clientFetch = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
-
-// The trip editor stands in for the location editor: its Close, and a save the test finishes when it chooses.
-const editors = vi.hoisted(() => ({ resolve: new Map<string, () => void>() }));
-vi.mock("@/components/location/LocationReviewPanel", () => ({
-  LocationReviewPanel: ({ reviewItemId, onClose, onResolved }: { reviewItemId: string; onClose: () => void; onResolved?: () => void }) => {
-    // As the real editor does: a save resolves, then closes.
-    editors.resolve.set(reviewItemId, () => {
-      onResolved?.();
-      onClose();
-    });
-    return (
-      <div data-editor-for={reviewItemId}>
-        <input aria-label={`Name for ${reviewItemId}`} />
-        <button aria-label="Close location evidence" onClick={onClose} type="button">×</button>
-      </div>
-    );
-  }
+// A place's or trip's dialog reads its map from the evidence route as it opens: those reads have their own
+// mock (the map stays unavailable here), so `clientFetch` sees only the answers the List sends.
+const evidenceFetch = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/client-auth-fetch", () => ({
+  clientFetch: (url: string, init?: RequestInit) => url.includes("/evidence?") ? evidenceFetch(url, init) : clientFetch(url, init)
 }));
+// The viewer's local midnight, which anchors the 7 days a "?" asks (owner, 28 Oct 2026); set per test.
+const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
+vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => clock.todayStartMs, useMediaQuery: () => false }));
 
 const { EntriesTable } = await import("./EntriesTable");
 
@@ -71,6 +62,13 @@ const reviewItems = [
     suggestedStoppedAt: at(6) })
 ];
 
+const outingPair = () => [
+  suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
+    rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } }),
+  suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
+    suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } })
+];
+
 // A reply that passes the acknowledgement check for what was sent (Codex r2 on #568).
 function acknowledge(url: string, init: RequestInit) {
   const envelope = JSON.parse(init.body as string);
@@ -85,9 +83,9 @@ function acknowledge(url: string, init: RequestInit) {
   return action.startsWith("ignore") ? { ...base, status: "ignored" } : { ...base, status: "accepted", entryId: `entry-${reviewItemId}` };
 }
 
-function renderList() {
+function renderList(items: readonly ReviewItemRow[] = reviewItems) {
   return render(
-    <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={timeline} reviewItems={reviewItems}
+    <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={timeline} reviewItems={items}
       entries={[entry("planning", "Planning", at(11), at(11, 45))]} onChanged={vi.fn(async () => undefined)}
       onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
   );
@@ -96,34 +94,67 @@ function renderList() {
 const baseProps = () => ({ capturedNow: new Date(at(12)), categories: [], groupByDay: true, locationTimeline: timeline, entries: [],
   onChanged: vi.fn(async () => undefined), onDeleteEntries: vi.fn(), onScroll: vi.fn(), scrollContainerRef: vi.fn(), tags: [] });
 
+/** The local midnight of the day `iso` falls on. */
+function localDayStart(iso: string) {
+  const day = new Date(iso);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+// The rows: each is one button, named by what it is and its times, "Needs a look" while it asks (owner item A).
+const officeRow = () => screen.queryByRole("button", { name: /^Office, .+\. Needs a look$/ });
+const sleepRow = () => screen.queryByRole("button", { name: /^Sleep, .+\. Needs a look$/ });
+const askingRow = (title: string) => screen.queryByRole("button", { name: new RegExp(`^${title}, .+\\. Needs a look$`) });
+const chip = (count: number) => screen.getByRole("button", { name: `${count} to check, oldest first` });
+const dialog = () => screen.queryByRole("dialog");
+
 describe("things to check in Calendar › List (location v4 step 14)", () => {
   beforeEach(() => {
     clientFetch.mockReset().mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
+    evidenceFetch.mockReset().mockResolvedValue(new Response("{}", { status: 404 }));
+    router.push.mockReset();
+    clock.todayStartMs = localDayStart(at(12));
     Element.prototype.scrollIntoView ??= () => undefined;
+    HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
+    HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
   });
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    window.localStorage.clear();
   });
 
   it("puts each open suggestion on the day's row it is about, and counts them", async () => {
     renderList();
-    expect(await screen.findByRole("button", { name: "3 to check" })).toBeTruthy();
+    expect((await screen.findByRole("button", { name: "3 to check, oldest first" })).textContent).toBe("3 to check");
     // The saved place shows because it has a suggestion; the trip and Apple Health have rows of their own.
-    expect(screen.getByRole("button", { name: "Check Office" })).toBeTruthy();
+    // Each mark is the row's own icon with the amber dot; there is no separate "Check …" toggle (owner concern 1).
+    for (const row of [officeRow(), askingRow("Walk"), sleepRow()]) {
+      expect(row?.querySelector(".timeline-location-mark .timeline-location-dot")).toBeTruthy();
+    }
     expect(screen.getByLabelText("Office → Unknown place. Legs: Walk")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Check / })).toBeNull();
+    // The place nobody asks about has no dot.
+    expect(screen.getByRole("button", { name: /^Unknown place, / }).querySelector(".timeline-location-dot")).toBeNull();
+    // Times are stacked, start over end (owner item D).
+    expect(officeRow()?.querySelectorAll(".timeline-location-span.is-stacked > span")).toHaveLength(2);
   });
 
   it("answers a place's question with the deck's own decision, held for Undo, then saved", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     renderList();
-    fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
-    // Card B: "Visited {guess}?" with its times under it, and Yes / Edit / Not now.
-    const asked = screen.getByRole("group", { name: "Visited Office?" });
-    expect(asked.textContent).toMatch(/\d\d:00–\d\d:00/);
+    // Owner item A: the row opens the place's dialog with its "?" asked at the top, Yes and Not now.
+    fireEvent.click(officeRow()!);
+    const opened = dialog()!;
+    const asked = within(opened).getByRole("group", { name: "Visited Office?" });
+    expect(asked.parentElement?.firstElementChild).toBe(asked);
+    // The dialog says its times; the question doesn't repeat them or "not in a block".
+    expect(opened.textContent).toMatch(/\d\d:00–\d\d:00/);
     expect(asked.textContent).not.toContain("not in a block");
-    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    // A row that opens a dialog never shows the inline question card too (owner final change 1).
+    expect(document.querySelector(".timeline-check-question")).toBeNull();
+    fireEvent.click(within(asked).getByRole("button", { name: "Yes" }));
+    expect(dialog()).toBeNull();
     expect(screen.getByText("Logged Office")).toBeTruthy();
     expect(clientFetch).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
@@ -132,142 +163,227 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "confirm" });
     // Saved, not rolled back: the "?" stays away and no error shows.
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.queryByRole("button", { name: "Check Office" })).toBeNull();
+    expect(officeRow()).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("answers a confident guess with the row's own Yes pill, held for Undo (owner item B)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    renderList();
+    const yes = officeRow()!.closest("tr")!.querySelector<HTMLButtonElement>(".timeline-row-yes")!;
+    expect(yes.textContent).toBe("Yes");
+    // The trip asks confidently too; Apple Health has no pill (its question has its own answers).
+    expect(askingRow("Walk")!.closest("tr")!.querySelector(".timeline-row-yes")).toBeTruthy();
+    expect(sleepRow()!.closest("tr")!.querySelector(".timeline-row-yes")).toBeNull();
+    fireEvent.click(yes);
+    expect(dialog()).toBeNull();
+    expect(screen.getByText("Logged Office")).toBeTruthy();
+    expect(officeRow()).toBeNull();
+    // Undo brings it back and nothing is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(officeRow()).toBeTruthy();
+    fireEvent.click(officeRow()!.closest("tr")!.querySelector<HTMLButtonElement>(".timeline-row-yes")!);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    expect(clientFetch.mock.calls[0][0]).toBe(`/api/review/${PLACE}`);
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "confirm" });
+  });
+
+  it("asks Apple Health under its row with compact pills, and never puts a card under a place row", () => {
+    renderList();
+    const row = sleepRow()!;
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(row);
+    expect(dialog()).toBeNull();
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    const asked = screen.getByRole("group", { name: /^Sleep, .+\?$/ });
+    expect(asked.closest("tr")?.previousElementSibling).toBe(row.closest("tr"));
+    for (const answer of within(asked).getAllByRole("button")) expect(answer.className).toContain("is-compact");
+    // The question cards under rows are Apple Health's alone: the place row opens its dialog instead.
+    expect(document.querySelectorAll(".timeline-check-question")).toHaveLength(1);
+    fireEvent.click(officeRow()!);
+    expect(dialog()).toBeTruthy();
+    expect(document.querySelector(`[data-question-for="${PLACE}"]`)).toBeNull();
   });
 
   it("brings a skipped suggestion back with Undo and saves nothing", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     renderList();
-    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
-    expect(screen.queryByRole("button", { name: "Check Sleep" })).toBeNull();
+    expect(sleepRow()).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
+    expect(sleepRow()).toBeTruthy();
   });
 
-  it("asks a trip by its title with Yes, Edit and Not now; Edit opens its editor under the question (card A)", async () => {
+  it("asks a trip by its title at the top of its own dialog, with Yes and Not now above its legs and fixes (card A)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    // The editor's evidence stays loading here: it only has to open and close.
-    clientFetch.mockImplementation(async (url: string, init?: RequestInit) => init?.method === "POST" || init?.body
-      ? new Response(JSON.stringify(acknowledge(url, init as RequestInit)), { status: 200 }) : new Promise(() => undefined));
     const trip = { ...reviewItems[1], title: "Getting around" };
     render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], trip, reviewItems[2]]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
-    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
-    const edit = screen.getByRole("button", { name: "Edit" });
-    expect(edit.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(edit);
-    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector(`[data-editor-for="${TRIP}"]`)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close location evidence" }));
-    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
-    // Focus goes back to Edit (Codex r1 on #590).
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit" }));
-    // Closing the question closes its editor: reopening it shows the question alone (Codex r1 on #590).
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
-    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
-    expect(screen.queryByRole("button", { name: "Close location evidence" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(askingRow("Getting around")!);
+    const opened = screen.getByRole("dialog", { name: "Office → Unknown place" });
+    const asked = within(opened).getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ });
+    expect(within(asked).getByRole("button", { name: "Yes" })).toBeTruthy();
+    expect(within(asked).getByRole("button", { name: "Not now" })).toBeTruthy();
+    // The trip's own dialog: its legs and its fixes (the editor it had under the question is gone).
+    expect(within(opened).getByRole("group", { name: "Legs" })).toBeTruthy();
+    expect(within(opened).getByRole("button", { name: "I didn't leave" })).toBeTruthy();
+    expect(within(opened).getByRole("button", { name: "This wasn't a trip" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(evidenceFetch.mock.calls[0][0]).toMatch(/^\/api\/timeline\/items\/seg-trip\/evidence\?kind=trip&startedAt=/);
     // Yes logs it as the deck's Log it does.
-    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    fireEvent.click(within(asked).getByRole("button", { name: "Yes" }));
+    expect(dialog()).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     const posted = clientFetch.mock.calls.find(([url, init]) => url === `/api/review/${TRIP}` && init?.body);
     expect(JSON.parse(posted![1].body).mutation).toEqual({ action: "confirm" });
   });
 
-  it("lets a save that finishes late leave another trip's open editor alone (Codex r2 on #590)", () => {
-    editors.resolve.clear();
+  it("asks each trip in its own dialog, so answering one leaves the other trip alone (Codex r2 on #590)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const other = { ...reviewItems[1], id: "00000000-0000-4000-8000-0000000000a4", title: "Getting around",
       suggestedStartedAt: at(11), suggestedStoppedAt: at(11, 30), rawPayload: { clientSegmentId: "seg-other" } };
     const trip = { ...reviewItems[1], title: "Getting around" };
     render(<EntriesTable {...baseProps()} reviewItems={[trip, other]} />);
-    const checks = () => screen.getAllByRole("button", { name: "Check Getting around" });
-    expect(checks()).toHaveLength(2);
-    fireEvent.click(checks()[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const opened = [...editors.resolve.keys()];
-    const firstId = opened[0];
-    const secondId = firstId === TRIP ? other.id : TRIP;
-    const finishFirst = editors.resolve.get(firstId)!;
-    // The person moves on to the other trip and starts editing it.
-    fireEvent.click(checks()[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText(`Name for ${secondId}`), { target: { value: "Shop run" } });
-    act(() => finishFirst());
-    expect((screen.getByLabelText(`Name for ${secondId}`) as HTMLInputElement).value).toBe("Shop run");
-    expect(screen.getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe("true");
+    const rows = () => screen.getAllByRole("button", { name: /^Getting around, .+\. Needs a look$/ });
+    expect(rows()).toHaveLength(2);
+    // The one at 11:00 has no trip on the day: it asks under its row, as anything without a dialog does.
+    const [later, earlier] = rows();
+    fireEvent.click(earlier);
+    expect(within(dialog()!).getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" }));
+    expect(dialog()).toBeNull();
+    fireEvent.click(later);
+    const asked = screen.getByRole("group", { name: /^Getting around, 1\d:00–1\d:30\?$/ });
+    expect(asked.closest("tr")?.dataset.questionFor).toBe(other.id);
+    fireEvent.click(within(asked).getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual([`/api/review/${other.id}`]);
+    expect(rows()).toHaveLength(1);
   });
 
-  it("asks a round trip from a place as a trip too, with Yes and Edit (Codex r1 on #590)", () => {
+  it("asks a round trip from a place as a trip too, with Yes (Codex r1 on #590)", () => {
     const round = { ...reviewItems[1], title: "Getting around", rawPayload: { clientSegmentId: "seg-trip", qualificationReason: "same_place_outing" } };
     render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], round, reviewItems[2]]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Getting around" }));
-    expect(screen.getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    const row = askingRow("Getting around")!;
+    expect(row.closest("tr")!.querySelector(".timeline-row-yes")).toBeTruthy();
+    fireEvent.click(row);
+    const asked = within(dialog()!).getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ });
+    expect(within(asked).getByRole("button", { name: "Yes" })).toBeTruthy();
   });
 
   it("keeps Log for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
     const legacy = suggestion("00000000-0000-4000-8000-0000000000a9", { title: "Unknown place", eventSource: "geofence_specific",
       suggestedStartedAt: at(10), suggestedStoppedAt: at(11) });
     render(<EntriesTable {...baseProps()} entries={[entry("planning", "Planning", at(11), at(11, 45))]} reviewItems={[legacy]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    const row = askingRow("Unknown place")!;
+    // No guess, so no Yes pill on the row.
+    expect(row.closest("tr")!.querySelector(".timeline-row-yes")).toBeNull();
+    fireEvent.click(row);
+    expect(dialog()).toBeNull();
     expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Log Unknown place" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   });
 
-  it("moves from one check to the next with the chip", async () => {
+  it("steps through the checks oldest first with the chip, each opening as it asks (owner concern 4)", async () => {
     renderList();
-    fireEvent.click(await screen.findByRole("button", { name: "3 to check" }));
-    expect(screen.getAllByRole("group").length).toBe(1);
-    const first = screen.getAllByRole("group")[0].getAttribute("aria-label");
-    fireEvent.click(screen.getByRole("button", { name: "3 to check" }));
-    expect(screen.getAllByRole("group")[0].getAttribute("aria-label")).not.toBe(first);
+    // Sleep (01:00) first: Apple Health asks under its row.
+    fireEvent.click(await screen.findByRole("button", { name: "3 to check, oldest first" }));
+    expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
+    expect(dialog()).toBeNull();
+    // Then the Office (09:00): its dialog, with the question at the top.
+    fireEvent.click(chip(3));
+    expect(screen.queryByRole("group", { name: /^Sleep, / })).toBeNull();
+    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    // Then the trip (10:00), in its own dialog.
+    fireEvent.click(chip(3));
+    expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" }));
+    // And round again to the oldest.
+    fireEvent.click(chip(3));
+    expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
+    expect(router.push).not.toHaveBeenCalled();
   });
+
+  it("steps across days: a \"?\" on a day the List hasn't loaded opens that day at it (owner concern 4)", async () => {
+    const earlier = suggestion("00000000-0000-4000-8000-0000000000c1", { title: "Sleep", eventSource: "health_sleep",
+      eventType: "health_sleep_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 9, 12)).toISOString(),
+      suggestedStoppedAt: new Date(Date.UTC(2026, 7, 9, 13)).toISOString() });
+    renderList([earlier, ...reviewItems]);
+    // Counted with today's, oldest first: it is the first one.
+    fireEvent.click(await screen.findByRole("button", { name: "4 to check, oldest first" }));
+    expect(router.push).toHaveBeenCalledWith(`/timeline?view=list&scope=day&date=2026-08-09&check=${earlier.id}`);
+    // The next press goes on from it to the oldest of this day.
+    fireEvent.click(chip(4));
+    expect(screen.getByRole("group", { name: /^Sleep, / }).closest("tr")?.dataset.questionFor).toBe(SLEEP);
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks only for 7 days: an older \"?\" has no dot and isn't counted (owner concern 4)", async () => {
+    // Today is 18 Aug: 11 Aug is 7 days before, so its "?" no longer ask; 12 Aug's still do.
+    clock.todayStartMs = localDayStart(new Date(Date.UTC(2026, 7, 18, 12)).toISOString());
+    const recent = suggestion("00000000-0000-4000-8000-0000000000c2", { title: "Sleep", eventSource: "health_sleep",
+      eventType: "health_sleep_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 12, 12)).toISOString(),
+      suggestedStoppedAt: new Date(Date.UTC(2026, 7, 12, 13)).toISOString() });
+    renderList([recent, ...reviewItems]);
+    expect(await screen.findByRole("button", { name: "1 to check, oldest first" })).toBeTruthy();
+    // The old trip and Apple Health don't ask at all; the saved place, asking nothing, is a quiet place again.
+    expect(officeRow()).toBeNull();
+    expect(askingRow("Walk")).toBeNull();
+    expect(sleepRow()).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Office, / })).toBeNull();
+    // With All places it is an ordinary row you can still correct, with no dot.
+    fireEvent.click(screen.getByRole("button", { name: "All places" }));
+    const office = screen.getByRole("button", { name: /^Office, / });
+    expect(office.getAttribute("aria-label")).not.toContain("Needs a look");
+    expect(office.querySelector(".timeline-location-dot")).toBeNull();
+    fireEvent.click(office);
+    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
+    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(chip(1));
+    expect(router.push).toHaveBeenCalledWith(`/timeline?view=list&scope=day&date=2026-08-12&check=${recent.id}`);
+  });
+
   it("folds an outing onto its stay, says what the answer covers, and decides them together (Codex r1 on #568)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    const outing = [
-      suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
-        rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } }),
-      suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
-        suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } })
-    ];
+    const outing = outingPair();
     render(
       <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={timeline} reviewItems={outing}
         entries={[]} onChanged={vi.fn(async () => undefined)} onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
-    expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    expect(chip(1)).toBeTruthy();
+    expect(askingRow("Walk")).toBeNull();
+    fireEvent.click(askingRow("Unknown place")!);
     // Card B: the outing's trips are decided with it, silently.
-    expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("group", { name: "Where were you?" })).toBeTruthy();
     expect(screen.queryByText(/With its trips/)).toBeNull();
-    // With no guess there is nothing to say Yes to: Edit names it.
+    // With no guess there is nothing to say Yes to: the dialog's choices name it.
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.queryByRole("button", { name: "Check Unknown place" })).toBeNull();
+    expect(askingRow("Unknown place")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("brings an answered card back with Undo even after a refresh dropped it, and moves focus on (Codex r1 on #568)", async () => {
-    const props = { capturedNow: new Date(at(12)), categories: [], groupByDay: true, locationTimeline: timeline, entries: [],
-      onChanged: vi.fn(async () => undefined), onDeleteEntries: vi.fn(), onScroll: vi.fn(), scrollContainerRef: vi.fn(), tags: [] };
+    const props = baseProps();
     const { rerender } = render(<EntriesTable {...props} reviewItems={reviewItems} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
+    fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
-    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.dataset.checkKey).toBeTruthy());
+    // Sleep is the List's last "?": focus moves on to the chip.
+    await waitFor(() => expect(document.activeElement).toBe(chip(2)));
     // A refresh no longer lists it (capped, or decided elsewhere meanwhile); Undo still brings it back.
-    rerender(<EntriesTable {...props} reviewItems={reviewItems.filter((item) => item.id !== PLACE)} />);
+    rerender(<EntriesTable {...props} reviewItems={reviewItems.filter((item) => item.id !== SLEEP)} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(screen.getByRole("button", { name: "Check Office" })).toBeTruthy();
+    expect(sleepRow()).toBeTruthy();
   });
 
   it("keeps Apple Health's check when the location read failed (Codex r1 on #568)", async () => {
@@ -276,47 +392,45 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
         checksDay={{ start: new Date(at(0)), end: new Date(at(24)) }}
         entries={[entry("planning", "Planning", at(11), at(11, 45))]} onChanged={vi.fn(async () => undefined)} onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
-    expect(await screen.findByRole("button", { name: "Check Sleep" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "3 to check" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Sleep, .+\. Needs a look$/ })).toBeTruthy();
+    expect(chip(3)).toBeTruthy();
   });
 
   it("keeps a revived card away once it is answered again and saved (Codex r2 on #568)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     const withoutSleep = reviewItems.filter((item) => item.id !== SLEEP);
     rerender(<EntriesTable {...baseProps()} reviewItems={withoutSleep} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     rerender(<EntriesTable {...baseProps()} reviewItems={[...withoutSleep]} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(screen.queryByRole("button", { name: "Check Sleep" })).toBeNull();
+    expect(sleepRow()).toBeNull();
   });
 
   it("brings back only the outing's cards the server says are still open (Codex r2 on #568)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    const stay = suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
-      rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } });
-    const walk = suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
-      suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } });
+    const [stay, walk] = outingPair();
     clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
       canonicalReviewStatuses: { [stay.id]: "open", [walk.id]: "accepted" } }), { status: 409 }));
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     // The refresh after the answer no longer lists either card.
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     // The stay comes back on its own: the accepted trip is not folded into the next answer.
-    expect(screen.getByRole("button", { name: "Check Unknown place" })).toBeTruthy();
+    expect(askingRow("Unknown place")).toBeTruthy();
+    expect(askingRow("Walk")).toBeNull();
     clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     expect(screen.queryByText(/With its trips/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
@@ -325,7 +439,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
 
   it("moves focus to the List when the last question is answered (Codex r2 on #568)", async () => {
     const { container } = render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[2]]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".timeline-list-scroll")));
   });
@@ -338,12 +452,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     try {
       clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
       render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
-      fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+      fireEvent.click(sleepRow()!);
       fireEvent.click(screen.getByRole("button", { name: "Not now" }));
       const before = startViewTransition.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
+      expect(sleepRow()).toBeTruthy();
       expect(startViewTransition.mock.calls.length).toBeGreaterThan(before);
     } finally {
       delete (document as { startViewTransition?: unknown }).startViewTransition;
@@ -351,30 +465,23 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     }
   });
 
-  const outingPair = () => [
-    suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
-      rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } }),
-    suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
-      suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } })
-  ];
-
   it("keeps a revived outing's trip away once the outing is answered again and saved (Codex r3 on #568)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const [stay, walk] = outingPair();
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(screen.queryByRole("button", { name: "Check Walk" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /to check$/ })).toBeNull();
+    expect(askingRow("Walk")).toBeNull();
+    expect(screen.queryByRole("button", { name: /to check, oldest first$/ })).toBeNull();
   });
 
   it("drops server-decided cards from stale data before grouping the outing (Codex r3 on #568)", async () => {
@@ -384,12 +491,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       canonicalReviewStatuses: { [stay.id]: "open", [walk.id]: "accepted" } }), { status: 409 }));
     // No replacement data arrives: the stale bootstrap still lists both.
     render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     const last = JSON.parse(clientFetch.mock.calls.at(-1)?.[1].body).mutation;
@@ -402,35 +509,58 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
       canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
     render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.queryByRole("button", { name: "Check Unknown place" })).toBeNull();
-    expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
+    expect(askingRow("Unknown place")).toBeNull();
+    expect(chip(1)).toBeTruthy();
+    expect(askingRow("Walk")).toBeTruthy();
   });
 
   it("opens the first question from Today's link, focuses it, and keeps it open when the day's places arrive (Codex r1 on #572)", async () => {
     search.params = "check=first";
     try {
-      const office = reviewItems[0];
       const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
-      // The location read has not arrived: the suggestion sits on a row of its own.
-      const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={[office]} />);
-      await waitFor(() => expect(screen.getByRole("group", { name: /^Visited Office\?/ })).toBeTruthy());
+      const sleep = reviewItems[2];
+      // The location read has not arrived: Apple Health's "?" asks under its row.
+      const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={[sleep]} />);
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy());
       await waitFor(() => expect((document.activeElement as HTMLElement | null)?.dataset.checkKey).toBeTruthy());
-      // The places arrive: the question moves onto the place's row and stays open.
-      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
-      expect(screen.getByRole("group", { name: /^Visited Office\?/ })).toBeTruthy();
-      // Focus moves with it to the place row's "?" (Codex r2 on #572).
-      await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Check Office"));
+      // The places arrive: the question stays open, its row's button keeps focus.
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[sleep]} />);
+      expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
+      await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
       // Closing it is final for this visit: it does not open again.
-      fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
-      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
-      expect(screen.queryByRole("group", { name: /^Visited Office\?/ })).toBeNull();
+      fireEvent.click(sleepRow()!);
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[sleep]} />);
+      expect(screen.queryByRole("group", { name: /^Sleep, / })).toBeNull();
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("opens a place's dialog from Today's link once its row is in (Codex r1 on #572)", async () => {
+    search.params = "check=first";
+    try {
+      render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0]]} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("opens the \"?\" a link names by its id, once (owner concern 4)", async () => {
+    search.params = `view=list&check=${TRIP}`;
+    try {
+      const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy());
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" }));
+      rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+      expect(dialog()).toBeNull();
     } finally {
       search.params = "";
     }
   });
 });
-
