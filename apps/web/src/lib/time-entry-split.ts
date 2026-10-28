@@ -106,7 +106,8 @@ export function newBlockCommandId(mode: string) {
  * unless the block had stopped by the time the split arrived (then it was split as a finished block).
  */
 export type RunningSplitOutcome =
-  | { ok: true; newEntryId: string; entries: TimeEntryRow[] }
+  /** `newEntryId` null: a repeat of a split whose second part has gone since (an Undo joined it back). */
+  | { ok: true; newEntryId: string | null; entries: TimeEntryRow[] }
   | { ok: false; error: string; changed?: boolean };
 
 /**
@@ -123,8 +124,11 @@ export async function splitRunningTimeEntry(
   }, "Couldn't split this block.");
   if (!outcome.ok) return outcome;
   const newEntryId = outcome.body?.newEntryId;
-  return typeof newEntryId === "string"
-    ? { ok: true, newEntryId, entries: Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [] }
+  const entries = Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [];
+  if (typeof newEntryId === "string") return { ok: true, newEntryId, entries };
+  // Done before and undone since: still reconciled from the blocks it names (Codex r4 on #607).
+  return newEntryId === null && outcome.body?.replayed === true
+    ? { ok: true, newEntryId: null, entries }
     : { ok: false, error: UNKNOWN, changed: true };
 }
 

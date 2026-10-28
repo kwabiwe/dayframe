@@ -1050,20 +1050,22 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
         // Whether the second part runs is read from the blocks as the server has them now: one that had stopped
         // by the time the split arrived was split as a finished block, and nothing runs (Codex r1, r2 on #607).
-        const running = outcome.entries.some((block) => block.id === outcome.newEntryId && !block.stoppedAt);
+        const newEntryId = outcome.newEntryId;
+        const running = newEntryId !== null && outcome.entries.some((block) => block.id === newEntryId && !block.stoppedAt);
         if (running) {
-          splitSuccessorsRef.current.set(entry.id, outcome.newEntryId);
-          splitSuccessorsRef.current.set(targetId, outcome.newEntryId);
+          splitSuccessorsRef.current.set(entry.id, newEntryId);
+          splitSuccessorsRef.current.set(targetId, newEntryId);
         }
         const shown = dataRef.current;
         // A part the answer leaves out is gone (deleted elsewhere meanwhile): never left running on screen (Codex r3 on #607).
         const answered = new Set(outcome.entries.map((block) => block.id));
-        const gone = [...new Set([entry.id, targetId, outcome.newEntryId])].filter((id) => !answered.has(id));
+        const gone = [...new Set([entry.id, targetId, ...(newEntryId ? [newEntryId] : [])])].filter((id) => !answered.has(id));
         if (shown) commitData(applyServerTimerBlocks(shown, outcome.entries, gone), "optimistic");
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
         await refresh({ force: true });
-        return { ok: true, entryId: targetId, newEntryId: outcome.newEntryId, running };
+        if (!newEntryId) return { ok: false, error: "This block was already split and put back together." };
+        return { ok: true, entryId: targetId, newEntryId, running };
       } finally {
         setIsTimerBusy(false);
       }
@@ -1073,6 +1075,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
     await mutationGateRef.current.whenIdle();
+    let carried = false;
     const result = await mutationGateRef.current.run(async (): Promise<MutationOutcome> => {
       // Edits typed into the second part and not saved yet would be lost by the join (Codex r2 on #607).
       const shownActive = dataRef.current?.activeEntry;
@@ -1084,11 +1087,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       refreshRequestRef.current += 1;
       try {
         const draftAtSend = draftRef.current;
+        carried = false;
         const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
         if (outcome.ok) {
           // Typed while the Undo was on its way: the text goes on to the joined block (saved as its edit), never
           // reset by the change of block (Codex r3 on #607).
-          if (!timerDraftsEqual(draftRef.current, draftAtSend)) rollbackDraftRef.current = { draft: draftRef.current, entryId: split.entryId };
+          if (!timerDraftsEqual(draftRef.current, draftAtSend)) {
+            rollbackDraftRef.current = { draft: draftRef.current, entryId: split.entryId };
+            carried = true;
+          }
           // A Stop asked for the second part while the Undo ran stops the joined block (Codex r1 on #607).
           splitSuccessorsRef.current.set(split.newEntryId, split.entryId);
           // Shown joined at once, as the server has it, so a failed reload never leaves the gone part running.
@@ -1102,8 +1109,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    // The carried text is saved once the gate is free: its autosave may have been turned away while the Undo
+    // held the gate, and nothing would arm it again (Codex r4 on #607).
+    const shown = dataRef.current;
+    if (carried && shown?.activeEntry && serverEntryId(shown.activeEntry.id) === split.entryId
+      && timerDraftEditedFields(draftRef.current, baseFor(shown.activeEntry)).length) {
+      await saveActiveDetails(shown, draftRef.current);
+    }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, refresh, serverEntryId]);
+  }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId]);
 
   const updateActiveDetails = useCallback(async (
     draft: TimerDraft,
