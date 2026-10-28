@@ -376,6 +376,39 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     await waitFor(() => expect(screen.getByTestId("error").textContent).toMatch(/^Stopped\./));
   });
 
+  for (const action of ["Split", "Undo split"] as const) {
+    it(`saves edits typed while a failed ${action === "Split" ? "split" : "Undo"} reloads the day (Codex r7 on #607)`, async () => {
+      const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+      const runningId = action === "Split" ? FIRST : SECOND;
+      const running = action === "Split" ? entry({ id: FIRST }) : entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+      let releaseReload: (() => void) | undefined;
+      const reloadPending = new Promise<void>((resolve) => { releaseReload = resolve; });
+      let reloads = 0;
+      const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+      mocks.clientFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+        requests.push({ url, ...(body ? { body } : {}) });
+        if (url === "/api/time-entries") return response({ error: "down" }, 503);
+        if (url === `/api/time-entries/${runningId}`) return response({ ok: true, id: runningId, updatedAt: "2026-08-17T05:01:00.000Z" });
+        if (url.startsWith("/api/bootstrap")) { reloads += 1; await reloadPending; return response({ error: "down" }, 503); }
+        if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+        return response({}, 500);
+      });
+      render(
+        <AppShellRuntimeProvider>
+          <Harness initial={bootstrap(running, action === "Split" ? [running] : [running, first])} />
+        </AppShellRuntimeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+      await waitFor(() => expect(screen.getByTestId("active").textContent).toContain(runningId));
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      await waitFor(() => expect(reloads).toBeGreaterThan(0));
+      fireEvent.click(screen.getByRole("button", { name: "Type more" }));
+      await act(async () => { releaseReload?.(); await reloadPending; });
+      await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${runningId}` && request.body?.description === "Typed more")).toBe(true));
+    });
+  }
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
