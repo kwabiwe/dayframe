@@ -10,6 +10,7 @@ import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import { useClockFormat } from "@/lib/clockFormat";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { CALENDAR_PROTOTYPE } from "@/lib/calendarPrototype";
+import { withPlacesAndLegs } from "@/lib/calendarPrototypeGrid";
 import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation";
 
 // Development-only harness for Calendar titles at every zoom (location v4 C6) and Calendar › List
@@ -255,7 +256,12 @@ export default function CalendarQaRoute() {
     theme,
     transitionDirection: 1
   }).model, [clockFormat, dense, now, theme]);
-  const shown = useMemo(() => ({ ...model, layout }), [layout, model]);
+  // Calendar prototype (steps 16–17): the Grid's Places lane and trip leg strip over the synthetic Thursday.
+  const shown = useMemo(() => {
+    const base = { ...model, layout };
+    return CALENDAR_PROTOTYPE && !dense && layout === "grid"
+      ? withPlacesAndLegs(base, timeline, QA_CHECKS, (ms) => new Date(ms).toTimeString().slice(0, 5)) : base;
+  }, [dense, layout, model]);
   if (!__DEV__) return <Redirect href="/" />;
   if (dense && layout !== "list") {
     // The whole day at the default 72 points an hour, opened at `at` (the header when absent), so

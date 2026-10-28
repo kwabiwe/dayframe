@@ -114,6 +114,7 @@ import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
 import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
 import { CALENDAR_PROTOTYPE } from "@/lib/calendarPrototype";
+import { withPlacesAndLegs } from "@/lib/calendarPrototypeGrid";
 import { latestCheckDay } from "@/lib/calendarChecks";
 import {
   ActivityNameTakenError,
@@ -2114,7 +2115,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
-    enabled: calendarLayout === "list",
+    // Calendar prototype: the Grid reads the day's places too (its Places lane and trip legs, steps 16–17).
+    enabled: calendarLayout === "list" || CALENDAR_PROTOTYPE,
     fetchTimeline: fetchLocationTimeline,
     owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
     refreshKey: calendarTimelineRefreshKey
@@ -2124,6 +2126,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  // Calendar prototype, steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
+  const gridModel = useMemo(() => CALENDAR_PROTOTYPE && calendarLayout === "grid"
+    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat))
+    : nativeCalendarModel, [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel]);
+  const gridModelRefreshing = useMemo(() => gridModel === nativeCalendarModel ? nativeCalendarModelRefreshing : { ...gridModel, refreshing: true },
+    [gridModel, nativeCalendarModel, nativeCalendarModelRefreshing]);
   // The List's place, trip and leg correction sheets (step 12).
   const locationCorrections = useLocationCorrections({
     acknowledged: correctionQueue.acknowledged,
@@ -3702,7 +3710,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
             </Animated.View>
             <DayframeCalendarView
-              model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
+              model={isFocused && refreshing ? gridModelRefreshing : gridModel}
               onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
               onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}

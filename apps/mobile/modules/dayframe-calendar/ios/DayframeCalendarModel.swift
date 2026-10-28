@@ -92,6 +92,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let placeText: String?
   let regionOffsetFraction: Double
   let regionWidthFraction: Double
+  let legs: [DayframeCalendarLegRecord]
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
@@ -131,6 +132,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     overlapCount = max(0, record.overlapCount)
     overlapSeconds = max(0, record.overlapSeconds)
     placeText = record.placeText
+    legs = record.legs ?? []
     regionOffsetFraction = record.regionOffsetFraction ?? 0
     regionWidthFraction = record.regionWidthFraction ?? 1
     startedAtMs = record.startedAtMs
@@ -182,6 +184,7 @@ struct DayframeCalendarBracket: Equatable, Identifiable {
 
 struct DayframeCalendarPresentation: Equatable {
   let brackets: [DayframeCalendarBracket]
+  let placesLane: [DayframeCalendarLaneItemRecord]
   let dayEndMs: Double
   let dayStartMs: Double
   let emptyState: String
@@ -214,6 +217,7 @@ struct DayframeCalendarPresentation: Equatable {
 
   init(_ record: DayframeCalendarPresentationRecord) {
     brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)
+    placesLane = record.placesLane ?? []
     dayEndMs = record.dayEndMs
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState
@@ -244,8 +248,9 @@ struct DayframeCalendarPresentation: Equatable {
 
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 
-  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width.
-  var entryLeadingInset: Double { 0 }
+  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width. The
+  /// Calendar prototype's Places lane (step 17) takes this much on the left when the day has one.
+  var entryLeadingInset: Double { placesLane.isEmpty ? 0 : DayframeCalendarPlacesLane.width }
 }
 
 /// A moment as the entries layer draws it and the coordinator hit-tests it (dense-day rules).

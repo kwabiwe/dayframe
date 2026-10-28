@@ -2,6 +2,8 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
 
+// The Calendar prototype's Nearby and search (native Apple Maps search) is not part of these tests.
+vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: () => null }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");

@@ -63,6 +63,8 @@ describe("mobile frame pacing", () => {
     expect(dashboard).toContain("manualProjectedEntries={loggedSourceEntries}");
     expect(dashboard).not.toMatch(/manualProjectedEntries=\{[^}]*\.filter\(/);
     // The native Calendar receives a stable model object between real changes.
-    expect(dashboard).toContain("model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}");
+    // (Calendar prototype: the Grid's model with its Places lane and legs is memoised the same way.)
+    expect(dashboard).toContain("model={isFocused && refreshing ? gridModelRefreshing : gridModel}");
+    expect(dashboard).toMatch(/const gridModel = useMemo\(/);
   });
 });
