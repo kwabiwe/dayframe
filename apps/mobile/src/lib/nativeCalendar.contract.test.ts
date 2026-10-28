@@ -7,6 +7,27 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
+  it("shares the Places lane's 44-point targets with the long press, and clips a trip's legs to the drawn day (Codex r1 on #610)", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    expect(model).toContain("DayframeCalendarPlacesLaneMath.hitFrames(spans:");
+    expect(rootView).toContain("ForEach(DayframeCalendarLaneLayout.layout(");
+    expect(coordinator).toContain("let laneFrames = DayframeCalendarLaneLayout.layout(");
+    expect(coordinator).toContain("frames: hitFrames + momentFrames + laneFrames");
+    expect(rootView).toContain("DayframeCalendarLegStripMath.segments(");
+    expect(rootView).not.toContain("minimumHeight: 4\n        ) {");
+  });
+
+  it("hands the Grid only the \"?\" that still ask, outings folded, and routes every one it draws (Codex r1 on #610)", () => {
+    const dashboard = readFileSync(dashboardPath, "utf8");
+    expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
+    expect(dashboard).toContain("reviewItemIds: gridReviewItemIds,");
+    // askingChecks comes from calendarChecks (outings folded), which the Grid's "?" routing looks up.
+    expect(dashboard).toContain("checksOldestFirst(calendarChecks.checks.filter(");
+    expect(dashboard).toContain(": calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;");
+  });
+
   it("shows the Calendar v3 header: month title, one round one-tap Day / List toggle, no − / +, and no framed line under the week strip", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const header = rootView.slice(

@@ -110,6 +110,7 @@ import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
+import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
 import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
@@ -2007,27 +2008,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarCheckBase, clockFormat, reviewSyncStateIds, openCalendarCheckId, openCheckVenue.venue]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
-  // Owner, 28 Oct 2026 (concern 4): only "?" from today and the 6 days before ask; the badge,
-  // Today's chip and "N to check" count and step through them oldest first, across days. Older ones stop asking:
+  // Owner, 28 Oct 2026 (concern 4): only "?" from today and the 6 days before ask; the badge, the List's
+  // "N to check" and the reminder count and step through them oldest first, across days. Older ones stop asking:
   // their places stay plain rows you can still correct.
   const askingChecks = useMemo(() => {
     const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
     return checksOldestFirst(calendarChecks.checks.filter((check) => check.startedAt && checkStillAsks(check, fromMs)));
   }, [calendarChecks, todayKey]);
+  // `week` is the 7-day count (the Calendar badge, the List's "N to check" and the reminder). `today` is Today's
+  // own "N to check today" chip, today-only on purpose (owner-approved; kept so after Codex r1 on #610): it counts
+  // today's "?" and opens today's oldest; earlier days are the badge's.
   const checkCounts = useMemo(() => {
     const todayStart = dateFromKey(todayKey).getTime();
     const tomorrowStart = addDaysToDate(dateFromKey(todayKey), 1).getTime();
     return { week: askingChecks.length, today: askingChecks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length };
   }, [askingChecks, todayKey]);
-  // Owner item 13 (28 Oct 2026): the end-of-day reminder counts the badge's "?", for this account.
-  const nudgeOwner = authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null;
-  useEffect(() => {
-    if (!nudgeOwner || !data) return;
-    const owner = { userId: data.user.id, workspaceId: data.workspace.id };
-    void import("@/lib/reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, askingChecks.length)).catch(() => undefined);
-    // Only when the count or the account changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askingChecks.length, nudgeOwner]);
+  // Owner item 13 (28 Oct 2026): the end-of-day reminder counts the badge's "?", for this account, noted again on
+  // each return to the front and each new day so the one-shot reminder is renewed (Codex r1 on #610).
+  const nudgeOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
+    [authState, data]);
+  useReviewNudgeCount(nudgeOwner, askingChecks.length, { dayKey: todayKey, foreground: appIsForeground });
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
@@ -2044,10 +2044,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     },
     [shownCalendarData?.reviewItems, earlierDays, reviewSyncStateIds]
   );
+  // Owner, 28 Oct 2026: the Grid draws only the "?" that still ask, outings folded, as the List does, so an expired
+  // or folded suggestion is never a dashed block there; onOpenReview's lookup (calendarChecks) covers every one drawn.
+  const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       clockFormat,
       data: shownCalendarData,
+      reviewItemIds: gridReviewItemIds,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -2061,6 +2065,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       shownCalendarData,
+      gridReviewItemIds,
       clockFormat,
       hapticsEnabled,
       minuteNow,
@@ -2815,6 +2820,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const openOldestCheck = useCallback(() => {
     if (askingChecks[0]) openCheckOn(askingChecks[0].id);
   }, [askingChecks, openCheckOn]);
+  // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge opens the 7-day oldest.
   const openTodayChecks = useCallback(() => {
     const todayStart = dateFromKey(formatDateKey(new Date())).getTime();
     const first = askingChecks.find((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStart);

@@ -250,7 +250,7 @@ struct DayframeCalendarPresentation: Equatable {
 
   /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width. The
   /// Places lane (step 17) takes this much on the left when the day has one.
-  var entryLeadingInset: Double { placesLane.isEmpty ? 0 : DayframeCalendarPlacesLane.width }
+  var entryLeadingInset: Double { placesLane.isEmpty ? 0 : DayframeCalendarPlacesLaneMath.width }
 }
 
 /// A moment as the entries layer draws it and the coordinator hit-tests it (dense-day rules).
@@ -277,6 +277,34 @@ enum DayframeCalendarMomentLayout {
     }
     let frames = DayframeCalendarMomentMath.hitFrames(tops: placed.map(\.1), hourLabelWidth: hourLabelWidth, timelineHeight: 24 * hourHeight)
     return zip(placed, frames).map { DayframeCalendarMomentPlacement(entry: $0.0.0, top: $0.0.1, frame: $0.1) }
+  }
+}
+
+/// A Places lane item as the entries layer draws it and the coordinator hit-tests it (step 17; Codex r1 on #610).
+struct DayframeCalendarLanePlacement {
+  let item: DayframeCalendarLaneItemRecord
+  let span: DayframeCalendarBracketSpan
+  let frame: DayframeCalendarHitFrame
+}
+
+enum DayframeCalendarLaneLayout {
+  /// The lane's items with their drawn spans and 44-point targets, resolved together (DayframeCalendarPlacesLaneMath).
+  static func layout(presentation: DayframeCalendarPresentation, hourHeight: Double, hourLabelWidth: Double) -> [DayframeCalendarLanePlacement] {
+    let placed = presentation.placesLane.compactMap { item -> (DayframeCalendarLaneItemRecord, DayframeCalendarBracketSpan)? in
+      guard let span = DayframeCalendarBracketMath.span(
+        parts: [(startedAtMs: item.startedAtMs, stoppedAtMs: Optional(item.stoppedAtMs))],
+        nowMs: presentation.nowMs,
+        dayStartMs: presentation.dayStartMs,
+        dayEndMs: presentation.dayEndMs,
+        hourHeight: hourHeight,
+        minimumHeight: 4
+      ) else {
+        return nil
+      }
+      return (item, span)
+    }
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(spans: placed.map(\.1), hourLabelWidth: hourLabelWidth, timelineHeight: 24 * hourHeight)
+    return zip(placed, frames).map { DayframeCalendarLanePlacement(item: $0.0.0, span: $0.0.1, frame: $0.1) }
   }
 }
 

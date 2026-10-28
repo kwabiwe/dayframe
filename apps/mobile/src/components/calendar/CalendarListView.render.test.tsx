@@ -336,6 +336,74 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(JSON.stringify(questions(health.tree)[0].props.children)).toContain("Log your sleep?");
   });
 
+  it("holds a request for a place's \"?\" until the day's places are read, then opens its sheet, never the card (Codex r1 on #610)", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenCheck = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace, openCheckRequest: { id: "c-unknown", request: 1 } };
+    const { tree } = render({ ...props, timeline: null });
+    // Its placeholder row is there, but what it is isn't known yet: nothing opens, under the row or elsewhere.
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-check-c-unknown").length).toBeGreaterThan(0);
+    expect(questions(tree)).toHaveLength(0);
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Pret?");
+    expect(questions(tree)).toHaveLength(0);
+    // Tapping the placeholder row before the places arrive opens it on its own screen, never the card.
+    const early = render({ ...props, openCheckRequest: null, timeline: null });
+    act(() => { early.tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
+    expect(questions(early.tree)).toHaveLength(0);
+  });
+
+  it("opens Apple Health's requested question at once, even before the day's places are read", () => {
+    const { tree } = render({ checks: [sleepCheck], checkTitles: new Map([["c-sleep", "Sleep"]]), checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), openCheckRequest: { id: "c-sleep", request: 1 }, timeline: null });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("holds Today's first request too until the day's places are read (Codex r1 on #610)", () => {
+    const onOpenPlace = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenPlace, scrollToFirstCheck: 1 };
+    const { tree } = render({ ...props, timeline: null });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(0);
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()}
+        onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} {...props} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+  });
+
+  it("offers the row's Yes for a confident named place's \"Visited X?\" and a trip's, not for Apple Health (Codex r1 on #610)", () => {
+    const named = { ...timeline, items: timeline.items.map((item) => item.id === "seg-unknown"
+      ? { ...item, name: "Exampleton Library", placeId: "p-lib", matchKind: "saved" } : item.kind === "trip" ? { ...item, blockIds: [] } : item) } as LocationTimeline;
+    const { tree } = render({
+      timeline: named, entries: [block("work", "Work", 9, 12)],
+      checks: [placeCheck, sleepCheck, { id: "c-trip", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) }],
+      checkTitles: new Map([["c-unknown", "Exampleton Library"], ["c-sleep", "Sleep"], ["c-trip", "Getting around"]]),
+      checkQuestions: new Map([["c-unknown", { ...visited, question: "Visited Exampleton Library?" }],
+        ["c-sleep", { ...question("Log your sleep, 01:00–06:00?"), logLabel: "Log as Sleep" }],
+        ["c-trip", { ...question("Getting around, 08:00–09:00?"), logLabel: "Yes" }]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn()
+    });
+    const pills = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-yes-")
+      && typeof node.props.onPress === "function").map((node) => node.props.testID);
+    expect(pills.sort()).toEqual(["calendar-list-yes-c-trip", "calendar-list-yes-c-unknown"]);
+    // A place question that isn't a guess ("Where were you?") has no row pill.
+    const unsure = render({ checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]),
+      checkQuestions: new Map([["c-unknown", { ...visited, question: "Where were you?" }]]), onAnswerCheck: vi.fn(), onOpenPlace: vi.fn() });
+    expect(unsure.tree.root.findAll((node) => node.props.testID === "calendar-list-yes-c-unknown")).toHaveLength(0);
+  });
+
   it("opens Today's first \"?\" in its sheet when it is a place's", () => {
     const onOpenPlace = vi.fn();
     const { tree } = render({ checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]),

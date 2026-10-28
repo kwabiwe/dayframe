@@ -529,31 +529,32 @@ private struct DayframeCalendarEntriesLayer: View {
       // Step 17: the Places lane left of the blocks (entryLeadingInset makes room): each
       // place and trip at its time, quiet; one that asks something is hatched with the amber dot and opens its
       // question in the List; any other opens the List on this day. Same fade as a block; none with Reduce Motion.
-      ForEach(presentation.placesLane, id: \.id) { item in
-        if let span = DayframeCalendarBracketMath.span(
-          parts: [(startedAtMs: item.startedAtMs, stoppedAtMs: Optional(item.stoppedAtMs))],
-          nowMs: presentation.nowMs,
-          dayStartMs: presentation.dayStartMs,
-          dayEndMs: presentation.dayEndMs,
-          hourHeight: Double(hourHeight),
-          minimumHeight: 4
-        ) {
-          let height = CGFloat(span.height)
-          let laneWidth = CGFloat(DayframeCalendarPlacesLane.width) - 6
-          Button {
-            // Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
-            actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
-          } label: {
-            DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
-          }
-          .buttonStyle(.plain)
-          .frame(width: laneWidth, height: max(height, 1))
-          .contentShape(Rectangle())
-          .position(x: hourLabelWidth + 8 + laneWidth / 2, y: CGFloat(span.top) + height / 2)
-          .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
-          .accessibilityLabel(item.accessibilityLabel)
-          .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
+      // Each item's touch target is at least 44 points tall, grown about it (DayframeCalendarLaneLayout, shared
+      // with the scroll coordinator so a long press never starts a block over one; Codex r1 on #610).
+      ForEach(DayframeCalendarLaneLayout.layout(
+        presentation: presentation,
+        hourHeight: Double(hourHeight),
+        hourLabelWidth: Double(hourLabelWidth)
+      ), id: \.item.id) { placement in
+        let item = placement.item
+        let height = CGFloat(placement.span.height)
+        let laneWidth = CGFloat(DayframeCalendarPlacesLaneMath.itemWidth)
+        let hitHeight = CGFloat(placement.frame.maxY - placement.frame.minY)
+        Button {
+          // Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
+          actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
+        } label: {
+          DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
+            .offset(y: CGFloat(placement.span.top - placement.frame.minY))
+            .frame(width: laneWidth, height: hitHeight, alignment: .top)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .frame(width: laneWidth, height: hitHeight)
+        .position(x: CGFloat(placement.frame.minX) + laneWidth / 2, y: CGFloat(placement.frame.minY) + hitHeight / 2)
+        .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
+        .accessibilityLabel(item.accessibilityLabel)
+        .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
       }
 
       ForEach(presentation.entries) { entry in
@@ -591,6 +592,9 @@ private struct DayframeCalendarEntriesLayer: View {
               labelTextScale: labelTextScale,
               metrics: metrics,
               nested: laidOut.nested,
+              dayStartMs: presentation.dayStartMs,
+              dayEndMs: presentation.dayEndMs,
+              nowMs: presentation.nowMs,
               visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -665,6 +669,10 @@ private struct DayframeCalendarBlockView: View {
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
   let nested: Bool
+  /// The day this block is drawn on, for its leg strip (Codex r1 on #610).
+  let dayStartMs: Double
+  let dayEndMs: Double
+  let nowMs: Double
   let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -716,7 +724,7 @@ private struct DayframeCalendarBlockView: View {
         .clipShape(shape)
       // Step 16: a trip block from 44 points tall shows its legs down its leading edge.
       if showsLegs {
-        DayframeCalendarLegStrip(entry: entry, height: visualHeight, ink: ink, theme: theme)
+        DayframeCalendarLegStrip(entry: entry, dayStartMs: dayStartMs, dayEndMs: dayEndMs, nowMs: nowMs, height: visualHeight, ink: ink, theme: theme)
           .padding(.leading, 5)
       }
       if entry.isActive {
@@ -1042,11 +1050,6 @@ private struct DayframeCalendarHatch: View {
 }
 
 
-/// Steps 16–17: the Places lane's width, and its items.
-enum DayframeCalendarPlacesLane {
-  static let width: Double = 52
-}
-
 /// One place or trip in the Places lane: a quiet tinted bar (a trip a thin one), hatched with the amber dot
 /// when it asks something.
 private struct DayframeCalendarLaneItemView: View {
@@ -1085,40 +1088,44 @@ private struct DayframeCalendarLaneItemView: View {
 }
 
 /// A trip block's legs (step 16): one segment per leg in proportion to its time, its glyph where it has room,
-/// an Unsure leg hatched in amber.
+/// an Unsure leg hatched in amber. Only this day's part of the trip: legs are clipped to the day and placed by the
+/// block's own day-clipped span (DayframeCalendarLegStripMath; Codex r1 on #610).
 private struct DayframeCalendarLegStrip: View {
   let entry: DayframeCalendarEntry
+  let dayStartMs: Double
+  let dayEndMs: Double
+  let nowMs: Double
   let height: CGFloat
   let ink: Color
   let theme: DayframeCalendarTheme
 
   var body: some View {
-    let fromMs = entry.startedAtMs
-    let toMs = entry.stoppedAtMs ?? entry.legs.map(\.stoppedAtMs).max() ?? fromMs + 1
-    let span = max(1, toMs - fromMs)
-    let usable = max(0, height - 4)
+    let segments = DayframeCalendarLegStripMath.segments(
+      legs: entry.legs.map { (startedAtMs: $0.startedAtMs, stoppedAtMs: $0.stoppedAtMs) },
+      startedAtMs: entry.startedAtMs,
+      stoppedAtMs: entry.stoppedAtMs ?? max(nowMs, entry.legs.map(\.stoppedAtMs).max() ?? entry.startedAtMs + 1),
+      dayStartMs: dayStartMs,
+      dayEndMs: dayEndMs,
+      height: Double(height)
+    )
     ZStack(alignment: .topLeading) {
-      ForEach(Array(entry.legs.enumerated()), id: \.offset) { _, leg in
-        let start = max(fromMs, leg.startedAtMs)
-        let end = min(toMs, leg.stoppedAtMs)
-        if end > start {
-          let top = CGFloat((start - fromMs) / span) * usable + 2
-          let segment = max(2, CGFloat((end - start) / span) * usable - 1)
-          ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-              .fill(leg.unsure ? Color(dayframeCSS: theme.warning).opacity(0.2) : ink.opacity(0.16))
-            if leg.unsure {
-              DayframeCalendarHatch(color: Color(dayframeCSS: theme.warningText)).opacity(0.35)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            }
-            if segment >= 15 {
-              DayframeCalendarGlyph(name: leg.glyph, size: 11, followsTextSize: false)
-                .foregroundStyle(leg.unsure ? Color(dayframeCSS: theme.warningText) : ink)
-            }
+      ForEach(segments, id: \.index) { placed in
+        let leg = entry.legs[placed.index]
+        let segment = CGFloat(placed.height)
+        ZStack {
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(leg.unsure ? Color(dayframeCSS: theme.warning).opacity(0.2) : ink.opacity(0.16))
+          if leg.unsure {
+            DayframeCalendarHatch(color: Color(dayframeCSS: theme.warningText)).opacity(0.35)
+              .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
           }
-          .frame(width: 16, height: segment)
-          .offset(y: top)
+          if segment >= 15 {
+            DayframeCalendarGlyph(name: leg.glyph, size: 11, followsTextSize: false)
+              .foregroundStyle(leg.unsure ? Color(dayframeCSS: theme.warningText) : ink)
+          }
         }
+        .frame(width: 16, height: segment)
+        .offset(y: CGFloat(placed.top))
       }
     }
     .frame(width: 16, height: height, alignment: .topLeading)

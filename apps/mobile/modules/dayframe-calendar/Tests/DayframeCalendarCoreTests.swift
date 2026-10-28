@@ -1519,6 +1519,68 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(layout["tick"])
   }
 
+  // Codex r1 on #610: a Places lane item is at least 44 points tall to touch, grown about it.
+  func testPlacesLaneItemsGetA44PointTargetCentredOnThem() {
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 300, height: 4), DayframeCalendarBracketSpan(top: 600, height: 120)],
+      hourLabelWidth: 68,
+      timelineHeight: 24 * 72
+    )
+    XCTAssertEqual(frames[0], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 280, maxY: 324))
+    // A tall item keeps its own span.
+    XCTAssertEqual(frames[1], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 600, maxY: 720))
+    XCTAssertEqual(DayframeCalendarPlacesLaneMath.width, 52)
+  }
+
+  func testPlacesLaneTargetsStayInsideTheDayAndSplitBetweenNeighbours() {
+    let edge = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 0, height: 4), DayframeCalendarBracketSpan(top: 1724, height: 4)],
+      hourLabelWidth: 68,
+      timelineHeight: 1728
+    )
+    XCTAssertEqual(edge[0].minY, 0)
+    XCTAssertEqual(edge[0].maxY, 44)
+    XCTAssertEqual(edge[1].minY, 1684)
+    XCTAssertEqual(edge[1].maxY, 1728)
+    // Two short items 10 points apart: each target stops at the middle of the gap, never inside the other's span.
+    let close = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 500, height: 6), DayframeCalendarBracketSpan(top: 516, height: 6)],
+      hourLabelWidth: 68,
+      timelineHeight: 1728
+    )
+    XCTAssertEqual(close[0].minY, 481)
+    XCTAssertEqual(close[0].maxY, 511)
+    XCTAssertEqual(close[1].minY, 511)
+    XCTAssertEqual(close[1].maxY, 541)
+    // A long press over a lane item hits it (the coordinator passes these frames with the blocks').
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(point: DayframeCalendarPoint(x: 90, y: 290), frames: [DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 300, height: 4)], hourLabelWidth: 68, timelineHeight: 1728)[0]]))
+  }
+
+  // Codex r1 on #610: a trip across midnight shows only this day's legs, placed by the day-clipped span.
+  func testLegStripClipsATripAcrossMidnightToTheDayItIsDrawnOn() {
+    let hour = 3_600_000.0
+    let midnight = 24 * hour
+    let legs = [(startedAtMs: midnight - hour, stoppedAtMs: midnight - hour / 2), (startedAtMs: midnight - hour / 2, stoppedAtMs: midnight + hour)]
+    // The first day (23:00–24:00 drawn): the first leg fills the top half, the second the bottom half.
+    let before = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 0, dayEndMs: midnight, height: 104)
+    XCTAssertEqual(before.map(\.index), [0, 1])
+    XCTAssertEqual(before[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(before[0].height, 49, accuracy: 0.001)
+    XCTAssertEqual(before[1].top, 52, accuracy: 0.001)
+    XCTAssertEqual(before[1].height, 49, accuracy: 0.001)
+    // The next day (00:00–01:00 drawn): only the second leg, over the whole strip.
+    let after = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: midnight, dayEndMs: 2 * midnight, height: 104)
+    XCTAssertEqual(after.map(\.index), [1])
+    XCTAssertEqual(after[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(after[0].height, 99, accuracy: 0.001)
+    // Nothing on a day the block doesn't reach.
+    XCTAssertTrue(DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 2 * midnight, dayEndMs: 3 * midnight, height: 104).isEmpty)
+  }
+
   func testMomentsSitAtTheGutterEdgeWithA44PointTargetInsideTheDay() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!

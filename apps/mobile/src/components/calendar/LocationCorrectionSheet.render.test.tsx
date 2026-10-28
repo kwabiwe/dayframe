@@ -383,6 +383,49 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onDismissed).toHaveBeenCalledWith(1);
   });
 
+  it("answers from the sheet only once its own changes are kept; a change that can't be kept sends no answer (Codex r1 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // Kept: the place change is queued first, then the answer, then the sheet closes.
+    const order: string[] = [];
+    const onAnswer = vi.fn(() => { order.push("answer"); });
+    const onDismissed = vi.fn();
+    const ok = sheetWith({ onDismissed, onQueue: vi.fn(async () => { order.push("queue"); }),
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    act(() => { ok.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { ok.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    expect(onAnswer).not.toHaveBeenCalled();
+    await settle();
+    expect(order).toEqual(["queue", "answer"]);
+    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(onDismissed).toHaveBeenCalledWith(1);
+    // Not kept: no answer, the question stays, the sheet says why and stays open; a later Done never sends it.
+    const refused = vi.fn();
+    const failedDismiss = vi.fn();
+    let fail = true;
+    const failing = sheetWith({ onDismissed: failedDismiss, onQueue: vi.fn(async () => { if (fail) throw new Error("disk full"); }),
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: refused } });
+    act(() => { failing.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { failing.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    await settle();
+    expect(refused).not.toHaveBeenCalled();
+    expect(failedDismiss).not.toHaveBeenCalled();
+    expect(failing.root.findAll((node) => node.props.testID === "location-correction-question").length).toBeGreaterThan(0);
+    expect(failing.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+    fail = false;
+    act(() => { action(failing).props.onPress(); });
+    await settle();
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("answers at once when the sheet has nothing of its own to keep", () => {
+    const onAnswer = vi.fn();
+    const onQueue = vi.fn(async () => undefined);
+    const tree = sheetWith({ onQueue, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    act(() => { tree.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    expect(onAnswer).toHaveBeenCalledWith(false);
+    expect(onQueue).not.toHaveBeenCalled();
+  });
+
   it("keeps Done quiet until something changes (owner item O)", () => {
     const tree = sheetWith({});
     expect(flat(action(tree).props.style).backgroundColor).toBe("surfaceMuted");

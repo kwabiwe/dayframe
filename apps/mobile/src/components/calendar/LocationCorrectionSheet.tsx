@@ -154,6 +154,11 @@ export function LocationCorrectionSheet({
   const kept = useRef(false);
   // Logs as waiting for this Done's corrections to be kept.
   const pendingLog = useRef<(() => void) | null>(null);
+  // The "?" answered at the top, waiting for the sheet's own changes to be kept: never sent if they aren't
+  // (Codex r1 on #610).
+  const pendingAnswer = useRef<(() => void) | null>(null);
+  // A keep in flight (set at once, unlike `saving`).
+  const keeping = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Kept: the sheet closes on the next render, once Done is enabled again (Codex r2 on #602).
@@ -192,7 +197,9 @@ export function LocationCorrectionSheet({
   function keep(corrections: QueuedCorrection[], then: "close" | "trip") {
     setSaving(true);
     setSaveError(null);
+    keeping.current = true;
     onQueue(corrections, { closing: then === "close" }).then(() => {
+      keeping.current = false;
       setSaving(false);
       if (then === "trip") {
         backToTrip();
@@ -201,9 +208,13 @@ export function LocationCorrectionSheet({
       kept.current = true;
       pendingLog.current?.();
       pendingLog.current = null;
+      pendingAnswer.current?.();
+      pendingAnswer.current = null;
       setCloseKept(true);
     }, () => {
+      keeping.current = false;
       pendingLog.current = null;
+      pendingAnswer.current = null;
       intent.current = null;
       setSaving(false);
       setSaveError("That change couldn't be kept on this iPhone. Try again.");
@@ -221,6 +232,7 @@ export function LocationCorrectionSheet({
           : intent.current === "not_here" && target.kind === "place" && target.notHere ? notHere(target.place) : null;
       if (!change) {
         intent.current = null;
+        pendingAnswer.current = null;
         setConfirming(null);
         return false;
       }
@@ -248,6 +260,8 @@ export function LocationCorrectionSheet({
     const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
     if (!corrections.length) {
       log?.();
+      pendingAnswer.current?.();
+      pendingAnswer.current = null;
       return true;
     }
     pendingLog.current = log;
@@ -277,6 +291,22 @@ export function LocationCorrectionSheet({
       setSaving(false);
       setSaveError("That place couldn't be saved. Saving a place needs a connection; try again.");
     });
+  }
+  /**
+   * The "?" at the top answered (Codex r1 on #610): the sheet's own changes are kept first, as Done keeps them, and
+   * the answer is sent only once they are; if they can't be kept (or its times don't work yet), the answer isn't
+   * sent, the question stays, and the sheet says why.
+   */
+  function answerFromSheet(yes: boolean) {
+    if (!question || frozen() || stale) return;
+    if (problem && !confirming) {
+      setSaveError("Those times don't work yet. Fix them, then answer.");
+      return;
+    }
+    pendingAnswer.current = () => question.onAnswer(yes);
+    commitRef.current?.();
+    // Done didn't keep anything and didn't answer: nothing waits, so a later Done never sends this answer.
+    if (!keeping.current) pendingAnswer.current = null;
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;
@@ -340,12 +370,12 @@ export function LocationCorrectionSheet({
           {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
           <View style={styles.pills}>
             {question.yesLabel ? (
-              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => { question.onAnswer(true); commitRef.current?.(); }}
+              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(true)}
                 style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
                 <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.surface }]}>{question.yesLabel}</Text>
               </Pressable>
             ) : null}
-            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => { question.onAnswer(false); commitRef.current?.(); }}
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
               style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
               <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
             </Pressable>

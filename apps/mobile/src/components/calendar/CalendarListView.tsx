@@ -178,14 +178,19 @@ export function CalendarListView({
   }, [blocks, checks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
+  // A "?" about a place or trip (it has a segment) is only known for what it is once the day's places are read:
+  // until then its row is a placeholder (`known: false`), and a request for it waits (Codex r1 on #610).
   const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
+  const segmentOf = new Map(checks.map((check) => [check.id, check.segmentId] as const));
   const checkRows = items.flatMap((item) => {
     if (item.kind !== "location") return [];
     const id = checkIdOf(item.row);
     if (!id) return [];
-    const inline = inlineCheckRow(item.row);
-    return [{ key: item.key, id, inline, open: inline ? undefined : sheetOpener(item.row, id, { checkQuestions, onOpenCheck, onOpenPlace }) }];
+    const inline = inlineCheckRow(item.row, segmentOf.get(id));
+    const known = inline || timeline != null;
+    return [{ key: item.key, id, inline, known, open: inline ? undefined : sheetOpener(item.row, id, { checkQuestions, onOpenCheck, onOpenPlace }) }];
   });
+  const inlineIds = new Set(checkRows.filter((row) => row.inline).map((row) => row.id));
   // The "?" last opened here (in its sheet or under its row): "N to check" moves on from it.
   const lastOpenedCheckId = useRef<string | null>(null);
   const checkKeys = checkRows.map((row) => row.key);
@@ -242,7 +247,7 @@ export function CalendarListView({
   // or a trip's in its sheet (never also under its row), Apple Health's under its row.
   const [handledCheckRequest, setHandledCheckRequest] = useState(0);
   const requestedRow = openCheckRequest && openCheckRequest.request !== handledCheckRequest
-    ? checkRows.find((row) => row.id === openCheckRequest.id) : undefined;
+    ? checkRows.find((row) => row.id === openCheckRequest.id && row.known) : undefined;
   if (openCheckRequest && requestedRow) {
     setHandledCheckRequest(openCheckRequest.request);
     if (requestedRow.inline) setOpenCheckId(openCheckRequest.id);
@@ -260,7 +265,8 @@ export function CalendarListView({
   // Today's chip also opens the first "?", once it is here, and VoiceOver hears it as when a "?" is tapped
   // (Codex r2 on #582): a place's or a trip's in its sheet, Apple Health's under its row.
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
-  const firstCheckRow = checkRows[0];
+  // Only once every "?" here is known, so the first is the real first and opens the right way (Codex r1 on #610).
+  const firstCheckRow = checkRows.every((row) => row.known) ? checkRows[0] : undefined;
   if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
     && (firstCheckRow.inline ? onAnswerCheck : firstCheckRow.open)) {
     setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckRow.id });
@@ -388,10 +394,11 @@ export function CalendarListView({
                 onOpenPlace={onOpenPlace ? (place, label) => { lastOpenedCheckId.current = checkIdOf(item.row) ?? lastOpenedCheckId.current; onOpenPlace(place, label); } : undefined}
                 onYes={onAnswerCheck ? (id) => answerCheck(id, true) : undefined}
                 onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
-                openCheckId={shownOpenCheckId} row={item.row} theme={theme} time={time} />
+                openCheckId={shownOpenCheckId} row={item.row} sheetless={inlineIds.has(checkIdOf(item.row) ?? "")} theme={theme} time={time} />
               {(() => {
                 // Only a row with no sheet (Apple Health) shows its question here (owner, 28 Oct 2026).
-                const id = inlineCheckRow(item.row) ? checkIdOf(item.row) : undefined;
+                const candidate = checkIdOf(item.row);
+                const id = candidate && inlineIds.has(candidate) ? candidate : undefined;
                 const question = id && id === shownOpenCheckId ? checkQuestions?.get(id) : undefined;
                 return id && question ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
@@ -414,9 +421,12 @@ export function CalendarListView({
 /** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
 const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
 
-/** Apple Health's "?" (a suggestion's own row, not a trip) has no sheet: its question opens under its row. */
-function inlineCheckRow(row: LocationListRow) {
-  return row.kind === "check" && !row.trip;
+/**
+ * Apple Health's "?" (a suggestion's own row about no place or trip) has no sheet: its question opens under its
+ * row. A "?" with a segment is a place's or a trip's, even while its row waits for the day's places.
+ */
+function inlineCheckRow(row: LocationListRow, segmentId: string | null | undefined) {
+  return row.kind === "check" && !row.trip && !segmentId;
 }
 
 /** How a place's or a trip's "?" opens its sheet: the place's sheet, the trip's (the caller routes it), or its screen. */
@@ -605,7 +615,7 @@ function RowMark({ asking, glyph, theme }: { asking: boolean; glyph: DayframeGly
  * Apple Health questions have no sheet: tapping one opens its question under the row. The journey in progress
  * keeps its own row.
  */
-function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, onOpenPlace, onToggleCheck, onYes, openCheckId, row, theme, time }: {
+function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, onOpenPlace, onToggleCheck, onYes, openCheckId, row, sheetless, theme, time }: {
   checkGlyphs?: ReadonlyMap<string, DayframeGlyph>; checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   checkTitles?: ReadonlyMap<string, string>; onOpenCheck?: (reviewItemId: string) => void;
   onOpenPlace?: (place: TimelinePlace, label: string) => void;
@@ -613,11 +623,17 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
   onToggleCheck?: (reviewItemId: string) => void;
   /** One-tap Yes on the row (item B), when the question has a confident answer. */
   onYes?: (reviewItemId: string) => void;
-  openCheckId: string | null; row: LocationListRow; theme: MobileTheme; time: (ms: number) => string;
+  openCheckId: string | null; row: LocationListRow;
+  /** Its "?" opens under the row (Apple Health); otherwise it opens a sheet or its own screen. */
+  sheetless: boolean;
+  theme: MobileTheme; time: (ms: number) => string;
 }) {
-  const yesFor = (checkId: string | undefined) => {
+  // The row's Yes pill (item B): only for an answerable confident guess, a place's "Visited X?" (named or not) or a
+  // trip's, with its log label (Codex r1 on #610). Apple Health answers in its question under the row.
+  const yesFor = (checkId: string | undefined, kind: "place" | "trip") => {
     const question = checkId ? checkQuestions?.get(checkId) : undefined;
-    return checkId && onYes && question?.logLabel && /^(Visited .+\?|.+, \d)/.test(question.question) ? question.logLabel : null;
+    if (!checkId || !onYes || !question?.logLabel) return null;
+    return kind === "trip" || /^Visited .+\?$/.test(question.question) ? question.logLabel : null;
   };
   const YesPill = ({ checkId, label }: { checkId: string; label: string }) => (
     <Pressable accessibilityHint="Answers its question" accessibilityLabel={label} accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP}
@@ -655,16 +671,17 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
     const fromMs = row.startedAt ? Date.parse(row.startedAt) : null;
     const toMs = row.stoppedAt ? Date.parse(row.stoppedAt) : null;
     const expanded = openCheckId === row.checkId;
-    // A trip has its own sheet (never the question under its row); anything else (Apple Health) opens its question here.
-    const opens = row.trip ? (onOpenCheck ? () => onOpenCheck(row.checkId) : undefined)
+    // A trip has its own sheet (never the question under its row); Apple Health opens its question here; a place's
+    // or trip's still waiting for the day's places opens on its own screen (the caller routes it).
+    const opens = !sheetless ? (onOpenCheck ? () => onOpenCheck(row.checkId) : undefined)
       : onToggleCheck ? () => onToggleCheck(row.checkId) : undefined;
-    const yes = yesFor(row.checkId);
+    const yes = row.trip ? yesFor(row.checkId, "trip") : null;
     return (
       <View style={styles.row}>
-        <Pressable accessibilityHint={opens ? row.trip ? "Opens the trip" : expanded ? "Hides the question" : "Shows the question" : undefined}
+        <Pressable accessibilityHint={opens ? !sheetless ? row.trip ? "Opens the trip" : "Opens it" : expanded ? "Hides the question" : "Shows the question" : undefined}
           accessibilityLabel={[title, fromMs != null ? `${time(fromMs)} to ${toMs != null ? time(toMs) : "now"}` : null,
             row.trip ? modesLabel(row.trip.legs, row.trip.route) : null, "Needs a look"].filter(Boolean).join(". ")}
-          accessibilityRole={opens ? "button" : undefined} accessibilityState={row.trip || !opens ? undefined : { expanded }} disabled={!opens} onPress={opens}
+          accessibilityRole={opens ? "button" : undefined} accessibilityState={!sheetless || !opens ? undefined : { expanded }} disabled={!opens} onPress={opens}
           style={({ pressed }) => [styles.rowMain, styles.blockRow, { opacity: pressed ? 0.7 : 1 }]} testID={`calendar-list-check-${row.checkId}`}>
           <RowMark asking glyph={checkGlyphs?.get(row.checkId) ?? (row.trip ? DAYFRAME_APP_ICONS.openTrip : DAYFRAME_APP_ICONS.places)} theme={theme} />
           <View style={styles.text}>
@@ -682,7 +699,6 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
   if (row.kind !== "place") return null;
   const { place } = row;
   const checkId = row.checkIds[0];
-  const guess = placeGuess(row, checkQuestions);
   const label = placeRowLabel(row, checkQuestions);
   const open = place.stoppedAt == null;
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
@@ -693,7 +709,7 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
   const partly = row.unloggedSeconds >= 60 && row.unloggedSeconds < length - 59 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
   // Item D: the length lives in the subtitle only.
   const detail = [formatDuration(length), partly, place.setByYou ? "You set this" : null].filter(Boolean).join(" · ");
-  const yes = guess ? yesFor(checkId) : null;
+  const yes = yesFor(checkId, "place");
   return (
     <View style={styles.row}>
       <Pressable accessibilityHint={opens ? "Opens the place" : undefined}

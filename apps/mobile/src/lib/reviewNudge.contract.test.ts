@@ -33,7 +33,7 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
 
   it("takes its count from the Dashboard's 7-day \"?\" only, and cancels at sign-out", () => {
     // Owner item 13 (28 Oct 2026): the reminder counts what the Calendar badge counts; replies' Review counts never feed it.
-    expect(dashboard).toContain("noteReviewCount(owner, askingChecks.length)");
+    expect(dashboard).toContain("useReviewNudgeCount(nudgeOwner, askingChecks.length, { dayKey: todayKey, foreground: appIsForeground });");
     expect(api).not.toContain("noteReviewCount");
     expect(locationStore).not.toContain("noteReviewCount");
     expect(locationStore).not.toContain("noteLocationReviewCount");

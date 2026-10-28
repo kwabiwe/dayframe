@@ -310,12 +310,18 @@ export function buildNativeCalendarBridgeState({
   reduceMotion,
   reduceTransparency,
   refreshing,
+  reviewItemIds,
   selectedDayKey,
   theme,
   transitionDirection
 }: {
   clockFormat?: ClockFormat;
   data: MobileBootstrap | null;
+  /**
+   * The suggestions the Grid may draw, when given: the "?" that still ask, outings folded, as Calendar › List
+   * shows them (owner, 28 Oct 2026; Codex r1 on #610). Absent, every open suggestion draws.
+   */
+  reviewItemIds?: ReadonlySet<string> | null;
   hapticsEnabled?: boolean;
   now: number;
   reduceMotion: boolean;
@@ -330,7 +336,7 @@ export function buildNativeCalendarBridgeState({
   const dayEnd = localDayEnd(dayStart);
   const todayKey = formatDateKey(new Date(now));
   const timeEntries = buildTimeEntries(data);
-  const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now);
+  const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now, reviewItemIds ?? null);
   const confirmedEntries = entries.filter((entry) => !isCalendarReviewNeeded(entry));
   const confirmedAnalysis = analyzeTimeIntervals(
     confirmedEntries.map((entry) => ({
@@ -593,7 +599,8 @@ function buildCalendarEntries(
   data: MobileBootstrap | null,
   allTimeEntries: NativeCalendarEntry[],
   selectedDayKey: string,
-  now: number
+  now: number,
+  reviewItemIds: ReadonlySet<string> | null = null
 ) {
   if (!data) return [];
   const reviewEntries: NativeCalendarEntry[] = [];
@@ -605,6 +612,7 @@ function buildCalendarEntries(
     // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
     // show them (hatched in the Review lane), not only commutes.
     if (!isOpenReviewItem(item)) continue;
+    if (reviewItemIds && !reviewItemIds.has(item.id)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
     const entry: NativeCalendarEntry = {

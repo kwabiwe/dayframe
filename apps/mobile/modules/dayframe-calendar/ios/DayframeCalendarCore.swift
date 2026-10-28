@@ -1700,6 +1700,77 @@ public enum DayframeCalendarMomentMath {
   }
 }
 
+/// The Places lane (location v4 step 17): its width left of the blocks, and its items' touch targets, shared by
+/// the entries layer (where it draws and places each button) and the scroll coordinator (where a long press must
+/// not start a new block) (Codex r1 on #610).
+public enum DayframeCalendarPlacesLaneMath {
+  /// The room the lane takes left of the blocks (the presentation's entryLeadingInset).
+  public static let width = 52.0
+  /// An item's drawn width inside the lane.
+  public static let itemWidth = width - 6
+  /// Every item is at least this tall to touch (AGENTS: 44-point targets), grown evenly about the item.
+  public static let targetHeight = 44.0
+
+  /// Where the lane's items start: where the blocks would, past the hour labels.
+  public static func minX(hourLabelWidth: Double) -> Double { hourLabelWidth + 8 }
+
+  /// Each item's target, in the order given: its drawn span grown to 44 points centred on it and kept inside
+  /// the day; where two neighbours' grown targets meet, each stops at the middle of the gap between them, so a
+  /// tap opens the nearest and no item's target is ever smaller than what is drawn.
+  public static func hitFrames(spans: [DayframeCalendarBracketSpan], hourLabelWidth: Double, timelineHeight: Double) -> [DayframeCalendarHitFrame] {
+    let minX = minX(hourLabelWidth: hourLabelWidth)
+    var ranges = spans.map { span -> (minY: Double, maxY: Double) in
+      let grow = max(0, targetHeight - span.height) / 2
+      var minY = span.top - grow
+      var maxY = span.top + span.height + grow
+      // At the day's edges the target moves inside rather than shrinking, while the day is tall enough.
+      if minY < 0 { maxY = min(timelineHeight, maxY - minY); minY = 0 }
+      if maxY > timelineHeight { minY = max(0, minY - (maxY - timelineHeight)); maxY = timelineHeight }
+      return (minY, maxY)
+    }
+    let order = spans.indices.sorted { spans[$0].top != spans[$1].top ? spans[$0].top < spans[$1].top : $0 < $1 }
+    for (previous, next) in zip(order, order.dropFirst()) where ranges[previous].maxY > ranges[next].minY {
+      let boundary = (spans[previous].top + spans[previous].height + spans[next].top) / 2
+      ranges[previous].maxY = max(min(ranges[previous].maxY, boundary), spans[previous].top + spans[previous].height)
+      ranges[next].minY = min(max(ranges[next].minY, boundary), spans[next].top)
+    }
+    return ranges.map { DayframeCalendarHitFrame(minX: minX, maxX: minX + itemWidth, minY: $0.minY, maxY: $0.maxY) }
+  }
+}
+
+/// A trip block's leg strip (location v4 step 16): each leg clipped to the part of the trip this day draws, and
+/// placed by that day-clipped span, so a trip across midnight shows only this day's legs (Codex r1 on #610).
+public enum DayframeCalendarLegStripMath {
+  public struct Segment: Equatable {
+    public let index: Int
+    public let top: Double
+    public let height: Double
+  }
+
+  /// Segments inside a strip `height` tall (2 points of inset at each end), for the block from `startedAtMs` to
+  /// `stoppedAtMs` drawn on the day from `dayStartMs` to `dayEndMs`. A leg not on this day has no segment.
+  public static func segments(
+    legs: [(startedAtMs: Double, stoppedAtMs: Double)],
+    startedAtMs: Double,
+    stoppedAtMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    height: Double
+  ) -> [Segment] {
+    let fromMs = max(startedAtMs, dayStartMs)
+    let toMs = min(stoppedAtMs, dayEndMs)
+    guard toMs > fromMs, height.isFinite else { return [] }
+    let span = toMs - fromMs
+    let usable = max(0, height - 4)
+    return legs.enumerated().compactMap { index, leg in
+      let start = max(fromMs, leg.startedAtMs)
+      let end = min(toMs, leg.stoppedAtMs)
+      guard end > start else { return nil }
+      return Segment(index: index, top: (start - fromMs) / span * usable + 2, height: max(2, (end - start) / span * usable - 1))
+    }
+  }
+}
+
 public struct DayframeCalendarBracketSpan: Equatable {
   public let top: Double
   public let height: Double
