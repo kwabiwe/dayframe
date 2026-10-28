@@ -359,7 +359,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
          from_stay_segment_id, to_stay_segment_id, route_distance_m, route_sample_count, max_gap_seconds, continuity_status, confidence, metadata)
        values ($1, $2, 'device-1', $3, 'location-v2.0', 'finalised', $4, $5, $6, $7, 1000, 4, 60, 'continuous', 'medium', $8::jsonb) returning id`,
-      [workspaceId, userId, segmentId, at(base + start), at(base + stop), from, to, JSON.stringify({ travelMode: mode,
+      [workspaceId, userId, segmentId, at(base + start), at(base + stop), from, to, JSON.stringify({ travelMode: mode, qualificationReason: "same_place_meaningful_round_trip",
         legs: [{ startedAt: at(base + start), stoppedAt: at(base + stop), mode, confidence: "sure", distanceMeters: 1000 }] })])).rows[0].id;
     const home1 = await stay("j-home-1", 0, 60, homeId);
     const notHere = await stay("j-x", 80, 95, null);
@@ -407,6 +407,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(new Date(joinedTrip.stoppedAt).toISOString()).toBe(at(base + 120));
     expect(joinedTrip.metadata.legs.map((leg: { mode: string }) => leg.mode)).toEqual(["automotive", "walking"]);
     expect(joinedTrip.metadata).not.toHaveProperty("travelMode");
+    expect(joinedTrip.metadata).not.toHaveProperty("qualificationReason");
     const gone = await db.query(`select id, status from stay_segments where id = $1 union all select id, status from commute_segments where id = $2`, [notHere, t2]);
     expect(gone.rows.map((row) => row.status)).toEqual(["superseded", "superseded"]);
     const suggestions = await db.query(`select location_segment_id as "segmentId", status, notes, suggested_stopped_at as "stoppedAt"
@@ -418,13 +419,14 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
 
     // I didn't leave: the two visits to Home are one stay, and the drive after leaves it. The one stay is as
     // finished as its last part (Codex r1 on #603).
-    await db.query(`update stay_segments set status = 'closed' where id = $1`, [home3]);
+    await db.query(`update stay_segments set status = 'closed', metadata = '{"openTrip":{"startedAt":"x"}}'::jsonb where id = $1`, [home3]);
     await correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t3" }, session);
     const merged = (await db.query(`select stopped_at as "stoppedAt", sample_count as "samples", status, metadata from stay_segments where id = $1`, [home2])).rows[0];
     expect(new Date(merged.stoppedAt).toISOString()).toBe(at(base + 200));
     expect(merged).toMatchObject({ samples: 6, status: "closed", metadata: { setByYou: true,
       correctionSpan: { startedAt: at(base + 120), stoppedAt: at(base + 150) } } });
-    expect((await db.query(`select status from stay_segments where id = $1`, [home3])).rows[0].status).toBe("superseded");
+    expect((await db.query(`select status, metadata from stay_segments where id = $1`, [home3])).rows[0]).toEqual({ status: "superseded", metadata: {} });
+    expect(merged.metadata.openTrip).toEqual({ startedAt: "x" });
     expect((await db.query(`select status from commute_segments where id = $1`, [t3])).rows[0].status).toBe("superseded");
     expect((await db.query(`select from_stay_segment_id as "fromStayId" from commute_segments where id = $1`, [t4])).rows[0].fromStayId).toBe(home2);
 

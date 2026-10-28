@@ -472,7 +472,8 @@ async function applyJoin(
     const legs = mergeSameModeLegs([...legsOf(before), ...legsOf(after)]);
     const stops = [...stopsOf(before), ...stopsOf(after)];
     const kept: Record<string, unknown> = { ...before.metadata };
-    for (const key of ["legs", "stops", "travelMode", "motionSupported", "motionTimed"]) delete kept[key];
+    // Its classification described the trip in alone (a round trip, say): the one trip has none (Codex r2 on #603).
+    for (const key of ["legs", "stops", "travelMode", "motionSupported", "motionTimed", "qualificationReason"]) delete kept[key];
     const { travelMode, motionSupported, motionTimed } = before.metadata ?? {};
     const metadata = {
       ...kept,
@@ -522,6 +523,9 @@ async function applyJoin(
     [...owner, first.id, second.id, row.id]);
   await supersede("commute_segments", [row.id]);
   await supersede("stay_segments", [second.id]);
+  // The journey in progress moves to the one stay rather than being on both (Codex r2 on #603).
+  await client.query(`update stay_segments set metadata = metadata - 'openTrip' where id = $3 and workspace_id = $1 and user_id = $2`,
+    [...owner, second.id]);
   await retireSuggestions(client, session, [row.id, second.id], "You said you didn't leave.");
   // The first visit's open suggestion offers the one stay; while the one stay is still open, replay offers it
   // again once it ends (Codex r1 on #603).
