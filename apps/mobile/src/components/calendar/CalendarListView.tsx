@@ -60,6 +60,7 @@ type ListItem =
 
 export function CalendarListView({
   checkGlyphs,
+  checkKinds,
   checkQuestions,
   checks = [],
   checkTitles,
@@ -89,6 +90,12 @@ export function CalendarListView({
 }: {
   /** Open suggestions ("?"), each on the row it is about (location v4 step 14, iPhone part 3a). */
   checks?: readonly ListCheck[];
+  /**
+   * What each "?" is about, from the suggestion itself (Codex r2 on #610): Apple Health's ("health") and one about
+   * nothing the List can open ("none": a legacy location suggestion without a segment) ask under their row; a
+   * place's or a trip's opens its sheet. Absent, a "?" with a segment is taken as a place's or trip's.
+   */
+  checkKinds?: ReadonlyMap<string, CalendarCheckKind>;
   /** Each "?" row's own icon (a trip's route, Apple Health's heart, a place's pin). */
   checkGlyphs?: ReadonlyMap<string, DayframeGlyph>;
   /** Every "?" that still asks, the last 7 days on any day (owner, 28 Oct 2026, concern 4); the chip shows this count. */
@@ -128,7 +135,7 @@ export function CalendarListView({
   /** Opens a place's correction sheet (step 12), its "?" asked at the top when it has one. */
   onOpenPlace?: (place: TimelinePlace, label: string) => void;
   /** Opens a trip's correction sheet at one of its legs (step 12): a leg's mode, on any trip. */
-  onOpenTripLeg?: (trip: TimelineTrip & { route: string }, legIndex: number) => void;
+  onOpenTripLeg?: (trip: TimelineTrip & { route: string }, legIndex: number | null) => void;
   /** Which "?" has its question open under its row (card B part 2: only that one looks for a place nearby). */
   onOpenCheckChange?: (reviewItemId: string | null) => void;
   /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?" and opens it. */
@@ -178,17 +185,24 @@ export function CalendarListView({
   }, [blocks, checks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
-  // A "?" about a place or trip (it has a segment) is only known for what it is once the day's places are read:
-  // until then its row is a placeholder (`known: false`), and a request for it waits (Codex r1 on #610).
+  // What each "?" is about comes from the caller (`checkKinds`, from the suggestion itself; Codex r2 on #610): Apple
+  // Health's, and one about nothing the List can open (a legacy location suggestion without a segment), have no
+  // sheet and ask under their row. A place's or a trip's is only known for what it is once the day's places are
+  // read: until then its row is a placeholder (`known: false`), and a request or a tap for it waits (Codex r1 on
+  // #610). Once they are read, a place's or trip's whose item isn't in them asks under its row as the fallback:
+  // there is no sheet to open and no Review screen to send it to (step 15).
   const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
   const segmentOf = new Map(checks.map((check) => [check.id, check.segmentId] as const));
+  const kindOf = (id: string) => checkKinds?.get(id) ?? (segmentOf.get(id) ? "place" : "none");
   const checkRows = items.flatMap((item) => {
     if (item.kind !== "location") return [];
     const id = checkIdOf(item.row);
     if (!id) return [];
-    const inline = inlineCheckRow(item.row, segmentOf.get(id));
-    const known = inline || timeline != null;
-    return [{ key: item.key, id, inline, known, open: inline ? undefined : sheetOpener(item.row, id, { checkQuestions, onOpenCheck, onOpenPlace }) }];
+    const sheetless = kindOf(id) === "health" || kindOf(id) === "none";
+    const known = sheetless || timeline != null;
+    const inline = item.row.kind === "check" && !item.row.trip && known;
+    return [{ key: item.key, id, inline, known,
+      open: inline || !known ? undefined : sheetOpener(item.row, id, { checkQuestions, onOpenCheck, onOpenPlace, onOpenTripLeg }) }];
   });
   const inlineIds = new Set(checkRows.filter((row) => row.inline).map((row) => row.id));
   // The "?" last opened here (in its sheet or under its row): "N to check" moves on from it.
@@ -246,15 +260,20 @@ export function CalendarListView({
   // it once its row is here, after any day change has closed the previous question, and scrolls to it: a place's
   // or a trip's in its sheet (never also under its row), Apple Health's under its row.
   const [handledCheckRequest, setHandledCheckRequest] = useState(0);
-  const requestedRow = openCheckRequest && openCheckRequest.request !== handledCheckRequest
-    ? checkRows.find((row) => row.id === openCheckRequest.id && row.known) : undefined;
-  if (openCheckRequest && requestedRow) {
-    setHandledCheckRequest(openCheckRequest.request);
-    if (requestedRow.inline) setOpenCheckId(openCheckRequest.id);
+  // A tap on a "?" not known yet waits the same way, as a request of the List's own (negative numbers).
+  // It stands until the caller makes a new request after it.
+  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number } | null>(null);
+  const tapRequests = useRef(0);
+  const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
+  const requestedRow = request && request.request !== handledCheckRequest
+    ? checkRows.find((row) => row.id === request.id && row.known) : undefined;
+  if (request && requestedRow) {
+    setHandledCheckRequest(request.request);
+    if (requestedRow.inline) setOpenCheckId(request.id);
   }
   useEffect(() => {
-    if (!handledCheckRequest || !openCheckRequest || openCheckRequest.request !== handledCheckRequest) return;
-    const row = checkRows.find((each) => each.id === openCheckRequest.id);
+    if (!handledCheckRequest || !request || request.request !== handledCheckRequest) return;
+    const row = checkRows.find((each) => each.id === request.id);
     if (!row) return;
     pendingScroll.current = row.key;
     tryScroll();
@@ -289,8 +308,20 @@ export function CalendarListView({
     const question = checkQuestions?.get(row.id);
     if (question) AccessibilityInfo.announceForAccessibility(question.question);
   };
-  // An Apple Health "?" opens (or closes) its question; with no answers here it opens the suggestion instead.
+  // A "?" row's tap: a trip's sheet; one not known yet waits for the day's places; one with no sheet opens (or
+  // closes) its question under the row, or with no answers here, the suggestion on its own screen.
   const toggleCheck = (id: string) => {
+    const row = checkRows.find((each) => each.id === id);
+    if (!row) return;
+    if (!row.known) {
+      tapRequests.current -= 1;
+      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0 });
+      return;
+    }
+    if (!row.inline) {
+      openCheckRow(row, false);
+      return;
+    }
     if (!onAnswerCheck) {
       onOpenCheck?.(id);
       return;
@@ -299,8 +330,7 @@ export function CalendarListView({
       setOpenCheckId(null);
       return;
     }
-    const row = checkRows.find((each) => each.id === id);
-    if (row) openCheckRow(row, true);
+    openCheckRow(row, true);
   };
   const answerCheck = (id: string, logged: boolean) => {
     setOpenCheckId(null);
@@ -393,7 +423,7 @@ export function CalendarListView({
                 onOpenCheck={onOpenCheck ? (id) => { lastOpenedCheckId.current = id; onOpenCheck(id); } : undefined}
                 onOpenPlace={onOpenPlace ? (place, label) => { lastOpenedCheckId.current = checkIdOf(item.row) ?? lastOpenedCheckId.current; onOpenPlace(place, label); } : undefined}
                 onYes={onAnswerCheck ? (id) => answerCheck(id, true) : undefined}
-                onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
+                onToggleCheck={onAnswerCheck || onOpenCheck || onOpenTripLeg || onOpenPlace ? toggleCheck : undefined}
                 openCheckId={shownOpenCheckId} row={item.row} sheetless={inlineIds.has(checkIdOf(item.row) ?? "")} theme={theme} time={time} />
               {(() => {
                 // Only a row with no sheet (Apple Health) shows its question here (owner, 28 Oct 2026).
@@ -421,24 +451,24 @@ export function CalendarListView({
 /** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
 const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
 
-/**
- * Apple Health's "?" (a suggestion's own row about no place or trip) has no sheet: its question opens under its
- * row. A "?" with a segment is a place's or a trip's, even while its row waits for the day's places.
- */
-function inlineCheckRow(row: LocationListRow, segmentId: string | null | undefined) {
-  return row.kind === "check" && !row.trip && !segmentId;
-}
+/** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet. */
+export type CalendarCheckKind = "health" | "place" | "trip" | "none";
 
 /** How a place's or a trip's "?" opens its sheet: the place's sheet, the trip's (the caller routes it), or its screen. */
-function sheetOpener(row: LocationListRow, checkId: string, { checkQuestions, onOpenCheck, onOpenPlace }: {
+function sheetOpener(row: LocationListRow, checkId: string, { checkQuestions, onOpenCheck, onOpenPlace, onOpenTripLeg }: {
   checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>; onOpenCheck?: (reviewItemId: string) => void;
   onOpenPlace?: (place: TimelinePlace, label: string) => void;
+  onOpenTripLeg?: (trip: TimelineTrip & { route: string }, legIndex: number | null) => void;
 }) {
   if (row.kind === "place") {
     if (onOpenPlace) return () => onOpenPlace(row.place, placeRowLabel(row, checkQuestions));
     return onOpenCheck ? () => onOpenCheck(checkId) : undefined;
   }
-  return row.kind === "check" && onOpenCheck ? () => onOpenCheck(checkId) : undefined;
+  if (row.kind !== "check" || !row.trip) return undefined;
+  // The trip's own sheet, its "?" asked at the top; the caller's own route only when the List can't open it.
+  const trip = row.trip;
+  if (onOpenTripLeg) return () => onOpenTripLeg(trip, null);
+  return onOpenCheck ? () => onOpenCheck(checkId) : undefined;
 }
 
 /** A second line's glyph (Calendar v3): the registry's pin, route, Health and tag. */
@@ -673,8 +703,7 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
     const expanded = openCheckId === row.checkId;
     // A trip has its own sheet (never the question under its row); Apple Health opens its question here; a place's
     // or trip's still waiting for the day's places opens on its own screen (the caller routes it).
-    const opens = !sheetless ? (onOpenCheck ? () => onOpenCheck(row.checkId) : undefined)
-      : onToggleCheck ? () => onToggleCheck(row.checkId) : undefined;
+    const opens = onToggleCheck ? () => onToggleCheck(row.checkId) : undefined;
     const yes = row.trip ? yesFor(row.checkId, "trip") : null;
     return (
       <View style={styles.row}>

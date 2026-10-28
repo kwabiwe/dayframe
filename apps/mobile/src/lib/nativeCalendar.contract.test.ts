@@ -12,7 +12,10 @@ describe("native Calendar production contract", () => {
     const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
     const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
     expect(model).toContain("DayframeCalendarPlacesLaneMath.hitFrames(spans:");
-    expect(rootView).toContain("ForEach(DayframeCalendarLaneLayout.layout(");
+    expect(rootView).toContain("let lane = DayframeCalendarLaneLayout.layout(");
+    // One arbitration for a touch (the nearest drawn centre), and each item its own VoiceOver button (Codex r2 on #610).
+    expect(rootView).toContain("DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\\.span), frames: lane.map(\\.frame))");
+    expect(rootView).toContain(".accessibilityAction { openLaneItem(item) }");
     expect(coordinator).toContain("let laneFrames = DayframeCalendarLaneLayout.layout(");
     expect(coordinator).toContain("frames: hitFrames + momentFrames + laneFrames");
     expect(rootView).toContain("DayframeCalendarLegStripMath.segments(");

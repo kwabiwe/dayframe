@@ -64,8 +64,9 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
   it("opens each \"?\" where its kind is handled, and asks none with a pending change of its own (Codex r10 on #582)", () => {
     expect(dashboard).toContain("onOpenCheck={(reviewItemId) => {");
-    // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602).
-    expect(dashboard).toContain("locationCorrections.openTripLeg(trip, null);");
+    // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602): the List opens it
+    // itself (Codex r2 on #610).
+    expect(dashboard).toContain("onOpenTripLeg={locationCorrections.openTripLeg}");
     expect(dashboard).toContain("router.push(calendarCheckRoute(");
     expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
@@ -101,5 +102,27 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(dashboard).toContain("const { open, outings, folded } = calendarCheckBase;");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
+  });
+});
+
+describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #610)", () => {
+  it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
+    expect(dashboard).toContain("await holdAnswerAfterCorrections(correctionOwner, { id, reviewItemId: check.id, logged: yes, waitsFor: ids });");
+    expect(dashboard).toContain("checkAnswers.answer(check.id, yes, null, { afterCorrections: id })");
+    expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner });");
+    expect(dashboard).toContain("!answersAfterCorrections.waitingIds.has(item.id)");
+  });
+
+  it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
+    expect(dashboard).toContain("correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])");
+    expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
+  });
+
+  it("classifies each \"?\" so only Apple Health's and a legacy one without a segment ask under their row, and never sends a row to Review", () => {
+    expect(dashboard).toContain("kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),");
+    expect(dashboard).toContain("checkKinds={calendarChecks.kinds}");
+    expect(dashboard).toContain('if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";');
+    // onOpenCheck is the question's own "More…" / "Open it" only; it no longer looks a trip up as a fallback.
+    expect(dashboard).not.toContain('each.kind === "trip" && each.id === segmentId && !each.blockIds.length');
   });
 });

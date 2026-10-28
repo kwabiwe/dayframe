@@ -477,6 +477,11 @@ private struct DayframeCalendarEntriesLayer: View {
   let labelTextScale: Double
   let presentation: DayframeCalendarPresentation
 
+  /// Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
+  private func openLaneItem(_ item: DayframeCalendarLaneItemRecord) {
+    actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
+  }
+
   var body: some View {
     // One layout per zoom step and text size (location v4 C6): every block at least one label line
     // tall, colliding drawn blocks side by side. The scroll coordinator hit-tests the same layout.
@@ -529,32 +534,36 @@ private struct DayframeCalendarEntriesLayer: View {
       // Step 17: the Places lane left of the blocks (entryLeadingInset makes room): each
       // place and trip at its time, quiet; one that asks something is hatched with the amber dot and opens its
       // question in the List; any other opens the List on this day. Same fade as a block; none with Reduce Motion.
-      // Each item's touch target is at least 44 points tall, grown about it (DayframeCalendarLaneLayout, shared
-      // with the scroll coordinator so a long press never starts a block over one; Codex r1 on #610).
-      ForEach(DayframeCalendarLaneLayout.layout(
+      // Each item has a full 44 × 44-point target (DayframeCalendarLaneLayout, shared with the scroll coordinator so
+      // a long press never starts a block over one). Close neighbours' targets overlap; a touch goes to the item
+      // whose drawn centre is nearest (DayframeCalendarPlacesLaneMath.hitIndex), whichever target it lands on. Each
+      // item is its own VoiceOver button (Codex r1 and r2 on #610).
+      let lane = DayframeCalendarLaneLayout.layout(
         presentation: presentation,
         hourHeight: Double(hourHeight),
         hourLabelWidth: Double(hourLabelWidth)
-      ), id: \.item.id) { placement in
+      )
+      ForEach(lane, id: \.item.id) { placement in
         let item = placement.item
         let height = CGFloat(placement.span.height)
         let laneWidth = CGFloat(DayframeCalendarPlacesLaneMath.itemWidth)
         let hitHeight = CGFloat(placement.frame.maxY - placement.frame.minY)
-        Button {
-          // Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
-          actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
-        } label: {
-          DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
-            .offset(y: CGFloat(placement.span.top - placement.frame.minY))
-            .frame(width: laneWidth, height: hitHeight, alignment: .top)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(width: laneWidth, height: hitHeight)
-        .position(x: CGFloat(placement.frame.minX) + laneWidth / 2, y: CGFloat(placement.frame.minY) + hitHeight / 2)
-        .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
-        .accessibilityLabel(item.accessibilityLabel)
-        .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
+        DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
+          .offset(y: CGFloat(placement.span.top - placement.frame.minY))
+          .frame(width: laneWidth, height: hitHeight, alignment: .top)
+          .contentShape(Rectangle())
+          .gesture(SpatialTapGesture().onEnded { value in
+            let point = DayframeCalendarPoint(x: placement.frame.minX + Double(value.location.x), y: placement.frame.minY + Double(value.location.y))
+            let index = DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\.span), frames: lane.map(\.frame))
+            openLaneItem(index.map { lane[$0].item } ?? item)
+          })
+          .position(x: CGFloat(placement.frame.minX) + laneWidth / 2, y: CGFloat(placement.frame.minY) + hitHeight / 2)
+          .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
+          .accessibilityElement(children: .ignore)
+          .accessibilityAddTraits(.isButton)
+          .accessibilityLabel(item.accessibilityLabel)
+          .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
+          .accessibilityAction { openLaneItem(item) }
       }
 
       ForEach(presentation.entries) { entry in

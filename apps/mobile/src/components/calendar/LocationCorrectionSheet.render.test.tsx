@@ -383,38 +383,70 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onDismissed).toHaveBeenCalledWith(1);
   });
 
-  it("answers from the sheet only once its own changes are kept; a change that can't be kept sends no answer (Codex r1 on #610)", async () => {
+  it("one tap keeps the sheet's changes and its answer, the answer kept first and waiting for them (owner, 28 Oct 2026; Codex r2 on #610)", async () => {
     const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    // Kept: the place change is queued first, then the answer, then the sheet closes.
     const order: string[] = [];
-    const onAnswer = vi.fn(() => { order.push("answer"); });
+    const start = vi.fn(() => { order.push("start"); });
+    const answerAfter = vi.fn(async (_yes: boolean, ids: readonly string[]) => { order.push(`hold ${ids.join(",")}`); return { start, cancel: vi.fn(async () => undefined) }; });
+    // The List's queue: the waiting answer is kept with the corrections' ids, then the corrections, then it starts.
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"]);
+      order.push("queued");
+      waiting?.start();
+    });
+    const onAnswer = vi.fn();
     const onDismissed = vi.fn();
-    const ok = sheetWith({ onDismissed, onQueue: vi.fn(async () => { order.push("queue"); }),
-      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    const ok = sheetWith({ onDismissed, onQueue: onQueue as never,
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter } });
     act(() => { ok.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    // The answers stay offered while the sheet has changes.
+    expect(ok.root.findAll((node) => node.props.testID === "location-correction-question-yes").length).toBeGreaterThan(0);
     act(() => { ok.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
-    expect(onAnswer).not.toHaveBeenCalled();
     await settle();
-    expect(order).toEqual(["queue", "answer"]);
-    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(onQueue).toHaveBeenCalledOnce();
+    expect(onQueue.mock.calls[0][0]).toEqual([expect.objectContaining({ request: expect.objectContaining({ kind: "place", placeId: SAVED }) })]);
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"]);
+    expect(order).toEqual(["hold cid-1", "queued", "start"]);
+    // Never answered straight away: only through the waiting record.
+    expect(onAnswer).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledWith(1);
-    // Not kept: no answer, the question stays, the sheet says why and stays open; a later Done never sends it.
-    const refused = vi.fn();
+    // The changes can't be kept: no answer starts, the sheet says why and stays open.
     const failedDismiss = vi.fn();
-    let fail = true;
-    const failing = sheetWith({ onDismissed: failedDismiss, onQueue: vi.fn(async () => { if (fail) throw new Error("disk full"); }),
-      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: refused } });
+    const failingAnswer = vi.fn(async () => ({ start, cancel: vi.fn(async () => undefined) }));
+    start.mockClear();
+    const failing = sheetWith({ onDismissed: failedDismiss, onQueue: vi.fn(async () => { throw new Error("disk full"); }),
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter: failingAnswer } });
     act(() => { failing.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
     act(() => { failing.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
     await settle();
-    expect(refused).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(onAnswer).not.toHaveBeenCalled();
     expect(failedDismiss).not.toHaveBeenCalled();
-    expect(failing.root.findAll((node) => node.props.testID === "location-correction-question").length).toBeGreaterThan(0);
     expect(failing.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
-    fail = false;
-    act(() => { action(failing).props.onPress(); });
+  });
+
+  it("Logs as on a place with a \"?\" queues log_place only, never an answer too (#609)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const onLog = vi.fn();
+    const onAnswer = vi.fn();
+    const answerAfter = vi.fn();
+    const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const done = sheetWith({ logAs, question });
+    act(() => { done.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { action(done).props.onPress(); });
     await settle();
-    expect(refused).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(answerAfter).not.toHaveBeenCalled();
+    // Yes is the answer alone: a Logs as pick is not sent with it.
+    onLog.mockClear();
+    const yes = sheetWith({ logAs, question });
+    act(() => { yes.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { yes.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(onLog).not.toHaveBeenCalled();
   });
 
   it("answers at once when the sheet has nothing of its own to keep", () => {

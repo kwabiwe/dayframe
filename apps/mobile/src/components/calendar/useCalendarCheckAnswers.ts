@@ -10,12 +10,18 @@ import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAn
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
+import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 
 /** A held answer, with the account that gave it. */
 type HeldAnswer = ReviewDeckHeldDecision & {
   owner: string | null;
   /** The Apple place a Yes names (card B part 2): recorded there once. */
   venue?: ReviewAnswerVenue | null;
+  /**
+   * Answered from its sheet with changes of its own (Codex r2 on #610): its record waits, on the phone, for those
+   * corrections (`reviewAnswersAfterCorrections`); the end of Undo lets it go once they are acknowledged.
+   */
+  afterCorrections?: string;
 };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
 type Saving = { owner: string | null; ids: ReadonlySet<string>; awaiting: ReadonlySet<string> };
@@ -130,9 +136,23 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // go and the answer is validated, claimed and saved again in the same turn (`verified`), against the
   // suggestion as it is now (Codex r3).
   const save = (decision: HeldAnswer, verified = false) => {
-    if (decision.owner !== ownerRef.current) return; // Another account now: never saved there.
+    if (decision.owner !== ownerRef.current) {
+      // Another account now: never saved there.
+      if (decision.afterCorrections) void cancelAnswerAfterCorrections(decision.afterCorrections).catch(() => undefined);
+      return;
+    }
     const owner = decision.owner;
     const heldIds = [decision.itemId, ...(decision.outing?.members.map((member) => member.itemId) ?? [])];
+    if (decision.afterCorrections) {
+      // Its corrections change the suggestion, so it is not checked against the copy answered: its record waits
+      // for them and then answers the "?" as the server has it (reviewAnswersAfterCorrections). Out of the List
+      // until the Review outbox's record takes over; its waiting record keeps it out meanwhile.
+      setSaving((now) => now?.owner === owner
+        ? { ...now, ids: new Set([...now.ids, ...heldIds]), awaiting: new Set([...now.awaiting, ...heldIds]) }
+        : { owner, ids: new Set(heldIds), awaiting: new Set(heldIds) });
+      void commitAnswerAfterCorrections(decision.afterCorrections).catch(() => undefined);
+      return;
+    }
     const unhide = (ids: readonly string[]) => {
       if (ownerRef.current !== owner) return;
       setSaving((now) => now && now.owner === owner ? { ...now, ids: new Set([...now.ids].filter((id) => !ids.includes(id))) } : now);
@@ -263,7 +283,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (ownerRef.current === ownerKey) return;
     ownerRef.current = ownerKey;
     const current = hold.current();
-    if (current) hold.undo(current.token);
+    if (current) {
+      hold.undo(current.token);
+      const waiting = (current as HeldAnswer).afterCorrections;
+      if (waiting) void cancelAnswerAfterCorrections(waiting).catch(() => undefined);
+    }
     known.current.clear();
     setSaving(null);
     setRestored(null);
@@ -291,12 +315,16 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     };
   }, [hold]);
 
-  /** "Log it" (true) or "Skip" (false) on a "?"; a new answer saves the one held before it. */
-  const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null) => {
+  /**
+   * "Log it" (true) or "Skip" (false) on a "?"; a new answer saves the one held before it. `afterCorrections`: the
+   * id of its waiting record, when its sheet's changes go first. Whether it was taken (held for Undo).
+   */
+  const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
+    options: { afterCorrections?: string } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
-    if (!ownerRef.current) return;
+    if (!ownerRef.current) return false;
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
-    if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return;
+    if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return false;
     // Already answered (held, or saving and not yet handed over): a repeat tap never saves the first answer
     // early and so never takes its Undo away (Codex r4 on #582).
     const current = hold.current();
@@ -304,18 +332,19 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       ? [current.itemId, ...((current as HeldAnswer).outing?.members.map((member) => member.itemId) ?? [])]
       : [];
     const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
-    if (heldNow.includes(itemId) || savingNow.has(itemId)) return;
+    if (heldNow.includes(itemId) || savingNow.has(itemId)) return false;
     // Every answer needs the suggestion's whole window (the outbox refuses one without), and none may have a
     // waiting or rejected change of its own (the deck's rule): such a "?" offers its own screen instead
     // (Codex r3 and r10 on #582).
-    if (!calendarCheckAnswerable(listed, syncStatesRef.current)) return;
+    if (!calendarCheckAnswerable(listed, syncStatesRef.current)) return false;
     // The outing the List asks about: the one map it folds and counts with, over the items it shows (none
     // held or saving), so a trip answered on its own never joins it (Codex r5 on #582).
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
       && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id));
-    const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
+    // An answer after corrections is the "?" alone: its corrections reshape it, so an outing is not folded in.
+    const members = options.afterCorrections ? [] : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
-    if (members.some((member) => isReviewAnswerClaimed(member.id))) return;
+    if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
     const outingKey = members.length ? outingKeyOf(listed) : null;
     known.current.set(listed.id, listed);
     for (const member of members) known.current.set(member.id, member);
@@ -334,6 +363,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       proposal: reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
       ...(logged && venue && !members.length ? { venue } : {}),
+      ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
       ...(members.length && outingKey ? {
         outing: { key: outingKey, members: members.map((member) => ({ key: member.id, itemId: member.id, proposal: reviewDeckProposalSignature(member) })) }
       } : {})
@@ -342,6 +372,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     // As the deck says it (Codex r2 on #582): the answer, and that Undo is there while its window runs.
     AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`);
+    return true;
     // The answers read the hook's refs, which hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
@@ -351,6 +382,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const undone = hold.undo(current.token);
     if (!undone || undone.kind !== "single") return;
     const answer = undone as HeldAnswer;
+    // Undo takes back the answer only: the sheet's corrections stay (Codex r2 on #610).
+    if (answer.afterCorrections) void cancelAnswerAfterCorrections(answer.afterCorrections).catch(() => undefined);
     // An answer whose suggestion a refresh paged out while held comes back whole (outing included).
     restore(answer.owner, [answer.itemId, ...(answer.outing?.members.map((member) => member.itemId) ?? [])]);
     AccessibilityInfo.announceForAccessibility(`${answer.title} is back.`);

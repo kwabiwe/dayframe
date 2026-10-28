@@ -26,6 +26,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("../../lib/api", () => ({ createPlace: mocks.createPlace, fetchTimelineItemEvidence: mocks.fetchEvidence }));
 vi.mock("../../lib/timelineCorrectionOutbox", () => ({
+  createTimelineCorrectionId: (() => { let next = 0; return () => `cid-${++next}`; })(),
   enqueueTimelineCorrections: mocks.enqueue,
   removeTimelineCorrections: mocks.remove,
   synchroniseTimelineCorrections: mocks.synchronise
@@ -77,6 +78,41 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { tree.update(<Probe data={account("b")} />); });
     await expect(onQueue([{ request: { kind: "times" } }], { closing: true })).rejects.toThrow();
     expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps an answer that waits before its corrections are queued, with their ids, then starts it; a failed keep removes it (Codex r2 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    type Queue = (corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> }) => Promise<void>;
+    const onQueue = sheetOf(tree)!.props.onQueue as Queue;
+    const order: string[] = [];
+    mocks.enqueue.mockImplementationOnce(async (...args: unknown[]) => {
+      const items = args[1] as Array<{ request: { clientCorrectionId?: string } }>;
+      order.push(`enqueue ${items.map((item) => item.request.clientCorrectionId).join(",")}`);
+      return items;
+    });
+    const start = vi.fn(() => { order.push("start"); });
+    const cancel = vi.fn(async () => { order.push("cancel"); });
+    await act(async () => {
+      await onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true, beforeEnqueue: async (ids) => {
+        order.push(`hold ${ids.join(",")}`);
+        return { start, cancel };
+      } });
+    });
+    expect(order).toHaveLength(3);
+    const [hold, enqueue, started] = order;
+    expect(hold.replace("hold ", "enqueue ")).toBe(enqueue);
+    expect(started).toBe("start");
+    expect(cancel).not.toHaveBeenCalled();
+    // Couldn't be kept: the waiting answer goes and never starts.
+    order.length = 0;
+    mocks.enqueue.mockRejectedValueOnce(new Error("storage full"));
+    await act(async () => {
+      await expect(onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true,
+        beforeEnqueue: async () => ({ start, cancel }) })).rejects.toThrow();
+    });
+    expect(order).toEqual(["cancel"]);
   });
 
   it("shows a sheet whose item left the List as it was, with nothing to change, until it closes", async () => {

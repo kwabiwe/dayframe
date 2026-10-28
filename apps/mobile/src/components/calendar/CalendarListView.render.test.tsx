@@ -355,11 +355,44 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onOpenPlace).toHaveBeenCalledOnce();
     expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Pret?");
     expect(questions(tree)).toHaveLength(0);
-    // Tapping the placeholder row before the places arrive opens it on its own screen, never the card.
+    // Tapping the placeholder row before the places arrive waits too, then opens the sheet: never the card, never
+    // the Review screen (Codex r2 on #610).
+    onOpenPlace.mockClear();
     const early = render({ ...props, openCheckRequest: null, timeline: null });
     act(() => { early.tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(onOpenPlace).not.toHaveBeenCalled();
     expect(questions(early.tree)).toHaveLength(0);
+    act(() => {
+      early.tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} openCheckRequest={null} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+  });
+
+  it("asks a place's or trip's \"?\" under its row when the day's places are read and lack its item, never Review (Codex r2 on #610)", () => {
+    const onOpenCheck = vi.fn();
+    const onOpenPlace = vi.fn();
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const { tree } = render({ checks: [missing], checkKinds: new Map([["c-missing", "trip"]]), checkTitles: new Map([["c-missing", "Getting around"]]),
+      checkQuestions: new Map([["c-missing", question("Getting around, 15:00–16:00?")]]), onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace,
+      openCheckRequest: { id: "c-missing", request: 1 } });
+    expect(questions(tree)).toHaveLength(1);
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(onOpenPlace).not.toHaveBeenCalled();
+  });
+
+  it("opens a trip's \"?\" in the trip's own sheet, at no leg", () => {
+    const onOpenTripLeg = vi.fn();
+    const onOpenCheck = vi.fn();
+    const freeTrip = { ...timeline, items: timeline.items.map((item) => item.kind === "trip" ? { ...item, blockIds: [] } : item) } as LocationTimeline;
+    const { tree } = render({ checks: [{ id: "c-trip", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) }], checkKinds: new Map([["c-trip", "trip"]]),
+      entries: [block("work", "Work", 9, 12)], timeline: freeTrip, onAnswerCheck: vi.fn(), onOpenCheck, onOpenTripLeg });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-trip" }).props.onPress(); });
+    expect(onOpenTripLeg).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-trip" }), null);
+    expect(onOpenCheck).not.toHaveBeenCalled();
   });
 
   it("opens Apple Health's requested question at once, even before the day's places are read", () => {
@@ -645,9 +678,12 @@ describe("CalendarListView correction sheets (location v4 step 12)", () => {
 });
 
 describe("CalendarListView's open question (card B part 2)", () => {
-  it("says which question is open under its row, so only that one looks for a place nearby", () => {
+  // A legacy location suggestion (before location v2) has no segment: nothing to open, so it is "none" and asks under
+  // its row (Codex r2 on #610).
+  it("says which question is open under its row, a legacy place \"?\" without a segment, so only that one looks for a place nearby", () => {
     const onOpenCheckChange = vi.fn();
     const { tree } = render({
+      checkKinds: new Map([["c-place", "none"]]),
       checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-place", "Unknown place"]]),
       checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }]]),

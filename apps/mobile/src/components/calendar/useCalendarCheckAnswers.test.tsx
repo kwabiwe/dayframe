@@ -27,6 +27,8 @@ const store = vi.hoisted(() => ({
     (await store.reviewItemsDecidedLocally(bootstrap, ids)) ? new Set(ids) : new Set())
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
+const waiting = vi.hoisted(() => ({ commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined), cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined) }));
+vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
@@ -100,6 +102,27 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     // Saved, not yet in the outbox's own record: still out of the List.
     expect(result.current.held).toBeNull();
     expect(result.current.hiddenIds.has("a")).toBe(true);
+  });
+
+  it("lets an answer after corrections go only through its waiting record, after Undo; Undo removes the record (Codex r2 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    waiting.cancelAnswerAfterCorrections.mockClear();
+    const { result } = mount(bootstrap([suggestion("a"), suggestion("b")]));
+    let taken = false;
+    act(() => { taken = result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(taken).toBe(true);
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-1");
+    // Never into the Review outbox from here: the record goes once its corrections are acknowledged.
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.answer("b", false, null, { afterCorrections: "m-2" }); });
+    act(() => { result.current.undo(); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("m-2");
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalledWith("m-2");
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 
   it("Undo brings the “?” back and saves nothing", async () => {

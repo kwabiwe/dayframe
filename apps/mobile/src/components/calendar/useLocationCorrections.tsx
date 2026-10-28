@@ -14,13 +14,14 @@ import type { MobileTheme } from "../../lib/mobileTheme";
 import { canSayDidntLeave, canSayNotHere, type QueuedCorrection } from "../../lib/locationCorrectionDraft";
 import { REVIEW_DECK_UNDO_MS } from "../../lib/reviewDeckHold";
 import {
+  createTimelineCorrectionId,
   enqueueTimelineCorrections,
   removeTimelineCorrections,
   synchroniseTimelineCorrections,
   type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
-import { LocationCorrectionSheet, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
+import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
 // Each sheet belongs to the account it opened for (Codex r1 on #602).
 const appInFront = () => AppState.currentState === "active";
@@ -142,12 +143,26 @@ export function useLocationCorrections({
   // none) is signed in, however late the Done; sending follows on its own.
   const currentOwner = useRef(ownerKey);
   useEffect(() => { currentOwner.current = ownerKey; }, [ownerKey]);
-  const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[], closing: boolean) => {
+  // `beforeEnqueue` (an answer that waits for these corrections; Codex r2 on #610) is kept first, with the ids the
+  // corrections will carry, so their acknowledgement always finds it; it starts once they are kept, and goes if
+  // they can't be.
+  const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[], closing: boolean,
+    beforeEnqueue?: LocationCorrectionBeforeEnqueue) => {
     if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
-    await enqueueTimelineCorrections(owner, corrections.map((correction) => ({
-      request: correction.request, ...(correction.preview ? { preview: correction.preview } : {})
-    })));
+    // The ids are chosen here only when an answer waits for them.
+    const ids = beforeEnqueue ? corrections.map((correction) => correction.request.clientCorrectionId ?? createTimelineCorrectionId()) : null;
+    const waiting = beforeEnqueue && ids?.length ? await beforeEnqueue(ids) : null;
+    try {
+      await enqueueTimelineCorrections(owner, corrections.map((correction, index) => ({
+        request: ids ? { ...correction.request, clientCorrectionId: ids[index] } : correction.request,
+        ...(correction.preview ? { preview: correction.preview } : {})
+      })));
+    } catch (error) {
+      await waiting?.cancel().catch(() => undefined);
+      throw error;
+    }
+    waiting?.start();
     // Only a Done that closes the sheet lets its item leave the List unremarked (a leg's Done goes back to the trip).
     if (closing) setClosingId(presentationId);
     // Sent only while the app is in front: a Logs as queued behind these must never go from the background
@@ -302,7 +317,7 @@ export function useLocationCorrections({
       clockFormat={clockFormat}
       evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
-      onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing)}
+      onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing, options.beforeEnqueue)}
       logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && activities.length && !stale ? {
         activities,
         onLog: (categoryId) => {

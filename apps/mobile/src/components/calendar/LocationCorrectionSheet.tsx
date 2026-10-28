@@ -54,6 +54,9 @@ import {
  */
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
+/** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
+export type LocationCorrectionBeforeEnqueue = (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }>;
+
 export type LocationCorrectionTarget =
   | { kind: "place"; place: TimelinePlace; label: string; notHere?: boolean }
   | { kind: "trip"; trip: TimelineTrip & { route?: string }; legIndex: number | null; didntLeave?: boolean };
@@ -91,7 +94,17 @@ export function LocationCorrectionSheet({
    * Owner item A (28 Oct 2026): the item's open "?", asked at the top of its sheet now that a row or a
    * Grid item opens the sheet directly. An answer closes the sheet (with any change made in it kept too).
    */
-  question?: { text: string; detail?: string | null; yesLabel: string | null; noLabel: string; onAnswer: (yes: boolean) => void } | null;
+  question?: {
+    text: string; detail?: string | null; yesLabel: string | null; noLabel: string;
+    /** Answers now (held for Undo): the sheet has no changes of its own. */
+    onAnswer: (yes: boolean) => void;
+    /**
+     * Answers after the sheet's own changes (Codex r2 on #610): kept on the phone first, waiting for the corrections
+     * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
+     * removes it if they can't be.
+     */
+    answerAfter?: (yes: boolean, ids: readonly string[]) => ReturnType<LocationCorrectionBeforeEnqueue>;
+  } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
@@ -99,7 +112,7 @@ export function LocationCorrectionSheet({
    * Keeps these corrections on the phone and sends them (the List shows them at once). Resolves once they are
    * kept: the sheet closes only then, and keeps its draft when they couldn't be (Codex r1 on #602).
    */
-  onQueue: (corrections: QueuedCorrection[], options: { closing: boolean }) => Promise<void>;
+  onQueue: (corrections: QueuedCorrection[], options: { closing: boolean; beforeEnqueue?: LocationCorrectionBeforeEnqueue }) => Promise<void>;
   /**
    * "Save this place" (step 12 part 4, card D item 14): saves the visit's place under this name and sets the
    * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
@@ -154,11 +167,7 @@ export function LocationCorrectionSheet({
   const kept = useRef(false);
   // Logs as waiting for this Done's corrections to be kept.
   const pendingLog = useRef<(() => void) | null>(null);
-  // The "?" answered at the top, waiting for the sheet's own changes to be kept: never sent if they aren't
-  // (Codex r1 on #610).
-  const pendingAnswer = useRef<(() => void) | null>(null);
-  // A keep in flight (set at once, unlike `saving`).
-  const keeping = useRef(false);
+
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Kept: the sheet closes on the next render, once Done is enabled again (Codex r2 on #602).
@@ -194,12 +203,10 @@ export function LocationCorrectionSheet({
   }
 
   /** Keeps the corrections on the phone, then closes (or goes back to the trip); the draft stays if they couldn't be kept. */
-  function keep(corrections: QueuedCorrection[], then: "close" | "trip") {
+  function keep(corrections: QueuedCorrection[], then: "close" | "trip", beforeEnqueue?: LocationCorrectionBeforeEnqueue) {
     setSaving(true);
     setSaveError(null);
-    keeping.current = true;
-    onQueue(corrections, { closing: then === "close" }).then(() => {
-      keeping.current = false;
+    onQueue(corrections, { closing: then === "close", ...(beforeEnqueue ? { beforeEnqueue } : {}) }).then(() => {
       setSaving(false);
       if (then === "trip") {
         backToTrip();
@@ -208,13 +215,9 @@ export function LocationCorrectionSheet({
       kept.current = true;
       pendingLog.current?.();
       pendingLog.current = null;
-      pendingAnswer.current?.();
-      pendingAnswer.current = null;
       setCloseKept(true);
     }, () => {
-      keeping.current = false;
       pendingLog.current = null;
-      pendingAnswer.current = null;
       intent.current = null;
       setSaving(false);
       setSaveError("That change couldn't be kept on this iPhone. Try again.");
@@ -232,7 +235,6 @@ export function LocationCorrectionSheet({
           : intent.current === "not_here" && target.kind === "place" && target.notHere ? notHere(target.place) : null;
       if (!change) {
         intent.current = null;
-        pendingAnswer.current = null;
         setConfirming(null);
         return false;
       }
@@ -260,8 +262,6 @@ export function LocationCorrectionSheet({
     const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
     if (!corrections.length) {
       log?.();
-      pendingAnswer.current?.();
-      pendingAnswer.current = null;
       return true;
     }
     pendingLog.current = log;
@@ -293,20 +293,37 @@ export function LocationCorrectionSheet({
     });
   }
   /**
-   * The "?" at the top answered (Codex r1 on #610): the sheet's own changes are kept first, as Done keeps them, and
-   * the answer is sent only once they are; if they can't be kept (or its times don't work yet), the answer isn't
-   * sent, the question stays, and the sheet says why.
+   * The "?" at the top answered, in one tap (owner, 28 Oct 2026; Codex r2 on #610). With no changes of its own the
+   * answer is held for Undo at once. With changes, they are kept as Done keeps them (the correction outbox, shown in
+   * the List at once) and the answer waits on the phone until the server has acknowledged them, so it can never
+   * reach the server first; a refused change drops it, and the "?" stays. A Logs as pick is not sent with an answer
+   * (never both): Done sends it.
    */
   function answerFromSheet(yes: boolean) {
     if (!question || frozen() || stale) return;
-    if (problem && !confirming) {
+    if (confirming) {
+      setSaveError("Finish the change above first, then answer.");
+      return;
+    }
+    if (problem) {
       setSaveError("Those times don't work yet. Fix them, then answer.");
       return;
     }
-    pendingAnswer.current = () => question.onAnswer(yes);
-    commitRef.current?.();
-    // Done didn't keep anything and didn't answer: nothing waits, so a later Done never sends this answer.
-    if (!keeping.current) pendingAnswer.current = null;
+    const corrections = target.kind === "place"
+      ? placeCorrections(target.place, { choice, times }, places)
+      : tripCorrections(target.trip, { times });
+    if (!corrections.length) {
+      question.onAnswer(yes);
+      kept.current = true;
+      setCloseKept(true);
+      return;
+    }
+    const answerAfter = question.answerAfter;
+    if (!answerAfter) {
+      setSaveError("Save your changes with Done; the question updates after.");
+      return;
+    }
+    keep(corrections, "close", (ids) => answerAfter(yes, ids));
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;

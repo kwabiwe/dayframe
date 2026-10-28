@@ -111,6 +111,9 @@ import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
+import { cancelAnswerAfterCorrections, holdAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
+import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
+import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
 import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
@@ -250,7 +253,7 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
@@ -1946,6 +1949,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
   // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
+  // Location timeline corrections still on the phone (step 12), this account's.
+  const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
+    [authState, data]);
+  const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
@@ -1961,13 +1968,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
   // The open suggestions the List asks about, and the outings it folds (their trips asked with their stay).
+  // Answers from a sheet waiting for its corrections (Codex r2 on #610): released into the Review outbox once the
+  // server has them; their "?" stay out of the List and Grid meanwhile.
+  const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner });
+  // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
+  // the same transaction, as their own "Not now" (#609), so they leave at once, until the day is read again.
+  const resolvedByCorrections = useMemo(() => new Set(correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])),
+    [correctionQueue.acknowledged]);
   const calendarCheckBase = useMemo(() => {
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
-    // answers held for Undo or saving (part 3b).
+    // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
     const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id));
+      && !checkAnswers.hiddenIds.has(item.id) && !answersAfterCorrections.waitingIds.has(item.id) && !resolvedByCorrections.has(item.id));
     return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, locallyDecidedIds, reviewSyncStateIds]);
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds, locallyDecidedIds, resolvedByCorrections,
+    reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
   const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);
   const openCalendarCheck = openCalendarCheckId
@@ -1995,6 +2010,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stoppedAt: item.suggestedStoppedAt
       })),
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      // What each "?" is about, for which have a sheet (Codex r2 on #610): Apple Health's; a location suggestion's
+      // place or trip by its segment; anything else (a legacy location suggestion from before location v2, which
+      // has no segment) "none", asked under its row.
+      kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),
       // Owner, 28 Oct 2026 (concern 1): each "?" row's own icon — a trip's route, Apple Health's heart, a place's pin.
       glyphs: new Map(items.map((item) => [item.id, (item.eventType === "commute_detected" ? DAYFRAME_APP_ICONS.openTrip
         : item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_") ? DAYFRAME_APP_ICONS.sourceHealth
@@ -2099,10 +2118,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
   // The List's places and trips: the selected day's timeline for this account, read again after each refresh.
   // Location timeline corrections still on the phone (step 12) show over the List's timeline at once; each
-  // time the queue shrinks (delivered) the timeline is read again.
-  const correctionQueue = useTimelineCorrectionQueue(
-    authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null
-  );
+  // time the queue shrinks (delivered) the timeline is read again (correctionQueue, above).
   const calendarTimelineRefreshKey = useMemo(
     () => ({ calendarData, delivered: correctionQueue.delivered }),
     [calendarData, correctionQueue.delivered]
@@ -2146,7 +2162,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
         yesLabel: question.logLabel ?? null,
         noLabel: question.skipLabel ?? "Not now",
-        onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null)
+        onAnswer: (yes) => { checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null); },
+        // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
+        // before the corrections are queued, and goes to the Review outbox only once the server has every one of them.
+        // No Apple place with it: the corrections say where it was.
+        answerAfter: async (yes, ids) => {
+          if (!correctionOwner) throw new Error("No account.");
+          const id = createReviewClientMutationId();
+          await holdAnswerAfterCorrections(correctionOwner, { id, reviewItemId: check.id, logged: yes, waitsFor: ids });
+          return {
+            start: () => {
+              if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+            },
+            cancel: () => cancelAnswerAfterCorrections(id)
+          };
+        }
       };
     },
     reduceMotion,
@@ -3753,6 +3783,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               >
                 <CalendarListView
                   checkGlyphs={calendarChecks.glyphs}
+                  checkKinds={calendarChecks.kinds}
                   checkQuestions={calendarChecks.questions}
                   checks={askingChecks}
                   checkTitles={calendarChecks.titles}
@@ -3774,21 +3805,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     ? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)
                     : undefined}
                   onOpenCheckChange={setOpenCalendarCheckId}
-                  // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
-                  // The editor's Nearby search takes the native search over from the question first (Codex r1 on #600).
+                  // Only a question's own "More…" / "Open it" (under its row) opens a suggestion on its own screen: a
+                  // place's evidence on its details screen, anything else on the deck, focused on it (Codex r10 on #582).
+                  // A place's or trip's "?" opens its sheet in the List itself (onOpenPlace, onOpenTripLeg), or asks under
+                  // its row when the day lacks its item: never this fallback (step 15; Codex r2 on #610). The editor's
+                  // Nearby search takes the native search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
                     const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
-                    // A trip's question edits the trip on its own sheet (mock-up #ios-list editorTrip; Codex r1 on #602):
-                    // its times, legs and "This wasn't a trip". Anything else keeps its screen.
-                    const segmentId = typeof reviewItem?.rawPayload?.clientSegmentId === "string" ? reviewItem.rawPayload.clientSegmentId : null;
-                    const trip = reviewItem?.eventType === "commute_detected" && segmentId
-                      ? calendarTimeline?.items.find((each) => each.kind === "trip" && each.id === segmentId && !each.blockIds.length)
-                      : undefined;
-                    if (trip?.kind === "trip") {
-                      locationCorrections.openTripLeg(trip, null);
-                      return;
-                    }
                     router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
@@ -4292,4 +4316,12 @@ function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstr
 
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
+}
+
+/** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet in Calendar › List. */
+function calendarCheckKind(item: MobileReviewItem): "health" | "place" | "trip" | "none" {
+  if (item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_")) return "health";
+  const segmentId = typeof item.rawPayload?.clientSegmentId === "string" ? item.rawPayload.clientSegmentId : null;
+  if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";
+  return "none";
 }
