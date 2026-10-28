@@ -1,6 +1,6 @@
 import type { LocationEngineConfig } from "./config";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, type Coordinate } from "./geo";
-import { motionArrivalMs, type MotionTimeline } from "./motionActivity";
+import { motionArrivalMs, type MotionInterval, type MotionTimeline } from "./motionActivity";
 import type { ClassifiedEvidence } from "./types";
 
 /**
@@ -146,8 +146,11 @@ function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: numbe
   // A drive (or ride, or run) Core Motion saw begin and end inside the silence is a journey of its own, even
   // near an edge; movement carried in from before it or out past it is parking and pulling away (Codex r4 on
   // #601).
+  // Its faster movement is read from the intervals at any confidence, as the block's own modes leave low-confidence
+  // ones out (Codex r5 on #601).
+  const vehicle = (interval: MotionInterval) => ["automotive", "cycling", "running"].includes(interval.activity);
   if (motion.blocks.some((block) => block.onsetObserved && block.stopObserved && block.startMs > fromMs && block.endMs < toMs &&
-    ((block.byMode.automotive ?? 0) + (block.byMode.cycling ?? 0) + (block.byMode.running ?? 0)) > 0)) return false;
+    motion.intervals.some((interval) => vehicle(interval) && interval.toMs > block.startMs && interval.fromMs < block.endMs))) return false;
   const silenceMs = toMs - fromMs;
   if (stationaryMs < silenceMs * config.physicalStopStillSilenceStationaryMinimumShare ||
     walkingMs > silenceMs * config.physicalStopStillSilenceWalkingMaximumShare ||
