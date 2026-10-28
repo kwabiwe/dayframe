@@ -71,20 +71,21 @@ const trip: TimelineTrip & { route: string } = {
 };
 const theme = new Proxy({}, { get: (_target, key) => String(key) }) as never;
 
-function mount(target: LocationCorrectionTarget) {
-  const onQueue = vi.fn();
+function mount(target: LocationCorrectionTarget, onQueue = vi.fn(async () => undefined)) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
-  act(() => {
-    tree = create(
-      <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue}
-        places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
-        target={target} theme={theme} />
-    );
-  });
+  const element = (next: LocationCorrectionTarget, stale = false) => (
+    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue}
+      places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
+      stale={stale} target={next} theme={theme} />
+  );
+  act(() => { tree = create(element(target)); });
   const press = (testID: string) => act(() => { tree.root.findByProps({ testID }).props.onPress(); });
   const has = (testID: string) => tree.root.findAll((node) => node.props.testID === testID).length > 0;
-  return { onDismissed, onQueue, press, has, tree };
+  const update = (next: LocationCorrectionTarget, stale = false) => act(() => { tree.update(element(next, stale)); });
+  // A kept correction settles (its write resolves) before the sheet moves on.
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  return { onDismissed, onQueue, press, has, settle, tree, update };
 }
 
 describe("the iPhone correction sheets (location v4 step 12)", () => {
@@ -101,7 +102,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props.evidence).toBe(evidence);
   });
 
-  it("names a place from the saved places and queues it on Done", () => {
+  it("names a place from the saved places and queues it on Done", async () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" });
     expect(sheet.tree.root.findByProps({ testID: "location-correction-place-unknown" }).props.accessibilityState).toEqual({ checked: true });
     sheet.press(`location-correction-place-${SAVED}`);
@@ -110,6 +111,8 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
       request: { kind: "place", subject: "place", itemId: "seg-a", placeId: SAVED, learnedPlaceId: null },
       preview: { name: "Exampleton Library", role: null }
     }]);
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledTimes(1);
   });
 
   it("queues nothing when nothing changed, and offers no place or times for a place in a block", () => {
@@ -121,7 +124,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(logged.has("location-correction-start")).toBe(false);
   });
 
-  it("pushes a leg inside the trip, sends its mode on its Done and comes back; Back alone sends nothing", () => {
+  it("pushes a leg inside the trip, sends its mode on its Done and comes back; Back alone sends nothing", async () => {
     const sheet = mount({ kind: "trip", trip, legIndex: null });
     expect(sheet.has("location-correction-back")).toBe(false);
     sheet.press("location-correction-leg-1");
@@ -134,12 +137,13 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.onQueue).toHaveBeenCalledWith([{
       request: { kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: iso(70), legStoppedAt: iso(100), mode: "bus" }
     }]);
+    await sheet.settle();
     // Back at the trip, still open.
     expect(sheet.has("location-correction-leg-0")).toBe(true);
     expect(sheet.onDismissed).not.toHaveBeenCalled();
   });
 
-  it("asks once, in place, before taking a trip that wasn't one off the day", () => {
+  it("asks once, in place, before taking a trip that wasn't one off the day", async () => {
     const sheet = mount({ kind: "trip", trip, legIndex: null });
     sheet.press("location-correction-not-a-trip");
     sheet.press("location-correction-keep-trip");
@@ -149,5 +153,61 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "delete", subject: "trip", itemId: "trip-1" } }]);
     const logged = mount({ kind: "trip", trip: { ...trip, blockIds: ["entry-1"] }, legIndex: 0 });
     expect(logged.has("location-correction-not-a-trip")).toBe(false);
+  });
+
+  // Codex r1 on #602.
+  it("lets an untouched end follow a refreshed item, so Done with no edit sends nothing", async () => {
+    const sheet = mount({ kind: "place", place, label: "Unknown place" });
+    sheet.update({ kind: "place", place: { ...place, startedAt: iso(5), stoppedAt: iso(65) }, label: "Unknown place" });
+    sheet.press("location-correction-sheet-action");
+    await sheet.settle();
+    expect(sheet.onQueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps the picked leg by its times when a refresh merges the legs before it, and goes back if it left", async () => {
+    const three = { ...trip, legs: [
+      { startedAt: iso(60), stoppedAt: iso(65), mode: "walking" as const, confidence: "sure" as const, distanceMeters: 300 },
+      { startedAt: iso(65), stoppedAt: iso(70), mode: "walking" as const, confidence: "sure" as const, distanceMeters: 400 },
+      { startedAt: iso(70), stoppedAt: iso(100), mode: "automotive" as const, confidence: "unsure" as const, distanceMeters: 9000 }
+    ] };
+    const sheet = mount({ kind: "trip", trip: three, legIndex: null });
+    sheet.press("location-correction-leg-2");
+    sheet.update({ kind: "trip", trip, legIndex: null });
+    sheet.press("location-correction-mode-bus");
+    sheet.press("location-correction-sheet-action");
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledWith([{
+      request: { kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: iso(70), legStoppedAt: iso(100), mode: "bus" }
+    }]);
+    sheet.press("location-correction-leg-1");
+    sheet.update({ kind: "trip", trip: { ...trip, legs: [{ ...trip.legs[0], stoppedAt: iso(100) }] }, legIndex: null });
+    expect(sheet.has("location-correction-back")).toBe(false);
+  });
+
+  it("stays open with its draft, saying so, when the change couldn't be kept on the phone", async () => {
+    const onQueue = vi.fn(async () => { throw new Error("storage full"); });
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, onQueue);
+    sheet.press(`location-correction-place-${SAVED}`);
+    sheet.press("location-correction-sheet-action");
+    await sheet.settle();
+    expect(sheet.has("location-correction-error")).toBe(true);
+    expect(sheet.onDismissed).not.toHaveBeenCalled();
+    expect(sheet.tree.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.accessibilityState).toEqual({ checked: true });
+  });
+
+  it("forgets an asked removal after Keep it, so a later Done sends only the times", async () => {
+    const sheet = mount({ kind: "trip", trip, legIndex: null });
+    sheet.press("location-correction-not-a-trip");
+    sheet.press("location-correction-keep-trip");
+    sheet.press("location-correction-sheet-action");
+    await sheet.settle();
+    expect(sheet.onQueue).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing to change once its item left the List", () => {
+    const sheet = mount({ kind: "place", place, label: "Unknown place" });
+    sheet.update({ kind: "place", place, label: "Unknown place" }, true);
+    expect(sheet.has("location-correction-stale")).toBe(true);
+    expect(sheet.tree.root.findByProps({ testID: "location-correction-sheet-action" }).props.disabled).toBe(true);
   });
 });

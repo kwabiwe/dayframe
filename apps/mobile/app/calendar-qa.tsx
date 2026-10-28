@@ -281,7 +281,7 @@ export default function CalendarQaRoute() {
         ) : null}
         {/* `?sheet=place|trip|leg` (step 12): a correction sheet open over the List, for Simulator screenshots. */}
         {qaSheetTarget(params.sheet) ? (
-          <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(params.sheet)} onDismissed={() => undefined} onQueue={() => undefined} places={QA_SHEET_PLACES}
+          <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(params.sheet)} onDismissed={() => undefined} onQueue={async () => undefined} places={QA_SHEET_PLACES}
             presentationId={1} reduceMotion={false} rootHosted={false} target={qaSheetTarget(params.sheet)!} theme={theme} />
         ) : null}
       </View>

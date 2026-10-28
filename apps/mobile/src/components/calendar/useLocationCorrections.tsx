@@ -11,14 +11,16 @@ import { fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import type { QueuedCorrection } from "../../lib/locationCorrectionDraft";
 import {
-  enqueueTimelineCorrection,
+  enqueueTimelineCorrections,
   removeTimelineCorrections,
   synchroniseTimelineCorrections,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
 import { LocationCorrectionSheet, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
-type Open = { id: number; kind: "place"; itemId: string; label: string } | { id: number; kind: "trip"; itemId: string; legIndex: number | null };
+// Each sheet belongs to the account it opened for (Codex r1 on #602).
+type Open = ({ kind: "place"; itemId: string; label: string } | { kind: "trip"; itemId: string; legIndex: number | null }) &
+  { id: number; ownerKey: string };
 
 /**
  * Calendar › List's correction sheets (location v4 step 12) for the Dashboard: which item's sheet is open
@@ -44,11 +46,18 @@ export function useLocationCorrections({
   /** The List's timeline, with the queued corrections shown. */
   timeline: LocationTimeline | null;
 }) {
-  const [open, setOpen] = useState<Open | null>(null);
+  const [opened, setOpen] = useState<Open | null>(null);
   const presentations = useRef(0);
-  const [held, setHeld] = useState<LocationCorrectionTarget | null>(null);
   const userId = data?.user.id ?? null;
   const workspaceId = data?.workspace.id ?? null;
+  const ownerKey = userId && workspaceId ? `${workspaceId}:${userId}` : null;
+  // Another account (or none) closes the sheet at once: its item, map and draft are never shown to it.
+  const open = opened && opened.ownerKey === ownerKey ? opened : null;
+  if (opened && !open) setOpen(null);
+  // The last target shown, by presentation: the sheet closes as it was when its item leaves the List.
+  const [held, setHeld] = useState<{ id: number; target: LocationCorrectionTarget } | null>(null);
+  // The presentation whose Done kept corrections: its item may leave the List as the sheet closes.
+  const [closingId, setClosingId] = useState<number | null>(null);
   // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet).
   const [evidence, setEvidence] = useState<{ itemId: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
   const openItemId = open?.itemId ?? null;
@@ -70,16 +79,20 @@ export function useLocationCorrections({
     );
     return () => controller.abort();
   }, [openItemId, openKind, openStartedAt, userId, workspaceId]);
-  const shownEvidence = evidence && evidence.itemId === openItemId ? evidence.evidence ?? "unavailable" as const : null;
+  const shownEvidence = evidence && evidence.itemId === openItemId && open ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
+    if (!ownerKey) return;
     presentations.current += 1;
-    setOpen({ id: presentations.current, kind: "place", itemId: place.id, label });
-  }, []);
+    setEvidence(null);
+    setOpen({ id: presentations.current, ownerKey, kind: "place", itemId: place.id, label });
+  }, [ownerKey]);
   const openTripLeg = useCallback((trip: TimelineTrip, legIndex: number | null) => {
+    if (!ownerKey) return;
     presentations.current += 1;
-    setOpen({ id: presentations.current, kind: "trip", itemId: trip.id, legIndex });
-  }, []);
+    setEvidence(null);
+    setOpen({ id: presentations.current, ownerKey, kind: "trip", itemId: trip.id, legIndex });
+  }, [ownerKey]);
 
   const target = useMemo<LocationCorrectionTarget | null>(() => {
     if (!open) return null;
@@ -91,33 +104,40 @@ export function useLocationCorrections({
     }
     return null;
   }, [open, timeline]);
-  // The item can leave the List while its sheet closes (a trip that wasn't one): it closes as it was.
-  if (target && target !== held) setHeld(target);
-  const shown = target ?? (open ? held : null);
+  // The item can leave the List while its sheet closes (a trip that wasn't one): it closes as it was. One that
+  // leaves while the sheet is open shows as it was, with nothing to change (Codex r1 on #602).
+  if (open && target && (held?.id !== open.id || held.target !== target)) setHeld({ id: open.id, target });
+  const last = open && held?.id === open.id ? held.target : null;
+  const shown = target ?? last;
+  const stale = Boolean(open && !target && last && closingId !== open.id);
 
   const places = useMemo(
     () => (data?.places ?? []).map((place) => ({ id: place.id, name: placeDisplayName(place), role: place.role ?? null })),
     [data?.places]
   );
 
-  const queue = useCallback((corrections: QueuedCorrection[]) => {
-    if (!userId || !workspaceId) return;
+  // Kept on the phone for the sheet's own account before its Done closes it; sending follows on its own.
+  const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[]) => {
+    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
-    void (async () => {
-      for (const correction of corrections) {
-        await enqueueTimelineCorrection(owner, correction.request, correction.preview ? { preview: correction.preview } : {});
-      }
-      await synchroniseTimelineCorrections({ owner, force: true });
-    })().catch(() => undefined);
-  }, [userId, workspaceId]);
+    await enqueueTimelineCorrections(owner, corrections.map((correction) => ({
+      request: correction.request, ...(correction.preview ? { preview: correction.preview } : {})
+    })));
+    setClosingId(presentationId);
+    void synchroniseTimelineCorrections({ owner, force: true }).catch(() => undefined);
+  }, [ownerKey, userId, workspaceId]);
 
-  // A refusal (the item changed, or is in a block now): said once, then dropped; the List already shows the row as it was.
+  // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
+  // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
+  const announced = useRef(new Set<string>());
   const refusedKey = pending.filter((item) => item.failureKind === "permanent").map((item) => item.clientCorrectionId).join("|");
   useEffect(() => {
     if (!refusedKey) return;
     const refused = pending.filter((item) => item.failureKind === "permanent");
-    showNotice(refused[0]?.lastError ?? "That change wasn't saved.");
-    void removeTimelineCorrections(refused.map((item) => item.clientCorrectionId));
+    const fresh = refused.filter((item) => !announced.current.has(item.clientCorrectionId));
+    for (const item of fresh) announced.current.add(item.clientCorrectionId);
+    if (fresh.length) showNotice(fresh[0].lastError ?? "That change wasn't saved.");
+    void removeTimelineCorrections(refused.map((item) => item.clientCorrectionId)).catch(() => undefined);
     // Only a new refusal shows a notice.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refusedKey]);
@@ -128,11 +148,12 @@ export function useLocationCorrections({
       clockFormat={clockFormat}
       evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
-      onQueue={queue}
+      onQueue={(corrections) => queue(open.id, open.ownerKey, corrections)}
       places={places}
       presentationId={open.id}
       reduceMotion={reduceMotion}
       rootHosted={false}
+      stale={stale}
       target={shown}
       theme={theme}
     />

@@ -72,6 +72,7 @@ export function LocationCorrectionSheet({
   presentationId,
   reduceMotion,
   rootHosted,
+  stale = false,
   target,
   theme
 }: {
@@ -79,64 +80,116 @@ export function LocationCorrectionSheet({
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
-  /** Keeps these corrections on the phone and sends them (the List shows them at once). */
-  onQueue: (corrections: QueuedCorrection[]) => void;
+  /**
+   * Keeps these corrections on the phone and sends them (the List shows them at once). Resolves once they are
+   * kept: the sheet closes only then, and keeps its draft when they couldn't be (Codex r1 on #602).
+   */
+  onQueue: (corrections: QueuedCorrection[]) => Promise<void>;
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
   reduceMotion: boolean;
   rootHosted: boolean;
+  /** The item left the List while its sheet was open: shown as it was, with nothing to change (Codex r1 on #602). */
+  stale?: boolean;
   target: LocationCorrectionTarget;
   theme: MobileTheme;
 }) {
   const item = target.kind === "place" ? target.place : target.trip;
   const [choice, setChoice] = useState<PlaceChoice>({ kind: "keep" });
-  const [times, setTimes] = useState<CorrectionTimes>({
-    startMs: Date.parse(item.startedAt),
-    stopMs: item.stoppedAt ? Date.parse(item.stoppedAt) : null
-  });
-  // The leg shown, pushed inside the trip sheet; its picked mode until its Done.
-  const [legIndex, setLegIndex] = useState<number | null>(target.kind === "trip" ? target.legIndex : null);
+  // Only the ends the person moved: an untouched end follows the item when the List refreshes, so a refresh
+  // never becomes a correction (Codex r1 on #602).
+  const [edited, setEdited] = useState<{ startMs?: number; stopMs?: number | null }>({});
+  const times: CorrectionTimes = {
+    startMs: edited.startMs ?? Date.parse(item.startedAt),
+    stopMs: edited.stopMs !== undefined ? edited.stopMs : item.stoppedAt ? Date.parse(item.stoppedAt) : null
+  };
+  const setTimes = (next: CorrectionTimes) => setEdited((current) => ({
+    ...current,
+    ...(next.startMs !== times.startMs ? { startMs: next.startMs } : {}),
+    ...(next.stopMs !== times.stopMs ? { stopMs: next.stopMs } : {})
+  }));
+  // The leg shown, pushed inside the trip sheet, by its exact times: a refresh that merges legs never moves the
+  // choice to another leg (Codex r1 on #602); its picked mode until its Done.
+  const openedLeg = target.kind === "trip" && target.legIndex != null ? target.trip.legs[target.legIndex] ?? null : null;
+  const [legKey, setLegKey] = useState<{ startedAt: string; stoppedAt: string } | null>(
+    openedLeg ? { startedAt: openedLeg.startedAt, stoppedAt: openedLeg.stoppedAt } : null);
   const [legMode, setLegMode] = useState<TripLegMode | null>(null);
   // Which way the last push went, for the leg view's slide.
   const [direction, setDirection] = useState<1 | -1>(1);
   // Opened at a leg from the List: its Done closes the sheet, unless the person went back to the trip.
   const [leftLeg, setLeftLeg] = useState(false);
   const commitRef = useRef<(() => void) | null>(null);
-  const deleting = useRef(false);
+  // What Done does: the trip's removal only when "Take it off your day" asked for it, once (Codex r1 on #602).
+  const intent = useRef<"remove" | null>(null);
+  // Kept on the phone: the next commit closes the sheet.
+  const kept = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
   const span = `${time(Date.parse(item.startedAt))}–${item.stoppedAt ? time(Date.parse(item.stoppedAt)) : "now"}`;
   const problem = correctable(item) ? timesProblem(item, times) : null;
   const trip = target.kind === "trip" ? target.trip : null;
-  const leg = trip && legIndex != null ? trip.legs[legIndex] ?? null : null;
+  const legIndex = trip && legKey ? trip.legs.findIndex((each) => each.startedAt === legKey.startedAt && each.stoppedAt === legKey.stoppedAt) : -1;
+  const leg = trip && legIndex >= 0 ? trip.legs[legIndex] : null;
+  // The leg left the trip (merged, or replay moved it): back to the trip's legs, with nothing picked.
+  if (legKey && !leg && !stale) {
+    setLegKey(null);
+    setLegMode(null);
+  }
 
   function openLeg(index: number) {
+    if (!trip) return;
     setDirection(1);
     setLegMode(null);
-    setLegIndex(index);
+    setLegKey({ startedAt: trip.legs[index].startedAt, stoppedAt: trip.legs[index].stoppedAt });
   }
 
   function backToTrip() {
     setLeftLeg(true);
     setDirection(-1);
     setLegMode(null);
-    setLegIndex(null);
+    setLegKey(null);
+  }
+
+  /** Keeps the corrections on the phone, then closes (or goes back to the trip); the draft stays if they couldn't be kept. */
+  function keep(corrections: QueuedCorrection[], then: "close" | "trip") {
+    setSaving(true);
+    setSaveError(null);
+    onQueue(corrections).then(() => {
+      setSaving(false);
+      if (then === "trip") {
+        backToTrip();
+        return;
+      }
+      kept.current = true;
+      commitRef.current?.();
+    }, () => {
+      intent.current = null;
+      setSaving(false);
+      setSaveError("That change couldn't be kept on this iPhone. Try again.");
+    });
   }
 
   function apply() {
-    if (deleting.current && trip) {
+    if (kept.current) return true;
+    if (stale || saving) return false;
+    if (intent.current === "remove" && trip) {
       const removal = notATrip(trip);
-      if (removal) onQueue([removal]);
-      return true;
+      if (!removal) return true;
+      keep([removal], "close");
+      return false;
     }
-    if (trip && leg && legIndex != null) {
+    if (trip && leg) {
       // A leg's Done sends its mode and goes back to the trip; the trip's own Done closes the sheet.
       const change = legMode ? legCorrection(trip, legIndex, legMode) : null;
+      const closes = target.kind === "trip" && target.legIndex != null && !leftLeg;
       if (change) {
-        onQueue([change]);
         playHaptic("timeSet");
+        keep([change], closes ? "close" : "trip");
+        return false;
       }
-      if (target.kind === "trip" && target.legIndex != null && !leftLeg) return true;
+      if (closes) return true;
       backToTrip();
       return false;
     }
@@ -144,15 +197,20 @@ export function LocationCorrectionSheet({
     const corrections = target.kind === "place"
       ? placeCorrections(target.place, { choice, times }, places)
       : tripCorrections(target.trip, { times });
-    if (corrections.length) onQueue(corrections);
-    return true;
+    if (!corrections.length) return true;
+    keep(corrections, "close");
+    return false;
   }
 
   // "This wasn't a trip" asks once, in place (UIA-005: no system alert): Take it off your day, or Keep it.
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   function removeTrip() {
-    deleting.current = true;
+    intent.current = "remove";
     commitRef.current?.();
+  }
+  function keepTrip() {
+    intent.current = null;
+    setConfirmingRemoval(false);
   }
 
   const title = target.kind === "place"
@@ -170,7 +228,8 @@ export function LocationCorrectionSheet({
       actionTone="neutral"
       calendarLayout={false}
       commitRef={commitRef}
-      disabled={!leg && Boolean(problem)}
+      // A removal needs no valid times; nothing changes while a change is being kept, or once the item left.
+      disabled={stale || saving || (!leg && !confirmingRemoval && Boolean(problem))}
       onApply={apply}
       onDismissed={onDismissed}
       presentationId={presentationId}
@@ -206,7 +265,7 @@ export function LocationCorrectionSheet({
       </View>
       {/* The view inside the sheet: the leg pushes in from the right and pops back from the left. */}
       <Reanimated.View
-        key={leg ? `leg-${legIndex}` : "main"}
+        key={leg ? `leg-${leg.startedAt}-${leg.stoppedAt}` : "main"}
         entering={FadeIn.duration(reduceMotion ? 90 : MOBILE_MOTION.control).reduceMotion(ReduceMotion.Never)
           .withInitialValues(reduceMotion ? { opacity: 0 } : { opacity: 0, transform: [{ translateX: 24 * direction }] })}
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
@@ -265,7 +324,7 @@ export function LocationCorrectionSheet({
                     style={({ pressed }) => [styles.pill, { backgroundColor: theme.danger, opacity: pressed ? 0.7 : 1 }]}>
                     <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.onDanger }]}>Take it off your day</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" onPress={() => setConfirmingRemoval(false)} testID="location-correction-keep-trip"
+                  <Pressable accessibilityRole="button" onPress={keepTrip} testID="location-correction-keep-trip"
                     style={({ pressed }) => [styles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
                     <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textPrimary }]}>Keep it</Text>
                   </Pressable>
@@ -279,6 +338,15 @@ export function LocationCorrectionSheet({
               </Pressable>
             )}
           </Section>
+        ) : null}
+        {stale ? (
+          <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]} testID="location-correction-stale">
+            This changed while it was open. Close it and open it again from the List.
+          </Text>
+        ) : null}
+        {saveError ? (
+          <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[styles.hint, { color: theme.dangerText }]}
+            testID="location-correction-error">{saveError}</Text>
         ) : null}
       </Reanimated.View>
     </BottomSheetShell>
