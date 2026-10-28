@@ -185,6 +185,7 @@ struct DayframeCalendarBracket: Equatable, Identifiable {
 struct DayframeCalendarPresentation: Equatable {
   let brackets: [DayframeCalendarBracket]
   let placesLane: [DayframeCalendarLaneItemRecord]
+  let prototype: Bool
   let dayEndMs: Double
   let dayStartMs: Double
   let emptyState: String
@@ -218,6 +219,7 @@ struct DayframeCalendarPresentation: Equatable {
   init(_ record: DayframeCalendarPresentationRecord) {
     brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)
     placesLane = record.placesLane ?? []
+    prototype = record.prototype ?? false
     dayEndMs = record.dayEndMs
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState

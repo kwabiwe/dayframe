@@ -2127,9 +2127,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
   // Calendar prototype, steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
-  const gridModel = useMemo(() => CALENDAR_PROTOTYPE && calendarLayout === "grid"
-    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat))
-    : nativeCalendarModel, [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel]);
+  // `prototype` gives the native header its one-tap toggle and the Grid's "?" the amber dot (owner items J, K).
+  const gridModel = useMemo(() => !CALENDAR_PROTOTYPE ? nativeCalendarModel : {
+    ...(calendarLayout === "grid"
+      ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat))
+      : nativeCalendarModel),
+    prototype: true
+  }, [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel]);
   const gridModelRefreshing = useMemo(() => gridModel === nativeCalendarModel ? nativeCalendarModelRefreshing : { ...gridModel, refreshing: true },
     [gridModel, nativeCalendarModel, nativeCalendarModelRefreshing]);
   // The List's place, trip and leg correction sheets (step 12).
@@ -2140,6 +2144,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // A place logged with Logs as: its blocks come with the next read of the day.
     onLogged: () => { void load(); },
     pending: correctionQueue.pending,
+    // Calendar prototype (owner items A, B, I): a sheet opened from a row or the Grid asks its item's "?" on top.
+    questionFor: CALENDAR_PROTOTYPE ? (kind, itemId) => {
+      const check = askingChecks.find((each) => each.segmentId === itemId);
+      const question = check ? calendarChecks.questions.get(check.id) : undefined;
+      if (!check || !question || !scopedOwnerKey) return null;
+      return {
+        text: question.question,
+        // The row and the sheet already say the times; only words that add something stay.
+        detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
+        yesLabel: question.logLabel ?? null,
+        noLabel: question.skipLabel ?? "Not now",
+        onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null)
+      };
+    } : undefined,
     reduceMotion,
     showNotice: (message) => showTodayNotice(message, null),
     theme,
@@ -3685,7 +3703,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             onOpenReview: (reviewItemId) => {
               // Calendar prototype (step 15): a "?" on the Grid opens its question in the List, never Review.
               if (CALENDAR_PROTOTYPE) {
-                if (!reviewItemId || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
+                // Owner item A: a Grid "?" or Places lane item opens its own sheet (its "?" asked at the top); Apple
+                // Health's, which has no sheet, opens its question in the List.
+                const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
+                  : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
+                const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
+                if (item?.kind === "place") {
+                  locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+                  return;
+                }
+                if (item?.kind === "trip") {
+                  locationCorrections.openTripLeg(item, null);
+                  return;
+                }
+                if (!reviewItemId || reviewItemId.startsWith("lane:") || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
                 return;
               }
               if (reviewItemId) router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } });
@@ -3798,6 +3829,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
+            {/* Calendar prototype (owner item A): the Grid's items open the same sheets, over the Grid. */}
+            {CALENDAR_PROTOTYPE && calendarLayout !== "list" ? locationCorrections.sheet : null}
           </View>
         </SafeAreaView>
       );

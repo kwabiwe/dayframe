@@ -80,6 +80,7 @@ export function LocationCorrectionSheet({
   logAs,
   places,
   presentationId,
+  question,
   reduceMotion,
   rootHosted,
   stale = false,
@@ -87,6 +88,11 @@ export function LocationCorrectionSheet({
   theme
 }: {
   clockFormat: ClockFormat;
+  /**
+   * Calendar prototype (owner item A): the item's open "?", asked at the top of its sheet now that a row or a
+   * Grid item opens the sheet directly. An answer closes the sheet (with any change made in it kept too).
+   */
+  question?: { text: string; detail?: string | null; yesLabel: string | null; noLabel: string; onAnswer: (yes: boolean) => void } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
@@ -293,10 +299,14 @@ export function LocationCorrectionSheet({
     ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${time(Date.parse(leg.startedAt))}–${time(Date.parse(leg.stoppedAt))}`
     : trip?.route ? `${trip.route} · ${span}` : span;
 
+  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || (!problem && (target.kind === "place"
+    ? placeCorrections(target.place, { choice, times }, places).length > 0
+    : tripCorrections(target.trip, { times }).length > 0));
   return (
     <BottomSheetShell
       action="Done"
-      actionTone="neutral"
+      // Calendar prototype (owner item O): Done looks secondary until something has changed.
+      actionTone={CALENDAR_PROTOTYPE && !sheetChanged ? "quiet" : "neutral"}
       calendarLayout={false}
       commitRef={commitRef}
       // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
@@ -323,12 +333,31 @@ export function LocationCorrectionSheet({
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
         </View>
       </View>
+      {question && !leg ? (
+        // Calendar prototype (owner items A, B, I): the "?" at the top of its sheet, Yes first when there's a guess.
+        <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
+          <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionText, { color: theme.textPrimary }]}>{question.text}</Text>
+          {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
+          <View style={styles.pills}>
+            {question.yesLabel ? (
+              <Pressable accessibilityRole="button" onPress={() => { question.onAnswer(true); commitRef.current?.(); }} testID="location-correction-question-yes"
+                style={({ pressed }) => [styles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]}>
+                <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.surface }]}>{question.yesLabel}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="button" onPress={() => { question.onAnswer(false); commitRef.current?.(); }} testID="location-correction-question-no"
+              style={({ pressed }) => [styles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]}>
+              <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {/* The map first, on every view (owner feedback, 27 Oct 2026); it stays put as a leg pushes and pops. */}
       <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
         {evidence && evidence !== "unavailable" ? (
           <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
             dangerColor={theme.danger} evidence={evidence} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
-            textColor={theme.textSecondary} />
+            textColor={theme.textSecondary} visitOnly={CALENDAR_PROTOTYPE} />
         ) : (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>
             {evidence === "unavailable" ? "The map isn't available right now." : "Loading the map…"}
@@ -357,6 +386,8 @@ export function LocationCorrectionSheet({
         ) : null}
         {target.kind === "place" ? (
           <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
+            distances={CALENDAR_PROTOTYPE && evidence && evidence !== "unavailable"
+              ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : undefined}
             places={places} theme={theme} />
         ) : null}
         {target.kind === "place" && logAs && !stale ? (
@@ -533,11 +564,22 @@ function Section({ children, hint, label, theme }: { children: React.ReactNode; 
   );
 }
 
-function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: {
-  choice: PlaceChoice; correctableItem: boolean; onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
+function PlaceView({ choice, correctableItem, distances, onChoose, place, places: allPlaces, theme }: {
+  choice: PlaceChoice; correctableItem: boolean;
+  /**
+   * Calendar prototype (owner item N): how far each saved place is from the visit, when known. Places then sort
+   * nearest first; places further than 2 km (or not near at all) wait behind "More places".
+   */
+  distances?: ReadonlyMap<string, number>;
+  onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
   places: readonly CorrectionPlaceOption[]; theme: MobileTheme;
 }) {
+  const [morePlaces, setMorePlaces] = useState(false);
   if (!correctableItem) return null;
+  const near = (id: string) => (distances?.get(id) ?? Infinity) <= 2_000 || id === place.placeId;
+  const sorted = distances ? [...allPlaces].sort((a, b) => (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity)) : allPlaces;
+  const hidden = distances && !morePlaces ? sorted.filter((option) => !near(option.id)) : [];
+  const places = distances && !morePlaces ? sorted.filter((option) => near(option.id)) : sorted;
   // What is ticked: the pick, or the place as it is (its saved place, or unknown).
   const selected = choice.kind === "saved" ? choice.id : choice.kind === "unknown" ? null
     : place.placeId ?? (place.learnedPlaceId ? "learned" : null);
@@ -548,7 +590,8 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
     ...places.map((option) => ({
       key: option.id,
       title: option.name,
-      detail: "Saved place",
+      // Calendar prototype (N): how far, when known.
+      detail: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
       glyph: (option.role === "home" ? "house" : DAYFRAME_APP_ICONS.places) as DayframeGlyph,
       pick: { kind: "saved", id: option.id } as PlaceChoice
     })),
@@ -574,8 +617,19 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
           );
         })}
       </View>
+      {hidden.length ? (
+        <Pressable accessibilityHint="Shows your saved places further away" accessibilityRole="button" onPress={() => setMorePlaces(true)}
+          style={({ pressed }) => [styles.morePlaces, { opacity: pressed ? 0.7 : 1 }]} testID="location-correction-more-places">
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textSecondary }]}>More places ({hidden.length})</Text>
+        </Pressable>
+      ) : null}
     </Section>
   );
+}
+
+/** "120 m", "1.4 km". */
+function formatMetres(metres: number) {
+  return metres < 1_000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1_000).toFixed(1)} km`;
 }
 
 function LegModes({ mode, onPick, theme }: { mode: TripLegMode; onPick: (mode: TripLegMode) => void; theme: MobileTheme }) {
@@ -685,6 +739,10 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
 }
 
 const styles = StyleSheet.create({
+  // Calendar prototype (A, N): the "?" at the top of the sheet, and "More places".
+  question: { gap: 6, borderRadius: 16, padding: 14, marginBottom: 12 },
+  questionText: { fontSize: 17, fontWeight: "700" },
+  morePlaces: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 6 },
   headText: { flex: 1, gap: 2 },
   back: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },

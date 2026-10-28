@@ -258,7 +258,7 @@ export default function CalendarQaRoute() {
   }).model, [clockFormat, dense, now, theme]);
   // Calendar prototype (steps 16–17): the Grid's Places lane and trip leg strip over the synthetic Thursday.
   const shown = useMemo(() => {
-    const base = { ...model, layout };
+    const base = { ...model, layout, ...(CALENDAR_PROTOTYPE ? { prototype: true } : {}) };
     return CALENDAR_PROTOTYPE && !dense && layout === "grid"
       ? withPlacesAndLegs(base, timeline, QA_CHECKS, (ms) => new Date(ms).toTimeString().slice(0, 5)) : base;
   }, [dense, layout, model]);

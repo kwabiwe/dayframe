@@ -67,6 +67,27 @@ struct DayframeCalendarRootView: View {
   /// current one. The menu's own presentation is the system's (and follows Reduce Motion).
   @ViewBuilder
   private func viewMenu(presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme) -> some View {
+    if presentation.prototype {
+      // Calendar prototype (owner item J): one tap switches, and the icon is always where it goes.
+      Button {
+        playSelectionHaptic()
+        actions.changeLayout(presentation.isList ? "grid" : "list")
+      } label: {
+        DayframeCalendarGlyph(name: presentation.isList ? "view-day" : "view-list", size: 20, followsTextSize: false)
+          .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+          .frame(width: 44, height: 44)
+          .background(Circle().fill(Color(dayframeCSS: theme.surface)))
+          .contentShape(Circle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(presentation.isList ? "Show as day" : "Show as list")
+    } else {
+      legacyViewMenu(presentation: presentation, theme: theme)
+    }
+  }
+
+  @ViewBuilder
+  private func legacyViewMenu(presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme) -> some View {
     Menu {
       // A picker inside a menu is the system's single choice: a check on the current item, its icon beside.
       Picker("Calendar view", selection: Binding(
@@ -563,11 +584,8 @@ private struct DayframeCalendarEntriesLayer: View {
           let height = CGFloat(span.height)
           let laneWidth = CGFloat(DayframeCalendarPlacesLane.width) - 6
           Button {
-            if let checkId = item.checkId {
-              actions.open(DayframeCalendarActionTarget(id: checkId, kind: .review))
-            } else {
-              actions.changeLayout("list")
-            }
+            // Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
+            actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
           } label: {
             DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
           }
@@ -577,7 +595,7 @@ private struct DayframeCalendarEntriesLayer: View {
           .position(x: hourLabelWidth + 8 + laneWidth / 2, y: CGFloat(span.top) + height / 2)
           .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
           .accessibilityLabel(item.accessibilityLabel)
-          .accessibilityHint(item.checkId != nil ? "Opens its question in the List" : "Opens this day in the List")
+          .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
         }
       }
 
@@ -616,6 +634,7 @@ private struct DayframeCalendarEntriesLayer: View {
               labelTextScale: labelTextScale,
               metrics: metrics,
               nested: laidOut.nested,
+              prototype: presentation.prototype,
               visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -690,6 +709,8 @@ private struct DayframeCalendarBlockView: View {
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
   let nested: Bool
+  /// Calendar prototype (owner item K): a suggestion is a light fill with a dashed edge and the amber dot.
+  let prototype: Bool
   let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -705,7 +726,7 @@ private struct DayframeCalendarBlockView: View {
     let dark = theme.mode == "dark"
     // The mock-up's tint: 18 % light / 28 % dark for blocks, 10 % / 14 % for suggestions. Under Reduce
     // Transparency it is opaque (blended over the surface) and a little stronger.
-    let tint: CGFloat = entry.isReview ? (dark ? 0.14 : 0.10) : (dark ? 0.28 : 0.18)
+    let tint: CGFloat = entry.isReview ? (prototype ? (dark ? 0.08 : 0.05) : (dark ? 0.14 : 0.10)) : (dark ? 0.28 : 0.18)
     let fill: Color = reduceTransparency
       ? Color(uiColor: blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint + 0.1))
       : Color(uiColor: blockColor).opacity(Double(tint))
@@ -733,7 +754,10 @@ private struct DayframeCalendarBlockView: View {
         shape.fill(Color(dayframeCSS: theme.background).opacity(DayframeCalendarConstants.nestedCanvasWash))
       }
       shape.fill(fill)
-      if entry.isReview {
+      if entry.isReview && prototype {
+        shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+      }
+      if entry.isReview && !prototype {
         DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))
           .opacity(reduceTransparency ? 0.22 : 0.14)
           .clipShape(shape)
@@ -753,7 +777,7 @@ private struct DayframeCalendarBlockView: View {
         DayframeCalendarDenseText(
           details: entry.isReview ? [] : entry.detailLines,
           ink: ink,
-          isReview: entry.isReview,
+          isReview: entry.isReview && !prototype,
           label: label,
           labelTextScale: labelTextScale,
           theme: theme,
@@ -764,6 +788,14 @@ private struct DayframeCalendarBlockView: View {
         .padding(.leading, CGFloat(label.leadingPadding + legInset))
         .padding(.trailing, CGFloat(label.trailingPadding))
         .padding(.top, CGFloat(label.verticalPadding))
+      }
+    }
+    .overlay(alignment: .topTrailing) {
+      if entry.isReview && prototype {
+        Circle().fill(Color(dayframeCSS: theme.warning)).frame(width: 9, height: 9)
+          .overlay(Circle().stroke(Color(dayframeCSS: theme.surface), lineWidth: 2))
+          .padding(4)
+          .accessibilityHidden(true)
       }
     }
   }
@@ -1092,7 +1124,8 @@ private struct DayframeCalendarLaneItemView: View {
     ZStack(alignment: .top) {
       shape.fill(asking ? Color(dayframeCSS: theme.warning).opacity(0.16) : Color(dayframeCSS: theme.textSecondary).opacity(item.kind == "trip" ? 0.34 : 0.14))
       if asking {
-        DayframeCalendarHatch(color: Color(dayframeCSS: theme.warningText)).opacity(0.3).clipShape(shape)
+        // Owner item K: the same amber dot as the List, on a light fill with a dashed edge (no hatching).
+        shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
       }
       if item.kind == "place" && height >= 20 {
         DayframeCalendarGlyph(name: item.glyph, size: 13, followsTextSize: false)

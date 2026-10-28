@@ -104,7 +104,8 @@ export function BottomSheetShell({
    */
   commitRef?: { current: (() => void) | null };
   /** The action's fill: coral for a filter's primary "Show", neutral for a Done (the date sheet's). Defaults by layout. */
-  actionTone?: "accent" | "neutral";
+  /** "quiet" (Calendar prototype, owner item O): a secondary-looking Done while nothing has changed. */
+  actionTone?: "accent" | "neutral" | "quiet";
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -287,7 +288,7 @@ export function BottomSheetShell({
                 // The filter's "Show N activities" is the sheet's primary action (coral); a
                 // date sheet's Done is neutral (UIA-026). Both are full width.
                 backgroundColor:
-                  disabled || closing
+                  disabled || closing || actionTone === "quiet"
                     ? theme.surfaceMuted
                     : neutralAction
                       ? theme.textPrimary
@@ -303,7 +304,9 @@ export function BottomSheetShell({
                   color:
                     disabled || closing
                       ? theme.textSecondary
-                      : neutralAction
+                      : actionTone === "quiet"
+                        ? theme.textPrimary
+                        : neutralAction
                         ? theme.background
                         : theme.onAccent,
                 },

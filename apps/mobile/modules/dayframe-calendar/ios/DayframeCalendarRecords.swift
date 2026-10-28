@@ -135,6 +135,8 @@ struct DayframeCalendarPresentationRecord: Codable {
   var modelVersion = 4
   /// Calendar prototype, step 17: the day's places and trips for the Places lane; absent or empty, no lane.
   var placesLane: [DayframeCalendarLaneItemRecord]?
+  /// The Calendar prototype's look (owner items J, K); absent or false in every other build.
+  var prototype: Bool?
   var monthTitle = ""
   var nowMs: Double = 0
   var reduceMotion = false

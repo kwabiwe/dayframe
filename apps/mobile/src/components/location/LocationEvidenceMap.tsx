@@ -18,6 +18,11 @@ type Props = {
   selectedPointRadiusMeters?: number;
   selectedSavedPlaceId?: string | null;
   showDetails?: boolean;
+  /**
+   * Calendar prototype (owner items L, M): only the visit's own area (no saved places' circles or pins), and the
+   * readings line inside the map card.
+   */
+  visitOnly?: boolean;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
   reduceMotion?: boolean;
   /** Changes once per place chosen from a list; each change shows `selectedPoint` with the stay. */
@@ -38,6 +43,7 @@ export function LocationEvidenceMap({
   selectedPointRadiusMeters,
   selectedSavedPlaceId,
   showDetails = true,
+  visitOnly = false,
   reduceMotion = false,
   revealChoiceToken,
   onSelectPoint,
@@ -49,7 +55,7 @@ export function LocationEvidenceMap({
   const samples = evidence.map.acceptedSamples;
   // Plain words, not the server's diagnostic summary (owner feedback, 27 Oct 2026).
   const summary = evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
-  const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
+  const shouldShowSavedPlaces = !visitOnly && (showDetails || evidence.segment.kind === "stay");
   // Time away has no route line, so its readings are the evidence to inspect.
   const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
   const coordinates = [
@@ -267,7 +273,8 @@ export function LocationEvidenceMap({
         <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
       ) : null}
       {/* The map's plain words, always (owner feedback, 27 Oct 2026; Codex r1 on #599); the map already says them. */}
-      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.routeCaption, { color: textColor }]}
+      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+        style={[styles.routeCaption, { color: textColor }, visitOnly ? [styles.insideCaption, { backgroundColor: surfaceColor }] : null]}
         testID="location-evidence-summary">{summary}</Text>
       {showDetails ? (
         <>
@@ -318,6 +325,8 @@ function spread(values: number[]) {
 }
 
 const styles = StyleSheet.create({
+  // Calendar prototype (M): the readings line sits inside the map card, on its own small plate.
+  insideCaption: { position: "absolute", left: 10, bottom: 8, marginTop: 0, overflow: "hidden", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   fallback: { borderRadius: 16, minHeight: 140, padding: 18, justifyContent: "center", gap: 8 },
   fallbackText: { fontSize: 14, lineHeight: 20 },
   map: { width: "100%", height: 280, borderRadius: 16 },
