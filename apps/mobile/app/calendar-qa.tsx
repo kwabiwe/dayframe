@@ -290,8 +290,10 @@ export default function CalendarQaRoute() {
           <View style={{ flex: 1 }}>
             <CalendarListView checkGlyphs={dense ? undefined : QA_CHECK_GLYPHS} checkTotal={dense || !CALENDAR_PROTOTYPE ? undefined : QA_CHECK_TOTAL}
               onNextCheck={CALENDAR_PROTOTYPE ? () => undefined : undefined} prototype={CALENDAR_PROTOTYPE}
+              // `?check=unknown|trip|sleep` (prototype) opens that "?" by id and scrolls to it, as the chip and badge do.
+              openCheckRequest={CALENDAR_PROTOTYPE && params.check && params.check !== "1" ? { id: `qa-check-${params.check}`, request: 1 } : null}
               checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
-              onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+              onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check === "1" ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={dense ? null : timeline} />
           </View>
