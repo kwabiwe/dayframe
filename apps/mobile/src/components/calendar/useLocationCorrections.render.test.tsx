@@ -246,5 +246,28 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       vi.useRealTimers();
     }
   });
+
+  // Codex r3 on #606.
+  it("sends the sheet's corrections only in front, and keeps a hold made in the background at once without sending it", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    const onQueue = sheetOf(tree)!.props.onQueue as (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
+    await act(async () => { await onQueue([{ request: { kind: "times" } }], { closing: true }); });
+    const drain = mocks.synchronise.mock.calls.at(-1)?.[0] as { isForeground?: () => boolean };
+    expect(drain.isForeground?.()).toBe(true);
+    mocks.appState = "background";
+    expect(drain.isForeground?.()).toBe(false);
+
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+    const sends = mocks.synchronise.mock.calls.length;
+    await act(async () => { logAs.onLog("cat-errands"); });
+    expect(mocks.enqueue).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
+      [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+    expect(mocks.synchronise.mock.calls.length).toBe(sends);
+    expect(api!.heldLog).toBeNull();
+    mocks.appState = "active";
+  });
 });
 

@@ -22,6 +22,8 @@ import {
 import { LocationCorrectionSheet, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
 // Each sheet belongs to the account it opened for (Codex r1 on #602).
+const appInFront = () => AppState.currentState === "active";
+
 type Open = ({ kind: "place"; itemId: string; label: string } | { kind: "trip"; itemId: string; legIndex: number | null }) &
   { id: number; ownerKey: string };
 
@@ -144,7 +146,9 @@ export function useLocationCorrections({
     })));
     // Only a Done that closes the sheet lets its item leave the List unremarked (a leg's Done goes back to the trip).
     if (closing) setClosingId(presentationId);
-    void synchroniseTimelineCorrections({ owner, force: true }).catch(() => undefined);
+    // Sent only while the app is in front: a Logs as queued behind these must never go from the background
+    // (Codex r3 on #606).
+    void synchroniseTimelineCorrections({ owner, force: true, isForeground: appInFront }).catch(() => undefined);
   }, [ownerKey, userId, workspaceId]);
 
   // "Save this place" (step 12 part 4, card D item 14): a saved place at the visit's centre, under the name the
@@ -201,8 +205,7 @@ export function useLocationCorrections({
     void enqueueTimelineCorrections(owner, [{ request: log.request }]).then((items) => {
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
       // Sent only while the app is in front, then and at every step of the send (Codex r2 on #606).
-      const inFront = () => AppState.currentState === "active";
-      return send && inFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: inFront }) : undefined;
+      return send && appInFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: appInFront }) : undefined;
     }).catch(() => showNotice("That place wasn't logged. Try again."));
   };
   useEffect(() => {
@@ -216,6 +219,12 @@ export function useLocationCorrections({
       setHeldLog((current) => current?.token === heldLog.token ? null : current);
       commitLogRef.current(heldLog, send);
     };
+    // Made while the app is already away (a Done that finished in the background): kept now, never sent from
+    // there (Codex r3 on #606).
+    if (!appInFront()) {
+      finish(false);
+      return;
+    }
     const timer = setTimeout(() => finish(true), REVIEW_DECK_UNDO_MS);
     // Leaving the app keeps the decision now, as the deck's hold does, and sends it on return (Codex r1 on #606).
     const subscription = AppState.addEventListener("change", (state) => {
