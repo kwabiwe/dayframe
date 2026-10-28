@@ -16,12 +16,19 @@ import { REVIEW_DECK_UNDO_MS } from "../../lib/reviewDeckHold";
 import {
   createTimelineCorrectionId,
   enqueueTimelineCorrections,
+  readAcknowledgedTimelineCorrections,
+  readPendingTimelineCorrections,
   removeTimelineCorrections,
   synchroniseTimelineCorrections,
   type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
-import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections, holdAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import {
+  cancelAnswerAfterCorrections,
+  commitAnswerAfterCorrections,
+  holdAnswerAfterCorrections,
+  noteTimelineCorrectionAcknowledged
+} from "../../lib/reviewAnswersAfterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
 // Each sheet belongs to the account it opened for (Codex r1 on #602).
@@ -301,6 +308,32 @@ export function useLocationCorrections({
     onLogged?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acknowledgedIds]);
+  // A Logs as kept on the phone until the place's corrections are acknowledged: `newIds` (this sheet's, about to be
+  // queued) and every one still queued for the place. Null when there is nothing to wait for (Codex r5 on #610).
+  const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string, title: string,
+    newIds: readonly string[]) => {
+    if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current) throw new Error("The account changed.");
+    const owner = { userId, workspaceId };
+    const earlier = (await readPendingTimelineCorrections(owner))
+      .filter((item) => item.request.itemId === placeItemId && item.request.kind !== "log_place")
+      .map((item) => item.clientCorrectionId);
+    const waitsFor = [...new Set([...newIds, ...earlier])];
+    if (!waitsFor.length) return null;
+    const id = createTimelineCorrectionId();
+    await holdAnswerAfterCorrections(owner, { id, reviewItemId: "", logged: true, log: { itemId: placeItemId, categoryId }, waitsFor });
+    // One acknowledged between the read and the record: marked from the queue's own memory of it, so it never looks
+    // refused.
+    const acknowledgedNow = new Set(readAcknowledgedTimelineCorrections(owner).map((item) => item.clientCorrectionId));
+    for (const earlierId of earlier) if (acknowledgedNow.has(earlierId)) await noteTimelineCorrectionAcknowledged(owner, earlierId);
+    return {
+      start: () => {
+        logTokens.current += 1;
+        holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
+          request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
+      },
+      cancel: () => cancelAnswerAfterCorrections(id)
+    };
+  };
   const activities = useMemo(() => [...(data?.categories ?? [])]
     .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
     .slice(0, 8)
@@ -346,31 +379,34 @@ export function useLocationCorrections({
       onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing, options.beforeEnqueue)}
       logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && activities.length && !stale ? {
         activities,
+        // Every Logs as waits for all of the place's corrections still on the phone — this sheet's new ones and any
+        // from an earlier Done (a sheet reopened before they were sent) — and goes as `log_place` only once the server
+        // has acknowledged every one; a refused one logs nothing (Codex r4 and r5 on #610). With none waiting, it is
+        // held for Undo and queued at once, as before.
         onLog: (categoryId) => {
-          logTokens.current += 1;
-          const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
-          holdLog({ token: logTokens.current, ownerKey: open.ownerKey, title: `${shown.label} as ${name}`,
-            request: { kind: "log_place", subject: "place", itemId: shown.place.id, categoryId } });
-        },
-        // After the sheet's own corrections (Codex r4 on #610): kept on the phone before they are queued, and queued as
-        // `log_place` only once the server has acknowledged every one; a refused one drops it (nothing is logged).
-        onLogAfter: async (categoryId, ids) => {
-          if (!userId || !workspaceId || open.ownerKey !== currentOwner.current) throw new Error("The account changed.");
-          const id = createTimelineCorrectionId();
-          const placeItemId = shown.place.id;
-          await holdAnswerAfterCorrections({ userId, workspaceId }, { id, reviewItemId: "", logged: true,
-            log: { itemId: placeItemId, categoryId }, waitsFor: ids });
           const sheetOwner = open.ownerKey;
+          const placeItemId = shown.place.id;
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
-          return {
-            start: () => {
-              logTokens.current += 1;
-              holdLog({ token: logTokens.current, ownerKey: sheetOwner, title,
-                request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
-            },
-            cancel: () => cancelAnswerAfterCorrections(id)
-          };
+          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, []).then((waiting) => {
+            if (currentOwner.current !== sheetOwner) {
+              void waiting?.cancel().catch(() => undefined);
+              return;
+            }
+            if (waiting) {
+              waiting.start();
+              return;
+            }
+            logTokens.current += 1;
+            holdLog({ token: logTokens.current, ownerKey: sheetOwner, title,
+              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId } });
+          }, () => showNotice("That place wasn't logged. Try again."));
+        },
+        onLogAfter: async (categoryId, ids) => {
+          const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
+          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids);
+          if (!waiting) throw new Error("Nothing to wait for.");
+          return waiting;
         }
       } : undefined}
       onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre

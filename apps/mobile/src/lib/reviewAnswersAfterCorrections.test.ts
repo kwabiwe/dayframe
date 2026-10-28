@@ -104,6 +104,38 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     expect(gone.dropped.map((item) => item.id)).toEqual(["m-2"]);
   });
 
+  it("a Logs as from a reopened sheet never goes after its earlier correction is refused (Codex r5 on #610)", async () => {
+    // A place correction saved while offline.
+    await outbox.enqueueTimelineCorrections(OWNER_A, [correction("seg-a", C1)]);
+    const sent: Array<{ kind: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(init.body as string));
+      throw new TypeError("Network request failed");
+    }));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    // The sheet reopened, Logs as picked: it waits for the earlier correction.
+    await answers.holdAnswerAfterCorrections(OWNER_A, { id: C2, reviewItemId: "", logged: true,
+      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
+    await answers.commitAnswerAfterCorrections(C2);
+    // Back online, the correction is refused.
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(init.body as string));
+      return json(409, { error: "This place is already in a block." });
+    }));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    // The release would queue log_place: it never runs, and nothing but the place correction was ever sent.
+    const release = vi.fn(async (): Promise<Outcome> => {
+      await outbox.enqueueTimelineCorrections(OWNER_A, [{ request: { kind: "log_place", subject: "place", itemId: "seg-a",
+        categoryId: "6f000000-0000-4000-8000-0000000000c1", clientCorrectionId: C2 } }]);
+      return "released";
+    });
+    const result = await releaseWith(release);
+    expect(release).not.toHaveBeenCalled();
+    expect(result.dropped.map((item) => item.id)).toEqual([C2]);
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    expect(sent.map((body) => body.kind)).not.toContain("log_place");
+  });
+
   it("is kept on the phone: a relaunch still releases it once its corrections are acknowledged", async () => {
     await answerWithCorrections(OWNER_A, [C1]);
     await answers.commitAnswerAfterCorrections("m-1");

@@ -329,8 +329,11 @@ export function CalendarListView({
     const row = checkRows.find((each) => each.id === id);
     if (!row) return;
     if (!row.known) {
+      // Timestamped, with a fresh read asked for: a response already in flight from before the tap that lacks its
+      // item never opens it under its row (Codex r5 on #610).
       tapRequests.current -= 1;
-      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0 });
+      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at: Date.now() });
+      onRequestFreshRead?.();
       return;
     }
     if (shownOpenCheckId === id) {

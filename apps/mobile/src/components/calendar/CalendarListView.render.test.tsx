@@ -419,6 +419,30 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(questions(tree)).toHaveLength(1);
   });
 
+  it("timestamps a tap while the day loads: a stale response lacking its item never opens it; a fresh one does (Codex r5 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onRequestFreshRead = vi.fn();
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      onRequestFreshRead };
+    const rerender = (tree: ReturnType<typeof create>, next: { timeline: LocationTimeline | null; timelineReadAt: number | null }) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} {...props} {...next} />);
+    });
+    // Loading: the day's places aren't here yet.
+    const { tree } = render({ ...props, timeline: null, timelineReadAt: null });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(onRequestFreshRead).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+    // The response in flight from before the tap lands, without the item: nothing opens.
+    rerender(tree, { timeline, timelineReadAt: Date.now() - 1_000 });
+    expect(questions(tree)).toHaveLength(0);
+    // The fresh read lands, still without it: it asks under its row (intended).
+    rerender(tree, { timeline, timelineReadAt: Date.now() + 1_000 });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
   it("opens a trip's \"?\" in the trip's own sheet, at no leg", () => {
     const onOpenTripLeg = vi.fn();
     const onOpenCheck = vi.fn();
