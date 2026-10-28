@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ClockFormat, DayframePaletteKey, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
@@ -1321,7 +1321,7 @@ function formatEyebrowDate(value: string) {
 /** The share of the bar a half needs to hold its label (about 26 px of 144). */
 const SPLIT_LABEL_ROOM = 0.14;
 
-function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled, onCancel, onConfirm, onMove, open }: {
+export function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled, lineRef: hostLineRef, onCancel, onConfirm, onMove, open }: {
   atMs: number;
   bounds: SplitBounds;
   /** False while the editor has unsaved changes: the split would act on the block as saved. */
@@ -1331,13 +1331,16 @@ function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled
   color?: string | null;
   colorName?: string;
   disabled: boolean;
+  /** The line's slider, for a host dialog's first focus (the running block's split dialog). */
+  lineRef?: RefObject<HTMLInputElement | null>;
   onCancel: () => void;
   onConfirm: () => void;
   onMove: (atMs: number) => void;
   open: boolean;
 }) {
-  const lineRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [open]);
+  const ownLineRef = useRef<HTMLInputElement>(null);
+  const lineRef = hostLineRef ?? ownLineRef;
+  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [lineRef, open]);
   const time = (ms: number) => formatTime(new Date(ms), clock);
   const minutes = (fromMs: number, toMs: number) => formatDuration(Math.round((toMs - fromMs) / 1000));
   // Where the line sits: the slider's own position (its range is where a split may fall), so the line, the

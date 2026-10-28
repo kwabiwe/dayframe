@@ -3,6 +3,7 @@ import { z, ZodError } from "zod";
 import {
   createManualEntry,
   duplicateFinishedEntry,
+  joinSplitEntries,
   processActivityEvent,
   splitActiveEntry,
   splitFinishedEntry,
@@ -30,9 +31,9 @@ export async function POST(request: Request) {
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate", "join"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, split, or duplicate.");
+      throw new BadRequestError("mode must be one of start, stop, manual, split, duplicate, or join.");
     }
     const mode = modeResult.data;
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
@@ -79,19 +80,37 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 201 });
     }
 
-    // Card G: Split (at `splitAt`) or Duplicate a finished block, `entryId`, with every detail, in one
-    // transaction; `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id
-    // header makes a retry safe.
+    // Undo of a split: the block `splitEntryId` that splitting `entryId` made goes, and `entryId` takes its
+    // end again (running again when that block ran). The client command id header makes a retry safe.
+    if (mode === "join") {
+      entryId = optionalUuid(body.entryId, "entryId") ?? null;
+      const splitEntryId = optionalUuid(body.splitEntryId, "splitEntryId");
+      if (!entryId || !splitEntryId) throw new BadRequestError("entryId and splitEntryId are required.");
+      const result = await joinSplitEntries(entryId, { splitEntryId, clientCommandId: requestClientCommandId(request) }, session);
+      scheduleLiveActivityNotification(session);
+      // The joined block as it is now, so the timer shows it without waiting for the day to load again.
+      return NextResponse.json({ ok: true, ...result, entry: await getTimeEntryById(session, entryId) }, { status: 200 });
+    }
+
+    // Card G: Split (at `splitAt`) or Duplicate a block, `entryId`, with every detail, in one transaction;
+    // `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id header makes
+    // a retry safe. A running block splits too: its second part keeps running (owner 28 Oct 2026).
     const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
     if (finishedEntryId) {
       entryId = finishedEntryId;
       const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
       const clientCommandId = requestClientCommandId(request);
       const result = mode === "split"
-        ? await splitFinishedEntry(finishedEntryId, { splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId }, session)
+        ? await splitFinishedEntry(finishedEntryId, {
+          splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId, source: eventSource
+        }, session)
         : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
       scheduleLiveActivityNotification(session);
-      return NextResponse.json({ ok: true, ...result }, { status: result.replayed ? 200 : 201 });
+      // Both blocks as they are now (on a repeat too): whether the second part runs is read from them.
+      const reader = session;
+      const entries = (await Promise.all([finishedEntryId, result.newEntryId].map((id) => id ? getTimeEntryById(reader, id) : null)))
+        .filter((entry) => entry !== null);
+      return NextResponse.json({ ok: true, ...result, entries }, { status: result.replayed ? 200 : 201 });
     }
     if (mode === "duplicate") throw new BadRequestError("entryId is required.");
 

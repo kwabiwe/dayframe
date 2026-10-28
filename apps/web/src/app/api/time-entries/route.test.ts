@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   processActivityEvent: vi.fn(),
   createManualEntry: vi.fn(),
   splitActiveEntry: vi.fn(),
+  joinSplitEntries: vi.fn(),
   splitFinishedEntry: vi.fn(),
   duplicateFinishedEntry: vi.fn(),
   scheduleLiveActivityNotification: vi.fn()
@@ -25,6 +26,7 @@ vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
   createManualEntry: mocks.createManualEntry,
   splitActiveEntry: mocks.splitActiveEntry,
+  joinSplitEntries: mocks.joinSplitEntries,
   splitFinishedEntry: mocks.splitFinishedEntry,
   duplicateFinishedEntry: mocks.duplicateFinishedEntry,
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {},
@@ -100,7 +102,7 @@ describe("POST /api/time-entries", () => {
     }));
     expect(split.status).toBe(201);
     expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
-      { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: "2026-07-04T11:00:00.000Z", clientCommandId: "web-split-1" }, session);
+      { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: "2026-07-04T11:00:00.000Z", clientCommandId: "web-split-1", source: "manual_app" }, session);
     expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
     mocks.duplicateFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: true });
     const duplicate = await POST(jsonRequest({ mode: "duplicate", entryId }));
@@ -109,6 +111,40 @@ describe("POST /api/time-entries", () => {
     expect((await POST(jsonRequest({ mode: "duplicate" }))).status).toBe(400);
     await POST(jsonRequest({ mode: "split" }));
     expect(mocks.splitActiveEntry).toHaveBeenCalledWith(session);
+  });
+
+  it("splits a running block from the iPhone with its source, and joins a split back for Undo (running split)", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const splitEntryId = "22222222-2222-4222-8222-222222222222";
+    mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: splitEntryId, replayed: false, running: true });
+    const split = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
+    expect(split.status).toBe(201);
+    // Both blocks as they are now come back with the answer, so the timer can show them at once.
+    expect(await split.json()).toEqual({
+      ok: true, id: entryId, newEntryId: splitEntryId, replayed: false, running: true,
+      entries: [{ id: "11111111-1111-4111-8111-111111111111" }, { id: "11111111-1111-4111-8111-111111111111" }]
+    });
+    expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
+      { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: undefined, clientCommandId: undefined, source: "mobile_app" }, session);
+
+    // A repeat is answered with both blocks as they are now too, so the client reads whether the part runs.
+    mocks.splitFinishedEntry.mockResolvedValueOnce({ id: entryId, newEntryId: splitEntryId, replayed: true });
+    const replay = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true, entries: [expect.objectContaining({ id: entryId }), expect.anything()] });
+
+    mocks.joinSplitEntries.mockResolvedValue({ id: entryId, replayed: false, running: true });
+    const join = await POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": "web-join-1" },
+      body: JSON.stringify({ mode: "join", entryId, splitEntryId })
+    }));
+    expect(join.status).toBe(200);
+    expect(mocks.joinSplitEntries).toHaveBeenCalledWith(entryId, { splitEntryId, clientCommandId: "web-join-1" }, session);
+    expect((await POST(jsonRequest({ mode: "join", entryId }))).status).toBe(400);
+    const { TimeEntryValidationError } = await import("@/lib/event-service");
+    mocks.joinSplitEntries.mockRejectedValueOnce(new TimeEntryValidationError("These blocks are no longer one split block, so they can't be put back together."));
+    expect((await POST(jsonRequest({ mode: "join", entryId, splitEntryId }))).status).toBe(422);
   });
 
   it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
@@ -129,7 +165,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, split, or duplicate."
+      error: "mode must be one of start, stop, manual, split, duplicate, or join."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();
