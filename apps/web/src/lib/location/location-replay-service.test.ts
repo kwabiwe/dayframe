@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { replayLocationEvidence, withinEngineEligibility } from "./location-replay-service";
+import { replayLocationEvidence, withinDecidedEnds, withinEngineEligibility } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
 import {
   journeyIdentityFixture, LOCATION_ENGINE_V2_CONFIG, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture, runLocationEngine,
@@ -631,3 +631,27 @@ describe("Location replay outing legs (PRD D19, Codex r2 on #461)", () => {
     expect(ids).toEqual(expect.arrayContaining(legs.map((leg) => leg.clientSegmentId)));
   });
 });
+
+describe("a trip a correction joined, between decided ends (Codex r5 on #603)", () => {
+  const at = (minutes: number) => new Date(Date.parse("2026-10-20T08:00:00.000Z") + minutes * 60_000).toISOString();
+  const trip = {
+    kind: "commute", clientSegmentId: "joined", startedAt: at(60), stoppedAt: at(120), fromStaySegmentId: "a", toStaySegmentId: "b",
+    gapDurationSeconds: 3_600, shapedByCorrection: true, setByYou: true,
+    tripLegs: [
+      { startedAt: at(60), stoppedAt: at(80), mode: "automotive", confidence: "sure", distanceMeters: 5_000 },
+      { startedAt: at(95), stoppedAt: at(120), mode: "walking", confidence: "likely", distanceMeters: 800 }
+    ]
+  } as never;
+
+  it("keeps its identity, clipped to the decided ends with its legs", () => {
+    expect(withinDecidedEnds(trip, at(61), at(118))).toMatchObject({
+      clientSegmentId: "joined", startedAt: at(61), stoppedAt: at(118), gapDurationSeconds: 3_420, setByYou: true,
+      tripLegs: [{ startedAt: at(61), stoppedAt: at(80), mode: "automotive" }, { startedAt: at(95), stoppedAt: at(118), mode: "walking" }]
+    });
+  });
+
+  it("is gone once the decided ends leave it no time", () => {
+    expect(withinDecidedEnds(trip, at(120), at(130))).toBeNull();
+  });
+});
+

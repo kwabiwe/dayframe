@@ -17,6 +17,8 @@ import {
   type ListCheck,
   type LocationListRow,
   type LocationTimeline,
+  type TimelinePlace,
+  type TimelineTrip,
   type TripLeg
 } from "@dayframe/shared";
 import { DayframeIcon } from "../icons/DayframeIcon";
@@ -62,6 +64,8 @@ export function CalendarListView({
   onOpenCheck,
   onOpenCheckChange,
   onOpenEntry,
+  onOpenPlace,
+  onOpenTripLeg,
   onScrolledToFirstCheck,
   scrollToFirstCheck,
   onRefresh,
@@ -92,6 +96,10 @@ export function CalendarListView({
   /** Each suggestion's question and answers (reviewAnswerQuestion). */
   checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   onOpenEntry: (entry: NativeCalendarPresentationEntry) => void;
+  /** Opens a place's correction sheet (step 12): a place with no "?" and no block. */
+  onOpenPlace?: (place: TimelinePlace, label: string) => void;
+  /** Opens a trip's correction sheet at one of its legs (step 12): a leg's mode, on any trip. */
+  onOpenTripLeg?: (trip: TimelineTrip & { route: string }, legIndex: number) => void;
   /** Which "?" has its question open (card B part 2: only that one looks for a place nearby). */
   onOpenCheckChange?: (reviewItemId: string | null) => void;
   /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?". */
@@ -275,7 +283,7 @@ export function CalendarListView({
                   onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} time={time} />
                 {trip && open ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
-                    <LegRows legs={trip.legs} theme={theme} time={time} />
+                    <LegRows legs={trip.legs} onOpenLeg={onOpenTripLeg ? (index) => onOpenTripLeg(trip, index) : undefined} theme={theme} time={time} />
                   </Animated.View>
                 ) : null}
               </Animated.View>
@@ -286,7 +294,7 @@ export function CalendarListView({
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
               style={divider}>
-              <LocationRow answering={Boolean(onAnswerCheck)} checkTitles={checkTitles} onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
+              <LocationRow answering={Boolean(onAnswerCheck)} checkTitles={checkTitles} onOpenPlace={onOpenPlace} onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
                 openCheckId={shownOpenCheckId} row={item.row} theme={theme} time={time} />
               {(() => {
                 const id = checkIdOf(item.row);
@@ -314,6 +322,8 @@ export function CalendarListView({
     </ScrollView>
   );
 }
+
+const PLACE_HINT = "Opens it to change the place or its times";
 
 /** A second line's glyph (Calendar v3): the registry's pin, route, Health and tag. */
 const DETAIL_GLYPHS: Record<string, DayframeGlyph> = {
@@ -406,14 +416,21 @@ function ModesLine({ legs, route, theme }: { legs: readonly TripLeg[]; route?: s
   );
 }
 
-function LegRows({ legs, theme, time }: { legs: readonly TripLeg[]; theme: MobileTheme; time: (ms: number) => string }) {
+function LegRows({ legs, onOpenLeg, theme, time }: {
+  legs: readonly TripLeg[]; onOpenLeg?: (index: number) => void; theme: MobileTheme; time: (ms: number) => string;
+}) {
   return (
     <View accessibilityLabel="Legs" style={styles.legs}>
       {legs.map((leg, index) => {
         const minutes = Math.max(0, Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000));
         const detail = legDetail(leg);
         return (
-          <View key={`${leg.startedAt}-${index}`} style={[styles.leg, { backgroundColor: theme.surfaceMuted }]}>
+          // A leg opens its trip's sheet at that leg, to change how you travelled (step 12).
+          <Pressable key={`${leg.startedAt}-${index}`} accessibilityHint={onOpenLeg ? "Opens it to change how you travelled" : undefined}
+            accessibilityLabel={`${legModeLabel(leg)}, ${formatDuration(minutes)}, from ${time(Date.parse(leg.startedAt))}`}
+            accessibilityRole={onOpenLeg ? "button" : undefined} disabled={!onOpenLeg} onPress={() => onOpenLeg?.(index)}
+            style={({ pressed }) => [styles.leg, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}
+            testID={`calendar-list-leg-${index}`}>
             <DayframeIcon color={leg.confidence === "unsure" ? theme.warningText : theme.textSecondary} glyph={DAYFRAME_LEG_MODE_ICONS[leg.mode]} size={16} />
             <View style={styles.text}>
               <Text {...mobileTextProps("itemTitle")} style={[styles.legTitle, { color: leg.confidence === "unsure" ? theme.warningText : theme.textPrimary }]}>
@@ -422,16 +439,17 @@ function LegRows({ legs, theme, time }: { legs: readonly TripLeg[]; theme: Mobil
               {detail ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{detail}</Text> : null}
             </View>
             <Text {...mobileTextProps("numeric")} style={[styles.meta, { color: theme.textSecondary }]}>{time(Date.parse(leg.startedAt))}</Text>
-          </View>
+          </Pressable>
         );
       })}
     </View>
   );
 }
 
-function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, theme, time }: {
+function LocationRow({ answering, checkTitles, onOpenPlace, onToggleCheck, openCheckId, row, theme, time }: {
   /** The "?" opens its question here (step 14 part 3b); otherwise it opens the suggestion. */
-  answering: boolean; checkTitles?: ReadonlyMap<string, string>; onToggleCheck?: (reviewItemId: string) => void;
+  answering: boolean; checkTitles?: ReadonlyMap<string, string>; onOpenPlace?: (place: TimelinePlace, label: string) => void;
+  onToggleCheck?: (reviewItemId: string) => void;
   openCheckId: string | null; row: LocationListRow; theme: MobileTheme; time: (ms: number) => string;
 }) {
   const hint = (id: string) => answering ? (openCheckId === id ? "Hides the question" : "Shows the question") : "Opens it to answer";
@@ -476,15 +494,21 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const open = place.stoppedAt == null;
   const span = open ? `since ${time(row.fromMs)}` : `${time(row.fromMs)}–${time(row.spanEndMs)}`;
+  // Its place and times can be corrected here when it has no "?" (the question is the way in) and no block.
+  const correctablePlace = row.checkIds.length === 0 && place.blockIds.length === 0;
+  const setByYou = place.setByYou ? ", you set this" : "";
   if (row.faint) {
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
     const note = row.unloggedSeconds < 60 ? "logged" : place.role === "home" ? "not logged" : `${formatDuration(row.unloggedSeconds)} not logged`;
+    const openFaint = correctablePlace && onOpenPlace ? () => onOpenPlace(place, label) : undefined;
     return (
-      <View accessible accessibilityLabel={`${label}, ${span}, ${note}`} style={[styles.rowMain, styles.faint]}>
+      <Pressable accessibilityHint={openFaint ? PLACE_HINT : undefined} accessibilityLabel={`${label}, ${span}, ${note}${setByYou}`}
+        accessibilityRole={openFaint ? "button" : undefined} disabled={!openFaint} onPress={openFaint}
+        style={({ pressed }) => [styles.rowMain, styles.faint, { opacity: pressed ? 0.7 : 1 }]} testID={`calendar-list-place-${place.id}`}>
         <View style={[styles.mark, { backgroundColor: theme.surfaceMuted }]}><DayframeIcon color={theme.textMuted} glyph={glyph} size={18} /></View>
         <Text {...mobileTextProps("metadata")} style={[styles.text, styles.meta, { color: theme.textSecondary }]}>{label} · {span}</Text>
         <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textMuted }]}>{note}</Text>
-      </View>
+      </Pressable>
     );
   }
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
@@ -492,8 +516,11 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
   const checkTitle = checkId ? checkTitles?.get(checkId) ?? label : null;
   return (
     <View style={styles.row}>
-      {/* Card B: the place and its times; no "not in a block" line. */}
-      <View accessible accessibilityLabel={`${label}, ${span}`} style={styles.rowMain}>
+      {/* Card B: the place and its times; no "not in a block" line. Step 12: it opens its correction sheet. */}
+      <Pressable accessibilityHint={correctablePlace && onOpenPlace ? PLACE_HINT : undefined} accessibilityLabel={`${label}, ${span}${setByYou}`}
+        accessibilityRole={correctablePlace && onOpenPlace ? "button" : undefined} disabled={!correctablePlace || !onOpenPlace}
+        onPress={() => onOpenPlace?.(place, label)} style={({ pressed }) => [styles.rowMain, { opacity: pressed ? 0.7 : 1 }]}
+        testID={`calendar-list-place-${place.id}`}>
         <View style={[styles.mark, styles.unknownMark, { backgroundColor: theme.surfaceMuted, borderColor: theme.warning }]}>
           <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={18} />
         </View>
@@ -502,7 +529,7 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{span}</Text>
         </View>
         <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textSecondary }]}>{formatDuration(length)}</Text>
-      </View>
+      </Pressable>
       {checkId && onToggleCheck ? (
         // Its "?": the place's suggestion, answered from here (location v4 step 14).
         <Pressable accessibilityHint={hint(checkId)} accessibilityLabel={`Check ${checkTitle}`} accessibilityRole="button"

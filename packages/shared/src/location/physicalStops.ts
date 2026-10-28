@@ -1,5 +1,6 @@
 import type { LocationEngineConfig } from "./config";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, type Coordinate } from "./geo";
+import { motionArrivalMs, type MotionInterval, type MotionTimeline } from "./motionActivity";
 import type { ClassifiedEvidence } from "./types";
 
 /**
@@ -19,6 +20,8 @@ export type PhysicalStop = {
   supportedByVisit: boolean;
   evidenceIds: string[];
   candidatePlaceIds: string[];
+  /** Silences the stop spans because Core Motion saw the device still through them (card J), as [from, to] ms. */
+  stillSpans?: Array<[number, number]>;
 };
 
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
@@ -103,6 +106,63 @@ function geofenceCrossings(accepted: ClassifiedEvidence[]) {
   return transitions.filter((item) => !paired.has(item));
 }
 
+/**
+ * Card J: whether the device stayed still through a silence between two fixes, by Core Motion. Its history
+ * covers the whole silence (no more than the still-silence maximum), with positive stillness: stationary for
+ * a share of it, never long without being stationary, walking about for a bounded share, driving, cycling or
+ * running (at any confidence) for at most a few minutes and only near its edges. iOS reports "unknown" between stationary readings
+ * while a phone sits on a table, so unknown time is allowed, but never for a long spell. No reading of any
+ * accuracy came in it (Codex r1 on #601), and no geofence was crossed.
+ */
+function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: number, config: LocationEngineConfig,
+  crossings: readonly ClassifiedEvidence[], rejectedReadingTimes: readonly number[]) {
+  if (!motion || !(toMs > fromMs) || toMs - fromMs > config.physicalStopStillSilenceMaximumMs) return false;
+  if (motion.coverageFromMs > fromMs || motion.coverageToMs < toMs) return false;
+  let stationaryMs = 0;
+  let walkingMs = 0;
+  let movingMs = 0;
+  let restlessMs = 0;
+  let longestRestlessMs = 0;
+  for (const interval of motion.intervals) {
+    const overlap = Math.max(0, Math.min(interval.toMs, toMs) - Math.max(interval.fromMs, fromMs));
+    if (!overlap) continue;
+    if (interval.activity === "stationary" && interval.confidence !== "low") {
+      stationaryMs += overlap;
+      restlessMs = 0;
+      continue;
+    }
+    if (interval.activity === "walking") walkingMs += overlap;
+    if (["automotive", "cycling", "running"].includes(interval.activity)) {
+      movingMs += overlap;
+      // Parking and pulling away happen at the silence's edges; a drive in its middle is a journey, an errand
+      // the stop must not swallow (Codex r2 on #601).
+      if (Math.min(interval.toMs, toMs - config.physicalStopStillSilenceEdgeMs) > Math.max(interval.fromMs, fromMs + config.physicalStopStillSilenceEdgeMs)) {
+        return false;
+      }
+    }
+    restlessMs += overlap;
+    longestRestlessMs = Math.max(longestRestlessMs, restlessMs);
+  }
+  // A drive (or ride, or run) Core Motion saw begin and end inside the silence is a journey of its own, even
+  // near an edge; movement carried in from before it or out past it is parking and pulling away (Codex r4 on
+  // #601).
+  // Its faster movement is read from the intervals at any confidence, as the block's own modes leave low-confidence
+  // ones out (Codex r5 on #601).
+  const vehicle = (interval: MotionInterval) => ["automotive", "cycling", "running"].includes(interval.activity);
+  if (motion.blocks.some((block) => block.onsetObserved && block.stopObserved && block.startMs > fromMs && block.endMs < toMs &&
+    motion.intervals.some((interval) => vehicle(interval) && interval.toMs > block.startMs && interval.fromMs < block.endMs))) return false;
+  const silenceMs = toMs - fromMs;
+  if (stationaryMs < silenceMs * config.physicalStopStillSilenceStationaryMinimumShare ||
+    walkingMs > silenceMs * config.physicalStopStillSilenceWalkingMaximumShare ||
+    movingMs > config.physicalStopStillSilenceMovingAllowanceMs ||
+    longestRestlessMs > config.physicalStopStillSilenceRestlessMaximumMs) return false;
+  if (rejectedReadingTimes.some((at) => at > fromMs && at < toMs)) return false;
+  return !crossings.some(({ evidence }) => {
+    const at = Date.parse(evidence.occurredAt);
+    return at > fromMs && at < toMs;
+  });
+}
+
 function iso(ms: number) {
   return new Date(ms).toISOString();
 }
@@ -111,7 +171,14 @@ function clamp(value: number, lower: number, upper: number) {
   return Math.min(upper, Math.max(lower, value));
 }
 
-export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: LocationEngineConfig): PhysicalStop[] {
+export function detectPhysicalStops(
+  accepted: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  /** Core Motion's history: a still silence (card J) may join a stop across a longer quiet spell. */
+  motion: MotionTimeline | null = null,
+  /** Readings too broad to accept, at any accuracy: any of them in a silence shows it was not silent (Codex r1, r2 on #601). */
+  rejectedReadingTimes: readonly number[] = []
+): PhysicalStop[] {
   const fixes = independentFixes(accepted, config);
   const slow = (fix: Fix) => fix.accurate && fix.speed != null && fix.speed < config.movementSpeedThresholdMps;
   const vehicle = (fix: Fix) => fix.accurate && fix.speed != null && fix.speed >= config.commuteFasterMovementThresholdMps;
@@ -142,6 +209,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     distanceMeters(centre, callback.point) - callback.accuracy > config.movementDisplacementThresholdMeters);
   const order = new Map(accepted.map((item, index) => [item, index]));
   const crossings = geofenceCrossings(accepted);
+  const still = (fromMs: number, toMs: number) => stillThrough(motion, fromMs, toMs, config, crossings, rejectedReadingTimes);
   const stops: PhysicalStop[] = [];
 
   let index = 0;
@@ -152,18 +220,25 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     }
     const members = [fixes[index]];
     const slowMembers = [fixes[index]];
+    const stillSpans: Array<[number, number]> = [];
     let centre = fixes[index].point;
     let next = index + 1;
     for (; next < fixes.length; next += 1) {
       const fix = fixes[next];
-      if (fix.at - members[members.length - 1].at > config.sparseUnknownContinuityMaximumGapMs || vehicle(fix)) break;
       const lastMemberAt = members[members.length - 1].at;
+      // A longer quiet spell is bridged only when it was truly silent (no fix at all since the last member,
+      // however broad) and the device stayed still through it (card J).
+      const longQuiet = fix.at - lastMemberAt > config.sparseUnknownContinuityMaximumGapMs;
+      const silent = fixes[next - 1] === members[members.length - 1];
+      if (longQuiet && !(silent && still(lastMemberAt, fix.at)) || vehicle(fix)) break;
       if (placedVisits.some((visit) => elsewhere(visit, centre) && visit.to >= lastMemberAt && visit.from <= fix.at)) break;
       // The cluster ends only where departure is evident, the same rule as its
       // boundaries; nearer fixes neither join nor split it, so one stop cannot
       // become overlapping clusters sharing one arrival and departure.
       if (certainlyBeyond(fix, centre, config.movementDisplacementThresholdMeters)) break;
       if (!fix.accurate || distanceMeters(centre, fix.point) > config.physicalStopRadiusMeters) continue;
+      // Only a silence the stop goes on across is covered by it (Codex r1 on #601).
+      if (longQuiet) stillSpans.push([lastMemberAt, fix.at]);
       members.push(fix);
       if (slow(fix)) {
         slowMembers.push(fix);
@@ -173,7 +248,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
       }
     }
     const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond,
-      placedVisits, elsewhere, crossings);
+      placedVisits, elsewhere, crossings, still, motion, stillSpans);
     // Defensive: never emit overlapping stops.
     if (stop && (!stops.length || Date.parse(stop.startedAt) >= Date.parse(stops[stops.length - 1].stoppedAt))) stops.push(stop);
     index = next;
@@ -188,7 +263,10 @@ function evaluateCluster(
   slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean,
   certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean,
   placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean,
-  crossings: readonly ClassifiedEvidence[]
+  crossings: readonly ClassifiedEvidence[],
+  still: (fromMs: number, toMs: number) => boolean,
+  motion: MotionTimeline | null,
+  stillSpans: Array<[number, number]>
 ): PhysicalStop | null {
   const slowMembers = members.filter(slow);
   const centre = accuracyWeightedCentre(slowMembers.map(member => ({
@@ -215,6 +293,20 @@ function evaluateCluster(
     if (elsewhere(visit, centre) && visit.to <= firstSlowAt && firstSlowAt - visit.to <= config.physicalStopBoundaryWindowMs) {
       arrivalAt = Math.max(arrivalAt ?? visit.to, visit.to);
     }
+  }
+  // Card J: the first slow fix comes after a long quiet spell. When the device stayed still through it and
+  // the fix before it is close by, that fix bounds the arrival (the stop began after it); Core Motion's own
+  // arrival, when it saw one, is nearer.
+  // A credible Visit elsewhere in the silence contradicts it (Codex r1 on #601). The stop starts at that
+  // arrival, not halfway to the first slow fix: the device was still from then (Codex r1 on #601).
+  const before = firstIndex > 0 ? fixes[firstIndex - 1] : null;
+  let stillArrivalAt: number | null = null;
+  if (arrivalAt == null && before?.accurate && firstSlowAt - before.at > config.physicalStopBoundaryWindowMs && still(before.at, firstSlowAt) &&
+    distanceMeters(centre, before.point) <= config.sparseUnknownContinuityMaximumDistanceMeters &&
+    !placedVisits.some((visit) => elsewhere(visit, centre) && visit.to >= before.at && visit.from <= firstSlowAt)) {
+    arrivalAt = motionArrivalMs(motion, before.at, firstSlowAt, config) ?? before.at;
+    stillArrivalAt = arrivalAt;
+    stillSpans.push([before.at, firstSlowAt]);
   }
   const lastMemberAt = members[members.length - 1].at;
   const visitDepartureAt = placedVisits
@@ -290,7 +382,7 @@ function evaluateCluster(
   const visitStart = visits.length ? Math.min(...visits.map(({ evidence }) => Date.parse(evidence.occurredAt))) : null;
   const startedAt = visitStart != null
     ? iso(clamp(visitStart, startLower, startUpper))
-    : midpointTimeIso(iso(startLower), iso(startUpper));
+    : stillArrivalAt != null ? iso(stillArrivalAt) : midpointTimeIso(iso(startLower), iso(startUpper));
   const stoppedAt = visitStop != null
     ? iso(clamp(visitStop, stopLower, stopUpper))
     : midpointTimeIso(iso(stopLower), iso(stopUpper));
@@ -328,6 +420,7 @@ function evaluateCluster(
     slowSampleCount: slowMembers.length,
     supportedByVisit: visits.length > 0,
     evidenceIds,
-    candidatePlaceIds
+    candidatePlaceIds,
+    ...(stillSpans.length ? { stillSpans } : {})
   };
 }
