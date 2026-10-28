@@ -57,12 +57,14 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
   it("offers no answers in a build without a backend identity, where the outbox's record is not read (Codex r9 on #582)", () => {
     expect(dashboard).toContain("ownerKey: scopedOwnerKey ?? null,");
-    expect(dashboard).toContain("onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}");
+    expect(dashboard).toContain("onAnswerCheck={scopedOwnerKey\n");
+    expect(dashboard).toContain("? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)\n                    : undefined}");
     expect(dashboard).not.toContain('"local"');
   });
 
   it("opens each \"?\" where its kind is handled, and asks none with a pending change of its own (Codex r10 on #582)", () => {
-    expect(dashboard).toContain("onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(");
+    expect(dashboard).toContain("onOpenCheck={(reviewItemId) => {");
+    expect(dashboard).toContain("router.push(calendarCheckRoute(");
     expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
   });
@@ -93,7 +95,8 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
-    expect(dashboard).toContain("const { outings, folded } = calendarCheckOutings(open, reviewSyncStateIds);");
+    expect(dashboard).toContain("return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };");
+    expect(dashboard).toContain("const { open, outings, folded } = calendarCheckBase;");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
   });

@@ -115,6 +115,20 @@ describe("Location Review evidence cache orchestration", () => {
     expect(cacheLocationReviewEvidence).toHaveBeenCalledTimes(1);
   });
 
+  it("starts its own request when asked for fresh evidence, never joining one already under way (Codex r2 on #600)", async () => {
+    const stale = evidenceFixture();
+    const fresh = { ...evidenceFixture(), segment: { ...stale.segment, startedAt: "2026-10-27T09:10:00.000Z" } };
+    // The earlier read ends only when its request is cancelled.
+    fetchLocationReviewEvidence.mockImplementationOnce((_id: string, { signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("aborted")));
+    })).mockResolvedValueOnce(fresh);
+    const earlier = revalidateLocationReviewEvidence({ ...owner, reviewItemId: stale.reviewItemId });
+    const later = revalidateLocationReviewEvidence({ ...owner, reviewItemId: stale.reviewItemId }, { fresh: true });
+    await expect(later).resolves.toMatchObject({ evidence: fresh, source: "network" });
+    await expect(earlier).rejects.toThrow();
+    expect(fetchLocationReviewEvidence).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the network when no fresh cache row exists", async () => {
     const evidence = evidenceFixture();
     fetchLocationReviewEvidence.mockResolvedValue(evidence);
