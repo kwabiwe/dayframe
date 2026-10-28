@@ -105,6 +105,7 @@ export type LocationEngineConfig = {
   physicalStopStillSilenceStationaryMinimumShare: number;
   physicalStopStillSilenceWalkingMaximumShare: number;
   physicalStopStillSilenceRestlessMaximumMs: number;
+  physicalStopStillSilenceEdgeMs: number;
   physicalStopAbsorbToleranceMs: number;
   motionStillBridgeMs: number;
   motionMinimumBlockMovingMs: number;
@@ -257,7 +258,7 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // A stop may bridge a silence longer than the usual bound when nothing was received in it, no geofence
   // was crossed, and Core Motion covered it with positive stillness: stationary for at least this share,
   // walking for at most this share, driving, cycling or running for at most a few minutes at any confidence
-  // (parking, then pulling away), and never this long without a stationary reading (iOS reports "unknown"
+  // and only near its edges (parking, then pulling away), and never this long without a stationary reading (iOS reports "unknown"
   // between them while a phone lies still; the owner's evening was 42 % stationary, 47 % unknown, 9 %
   // walking, its longest spell without stationary 12 minutes). The readings either side, close together,
   // are one stop. Never longer than this.
@@ -266,6 +267,9 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   physicalStopStillSilenceStationaryMinimumShare: 0.3,
   physicalStopStillSilenceWalkingMaximumShare: 0.25,
   physicalStopStillSilenceRestlessMaximumMs: 1_200_000,
+  // Vehicle movement in a still silence only this near its edges (parking, pulling away); one further in is
+  // a journey, so the silence is no stop.
+  physicalStopStillSilenceEdgeMs: 600_000,
   physicalStopAbsorbToleranceMs: 120_000,
   // Motion & Fitness activity (Core Motion) times journeys; it never places the
   // device. Movement separated by no more than this much stillness (a crossing,

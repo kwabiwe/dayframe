@@ -1120,6 +1120,8 @@ function preprocess(input: LocationEngineInput) {
   const learnedIndex = indexPlacesByLatitude(input.acceptedLearnedPlaces, input.config);
   const rejectedEvidence: RejectedEvidence[] = [];
   const broadReadingTimes: number[] = [];
+  // Every genuine reading rejected as too broad, whatever its accuracy: a still silence has none (card J).
+  const rejectedReadingTimes: number[] = [];
   const seen = new Set<string>();
   const sorted = input.evidence.map((evidence) => ({ ...evidence, metadata: evidence.metadata ? { ...evidence.metadata } : undefined })).sort((a, b) => {
     const timeDifference = Date.parse(a.occurredAt) - Date.parse(b.occurredAt);
@@ -1157,8 +1159,10 @@ function preprocess(input: LocationEngineInput) {
       evidence.horizontalAccuracyMeters > input.config.maxAcceptedHorizontalAccuracyMeters
     ) {
       rejectedEvidence.push({ clientEvidenceId: evidence.clientEvidenceId, kind: evidence.kind, occurredAt: evidence.occurredAt, reason: "accuracy_too_broad" });
-      if ((evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true &&
-        evidence.horizontalAccuracyMeters < input.config.tripUnseenObservedAccuracyMeters) broadReadingTimes.push(occurredAtMs);
+      if ((evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true) {
+        rejectedReadingTimes.push(occurredAtMs);
+        if (evidence.horizontalAccuracyMeters < input.config.tripUnseenObservedAccuracyMeters) broadReadingTimes.push(occurredAtMs);
+      }
       continue;
     }
     let impliedSpeedMetersPerSecond: number | null = null;
@@ -1217,7 +1221,7 @@ function preprocess(input: LocationEngineInput) {
     }
     accepted.push({ evidence: normalisedEvidence, match, impliedSpeedMetersPerSecond });
   }
-  return { accepted, rejectedEvidence, broadReadingTimes };
+  return { accepted, rejectedEvidence, broadReadingTimes, rejectedReadingTimes };
 }
 
 function resolveCorroboratedCoincidentVisits(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
@@ -1539,6 +1543,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const { accepted: acceptedWithMotion, rejectedEvidence } = preprocessed;
   // This run's own broad readings, and those stored earlier as rejected (times only, never positions).
   const broadReadingTimes = [...preprocessed.broadReadingTimes, ...(input.broadReadingTimes ?? [])].sort((a, b) => a - b);
+  const rejectedReadingTimes = [...preprocessed.rejectedReadingTimes, ...(input.rejectedReadingTimes ?? input.broadReadingTimes ?? [])]
+    .sort((a, b) => a - b);
   // Motion & Fitness activity is not a location observation: stays, physical
   // stops and continuity never see it. Only journey timing uses it, below.
   const accepted = acceptedWithMotion.filter((item) => !isMotionEvidence(item.evidence));
@@ -2010,7 +2016,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const absorbed = new Set<StaySegment>();
   const physicalStays: StaySegment[] = [];
   const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
-  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline, broadReadingTimes)) {
+  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline, rejectedReadingTimes)) {
     const stopStartMs = Date.parse(stop.startedAt);
     const stopEndMs = Date.parse(stop.stoppedAt);
     const overlapping = promotedStays.filter((stay) =>

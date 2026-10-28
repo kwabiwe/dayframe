@@ -110,12 +110,12 @@ function geofenceCrossings(accepted: ClassifiedEvidence[]) {
  * Card J: whether the device stayed still through a silence between two fixes, by Core Motion. Its history
  * covers the whole silence (no more than the still-silence maximum), with positive stillness: stationary for
  * a share of it, never long without being stationary, walking about for a bounded share, driving, cycling or
- * running (at any confidence) for at most a few minutes. iOS reports "unknown" between stationary readings
+ * running (at any confidence) for at most a few minutes and only near its edges. iOS reports "unknown" between stationary readings
  * while a phone sits on a table, so unknown time is allowed, but never for a long spell. No reading of any
  * accuracy came in it (Codex r1 on #601), and no geofence was crossed.
  */
 function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: number, config: LocationEngineConfig,
-  crossings: readonly ClassifiedEvidence[], broadReadingTimes: readonly number[]) {
+  crossings: readonly ClassifiedEvidence[], rejectedReadingTimes: readonly number[]) {
   if (!motion || !(toMs > fromMs) || toMs - fromMs > config.physicalStopStillSilenceMaximumMs) return false;
   if (motion.coverageFromMs > fromMs || motion.coverageToMs < toMs) return false;
   let stationaryMs = 0;
@@ -132,7 +132,14 @@ function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: numbe
       continue;
     }
     if (interval.activity === "walking") walkingMs += overlap;
-    if (["automotive", "cycling", "running"].includes(interval.activity)) movingMs += overlap;
+    if (["automotive", "cycling", "running"].includes(interval.activity)) {
+      movingMs += overlap;
+      // Parking and pulling away happen at the silence's edges; a drive in its middle is a journey, an errand
+      // the stop must not swallow (Codex r2 on #601).
+      if (Math.min(interval.toMs, toMs - config.physicalStopStillSilenceEdgeMs) > Math.max(interval.fromMs, fromMs + config.physicalStopStillSilenceEdgeMs)) {
+        return false;
+      }
+    }
     restlessMs += overlap;
     longestRestlessMs = Math.max(longestRestlessMs, restlessMs);
   }
@@ -141,7 +148,7 @@ function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: numbe
     walkingMs > silenceMs * config.physicalStopStillSilenceWalkingMaximumShare ||
     movingMs > config.physicalStopStillSilenceMovingAllowanceMs ||
     longestRestlessMs > config.physicalStopStillSilenceRestlessMaximumMs) return false;
-  if (broadReadingTimes.some((at) => at > fromMs && at < toMs)) return false;
+  if (rejectedReadingTimes.some((at) => at > fromMs && at < toMs)) return false;
   return !crossings.some(({ evidence }) => {
     const at = Date.parse(evidence.occurredAt);
     return at > fromMs && at < toMs;
@@ -161,8 +168,8 @@ export function detectPhysicalStops(
   config: LocationEngineConfig,
   /** Core Motion's history: a still silence (card J) may join a stop across a longer quiet spell. */
   motion: MotionTimeline | null = null,
-  /** Readings too broad to accept: any of them in a silence shows it was not silent (Codex r1 on #601). */
-  broadReadingTimes: readonly number[] = []
+  /** Readings too broad to accept, at any accuracy: any of them in a silence shows it was not silent (Codex r1, r2 on #601). */
+  rejectedReadingTimes: readonly number[] = []
 ): PhysicalStop[] {
   const fixes = independentFixes(accepted, config);
   const slow = (fix: Fix) => fix.accurate && fix.speed != null && fix.speed < config.movementSpeedThresholdMps;
@@ -194,7 +201,7 @@ export function detectPhysicalStops(
     distanceMeters(centre, callback.point) - callback.accuracy > config.movementDisplacementThresholdMeters);
   const order = new Map(accepted.map((item, index) => [item, index]));
   const crossings = geofenceCrossings(accepted);
-  const still = (fromMs: number, toMs: number) => stillThrough(motion, fromMs, toMs, config, crossings, broadReadingTimes);
+  const still = (fromMs: number, toMs: number) => stillThrough(motion, fromMs, toMs, config, crossings, rejectedReadingTimes);
   const stops: PhysicalStop[] = [];
 
   let index = 0;
