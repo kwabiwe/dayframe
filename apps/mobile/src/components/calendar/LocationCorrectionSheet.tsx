@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Reanimated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
@@ -29,8 +29,10 @@ import { mobileTextProps } from "../../lib/mobileTypography";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
   correctable,
+  didntLeave,
   legCorrection,
   notATrip,
+  notHere,
   placeCorrections,
   timesProblem,
   tripCorrections,
@@ -50,9 +52,13 @@ import {
  * Apple Maps (card B part 2).
  */
 
+/** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
 export type LocationCorrectionTarget =
-  | { kind: "place"; place: TimelinePlace; label: string }
-  | { kind: "trip"; trip: TimelineTrip & { route?: string }; legIndex: number | null };
+  | { kind: "place"; place: TimelinePlace; label: string; notHere?: boolean }
+  | { kind: "trip"; trip: TimelineTrip & { route?: string }; legIndex: number | null; didntLeave?: boolean };
+
+type Join = "remove" | "not_here" | "didnt_leave";
+type Confirming = Join | "save_place";
 
 const LEG_MODES: TripLegMode[] = ["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram"];
 const TIME_FIELD_ACCESSIBILITY_ACTIONS = [
@@ -68,6 +74,7 @@ export function LocationCorrectionSheet({
   evidence,
   onDismissed,
   onQueue,
+  onSavePlace,
   places,
   presentationId,
   reduceMotion,
@@ -85,6 +92,11 @@ export function LocationCorrectionSheet({
    * kept: the sheet closes only then, and keeps its draft when they couldn't be (Codex r1 on #602).
    */
   onQueue: (corrections: QueuedCorrection[], options: { closing: boolean }) => Promise<void>;
+  /**
+   * "Save this place" (step 12 part 4, card D item 14): saves the visit's place under this name and sets the
+   * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
+   */
+  onSavePlace?: (name: string) => Promise<void>;
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
@@ -123,8 +135,8 @@ export function LocationCorrectionSheet({
   // Opened at a leg from the List: its Done closes the sheet, unless the person went back to the trip.
   const [leftLeg, setLeftLeg] = useState(false);
   const commitRef = useRef<(() => void) | null>(null);
-  // What Done does: the trip's removal only when "Take it off your day" asked for it, once (Codex r1 on #602).
-  const intent = useRef<"remove" | null>(null);
+  // What Done does: a removal or a join only when its confirm asked for it, once (Codex r1 on #602).
+  const intent = useRef<Join | null>(null);
   // Kept on the phone: the next commit closes the sheet.
   const kept = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -183,10 +195,15 @@ export function LocationCorrectionSheet({
   function apply() {
     if (kept.current) return true;
     if (stale || saving) return false;
-    if (intent.current === "remove" && trip) {
-      const removal = notATrip(trip);
-      if (!removal) return true;
-      keep([removal], "close");
+    if (intent.current) {
+      const change = intent.current === "remove" && trip ? notATrip(trip)
+        : intent.current === "didnt_leave" && trip ? didntLeave(trip)
+          : intent.current === "not_here" && target.kind === "place" ? notHere(target.place) : null;
+      if (!change) {
+        intent.current = null;
+        return false;
+      }
+      keep([change], "close");
       return false;
     }
     if (trip && leg) {
@@ -211,15 +228,29 @@ export function LocationCorrectionSheet({
     return false;
   }
 
-  // "This wasn't a trip" asks once, in place (UIA-005: no system alert): Take it off your day, or Keep it.
-  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
-  function removeTrip() {
-    intent.current = "remove";
+  // "This wasn't a trip", "I wasn't here" and "I didn't leave" each ask once, in place (UIA-005: no system alert).
+  const [confirming, setConfirming] = useState<Confirming | null>(null);
+  const [placeName, setPlaceName] = useState("");
+  function savePlace() {
+    if (!onSavePlace || !placeName.trim() || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    onSavePlace(placeName.trim()).then(() => {
+      setSaving(false);
+      kept.current = true;
+      setCloseKept(true);
+    }, () => {
+      setSaving(false);
+      setSaveError("That place couldn't be saved. Saving a place needs a connection; try again.");
+    });
+  }
+  function confirmJoin(join: Join) {
+    intent.current = join;
     commitRef.current?.();
   }
-  function keepTrip() {
+  function keepAsIs() {
     intent.current = null;
-    setConfirmingRemoval(false);
+    setConfirming(null);
   }
 
   const title = target.kind === "place"
@@ -237,9 +268,9 @@ export function LocationCorrectionSheet({
       actionTone="neutral"
       calendarLayout={false}
       commitRef={commitRef}
-      // A removal needs no valid times; nothing changes while a change is being kept, or once the item left. A
-      // kept change always closes.
-      disabled={!closeKept && (stale || saving || (!leg && !confirmingRemoval && Boolean(problem)))}
+      // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
+      // left. A kept change always closes.
+      disabled={!closeKept && (stale || saving || (!leg && !confirming && Boolean(problem)))}
       onApply={apply}
       onDismissed={onDismissed}
       presentationId={presentationId}
@@ -324,28 +355,56 @@ export function LocationCorrectionSheet({
             {target.kind === "trip" ? "This trip is in a block: its times are the block's." : "This place is in a block. Edit the block instead."}
           </Text>
         ) : null}
-        {trip && !leg && correctable(trip) ? (
+        {target.kind === "place" && (target.notHere || onSavePlace) && !stale ? (
           <Section label="Fix the shape" theme={theme}>
-            {confirmingRemoval ? (
+            {confirming === "not_here" ? (
+              <ConfirmRow confirmLabel="Take it off your day" danger message="It comes off your day, and the trips either side become one."
+                onConfirm={() => confirmJoin("not_here")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="not-here" theme={theme} />
+            ) : confirming === "save_place" ? (
               <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}>
-                <Text {...mobileTextProps("body")} style={[styles.hint, { color: theme.textPrimary }]}>It comes off your day. Nothing else changes.</Text>
+                <TextInput accessibilityLabel="Name of this place" autoFocus onChangeText={setPlaceName} onSubmitEditing={savePlace}
+                  placeholder="Name this place" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+                  style={[styles.nameInput, { backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+                  testID="location-correction-place-name" value={placeName} />
                 <View style={styles.pills}>
-                  <Pressable accessibilityRole="button" onPress={removeTrip} testID="location-correction-remove-trip"
-                    style={({ pressed }) => [styles.pill, { backgroundColor: theme.danger, opacity: pressed ? 0.7 : 1 }]}>
-                    <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.onDanger }]}>Take it off your day</Text>
+                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving || !placeName.trim() }}
+                    disabled={saving || !placeName.trim()} onPress={savePlace} testID="location-correction-confirm-save-place"
+                    style={({ pressed }) => [styles.pill, { backgroundColor: theme.textPrimary, opacity: pressed || !placeName.trim() ? 0.5 : 1 }]}>
+                    <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.surface }]}>Save this place</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" onPress={keepTrip} testID="location-correction-keep-trip"
+                  <Pressable accessibilityRole="button" onPress={keepAsIs} testID="location-correction-keep-save-place"
                     style={({ pressed }) => [styles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
                     <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textPrimary }]}>Keep it</Text>
                   </Pressable>
                 </View>
               </Reanimated.View>
             ) : (
-              <Pressable accessibilityRole="button" onPress={() => setConfirmingRemoval(true)}
-                style={({ pressed }) => [styles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}
-                testID="location-correction-not-a-trip">
-                <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.dangerText }]}>This wasn't a trip</Text>
-              </Pressable>
+              <View style={styles.pills}>
+                {onSavePlace ? (
+                  <ShapeAction label="Save this place" onPress={() => setConfirming("save_place")} testID="location-correction-save-place" theme={theme} />
+                ) : null}
+                {target.notHere ? (
+                  <ShapeAction danger label="I wasn't here" onPress={() => setConfirming("not_here")} testID="location-correction-not-here" theme={theme} />
+                ) : null}
+              </View>
+            )}
+          </Section>
+        ) : null}
+        {trip && !leg && correctable(trip) ? (
+          <Section label="Fix the shape" theme={theme}>
+            {confirming === "didnt_leave" ? (
+              <ConfirmRow confirmLabel="Make it one stay" message="The trip comes off your day, and the visits either side become one stay."
+                onConfirm={() => confirmJoin("didnt_leave")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="didnt-leave" theme={theme} />
+            ) : confirming === "remove" ? (
+              <ConfirmRow confirmLabel="Take it off your day" danger message="It comes off your day. Nothing else changes."
+                onConfirm={() => confirmJoin("remove")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="trip" theme={theme} />
+            ) : (
+              <View style={styles.pills}>
+                {target.kind === "trip" && target.didntLeave ? (
+                  <ShapeAction label="I didn't leave" onPress={() => setConfirming("didnt_leave")} testID="location-correction-didnt-leave" theme={theme} />
+                ) : null}
+                <ShapeAction danger label="This wasn't a trip" onPress={() => setConfirming("remove")} testID="location-correction-not-a-trip" theme={theme} />
+              </View>
             )}
           </Section>
         ) : null}
@@ -360,6 +419,40 @@ export function LocationCorrectionSheet({
         ) : null}
       </Reanimated.View>
     </BottomSheetShell>
+  );
+}
+
+/** A "Fix the shape" pill: neutral, or in the danger colour for one that takes something off the day. */
+function ShapeAction({ danger = false, label, onPress, testID, theme }: {
+  danger?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
+}) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} testID={testID}
+      style={({ pressed }) => [styles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
+      <Text {...mobileTextProps("control")} style={[styles.pillText, { color: danger ? theme.dangerText : theme.textPrimary }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Asked once, in place: the change, or Keep it. */
+function ConfirmRow({ confirmLabel, danger = false, message, onConfirm, onKeep, reduceMotion, testID, theme }: {
+  confirmLabel: string; danger?: boolean; message: string; onConfirm: () => void; onKeep: () => void; reduceMotion: boolean;
+  testID: string; theme: MobileTheme;
+}) {
+  return (
+    <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}>
+      <Text {...mobileTextProps("body")} style={[styles.hint, { color: theme.textPrimary }]}>{message}</Text>
+      <View style={styles.pills}>
+        <Pressable accessibilityRole="button" onPress={onConfirm} testID={testID === "trip" ? "location-correction-remove-trip" : `location-correction-confirm-${testID}`}
+          style={({ pressed }) => [styles.pill, { backgroundColor: danger ? theme.danger : theme.textPrimary, opacity: pressed ? 0.7 : 1 }]}>
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: danger ? theme.onDanger : theme.surface }]}>{confirmLabel}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={onKeep} testID={testID === "trip" ? "location-correction-keep-trip" : `location-correction-keep-${testID}`}
+          style={({ pressed }) => [styles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textPrimary }]}>Keep it</Text>
+        </Pressable>
+      </View>
+    </Reanimated.View>
   );
 }
 
@@ -555,5 +648,6 @@ const styles = StyleSheet.create({
   pill: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 18, borderRadius: DAYFRAME_BLOCKS.radius.pill },
   pills: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   confirm: { gap: 10 },
+  nameInput: { minHeight: 44, borderRadius: 12, paddingHorizontal: 14, fontSize: 17 },
   pillText: { fontSize: 15, fontWeight: "600" }
 });

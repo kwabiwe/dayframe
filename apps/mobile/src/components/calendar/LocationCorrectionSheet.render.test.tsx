@@ -14,6 +14,7 @@ vi.mock("react-native", () => ({
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   Text: "Text",
+  TextInput: "TextInput",
   View: "View",
   useWindowDimensions: () => ({ width: 390, height: 844 }),
   StyleSheet: { create: (s: unknown) => s, absoluteFill: {}, hairlineWidth: 1 }
@@ -72,11 +73,11 @@ const trip: TimelineTrip & { route: string } = {
 const theme = new Proxy({}, { get: (_target, key) => String(key) }) as never;
 
 type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
-function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined)) {
+function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string) => Promise<void>) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
-    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue}
+    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace}
       places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
       stale={stale} target={next} theme={theme} />
   );
@@ -225,6 +226,53 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
     expect(onQueue).toHaveBeenCalledTimes(1);
     expect(onQueue.mock.calls[0][1]).toEqual({ closing: true });
+  });
+
+  // Step 12 part 4.
+  it("takes a place you weren't at off the day once you confirm, and only when the List can join its trips", async () => {
+    const plain = mount({ kind: "place", place, label: "Unknown place" });
+    expect(plain.has("location-correction-not-here")).toBe(false);
+    const sheet = mount({ kind: "place", place, label: "Unknown place", notHere: true });
+    sheet.press("location-correction-not-here");
+    sheet.press("location-correction-keep-not-here");
+    expect(sheet.has("location-correction-confirm-not-here")).toBe(false);
+    expect(sheet.onQueue).not.toHaveBeenCalled();
+    sheet.press("location-correction-not-here");
+    sheet.press("location-correction-confirm-not-here");
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "delete", subject: "place", itemId: "seg-a" } }], { closing: true });
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("makes a trip's two visits one stay when you didn't leave, offered only when the List allows it", async () => {
+    const plain = mount({ kind: "trip", trip, legIndex: null });
+    expect(plain.has("location-correction-didnt-leave")).toBe(false);
+    const sheet = mount({ kind: "trip", trip, legIndex: null, didntLeave: true });
+    sheet.press("location-correction-didnt-leave");
+    sheet.press("location-correction-confirm-didnt-leave");
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "merge", subject: "trip", itemId: "trip-1" } }], { closing: true });
+  });
+
+  it("saves an unknown place under the name typed, closing once it is saved, and says so when it can't be", async () => {
+    const onSavePlace = vi.fn(async (_name: string) => undefined);
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace);
+    sheet.press("location-correction-save-place");
+    expect(sheet.tree.root.findByProps({ testID: "location-correction-confirm-save-place" }).props.disabled).toBe(true);
+    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("  Exampleton Bakery "); });
+    sheet.press("location-correction-confirm-save-place");
+    await sheet.settle();
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery");
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+
+    const failing = mount({ kind: "place", place, label: "Unknown place" }, undefined, vi.fn(async () => { throw new Error("offline"); }));
+    failing.press("location-correction-save-place");
+    act(() => { failing.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
+    failing.press("location-correction-confirm-save-place");
+    await failing.settle();
+    expect(failing.has("location-correction-error")).toBe(true);
+    expect(failing.onDismissed).not.toHaveBeenCalled();
+    expect(mount({ kind: "place", place, label: "Unknown place" }).has("location-correction-save-place")).toBe(false);
   });
 
   // Codex r3 on #602.

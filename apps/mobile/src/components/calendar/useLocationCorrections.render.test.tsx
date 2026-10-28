@@ -7,12 +7,13 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 const mocks = vi.hoisted(() => ({
-  fetchEvidence: vi.fn(async () => ({ segment: { kind: "stay" } })),
+  fetchEvidence: vi.fn(async () => ({ segment: { kind: "stay" }, map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters: 40 } })),
+  createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
   enqueue: vi.fn(async () => []),
   remove: vi.fn(async () => undefined),
   synchronise: vi.fn(async () => undefined)
 }));
-vi.mock("../../lib/api", () => ({ fetchTimelineItemEvidence: mocks.fetchEvidence }));
+vi.mock("../../lib/api", () => ({ createPlace: mocks.createPlace, fetchTimelineItemEvidence: mocks.fetchEvidence }));
 vi.mock("../../lib/timelineCorrectionOutbox", () => ({
   enqueueTimelineCorrections: mocks.enqueue,
   removeTimelineCorrections: mocks.remove,
@@ -47,7 +48,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
     await settle();
-    expect(sheetOf(tree)?.props.evidence).toEqual({ segment: { kind: "stay" } });
+    expect(sheetOf(tree)?.props.evidence).toMatchObject({ segment: { kind: "stay" } });
     await act(async () => { tree.update(<Probe data={null} />); });
     expect(sheetOf(tree)).toBeNull();
     await act(async () => { tree.update(<Probe data={account("b")} />); });
@@ -116,6 +117,20 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { await onQueue([{ request: { kind: "leg_mode" } }], { closing: false }); });
     await act(async () => { tree.update(<Probe data={account("a")} timeline={{ items: [place] } as unknown as LocationTimeline} />); });
     expect(sheetOf(tree)?.props.stale).toBe(true);
+  });
+
+  it("saves an unknown place at the visit's centre, then sets the visit to it (step 12 part 4)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    await settle();
+    const onSavePlace = sheetOf(tree)!.props.onSavePlace as (name: string) => Promise<void>;
+    await act(async () => { await onSavePlace("Exampleton Bakery"); });
+    expect(mocks.createPlace).toHaveBeenCalledWith({ name: "Exampleton Bakery", latitude: 10, longitude: 20, radiusMeters: 75 });
+    expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, [{
+      request: { kind: "place", subject: "place", itemId: "seg-a", placeId: "6f000000-0000-4000-8000-0000000000aa", learnedPlaceId: null },
+      preview: { name: "Exampleton Bakery", role: null }
+    }]);
   });
 });
 

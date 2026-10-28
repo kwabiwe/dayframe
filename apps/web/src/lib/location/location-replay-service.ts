@@ -247,7 +247,9 @@ export async function replayLocationEvidence(
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places,
     output.broadReadingTimes);
   // What the person set on their timeline (location v4 step 11) wins over what the engine derived again.
-  const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt);
+  // Stays "I didn't leave" folded into another: the journey in progress from one leaves the one that stands for it.
+  const joinedStayIds = new Map<string, string>();
+  const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt, joinedStayIds);
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
   const nextStayClientIds = segments
@@ -284,10 +286,15 @@ export async function replayLocationEvidence(
   const engineOrigin = output.openTrip ? output.segmentUpserts.find((segment): segment is StaySegment =>
     segment.kind === "stay" && segment.clientSegmentId === output.openTrip!.fromStaySegmentId) : undefined;
   const engineConfig = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
-  const openTripChanged = await persistOpenTrip(client, session, options.deviceId, output.openTrip ?? null, stayIds, options.processingAt,
+  const joinedOrigin = output.openTrip ? joinedStayIds.get(output.openTrip.fromStaySegmentId) : undefined;
+  const openTrip = output.openTrip && joinedOrigin ? { ...output.openTrip, fromStaySegmentId: joinedOrigin } : output.openTrip ?? null;
+  const openTripChanged = await persistOpenTrip(client, session, options.deviceId, openTrip, stayIds, options.processingAt,
     openTripShownBefore, engineOrigin ? {
       engineStoppedAt: engineOrigin.stoppedAt ?? null,
-      rederive: (persistedStoppedAt) => openTripAgainstDecidedOrigin(output, persistedStoppedAt, engineConfig, options.processingAt)
+      rederive: (persistedStoppedAt) => {
+        const rederived = openTripAgainstDecidedOrigin(output, persistedStoppedAt, engineConfig, options.processingAt);
+        return rederived && joinedOrigin ? { ...rederived, fromStaySegmentId: joinedOrigin } : rederived;
+      }
     } : null);
   // Today's "Travelling since…" line is something the app shows: its change asks the phone to refresh.
   if (openTripChanged && options.semanticChanges) options.semanticChanges.count += 1;

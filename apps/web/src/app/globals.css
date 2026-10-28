@@ -6414,6 +6414,148 @@ dialog.ui-dialog.df-range-custom {
   padding: 12px var(--calendar-compact-horizontal-inset);
 }
 
+/* Card G: Split a block (Toggl's "Split time log", in Dayframe's style). The block as a tall bar in its
+   activity colour, earliest at the top as on the time grid; a line across it with a grip at each end, moved
+   by a vertical minute-step slider over the whole bar; each half's length and times inside it, live. The
+   slider's own thumb is transparent: the mark is drawn where the thumb sits (its centre runs from half a
+   thumb to the bar's height less half a thumb). The global neutral focus ring outlines the bar. */
+/* The split row's single transition owner (as `.df-rf-more-panel`): rows 0fr ↔ 1fr with opacity, from
+   closed on entry; at once with Reduce Motion. */
+.calendar-compact-split-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease-out;
+}
+
+.calendar-compact-split-wrap[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+@starting-style {
+  .calendar-compact-split-wrap[data-open="true"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.calendar-compact-split-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-compact-split-wrap { transition: none; }
+}
+
+.calendar-compact-split {
+  display: grid;
+  gap: 10px;
+  padding: 12px var(--calendar-compact-horizontal-inset) 0;
+}
+
+.calendar-compact-split-bar {
+  --block: var(--surface-muted);
+  --on-block: var(--text-primary);
+  --split-thumb: 20px;
+  --split-y: calc(var(--split-thumb) / 2 + (100% - var(--split-thumb)) * var(--split-at));
+  position: relative;
+  height: 144px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.calendar-compact-split-half {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Each half's label centred in its half (it meets the line only when that half is a few minutes). */
+.calendar-compact-split-half.is-first { top: max(2px, calc(var(--split-y) / 2 - 9px)); }
+.calendar-compact-split-half.is-second { top: min(calc(100% - 20px), calc(var(--split-y) + (100% - var(--split-y)) / 2 - 9px)); }
+.calendar-compact-split-half.is-first.is-beside { top: calc(var(--split-y) + 8px); }
+.calendar-compact-split-half.is-second.is-beside { top: calc(var(--split-y) - 26px); }
+
+/* The line, with a grip at each end. */
+.calendar-compact-split-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--split-y);
+  height: 2px;
+  margin-top: -1px;
+  background: var(--on-block);
+  pointer-events: none;
+}
+
+.calendar-compact-split-mark::before,
+.calendar-compact-split-mark::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  width: 20px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--on-block);
+}
+
+.calendar-compact-split-mark::before { left: 6px; }
+.calendar-compact-split-mark::after { right: 6px; }
+
+/* Two classes: above the editor's own `.calendar-compact-editor-panel input` field look. */
+.calendar-compact-split .calendar-compact-split-line {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  writing-mode: vertical-lr;
+  direction: ltr;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: ns-resize;
+}
+
+.calendar-compact-split-line::-webkit-slider-runnable-track { width: 100%; height: 100%; background: transparent; }
+.calendar-compact-split-line::-moz-range-track { width: 100%; height: 100%; background: transparent; }
+
+.calendar-compact-split-line::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--split-thumb);
+  height: var(--split-thumb);
+  background: transparent;
+}
+
+.calendar-compact-split-line::-moz-range-thumb {
+  width: var(--split-thumb);
+  height: var(--split-thumb);
+  border: 0;
+  background: transparent;
+}
+
+.calendar-compact-split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .calendar-compact-editor-fields label,
 .calendar-compact-editor-description {
   display: grid;
@@ -12525,6 +12667,24 @@ dialog.ui-dialog.df-palette {
   margin-left: 8px;
 }
 
+/* Card G: with Split and Duplicate a finished block has five icons. On a phone that leaves the heading
+   no room, so the icons take their own row at the top right and the heading runs full width under them. */
+@media (max-width: 480px) {
+  .calendar-compact-editor-header.df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) > div:first-child {
+    order: 1;
+    flex: 1 0 100%;
+  }
+
+  .df-ed-head:has(.calendar-compact-editor-icons > :nth-child(4)) .calendar-compact-editor-icons {
+    margin-left: auto;
+  }
+}
+
 .calendar-compact-editor-panel .calendar-compact-editor-fields {
   gap: 12px;
   padding: 12px var(--calendar-compact-horizontal-inset);
@@ -14488,6 +14648,46 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   color: var(--danger-text);
   font-size: 13px;
+}
+
+.location-correction-shape {
+  display: grid;
+  justify-items: start;
+}
+
+/* "I wasn't here", asked once in place: it fades in where the button was (step 12 part 4). */
+.location-correction-confirm {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  transition: opacity 160ms ease;
+}
+
+@starting-style {
+  .location-correction-confirm {
+    opacity: 0;
+  }
+}
+
+.location-correction-confirm p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.location-correction-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .location-correction-confirm {
+    transition: none;
+  }
 }
 
 @media (max-width: 420px) {

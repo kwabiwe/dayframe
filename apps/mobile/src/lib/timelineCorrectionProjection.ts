@@ -1,4 +1,4 @@
-import { mergeSameModeLegs, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
+import { mergeSameModeLegs, sameKnownPlace, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import type { AcknowledgedTimelineCorrection, PendingTimelineCorrection } from "./timelineCorrectionOutbox";
 
 /**
@@ -27,8 +27,16 @@ export function projectTimelineCorrections(
   if (waiting.length === 0) return timeline;
   let items: Array<TimelinePlace | TimelineTrip> = timeline.items;
   for (const { request, preview } of waiting) {
-    if (request.kind === "delete") {
+    if (request.kind === "delete" && request.subject === "trip") {
       items = items.filter((item) => !(item.kind === "trip" && item.id === request.itemId));
+      continue;
+    }
+    if (request.kind === "delete") {
+      items = withoutPlace(items, request.itemId);
+      continue;
+    }
+    if (request.kind === "merge") {
+      items = withoutTrip(items, request.itemId);
       continue;
     }
     items = items.map((item): TimelinePlace | TimelineTrip => {
@@ -65,3 +73,43 @@ export function projectTimelineCorrections(
   }
   return { ...timeline, items };
 }
+
+/**
+ * "I wasn't here", as the server makes it (step 12 part 4): the trips into and out of the place become one,
+ * and the place and the trip out leave; without a trip on both sides nothing changes (the server refuses it).
+ */
+function withoutPlace(items: Array<TimelinePlace | TimelineTrip>, placeId: string) {
+  const before = items.find((item): item is TimelineTrip => item.kind === "trip" && item.toId === placeId);
+  const after = items.find((item): item is TimelineTrip => item.kind === "trip" && item.fromId === placeId);
+  if (!items.some((item) => item.kind === "place" && item.id === placeId) || !before || !after || before === after) return items;
+  const joined: TimelineTrip = {
+    ...before,
+    stoppedAt: after.stoppedAt,
+    toId: after.toId,
+    mode: before.mode && before.mode === after.mode ? before.mode : null,
+    legs: mergeSameModeLegs([...before.legs, ...after.legs]),
+    stopIds: [...before.stopIds, ...after.stopIds],
+    distanceMeters: before.distanceMeters == null || after.distanceMeters == null ? null : before.distanceMeters + after.distanceMeters,
+    confidence: "low",
+    setByYou: true
+  };
+  return items.flatMap((item) => item === before ? [joined] : item === after || (item.kind === "place" && item.id === placeId) ? [] : [item]);
+}
+
+/**
+ * "I didn't leave", as the server makes it: the two visits either side, to one saved or learned place, become
+ * one stay, the trip and the second visit leave, and a trip that left the second visit leaves the first.
+ */
+function withoutTrip(items: Array<TimelinePlace | TimelineTrip>, tripId: string) {
+  const trip = items.find((item): item is TimelineTrip => item.kind === "trip" && item.id === tripId);
+  const first = trip && items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.fromId);
+  const second = trip && items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.toId);
+  if (!trip || !first || !second || first === second || !sameKnownPlace(first, second)) return items;
+  return items.flatMap((item): Array<TimelinePlace | TimelineTrip> => {
+    if (item === first) return [{ ...first, stoppedAt: second.stoppedAt, setByYou: true }];
+    if (item === trip || item === second) return [];
+    if (item.kind === "trip" && item.fromId === second.id) return [{ ...item, fromId: first.id }];
+    return [item];
+  });
+}
+

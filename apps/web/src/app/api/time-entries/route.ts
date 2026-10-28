@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import {
   createManualEntry,
+  duplicateFinishedEntry,
   processActivityEvent,
   splitActiveEntry,
+  splitFinishedEntry,
+  TimeEntryConflictError,
+  TimeEntryNotFoundError,
+  TimeEntryValidationError,
   TimerMutationBusyError,
   TimerReplacementWindowError,
   TimerStopBeforeStartError
@@ -14,16 +19,20 @@ import {
   ManualTimeEntryValidationError,
   validateManualTimeEntryWindow
 } from "@/lib/manual-time-entry";
-import { TagNameSchema } from "@dayframe/shared";
+import { getTimeEntryById } from "@/lib/queries";
+import { ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
+import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 export async function POST(request: Request) {
+  let session: Awaited<ReturnType<typeof resolveRequestSession>> | null = null;
+  let entryId: string | null = null;
   try {
-    const session = await resolveRequestSession(request);
+    session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, or split.");
+      throw new BadRequestError("mode must be one of start, stop, manual, split, or duplicate.");
     }
     const mode = modeResult.data;
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
@@ -70,6 +79,22 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 201 });
     }
 
+    // Card G: Split (at `splitAt`) or Duplicate a finished block, `entryId`, with every detail, in one
+    // transaction; `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id
+    // header makes a retry safe.
+    const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
+    if (finishedEntryId) {
+      entryId = finishedEntryId;
+      const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
+      const clientCommandId = requestClientCommandId(request);
+      const result = mode === "split"
+        ? await splitFinishedEntry(finishedEntryId, { splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId }, session)
+        : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
+      scheduleLiveActivityNotification(session);
+      return NextResponse.json({ ok: true, ...result }, { status: result.replayed ? 200 : 201 });
+    }
+    if (mode === "duplicate") throw new BadRequestError("entryId is required.");
+
     if (mode === "split") {
       await splitActiveEntry(session);
       scheduleLiveActivityNotification(session);
@@ -101,6 +126,16 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    if (error instanceof TimeEntryNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: 404 });
+    }
+    if (error instanceof TimeEntryConflictError && session && entryId) {
+      const entry = await getTimeEntryById(session, entryId);
+      return NextResponse.json({ error: error.message, code: "time_entry_details_conflict", entry }, { status: 409 });
+    }
+    if (error instanceof TimeEntryValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -166,6 +201,20 @@ function requiredString(value: unknown, field: string) {
   const next = optionalString(value);
   if (!next) throw new BadRequestError(`${field} is required.`);
   return next;
+}
+
+function requiredTimestamp(value: unknown, field: string) {
+  const next = optionalTimestamp(value, field);
+  if (!next) throw new BadRequestError(`${field} is required.`);
+  return next;
+}
+
+function requestClientCommandId(request: Request) {
+  const header = request.headers.get(TIME_ENTRY_CLIENT_COMMAND_ID_HEADER);
+  if (header === null) return undefined;
+  const parsed = TimeEntryClientCommandIdSchema.safeParse(header);
+  if (!parsed.success) throw new BadRequestError(`${TIME_ENTRY_CLIENT_COMMAND_ID_HEADER} is malformed.`);
+  return parsed.data;
 }
 
 function optionalTimestamp(value: unknown, field: string) {

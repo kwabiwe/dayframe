@@ -7,9 +7,9 @@ import {
   type TimelinePlace,
   type TimelineTrip
 } from "@dayframe/shared";
-import { fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
+import { createPlace, fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
 import type { MobileTheme } from "../../lib/mobileTheme";
-import type { QueuedCorrection } from "../../lib/locationCorrectionDraft";
+import { canSayDidntLeave, canSayNotHere, type QueuedCorrection } from "../../lib/locationCorrectionDraft";
 import {
   enqueueTimelineCorrections,
   removeTimelineCorrections,
@@ -97,10 +97,13 @@ export function useLocationCorrections({
   const target = useMemo<LocationCorrectionTarget | null>(() => {
     if (!open) return null;
     const item = timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind);
-    if (item?.kind === "place" && open.kind === "place") return { kind: "place", place: item, label: open.label };
+    if (item?.kind === "place" && open.kind === "place") {
+      return { kind: "place", place: item, label: open.label, notHere: canSayNotHere(item, timeline!.items) };
+    }
     if (item?.kind === "trip" && open.kind === "trip") {
       const names = new Map(timeline!.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
-      return { kind: "trip", trip: { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` }, legIndex: open.legIndex };
+      return { kind: "trip", trip: { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` },
+        legIndex: open.legIndex, didntLeave: canSayDidntLeave(item, timeline!.items) };
     }
     return null;
   }, [open, timeline]);
@@ -130,6 +133,25 @@ export function useLocationCorrections({
     if (closing) setClosingId(presentationId);
     void synchroniseTimelineCorrections({ owner, force: true }).catch(() => undefined);
   }, [ownerKey, userId, workspaceId]);
+
+  // "Save this place" (step 12 part 4, card D item 14): a saved place at the visit's centre, under the name the
+  // person typed, then the visit set to it. Saving a place needs the server; the sheet says so if it fails.
+  const shownCentre = shownEvidence && shownEvidence !== "unavailable" ? shownEvidence.map.centre : null;
+  const shownRadius = shownEvidence && shownEvidence !== "unavailable" ? shownEvidence.map.stayRadiusMeters : null;
+  const savePlace = useCallback(async (presentationId: number, sheetOwnerKey: string, place: TimelinePlace, name: string) => {
+    if (!userId || !workspaceId || !shownCentre || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) {
+      throw new Error("The place can't be saved now.");
+    }
+    const [longitude, latitude] = shownCentre.coordinates;
+    const created = await createPlace({ name, latitude, longitude, radiusMeters: Math.round(Math.min(250, Math.max(75, shownRadius ?? 100))) });
+    const placeId = (created as { place?: { id?: string } })?.place?.id;
+    if (!placeId) throw new Error("The place wasn't saved.");
+    if (currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
+    await queue(presentationId, sheetOwnerKey, [{
+      request: { kind: "place", subject: "place", itemId: place.id, placeId, learnedPlaceId: null },
+      preview: { name, role: null }
+    }], true);
+  }, [ownerKey, queue, shownCentre, shownRadius, userId, workspaceId]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
@@ -169,6 +191,8 @@ export function useLocationCorrections({
       evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
       onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing)}
+      onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
+        ? (name) => savePlace(open.id, open.ownerKey, shown.place, name) : undefined}
       places={places}
       presentationId={open.id}
       reduceMotion={reduceMotion}

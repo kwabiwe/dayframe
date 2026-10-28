@@ -135,4 +135,41 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: null, learnedPlaceId: "00000000-0000-4000-8000-000000000201" });
     release({ ok: true, json: async () => ({ ok: true }) });
   });
+
+  it("takes a place you weren't at off the day, joining the trips either side, once you confirm (step 12 part 4)", async () => {
+    const onCorrected = vi.fn();
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={onCorrected} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place", joinsTrips: true }} />);
+    fireEvent.click(screen.getByRole("button", { name: "I wasn't here" }));
+    expect(clientFetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("button", { name: "Take it off your day" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "I wasn't here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take it off your day" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(sent()).toEqual([{ kind: "delete", subject: "place", itemId: "seg-cafe" }]);
+    expect(onCorrected).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers I wasn't here only between two trips, and never for a place you are still at", () => {
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    expect(screen.queryByRole("button", { name: "I wasn't here" })).toBeNull();
+    cleanup();
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place({ stoppedAt: null }), label: "Unknown place", joinsTrips: true }} />);
+    expect(screen.queryByRole("button", { name: "I wasn't here" })).toBeNull();
+  });
+
+  it("says why the server refused to take a place off the day, and keeps the dialog open", async () => {
+    clientFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: "A trip next to this place is already in a block. Edit the block instead." }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place", joinsTrips: true }} />);
+    fireEvent.click(screen.getByRole("button", { name: "I wasn't here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take it off your day" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("already in a block");
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

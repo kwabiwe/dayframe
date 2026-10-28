@@ -1,7 +1,8 @@
 import type pg from "pg";
 import {
-  applyTimelineCorrections,
+  applyTimelineCorrectionsWithJoins,
   mergeSameModeLegs,
+  sameKnownPlace,
   TimelineCorrectionRequestSchema,
   type LocationSegment,
   type TimelineCorrection,
@@ -20,7 +21,9 @@ import { recordReviewTitleHistory } from "./review-title-history";
  * changes. Replay applies every active correction again (`activeTimelineCorrections` +
  * `applyTimelineCorrections`), so replay never undoes what the person set. A place's place or times, or a
  * trip's times or existence, are not corrected here once it has a block: its block is what the person
- * edits. A leg's mode is, on any trip. Never coordinates.
+ * edits. A leg's mode is, on any trip. Step 12 part 4: a place the person wasn't at joins the trips either
+ * side into one ("I wasn't here"), and a trip they didn't take joins the two visits to one place either side
+ * ("I didn't leave"); neither when a block was made from any item it joins. Never coordinates.
  */
 
 export class TimelineCorrectionError extends Error {
@@ -61,9 +64,13 @@ export async function activeTimelineCorrections(client: pg.PoolClient, session: 
   return result.rows.map(correctionFromRow);
 }
 
-/** Replay's segments with the person's corrections applied; unchanged when there are none. */
+/**
+ * Replay's segments with the person's corrections applied; unchanged when there are none. `joinedStayIds`, when
+ * given, is filled with the stays "I didn't leave" folded into another (id → the one that stands for it).
+ */
 export async function withTimelineCorrections(
-  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], processingAt: string
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], processingAt: string,
+  joinedStayIds?: Map<string, string>
 ): Promise<LocationSegment[]> {
   if (!segments.length) return segments;
   const from = segments.reduce((min, segment) => Math.min(min, Date.parse(segment.startedAt)), Number.POSITIVE_INFINITY);
@@ -88,7 +95,10 @@ export async function withTimelineCorrections(
   const usable = corrections.filter((correction) => correction.kind !== "place" ||
     ((!correction.target.placeId || known.has(correction.target.placeId)) &&
       (!correction.target.learnedPlaceId || known.has(correction.target.learnedPlaceId))));
-  return usable.length ? applyTimelineCorrections(segments, usable, nowMs) : segments;
+  if (!usable.length) return segments;
+  const applied = applyTimelineCorrectionsWithJoins(segments, usable, nowMs);
+  for (const [from, to] of applied.joinedStayIds) joinedStayIds?.set(from, to);
+  return applied.segments;
 }
 
 type SegmentRow = {
@@ -151,7 +161,9 @@ function targetFor(request: TimelineCorrectionRequest): TimelineCorrection["targ
     case "place": return { placeId: request.placeId, learnedPlaceId: request.learnedPlaceId };
     case "times": return { startedAt: iso(request.startedAt), stoppedAt: iso(request.stoppedAt) };
     case "leg_mode": return { mode: request.mode };
-    case "delete": return {};
+    case "delete":
+    case "merge":
+    case "log_place": return {};
   }
 }
 
@@ -169,6 +181,95 @@ async function assertOwnPlace(client: pg.PoolClient, session: RequestSession, re
   }
 }
 
+type TripRow = SegmentRow & {
+  clientSegmentId: string; fromStayId: string; toStayId: string; toPlaceId: string | null;
+  stopLowerBoundAt: Date | null; stopUpperBoundAt: Date | null; routeDistance: number | null; routeSampleCount: number;
+  maxGapSeconds: number | null; continuityStatus: string;
+};
+type StayRow = SegmentRow & { clientSegmentId: string; placeId: string | null; learnedPlaceId: string | null };
+
+/** The trip into (`to`) or out of (`from`) a stay row, locked. */
+async function lockTripAt(client: pg.PoolClient, session: RequestSession, stayRowId: string, end: "from" | "to") {
+  // Trusted column name from `end`.
+  const result = await client.query<TripRow>(
+    `select id, client_segment_id as "clientSegmentId", started_at as "startedAt", stopped_at as "stoppedAt",
+            created_from_event_id as "createdFromEventId", metadata, from_stay_segment_id as "fromStayId",
+            to_stay_segment_id as "toStayId", to_place_id as "toPlaceId", stop_lower_bound_at as "stopLowerBoundAt",
+            stop_upper_bound_at as "stopUpperBoundAt", route_distance_m as "routeDistance", route_sample_count as "routeSampleCount",
+            max_gap_seconds as "maxGapSeconds", continuity_status as "continuityStatus"
+       from commute_segments
+      where workspace_id = $1 and user_id = $2 and ${end}_stay_segment_id = $3 and status <> 'superseded'
+      order by updated_at desc
+      limit 1
+      for update`,
+    [session.workspaceId, session.userId, stayRowId]);
+  return result.rows[0] ?? null;
+}
+
+/** A stay row by its row id, locked. */
+async function lockStayRow(client: pg.PoolClient, session: RequestSession, id: string) {
+  const result = await client.query<StayRow>(
+    `select id, client_segment_id as "clientSegmentId", started_at as "startedAt", stopped_at as "stoppedAt",
+            created_from_event_id as "createdFromEventId", metadata, place_id as "placeId", learned_place_id as "learnedPlaceId"
+       from stay_segments
+      where workspace_id = $1 and user_id = $2 and id = $3 and status <> 'superseded'
+      for update`,
+    [session.workspaceId, session.userId, id]);
+  return result.rows[0] ?? null;
+}
+
+/** What a place delete or trip merge joins, checked: the items either side, never one with a block. */
+async function joinedItems(client: pg.PoolClient, session: RequestSession, request: TimelineCorrectionRequest, row: SegmentRow) {
+  if (request.kind === "delete" && request.subject === "place") {
+    const before = await lockTripAt(client, session, row.id, "to");
+    const after = await lockTripAt(client, session, row.id, "from");
+    if (!before || !after || before.id === after.id) {
+      throw new TimelineCorrectionError("Only a place with a trip before and after it can come off your day.", 422);
+    }
+    for (const trip of [before, after]) {
+      if (await hasBlock(client, session, trip.clientSegmentId, trip)) {
+        throw new TimelineCorrectionError("A trip next to this place is already in a block. Edit the block instead.", 409);
+      }
+    }
+    return { kind: "place_delete" as const, before, after };
+  }
+  if (request.kind === "merge") {
+    const ends = (await client.query<{ fromStayId: string; toStayId: string }>(
+      `select from_stay_segment_id as "fromStayId", to_stay_segment_id as "toStayId" from commute_segments
+        where id = $1 and workspace_id = $2 and user_id = $3`, [row.id, session.workspaceId, session.userId])).rows[0];
+    const first = ends ? await lockStayRow(client, session, ends.fromStayId) : null;
+    const second = ends ? await lockStayRow(client, session, ends.toStayId) : null;
+    if (!first || !second || first.id === second.id || !sameKnownPlace(first, second)) {
+      throw new TimelineCorrectionError("Only a trip between two visits to one of your places can be one stay.", 422);
+    }
+    for (const stay of [first, second]) {
+      if (await hasBlock(client, session, stay.clientSegmentId, stay)) {
+        throw new TimelineCorrectionError("A visit either side is already in a block. Edit the block instead.", 409);
+      }
+    }
+    return { kind: "trip_merge" as const, first, second };
+  }
+  return null;
+}
+
+/** Retires the open Review suggestions of these segment rows, and their events, with the person's reason. */
+async function retireSuggestions(client: pg.PoolClient, session: RequestSession, segmentRowIds: string[], note: string) {
+  const retired = await client.query<{ sourceEventId: string | null }>(
+    `update review_items
+        set status = 'ignored', resolved_at = now(), ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}',
+            notes = concat_ws(' ', nullif(notes, ''), $4::text)
+      where workspace_id = $1 and user_id = $2 and location_segment_id = any($3::uuid[]) and status = 'open'
+      returning event_id as "sourceEventId"`,
+    [session.workspaceId, session.userId, segmentRowIds, note]);
+  const eventIds = retired.rows.flatMap((item) => item.sourceEventId ? [item.sourceEventId] : []);
+  if (eventIds.length) {
+    await client.query(
+      `update activity_events set review_status = 'ignored'
+        where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and review_status = 'needs_review'`,
+      [session.workspaceId, session.userId, eventIds]);
+  }
+}
+
 /** Records one correction and applies it to the segment now; replay applies it again from then on. */
 export async function correctLocationTimeline(input: unknown, session: RequestSession) {
   const request = TimelineCorrectionRequestSchema.parse(input);
@@ -181,9 +282,9 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     // the two attempts; the activity_events client id index backs it.
     const clientEventId = request.clientCorrectionId ? `timeline_correction:${request.clientCorrectionId}` : null;
     if (clientEventId) {
-      const earlier = await client.query<CorrectionRow | { id: null }>(
+      const earlier = await client.query<(CorrectionRow | { id: null }) & { eventId: string; eventKind: string | null }>(
         `select c.id, c.subject, c.kind, c.span_started_at as "spanStartedAt", c.span_stopped_at as "spanStoppedAt", c.target,
-                c.created_at as "createdAt"
+                c.created_at as "createdAt", e.id as "eventId", e.raw_payload ->> 'kind' as "eventKind"
            from activity_events e
            left join location_timeline_corrections c
              on c.created_from_event_id = e.id and c.workspace_id = e.workspace_id and c.user_id = e.user_id
@@ -191,6 +292,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         [session.workspaceId, session.userId, clientEventId]);
       const found = earlier.rows[0];
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
+      // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
+      if (found && found.eventKind === "log_place" && request.kind === "log_place") {
+        return { ok: true as const, logged: { entryIds: await entriesFromEvent(client, session, found.eventId) } };
+      }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
       if (found) throw new TimelineCorrectionError("That change was already used for something else. Try again.", 409);
     }
@@ -203,6 +308,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);
     }
+    if (request.kind === "log_place") return logPlace(client, session, request, row, clientEventId);
+    const joined = await joinedItems(client, session, request, row);
     const itemStartedAt = iso(row.startedAt);
     const itemStoppedAt = iso(row.stoppedAt ?? new Date());
     if (request.kind === "place") await assertOwnPlace(client, session, request);
@@ -240,7 +347,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         where workspace_id = $2 and user_id = $3 and id <> $1 and replaced_at is null
           and subject = $4 and kind = $5 and span_started_at = $6::timestamptz and span_stopped_at = $7::timestamptz`,
       [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
-    await applyToSegment(client, session, table, row, request, legIndex, span);
+    if (joined) await applyJoin(client, session, row, joined);
+    else await applyToSegment(client, session, table, row, request, legIndex, span);
     return { ok: true as const, correction };
   });
 }
@@ -348,3 +456,166 @@ async function applyToSegment(
     }
   }
 }
+
+/**
+ * "I wasn't here": the trip in takes the trip out's end, both trips' legs and stops, and the place and the
+ * trip out leave the day. "I didn't leave": the first visit runs to the second's end, and the trip and the
+ * second visit leave it; a trip that left the second visit leaves the first. Replay makes the same from the
+ * correction (`applyTimelineCorrections`).
+ */
+async function applyJoin(
+  client: pg.PoolClient, session: RequestSession, row: SegmentRow, joined: NonNullable<Awaited<ReturnType<typeof joinedItems>>>
+) {
+  const owner = [session.workspaceId, session.userId];
+  const supersede = async (table: "stay_segments" | "commute_segments", ids: string[]) => client.query(
+    // Trusted table name.
+    `update ${table} set status = 'superseded', updated_at = now() where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])`,
+    [...owner, ids]);
+  if (joined.kind === "place_delete") {
+    const { before, after } = joined;
+    const legsOf = (trip: TripRow) => Array.isArray(trip.metadata?.legs) ? trip.metadata.legs as TripLeg[] : [];
+    const stopsOf = (trip: TripRow) => Array.isArray(trip.metadata?.stops) ? trip.metadata.stops as unknown[] : [];
+    const legs = mergeSameModeLegs([...legsOf(before), ...legsOf(after)]);
+    const stops = [...stopsOf(before), ...stopsOf(after)];
+    const kept: Record<string, unknown> = { ...before.metadata };
+    // Its classification described the trip in alone (a round trip, say): the one trip has none (Codex r2 on #603).
+    for (const key of ["legs", "stops", "travelMode", "motionSupported", "motionTimed", "qualificationReason"]) delete kept[key];
+    const { travelMode, motionSupported, motionTimed } = before.metadata ?? {};
+    const metadata = {
+      ...kept,
+      ...(legs.length ? { legs } : {}),
+      ...(stops.length ? { stops } : {}),
+      ...(travelMode && travelMode === after.metadata?.travelMode ? { travelMode } : {}),
+      ...(motionSupported || after.metadata?.motionSupported ? { motionSupported: true } : {}),
+      ...(motionTimed || after.metadata?.motionTimed ? { motionTimed: true } : {}),
+      setByYou: true,
+      // Later corrections of the one trip are tied to the trip in's span, as replay ties them (Codex r1 on #603).
+      correctionSpan: correctionSpan(before, iso(before.startedAt), iso(before.stoppedAt ?? new Date()))
+    };
+    await client.query(
+      `update commute_segments
+          set stopped_at = $4, stop_lower_bound_at = $5, stop_upper_bound_at = $6, to_stay_segment_id = $7, to_place_id = $8,
+              route_distance_m = case when route_distance_m is null or $9::double precision is null then null else route_distance_m + $9 end,
+              straight_line_distance_m = null, route_sample_count = route_sample_count + $10,
+              max_gap_seconds = greatest(max_gap_seconds, $11),
+              continuity_status = case when continuity_status = 'continuous' and $12 = 'continuous' then 'continuous' else 'uncertain_gap' end,
+              confidence = 'low', metadata = $13::jsonb, updated_at = now()
+        where id = $3 and workspace_id = $1 and user_id = $2`,
+      [...owner, before.id, after.stoppedAt, after.stopLowerBoundAt, after.stopUpperBoundAt, after.toStayId, after.toPlaceId,
+        after.routeDistance, after.routeSampleCount, after.maxGapSeconds ?? 0, after.continuityStatus, JSON.stringify(metadata)]);
+    await supersede("stay_segments", [row.id]);
+    await supersede("commute_segments", [after.id]);
+    // The trip in's suggestion described another trip (its route, title and activity): replay offers the one
+    // trip afresh, reopening it with what the one trip is (Codex r1 on #603).
+    await retireSuggestions(client, session, [row.id, after.id, before.id], "You said you weren't here.");
+    return;
+  }
+  const { first, second } = joined;
+  await client.query(
+    // Still open, closed or finalised as the second visit is; tied to the first visit's span, as replay ties it
+    // (Codex r1 on #603).
+    `update stay_segments s
+        set stopped_at = n.stopped_at, stop_lower_bound_at = n.stop_lower_bound_at, stop_upper_bound_at = n.stop_upper_bound_at,
+            status = n.status, sample_count = s.sample_count + n.sample_count,
+            metadata = s.metadata || jsonb_build_object('setByYou', true, 'correctionSpan', $5::jsonb)
+              || case when n.metadata ? 'openTrip' then jsonb_build_object('openTrip', n.metadata -> 'openTrip') else '{}'::jsonb end,
+            updated_at = now()
+       from stay_segments n
+      where s.id = $3 and n.id = $4 and s.workspace_id = $1 and s.user_id = $2 and n.workspace_id = $1 and n.user_id = $2`,
+    [...owner, first.id, second.id, JSON.stringify(correctionSpan(first, iso(first.startedAt), iso(first.stoppedAt ?? new Date())))]);
+  await client.query(
+    `update commute_segments set from_stay_segment_id = $3, updated_at = now()
+      where workspace_id = $1 and user_id = $2 and from_stay_segment_id = $4 and status <> 'superseded' and id <> $5`,
+    [...owner, first.id, second.id, row.id]);
+  await supersede("commute_segments", [row.id]);
+  await supersede("stay_segments", [second.id]);
+  // The journey in progress moves to the one stay rather than being on both (Codex r2 on #603).
+  await client.query(`update stay_segments set metadata = metadata - 'openTrip' where id = $3 and workspace_id = $1 and user_id = $2`,
+    [...owner, second.id]);
+  await retireSuggestions(client, session, [row.id, second.id], "You said you didn't leave.");
+  // The first visit's open suggestion offers the one stay; while the one stay is still open, replay offers it
+  // again once it ends (Codex r1 on #603).
+  if (second.stoppedAt == null) {
+    await retireSuggestions(client, session, [first.id], "You said you didn't leave.");
+    return;
+  }
+  await client.query(
+    `update review_items set suggested_stopped_at = $4
+      where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open'`,
+    [...owner, first.id, second.stoppedAt]);
+}
+
+async function entriesFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {
+  return (await client.query<{ id: string }>(
+    `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3 order by started_at`,
+    [session.workspaceId, session.userId, eventId])).rows.map((row) => row.id);
+}
+
+/** The parts of [from, to) no interval covers, a minute or longer, in order. */
+export function freeSpans(fromMs: number, toMs: number, taken: ReadonlyArray<{ fromMs: number; toMs: number }>) {
+  const out: Array<{ fromMs: number; toMs: number }> = [];
+  let cursor = fromMs;
+  for (const span of [...taken].sort((a, b) => a.fromMs - b.fromMs)) {
+    if (span.toMs <= cursor) continue;
+    if (span.fromMs > cursor) out.push({ fromMs: cursor, toMs: Math.min(span.fromMs, toMs) });
+    cursor = Math.max(cursor, span.toMs);
+    if (cursor >= toMs) break;
+  }
+  if (cursor < toMs) out.push({ fromMs: cursor, toMs });
+  return out.filter((span) => span.toMs - span.fromMs >= 60_000);
+}
+
+/**
+ * "Logs as" (step 12 part 4, orchestrator 28 Oct 2026): a finished place with no question and no block becomes
+ * blocks with the picked activity, for the time the person's own blocks don't cover. Event-first: a
+ * `location_place_logged` event naming the place's segment, then its blocks, then the place kept as decided,
+ * as a confirmed suggestion is, so replay never replaces it.
+ */
+async function logPlace(
+  client: pg.PoolClient, session: RequestSession, request: Extract<TimelineCorrectionRequest, { kind: "log_place" }>, row: SegmentRow,
+  clientEventId: string | null
+) {
+  if (!row.stoppedAt) throw new TimelineCorrectionError("This place hasn't ended yet. Log it once you've left.", 422);
+  const asked = await client.query(
+    `select 1 from review_items where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open' limit 1`,
+    [session.workspaceId, session.userId, row.id]);
+  if (asked.rowCount) throw new TimelineCorrectionError("This place has a question. Answer it instead.", 409);
+  const category = await client.query(
+    `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
+  if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
+  const place = await client.query<{ placeId: string | null }>(
+    `select place_id as "placeId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
+    [row.id, session.workspaceId, session.userId]);
+  const fromMs = new Date(row.startedAt).getTime();
+  const toMs = new Date(row.stoppedAt).getTime();
+  // The person's own blocks, running ones to now, decide what is free.
+  const taken = await client.query<{ startedAt: Date; stoppedAt: Date }>(
+    `select started_at as "startedAt", coalesce(stopped_at, now()) as "stoppedAt" from time_entries
+      where workspace_id = $1 and user_id = $2 and started_at < $4 and coalesce(stopped_at, now()) > $3`,
+    [session.workspaceId, session.userId, iso(row.startedAt), iso(row.stoppedAt)]);
+  const free = freeSpans(fromMs, toMs, taken.rows.map((entry) => ({ fromMs: entry.startedAt.getTime(), toMs: entry.stoppedAt.getTime() })));
+  if (!free.length) throw new TimelineCorrectionError("Your blocks already cover this place's time.", 409);
+  const event = await client.query<{ id: string }>(
+    `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
+     values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
+     returning id`,
+    [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId }),
+      clientEventId]);
+  const entryIds: string[] = [];
+  for (const span of free) {
+    const entry = await client.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, category_id, place_id, source, confidence, review_status, started_at, stopped_at,
+         created_from_event_id)
+       values ($1, $2, $3, $4, 'location_learning', 'high', 'confirmed', $5, $6, $7)
+       returning id`,
+      [session.workspaceId, session.userId, request.categoryId, place.rows[0]?.placeId ?? null,
+        new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id]);
+    entryIds.push(entry.rows[0].id);
+  }
+  await client.query(
+    `update stay_segments set status = 'finalised', continuity_status = 'manual', updated_at = now()
+      where id = $1 and workspace_id = $2 and user_id = $3`,
+    [row.id, session.workspaceId, session.userId]);
+  return { ok: true as const, logged: { entryIds } };
+}
+
