@@ -350,11 +350,11 @@ export function EntriesTable({
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
-  const correctPlace = (place: TimelinePlace, label: string) => {
+  const correctPlace = (place: TimelinePlace, label: string, checkIds?: readonly string[]) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips });
+    setCorrection({ kind: "place", place, label, joinsTrips, checkIds });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
@@ -627,8 +627,14 @@ export function EntriesTable({
                 }}
                 reviewItemId={item.id} />
             ) : undefined}
-            onEdit={hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
-              ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
+            onEdit={prototype && row.kind === "place"
+              // Calendar prototype (step 15): a place's Edit opens its dialog — the map first, Where were you?, times,
+              // Logs as, Save this place — and a trip's opens the trip's own.
+              ? () => correctPlace(row.place, row.place.name ?? "Unknown place", row.checkIds)
+              : prototype && row.kind === "check" && row.trip
+                ? () => setCorrection({ kind: "trip", trip: row.trip!, route: row.trip!.route })
+                : hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
+                  ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
             onAnswer={(kind) => {
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
               const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
@@ -1572,6 +1578,7 @@ export function EntriesTable({
         return (
           <PlacesColumn askingBySegment={askingBySegment} blocks={entries} clock={clock} nowMs={nowMs}
             onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
+            onCorrectTrip={(trip, route) => setCorrection({ kind: "trip", trip, route })}
             onHide={() => setPlacesColumn(false)}
             onOpenCheck={(checkId) => {
               const row = checkRows.find((other) => checkOf(other)?.id === checkId);
@@ -1582,7 +1589,8 @@ export function EntriesTable({
       })() : null}
       </div>
       {correction ? (
-        <LocationCorrectionDialog clock={clock} onClose={() => setCorrection(null)}
+        <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => setCorrection(null)}
+          prototype={prototype}
           onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
       ) : null}
       {editingEntry ? (

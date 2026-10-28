@@ -29,6 +29,7 @@ export function PlacesColumn({
   nowMs,
   onCorrectLeg,
   onCorrectPlace,
+  onCorrectTrip,
   onHide,
   onOpenCheck,
   timeline
@@ -41,6 +42,8 @@ export function PlacesColumn({
   nowMs: number;
   onCorrectLeg: (trip: TimelineTrip, index: number) => void;
   onCorrectPlace: (place: TimelinePlace, label: string) => void;
+  /** A trip with no question opens its own dialog (its map, legs, "I didn't leave", "This wasn't a trip"). */
+  onCorrectTrip: (trip: TimelineTrip, route: string) => void;
   onHide: () => void;
   onOpenCheck: (checkId: string) => void;
   timeline: LocationTimeline | null;
@@ -114,7 +117,10 @@ export function PlacesColumn({
                   <TripHead asking route={route} span={span(item.startedAt, item.stoppedAt)} logged={item.blockIds.length > 0} />
                 </button>
               ) : (
-                <div className="timeline-location-hit"><TripHead asking={false} route={route} span={span(item.startedAt, item.stoppedAt)} logged={item.blockIds.length > 0} /></div>
+                <button aria-label={`Trip ${route}, ${span(item.startedAt, item.stoppedAt)}`} className="timeline-location-hit"
+                  data-tip="Opens the trip: its map, legs and fixes" onClick={() => onCorrectTrip(item, route)} type="button">
+                  <TripHead asking={false} route={route} span={span(item.startedAt, item.stoppedAt)} logged={item.blockIds.length > 0} />
+                </button>
               )}
               {item.legs.length ? (
                 <ol aria-label="Legs" className="timeline-places-column-legs">

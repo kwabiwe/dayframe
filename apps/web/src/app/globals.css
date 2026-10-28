@@ -15069,3 +15069,119 @@ button.timeline-location-hit:focus-visible {
   background: var(--warning);
   box-shadow: 0 0 0 2px var(--surface);
 }
+
+/* Calendar prototype, step 15 on the web: the correction dialog opens with the map, then the choices. */
+.location-correction-map {
+  overflow: hidden;
+  min-height: 180px;
+  margin: 0 0 4px;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-map.is-loading {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.location-correction-legs {
+  display: grid;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-inset, var(--surface-muted));
+}
+
+.location-correction-leg {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 16px;
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-correction-leg:first-child {
+  border-top: 0;
+}
+
+.location-correction-leg small,
+.location-correction-leg b {
+  display: block;
+}
+
+.location-correction-leg small {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.location-correction-back {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  border: 0;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-logs-as {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-correction-pill {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-pill[aria-checked="true"] {
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.location-correction-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-correction-save input {
+  min-width: 0;
+  min-height: 44px;
+  flex: 1 1 180px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.location-correction-shape:has(> button + button) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
