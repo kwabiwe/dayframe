@@ -244,11 +244,16 @@ export async function replayLocationEvidence(
     ? await lockAutoLoggedBlocks(client, session, { ...options, reconciliation: options.autoLogReconciliation })
     : new Set<string>();
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places,
-    output.broadReadingTimes);
-  // What the person set on their timeline (location v4 step 11) wins over what the engine derived again.
+  // What the person set on their timeline (location v4 step 11) wins over what the engine derived again. It is
+  // applied before decided history is protected as well as after: a place they weren't at, or a trip they didn't
+  // take, joined items that decided history (the one trip or stay, once logged) now stands for, so protection
+  // must see the joined day, not the engine's parts of it (Codex r3 on #603). Applying again after protection is
+  // a no-op for what already applied and covers segments protection rebuilt.
   // Stays "I didn't leave" folded into another: the journey in progress from one leaves the one that stands for it.
   const joinedStayIds = new Map<string, string>();
+  const corrected = await withTimelineCorrections(client, session, output.segmentUpserts, options.processingAt, joinedStayIds);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, corrected, output.acceptedEvidence, places,
+    output.broadReadingTimes);
   const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt, joinedStayIds);
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
