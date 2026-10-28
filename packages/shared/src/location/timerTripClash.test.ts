@@ -41,6 +41,9 @@ describe("timerTripClash (location v4 design §7)", () => {
       expect(timerTripClash(block("13:00", "15:00", { categoryStarterKey: key }), trips, now)).toBeNull();
     }
     expect(timerTripClash(block("13:00", "15:00", { categoryStarterKey: "work" }), trips, now)).not.toBeNull();
+    // A block added by hand, or one whose end you set yourself: you chose where it ends.
+    expect(timerTripClash(block("13:00", "15:00", { timerEnd: false }), trips, now)).toBeNull();
+    expect(timerTripClash(block("13:00", null, { timerEnd: true }), trips, now)).not.toBeNull();
   });
 });
 

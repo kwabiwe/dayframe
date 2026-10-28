@@ -26,12 +26,19 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
 describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location v4 design §7)", () => {
   const db = () => database!;
-  const block = async (start: number, stop: number | null, extra: { categoryId?: string; description?: string; source?: string } = {}) =>
-    (await db().query<{ id: string }>(
-      `insert into time_entries (workspace_id, user_id, source, category_id, description, started_at, stopped_at)
-       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+  // A block a timer started (the server marks its Start event), unless `byHand`.
+  const block = async (start: number, stop: number | null,
+    extra: { categoryId?: string; description?: string; source?: string; byHand?: boolean } = {}) => {
+    const startEvent = extra.byHand ? null : (await db().query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, 'mobile_app', 'timer_start', $3, 'high', '{"serverTimerStart": true}'::jsonb) returning id`,
+      [workspaceId, userId, at(start)])).rows[0].id;
+    return (await db().query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, source, category_id, description, started_at, stopped_at, created_from_event_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
       [workspaceId, userId, extra.source ?? "manual_app", extra.categoryId ?? null, extra.description ?? "Team sync", at(start),
-        stop == null ? null : at(stop)])).rows[0].id;
+        stop == null ? null : at(stop), startEvent])).rows[0].id;
+  };
   const question = async (entryId: string) => (await db().query<{
     id: string; status: string; title: string; suggestedStartedAt: Date; suggestedStoppedAt: Date; payload: Record<string, unknown>;
   }>(
@@ -96,33 +103,64 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const startedOnTheWay = await block(865, 880, { description: "Podcast" });
     const commute = await block(780, 880, { categoryId: commuteId, description: null as unknown as string });
     const health = await block(780, 880, { source: "health_workout" });
+    const byHand = await block(780, 880, { description: "Added later", byHand: true });
     expect(await reconcile(window)).toBe(1);
     expect(await question(ranInto)).toMatchObject({
       status: "open", title: "Team sync ran 18m into your trip",
       suggestedStartedAt: new Date(at(780)), suggestedStoppedAt: new Date(at(862)),
       payload: { timeEntryId: ranInto, tripId: "trip-home", tripStartedAt: at(862), tripStoppedAt: at(890), overlapSeconds: 18 * 60 }
     });
-    for (const id of [startedOnTheWay, commute, health]) expect(await question(id)).toBeUndefined();
+    for (const id of [startedOnTheWay, commute, health, byHand]) expect(await question(id)).toBeUndefined();
     // Idempotent: nothing changed, nothing written; another account sees nothing.
     expect(await reconcile(window)).toBe(0);
     expect(await reconcile(window, otherSession)).toBe(0);
     const type = await db().query(`select type, location_segment_id from review_items where id = $1`, [(await question(ranInto)).id]);
     expect(type.rows[0]).toEqual({ type: "location_timer_trip_clash", location_segment_id: null });
-    await db().query(`delete from time_entries where id = any($1::uuid[])`, [[startedOnTheWay, commute, health]]);
+    await db().query(`delete from time_entries where id = any($1::uuid[])`, [[startedOnTheWay, commute, health, byHand]]);
   });
 
-  it("an edit that ends the block before the trip retires the question, and one that runs it on again reopens it", async () => {
+  it("a block you already edited keeps asking until you set its end; an end you set never asks again", async () => {
     const { updateTimeEntry } = await import("../event-service");
     const id = await block(700, 900, { description: "Deep work" });
     await reconcile({ entryIds: [id] });
     expect((await question(id)).status).toBe("open");
-    await updateTimeEntry(id, { stoppedAt: at(862) }, session);
-    expect((await question(id)).status).toBe("superseded");
+    // A title edit is not an end you chose: the question stays, with the new name.
+    await updateTimeEntry(id, { description: "Focus" }, session);
+    expect(await question(id)).toMatchObject({ status: "open", title: "Focus ran 28m into your trip" });
+    // Setting the end yourself (even still into the trip) is your answer: it retires, and stays retired.
     await updateTimeEntry(id, { stoppedAt: at(875) }, session);
-    expect(await question(id)).toMatchObject({ status: "open", title: "Deep work ran 13m into your trip" });
+    expect((await question(id)).status).toBe("superseded");
+    await reconcile(window);
+    expect((await question(id)).status).toBe("superseded");
+  });
+
+  it("a retired question comes back when its block runs into the trip again, and a move activity never asks", async () => {
+    const { updateTimeEntry } = await import("../event-service");
+    const id = await block(705, 900, { description: "Admin" });
+    await reconcile({ entryIds: [id] });
+    await db().query(`update commute_segments set started_at = $2, stopped_at = $3 where workspace_id = $1 and client_segment_id = 'trip-home'`, [workspaceId, at(950), at(980)]);
+    await reconcile(window);
+    expect((await question(id)).status).toBe("superseded");
+    await db().query(`update commute_segments set started_at = $2, stopped_at = $3 where workspace_id = $1 and client_segment_id = 'trip-home'`, [workspaceId, at(862), at(890)]);
+    await reconcile(window);
+    expect(await question(id)).toMatchObject({ status: "open", title: "Admin ran 28m into your trip" });
     // A move activity merges with the trip instead (step 16): no question.
     await updateTimeEntry(id, { categoryId: commuteId }, session);
     expect((await question(id)).status).toBe("superseded");
+  });
+
+  it("End it moves a finished block's end to where the trip started, as your edit", async () => {
+    const { resolveIdempotentReviewMutation } = await import("../review-mutation-service");
+    const id = await block(790, 885, { description: "Planning" });
+    await reconcile({ entryIds: [id] });
+    const result = await resolveIdempotentReviewMutation((await question(id)).id, envelope("accept"), session);
+    expect(result).toMatchObject({ ok: true, status: "accepted", timeEntryId: id, endedAt: at(862) });
+    expect(result).not.toHaveProperty("stoppedRunningTimer");
+    const entry = await db().query(
+      `select te.stopped_at as "stoppedAt",
+              exists (select 1 from audit_log a where a.entity_id = te.id and a.action = 'time_entry.end_set') as "endSet"
+         from time_entries te where te.id = $1`, [id]);
+    expect(entry.rows[0]).toEqual({ stoppedAt: new Date(at(862)), endSet: true });
   });
 
   it("End it stops a running timer where the trip started, once; a resend is the same answer and Keep it then conflicts", async () => {

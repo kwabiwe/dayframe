@@ -4,6 +4,7 @@ import {
   timerTripClashTitle, type TimerTripClash
 } from "@dayframe/shared";
 import type { RequestSession } from "../session";
+import { PERSON_SET_END_SQL, TIMER_STARTED_SQL } from "../time-entry-provenance";
 
 /**
  * A timer left running into a trip (location v4 design §7) asks once, on the block: "Team sync ran 18m into
@@ -22,6 +23,7 @@ const ENTRY_LOOKBACK_MS = 2 * 86_400_000;
 type EntryRow = {
   id: string; startedAt: Date; stoppedAt: Date | null; source: string; eventType: string | null; reviewStatus: string;
   categoryId: string | null; categoryName: string | null; categoryStarterKey: string | null; description: string | null;
+  timerEnd: boolean;
 };
 type TripRow = { id: string; startedAt: Date; stoppedAt: Date };
 type QuestionRow = {
@@ -44,7 +46,9 @@ export async function reconcileTimerTripClashes(
   const entries = await client.query<EntryRow>(
     `select te.id, te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.source, ae.event_type as "eventType",
             te.review_status as "reviewStatus", te.category_id as "categoryId", c.name as "categoryName",
-            c.starter_key as "categoryStarterKey", te.description
+            c.starter_key as "categoryStarterKey", te.description,
+            -- Only an end a timer gave asks: a block added by hand, or an end a person set, is theirs (PRD D20).
+            (${TIMER_STARTED_SQL} and (te.stopped_at is null or not ${PERSON_SET_END_SQL})) as "timerEnd"
        from time_entries te
        left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
        left join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id
@@ -79,7 +83,8 @@ export async function reconcileTimerTripClashes(
   for (const entry of entries.rows) {
     const clash = timerTripClash({
       id: entry.id, startedAt: entry.startedAt.toISOString(), stoppedAt: iso(entry.stoppedAt), source: entry.source,
-      eventType: entry.eventType, reviewStatus: entry.reviewStatus, categoryStarterKey: entry.categoryStarterKey
+      eventType: entry.eventType, reviewStatus: entry.reviewStatus, categoryStarterKey: entry.categoryStarterKey,
+      timerEnd: entry.timerEnd
     }, trips, new Date(nowIso));
     if (clash) wanted.set(timerTripClashClientEventId(entry.id), { entry, clash });
   }

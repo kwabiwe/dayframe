@@ -28,6 +28,11 @@ export type TimerTripClashEntry = {
   reviewStatus?: string | null;
   /** The block's activity's starter key, when it has one. */
   categoryStarterKey?: string | null;
+  /**
+   * False when the block's end is not a timer's: a block added by hand, or an end you set yourself (you
+   * chose where it ends, so it never asks). The server knows; a client may leave it out.
+   */
+  timerEnd?: boolean;
 };
 
 export type TimerTripClashTrip = { id: string; startedAt: string; stoppedAt: string };
@@ -43,7 +48,7 @@ export type TimerTripClash = {
 
 /** Whether this block can ask at all, whatever trips there are. */
 export function timerTripClashEligible(entry: TimerTripClashEntry) {
-  return (entry.reviewStatus ?? "confirmed") === "confirmed" &&
+  return (entry.reviewStatus ?? "confirmed") === "confirmed" && entry.timerEnd !== false &&
     classifyAutomaticActivity(entry) === "manual_or_other" &&
     !(entry.categoryStarterKey && TIMER_TRIP_MOVE_STARTER_KEYS.has(entry.categoryStarterKey));
 }
