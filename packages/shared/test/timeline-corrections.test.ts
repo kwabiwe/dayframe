@@ -147,14 +147,17 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(result.find((segment) => segment.clientSegmentId === "b")).toMatchObject({ placeId: SAVED, setByYou: true });
   });
 
-  it("accepts the four kinds the app sends and refuses the rest", () => {
+  it("accepts the kinds the app sends and refuses the rest", () => {
     const parse = (value: unknown) => TimelineCorrectionRequestSchema.safeParse(value).success;
     expect(parse({ kind: "place", subject: "place", itemId: "a", placeId: SAVED, learnedPlaceId: null })).toBe(true);
     expect(parse({ kind: "place", subject: "place", itemId: "a", placeId: SAVED, learnedPlaceId: LEARNED })).toBe(false);
     expect(parse({ kind: "times", subject: "trip", itemId: "t", startedAt: at(1), stoppedAt: at(2) })).toBe(true);
     expect(parse({ kind: "times", subject: "trip", itemId: "t", startedAt: at(2), stoppedAt: at(1) })).toBe(false);
     expect(parse({ kind: "delete", subject: "trip", itemId: "t" })).toBe(true);
-    expect(parse({ kind: "delete", subject: "place", itemId: "a" })).toBe(false);
+    expect(parse({ kind: "delete", subject: "place", itemId: "a" })).toBe(true);
+    expect(parse({ kind: "delete", subject: "leg", itemId: "t" })).toBe(false);
+    expect(parse({ kind: "merge", subject: "trip", itemId: "t" })).toBe(true);
+    expect(parse({ kind: "merge", subject: "place", itemId: "a" })).toBe(false);
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "bus" })).toBe(true);
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "boat" })).toBe(false);
     expect(parse({ kind: "split", subject: "place", itemId: "a" })).toBe(false);
@@ -168,5 +171,57 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(parse({ kind: "times", subject: "place", itemId: "a", startedAt: at(1), stoppedAt: at(2), clientCorrectionId: id }).success).toBe(true);
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "bus", clientCorrectionId: id }).success).toBe(true);
     expect(parse({ kind: "delete", subject: "trip", itemId: "t", clientCorrectionId: "retry-1" }).success).toBe(false);
+  });
+
+  // Step 12 part 4: a drive out, a place the person wasn't at, a walk on; then two visits to one place.
+  const linked = (id: string, from: number, to: number, fromStay: string, toStay: string, legs: CommuteSegment["tripLegs"]) =>
+    ({ ...trip(id, from, to, legs), fromStaySegmentId: fromStay, toStaySegmentId: toStay, routeDistanceMeters: 1_000, evidenceIds: [id] });
+  const day: LocationSegment[] = [
+    stay("home", 0, 60),
+    linked("t1", 60, 80, "home", "x", [{ startedAt: at(60), stoppedAt: at(80), mode: "automotive", confidence: "sure", distanceMeters: 5_000 }]),
+    stay("x", 80, 95),
+    linked("t2", 95, 120, "x", "shop", [{ startedAt: at(95), stoppedAt: at(120), mode: "walking", confidence: "likely", distanceMeters: 800 }]),
+    { ...stay("shop", 120, 150), placeId: SAVED, placeMatchKind: "saved" },
+    linked("t3", 150, 160, "shop", "shop2", []),
+    { ...stay("shop2", 160, 200), placeId: SAVED, placeMatchKind: "saved" },
+    linked("t4", 200, 230, "shop2", "home2", []),
+    stay("home2", 230, null)
+  ];
+
+  it("joins the trips either side of a place you weren't at into one trip (I wasn't here)", () => {
+    const result = applyTimelineCorrections(day, [correction({ subject: "place", kind: "delete" }, 80, 95)], NOW);
+    expect(result.map((segment) => segment.clientSegmentId)).toEqual(["home", "t1", "shop", "t3", "shop2", "t4", "home2"]);
+    const joined = result.find((segment) => segment.clientSegmentId === "t1") as CommuteSegment;
+    expect(joined).toMatchObject({ startedAt: at(60), stoppedAt: at(120), fromStaySegmentId: "home", toStaySegmentId: "shop",
+      routeDistanceMeters: 2_000, confidence: "low", setByYou: true, gapDurationSeconds: 3_600, evidenceIds: ["t1", "t2"] });
+    expect(joined.tripLegs?.map((leg) => leg.mode)).toEqual(["automotive", "walking"]);
+  });
+
+  it("changes nothing for a place you weren't at without a trip on both sides", () => {
+    const edge = day.slice(0, 3);
+    expect(applyTimelineCorrections(edge, [correction({ subject: "place", kind: "delete" }, 80, 95)], NOW)).toEqual(edge);
+  });
+
+  it("makes two visits to one place one stay when you didn't leave, and the next trip leaves it", () => {
+    const result = applyTimelineCorrections(day, [correction({ subject: "trip", kind: "merge" }, 150, 160)], NOW);
+    expect(result.map((segment) => segment.clientSegmentId)).toEqual(["home", "t1", "x", "t2", "shop", "t4", "home2"]);
+    expect(result.find((segment) => segment.clientSegmentId === "shop")).toMatchObject({ startedAt: at(120), stoppedAt: at(200), setByYou: true });
+    expect(result.find((segment) => segment.clientSegmentId === "t4")).toMatchObject({ fromStaySegmentId: "shop" });
+  });
+
+  it("keeps a trip between two different places, or unknown ones, when asked to merge it", () => {
+    expect(applyTimelineCorrections(day, [correction({ subject: "trip", kind: "merge" }, 95, 120)], NOW)).toEqual(day);
+    const unknown = [stay("p", 0, 10), linked("tt", 10, 20, "p", "q", []), stay("q", 20, 30)];
+    expect(applyTimelineCorrections(unknown, [correction({ subject: "trip", kind: "merge" }, 10, 20)], NOW)).toEqual(unknown);
+  });
+
+  it("applies later corrections to what an earlier one joined", () => {
+    const result = applyTimelineCorrections(day, [
+      correction({ subject: "trip", kind: "merge" }, 150, 160, 1),
+      correction({ subject: "place", kind: "place", target: { placeId: null, learnedPlaceId: LEARNED } }, 120, 150, 2),
+      correction({ subject: "trip", kind: "times", target: { startedAt: at(62), stoppedAt: at(80) } }, 95, 120, 3)
+    ], NOW);
+    expect(result.find((segment) => segment.clientSegmentId === "shop")).toMatchObject({ stoppedAt: at(200), learnedPlaceId: LEARNED });
+    expect(result.find((segment) => segment.clientSegmentId === "t2")).toMatchObject({ startedAt: at(62) });
   });
 });

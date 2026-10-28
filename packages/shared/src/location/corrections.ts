@@ -6,8 +6,9 @@ import type { CommuteSegment, LocationSegment, StaySegment, TripLeg, TripLegMode
  * Timeline corrections (location v4 §4, §14; build step 11): what the person set on their location
  * timeline, tied to the time it covers and applied again by every replay. A corrected item shows "You
  * set this" and replay never changes it. Part 1 handles a place's place and times, a trip's times, a
- * trip that wasn't one, and a leg's mode; the other kinds the table allows (split, merge, leg boundary,
- * leg split, leg merge) come with the correction sheets. Never coordinates.
+ * trip that wasn't one, and a leg's mode; step 12 part 4 adds a place you weren't at ("I wasn't here",
+ * a place's delete) and a trip you didn't take between two visits to one place ("I didn't leave", a
+ * trip's merge). Split, leg boundary, leg split and leg merge come with step 16. Never coordinates.
  */
 
 export const TIMELINE_CORRECTION_SUBJECTS = ["place", "trip", "leg"] as const;
@@ -44,7 +45,10 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     startedAt: instant,
     stoppedAt: instant
   }).refine((value) => Date.parse(value.stoppedAt) > Date.parse(value.startedAt), { message: "The end must be after the start." }),
-  z.object({ kind: z.literal("delete"), subject: z.literal("trip"), itemId, clientCorrectionId }),
+  // A trip that wasn't one; a place you weren't at, whose trips either side become one (step 12 part 4).
+  z.object({ kind: z.literal("delete"), subject: z.enum(["place", "trip"]), itemId, clientCorrectionId }),
+  // "I didn't leave": the trip between two visits to one place, which become one stay (step 12 part 4).
+  z.object({ kind: z.literal("merge"), subject: z.literal("trip"), itemId, clientCorrectionId }),
   z.object({
     kind: z.literal("leg_mode"),
     subject: z.literal("leg"),
@@ -132,19 +136,82 @@ function legsWithMode(legs: readonly TripLeg[] | undefined, correction: Timeline
   });
 }
 
+const sum = (a: number | null | undefined, b: number | null | undefined) => a == null || b == null ? null : a + b;
+
+/**
+ * One trip from the trip into a place the person wasn't at and the trip out of it ("I wasn't here"): the
+ * earlier trip's identity and start, the later one's end, both trips' legs and stops. The time at the place
+ * is a pause between their legs. Low confidence, as a trip read across a stop is.
+ */
+export function joinTripsAcrossPlace(before: CommuteSegment, after: CommuteSegment): CommuteSegment {
+  const legs = [...(before.tripLegs ?? []), ...(after.tripLegs ?? [])];
+  const stops = [...(before.stops ?? []), ...(after.stops ?? [])];
+  const travelMode = before.travelMode && before.travelMode === after.travelMode ? before.travelMode : undefined;
+  // The earlier trip's identity and start; what the two trips had between them is set again below.
+  const rest: CommuteSegment = { ...before };
+  for (const key of ["legs", "outingStayIds", "travelMode", "tripLegs", "stops", "motionSupported", "motionTimed"] as const) delete rest[key];
+  return {
+    ...rest,
+    stoppedAt: after.stoppedAt,
+    stopLowerBoundAt: after.stopLowerBoundAt ?? null,
+    stopUpperBoundAt: after.stopUpperBoundAt ?? null,
+    toStaySegmentId: after.toStaySegmentId,
+    toPlaceId: after.toPlaceId ?? null,
+    routeDistanceMeters: sum(before.routeDistanceMeters, after.routeDistanceMeters),
+    straightLineDistanceMeters: null,
+    routeSampleCount: before.routeSampleCount + after.routeSampleCount,
+    gapDurationSeconds: Math.round((ms(after.stoppedAt) - ms(before.startedAt)) / 1_000),
+    maximumObservationGapSeconds: Math.max(before.maximumObservationGapSeconds, after.maximumObservationGapSeconds),
+    continuityStatus: before.continuityStatus === "continuous" && after.continuityStatus === "continuous" ? "continuous" : "uncertain_gap",
+    confidence: "low",
+    ...(stops.length ? { stops } : {}),
+    ...(travelMode ? { travelMode } : {}),
+    ...(legs.length ? { tripLegs: mergeSameModeLegs(legs) } : {}),
+    ...(before.motionSupported || after.motionSupported ? { motionSupported: true as const } : {}),
+    ...(before.motionTimed || after.motionTimed ? { motionTimed: true as const } : {}),
+    evidenceIds: [...new Set([...before.evidenceIds, ...after.evidenceIds])],
+    setByYou: true
+  };
+}
+
+/** Whether two visits are to one place the person has (saved or learned): "I didn't leave" joins only those. */
+export function sameKnownPlace(a: Pick<StaySegment, "placeId" | "learnedPlaceId">, b: Pick<StaySegment, "placeId" | "learnedPlaceId">) {
+  return Boolean((a.placeId && a.placeId === b.placeId) || (!a.placeId && !b.placeId && a.learnedPlaceId && a.learnedPlaceId === b.learnedPlaceId));
+}
+
+/** Two visits to one place, with the trip between them that the person didn't take: one stay ("I didn't leave"). */
+export function joinVisits(first: StaySegment, second: StaySegment): StaySegment {
+  return {
+    ...first,
+    stoppedAt: second.stoppedAt ?? null,
+    stopLowerBoundAt: second.stopLowerBoundAt ?? null,
+    stopUpperBoundAt: second.stopUpperBoundAt ?? null,
+    ...(second.locationOnlyStoppedAt ? { locationOnlyStoppedAt: second.locationOnlyStoppedAt } : {}),
+    sampleCount: first.sampleCount + second.sampleCount,
+    continuityStatus: first.continuityStatus === "continuous" && second.continuityStatus === "continuous" ? "continuous" : "uncertain_gap",
+    evidenceIds: [...new Set([...first.evidenceIds, ...second.evidenceIds])],
+    setByYou: true
+  };
+}
+
 /**
  * The engine's segments with the person's corrections applied, oldest first, so a later correction of
  * the same item wins. Each correction finds its item among the engine's own segments, before any
  * correction changed their times, so a shortened item is still found by a later correction tied to its
  * original span (Codex r1 on #566). A corrected item carries `setByYou` and the span its corrections
- * are tied to (`correctionSpan`). A trip that wasn't one is left out. Pure and deterministic: replay
+ * are tied to (`correctionSpan`). A trip that wasn't one is left out, and so are a place the person wasn't
+ * at (its trips either side made one) and a trip they didn't take (its two visits made one stay). Pure and deterministic: replay
  * calls it before it persists anything.
  */
 export function applyTimelineCorrections(segments: readonly LocationSegment[], corrections: readonly TimelineCorrection[], nowMs: number) {
   const engineStays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const engineTrips = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
-  const stays = new Map<StaySegment, StaySegment>(engineStays.map((stay) => [stay, { ...stay }]));
+  const stays = new Map<StaySegment, StaySegment | null>(engineStays.map((stay) => [stay, { ...stay }]));
   const trips = new Map<CommuteSegment, CommuteSegment | null>(engineTrips.map((trip) => [trip, { ...trip }]));
+  // The engine item now standing for a place or trip, by its id as corrected so far.
+  const stayById = (id: string) => [...stays].find(([, stay]) => stay?.clientSegmentId === id) as [StaySegment, StaySegment] | undefined;
+  const tripWhere = (test: (trip: CommuteSegment) => boolean) =>
+    [...trips].find(([, trip]) => trip != null && test(trip)) as [CommuteSegment, CommuteSegment] | undefined;
   const ordered = [...corrections].sort((a, b) => ms(a.createdAt) - ms(b.createdAt) || a.id.localeCompare(b.id));
   const spanOf = (correction: TimelineCorrection) => ({ startedAt: correction.spanStartedAt, stoppedAt: correction.spanStoppedAt });
   for (const correction of ordered) {
@@ -165,12 +232,33 @@ export function applyTimelineCorrections(segments: readonly LocationSegment[], c
       } else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {
         stays.set(engine, { ...stay, startedAt: correction.target.startedAt, stoppedAt: correction.target.stoppedAt, setByYou: true,
           correctionSpan: spanOf(correction) });
+      } else if (correction.kind === "delete") {
+        // "I wasn't here": only between two trips, which become one; otherwise nothing changes.
+        const before = tripWhere((trip) => trip.toStaySegmentId === stay.clientSegmentId);
+        const after = tripWhere((trip) => trip.fromStaySegmentId === stay.clientSegmentId);
+        if (!before || !after || before[0] === after[0]) continue;
+        trips.set(before[0], joinTripsAcrossPlace(before[1], after[1]));
+        trips.set(after[0], null);
+        stays.set(engine, null);
       }
     } else if (correction.subject === "trip") {
       const engine = bestOverlap(engineTrips, correction, nowMs);
       const trip = engine ? trips.get(engine) : null;
       if (!engine || !trip) continue;
       if (correction.kind === "delete") trips.set(engine, null);
+      else if (correction.kind === "merge") {
+        // "I didn't leave": the visits either side, to one place, become one stay; otherwise nothing changes.
+        const first = stayById(trip.fromStaySegmentId);
+        const second = stayById(trip.toStaySegmentId);
+        if (!first || !second || first[0] === second[0] || !sameKnownPlace(first[1], second[1])) continue;
+        stays.set(first[0], joinVisits(first[1], second[1]));
+        stays.set(second[0], null);
+        trips.set(engine, null);
+        // A trip that left the later visit now leaves the one stay.
+        for (const [key, next] of trips) {
+          if (next?.fromStaySegmentId === second[1].clientSegmentId) trips.set(key, { ...next, fromStaySegmentId: first[1].clientSegmentId });
+        }
+      }
       else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {
         trips.set(engine, { ...trip, startedAt: correction.target.startedAt, stoppedAt: correction.target.stoppedAt, setByYou: true,
           correctionSpan: spanOf(correction) });
@@ -186,6 +274,9 @@ export function applyTimelineCorrections(segments: readonly LocationSegment[], c
   for (const [engine, trip] of trips) {
     if (trip?.tripLegs && trip.tripLegs !== engine.tripLegs) trips.set(engine, { ...trip, tripLegs: mergeSameModeLegs(trip.tripLegs) });
   }
-  const out: LocationSegment[] = [...stays.values(), ...[...trips.values()].filter((trip): trip is CommuteSegment => trip != null)];
+  const out: LocationSegment[] = [
+    ...[...stays.values()].filter((stay): stay is StaySegment => stay != null),
+    ...[...trips.values()].filter((trip): trip is CommuteSegment => trip != null)
+  ];
   return out.sort((a, b) => ms(a.startedAt) - ms(b.startedAt) || a.kind.localeCompare(b.kind));
 }

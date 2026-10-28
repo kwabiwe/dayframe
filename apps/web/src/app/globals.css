@@ -14650,6 +14650,46 @@ dialog.ui-dialog.df-palette {
   font-size: 13px;
 }
 
+.location-correction-shape {
+  display: grid;
+  justify-items: start;
+}
+
+/* "I wasn't here", asked once in place: it fades in where the button was (step 12 part 4). */
+.location-correction-confirm {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  transition: opacity 160ms ease;
+}
+
+@starting-style {
+  .location-correction-confirm {
+    opacity: 0;
+  }
+}
+
+.location-correction-confirm p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.location-correction-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .location-correction-confirm {
+    transition: none;
+  }
+}
+
 @media (max-width: 420px) {
   .location-correction-modes {
     grid-template-columns: repeat(2, minmax(0, 1fr));
