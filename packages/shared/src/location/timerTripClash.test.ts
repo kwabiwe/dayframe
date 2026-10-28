@@ -25,10 +25,9 @@ describe("timerTripClash (location v4 design §7)", () => {
     expect(timerTripClash(block("14:30", "15:00"), [trip("t1", "14:22", "14:50")], now)).toBeNull();
   });
 
-  it("asks nothing about a trip more than 2 days after the block started", () => {
-    const longAgo = { ...block("13:00", null), startedAt: "2026-10-26T14:00:00.000Z" };
-    expect(timerTripClash(longAgo, [trip("t1", "14:22", "14:50")], now)).toBeNull();
-    expect(timerTripClash({ ...longAgo, startedAt: "2026-10-26T14:30:00.000Z" }, [trip("t1", "14:22", "14:50")], now)).not.toBeNull();
+  it("asks about a timer left running for days (no longest lead; Codex r3 on #611)", () => {
+    const longAgo = { ...block("13:00", null), startedAt: "2026-10-25T09:00:00.000Z" };
+    expect(timerTripClash(longAgo, [trip("t1", "14:22", "14:50")], now)?.tripId).toBe("t1");
   });
 
   it("asks about the first trip the block ran into", () => {

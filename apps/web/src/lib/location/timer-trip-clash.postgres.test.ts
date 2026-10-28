@@ -345,4 +345,53 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     await splitFinishedEntry(finished, { splitAt: at(855) }, session);
     expect((await question(finished)).status).toBe("superseded");
   });
+  it("a pass that removes the trip retires its question even while another transaction holds the block (Codex r3 on #611)", async () => {
+    const id = await block(855, 935, { description: "Sync prep" });
+    await reconcile({ entryIds: [id] });
+    expect((await question(id)).status).toBe("open");
+    const edit = await db().connect();
+    try {
+      await edit.query("begin");
+      await edit.query(`select id from time_entries where id = $1 for update`, [id]);
+      // A correction: the trip goes, then its window pass runs while the edit still holds the block.
+      const correction = await db().connect();
+      try {
+        await correction.query("begin");
+        await correction.query(`update commute_segments set status = 'superseded' where workspace_id = $1 and client_segment_id = 'trip-home'`, [workspaceId]);
+        const { reconcileTimerTripClashes } = await import("./timer-trip-clash-service");
+        await reconcileTimerTripClashes(correction, session, window, now);
+        await correction.query("commit");
+      } finally {
+        correction.release();
+      }
+      await edit.query("commit");
+    } finally {
+      edit.release();
+    }
+    expect((await question(id)).status).toBe("superseded");
+    await db().query(`update commute_segments set status = 'finalised' where workspace_id = $1 and client_segment_id = 'trip-home'`, [workspaceId]);
+    await reconcile(window);
+    expect((await question(id)).status).toBe("open");
+    await db().query(`delete from time_entries where id = $1`, [id]);
+  });
+
+  it("an End it resend for another proposal than the one accepted is a conflict, not the same answer (Codex r3 on #611)", async () => {
+    const { resolveIdempotentReviewMutation } = await import("../review-mutation-service");
+    const id = await block(818, 905, { description: "Retro" });
+    await reconcile({ entryIds: [id] });
+    const item = await question(id);
+    await resolveIdempotentReviewMutation(item.id, envelope("accept"), session);
+    const other = { ...envelope("accept"), mutation: { action: "accept" as const, expectedProposalHash: "1".repeat(64) } };
+    await expect(resolveIdempotentReviewMutation(item.id, other, session)).rejects.toMatchObject({ code: expect.any(String) });
+    expect(await resolveIdempotentReviewMutation(item.id, envelope("accept"), session))
+      .toMatchObject({ status: "accepted", alreadyResolved: true, entryId: id });
+  });
+
+  it("a timer left running for days still asks about the first trip it ran into (Codex r3 on #611)", async () => {
+    await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+    const id = await block(-3 * 24 * 60, null, { description: "Forgotten" });
+    expect(await reconcile(window)).toBeGreaterThanOrEqual(1);
+    expect(await question(id)).toMatchObject({ status: "open", payload: { tripId: "trip-home", tripStartedAt: at(862) } });
+    await db().query(`delete from time_entries where id = $1`, [id]);
+  });
 });

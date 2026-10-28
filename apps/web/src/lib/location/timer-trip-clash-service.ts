@@ -1,6 +1,6 @@
 import type pg from "pg";
 import {
-  TIMER_TRIP_CLASH_EVENT_TYPE, TIMER_TRIP_CLASH_MAX_LEAD_MS, TIMER_TRIP_CLASH_REVIEW_TYPE, timerTripClash, timerTripClashClientEventId,
+  TIMER_TRIP_CLASH_EVENT_TYPE, TIMER_TRIP_CLASH_LEAD_MS, TIMER_TRIP_CLASH_OVERLAP_MS, TIMER_TRIP_CLASH_REVIEW_TYPE, timerTripClash, timerTripClashClientEventId,
   timerTripClashTitle, type TimerTripClash, type TimerTripClashTrip
 } from "@dayframe/shared";
 import type { RequestSession } from "../session";
@@ -28,6 +28,11 @@ export function timerTripChecksEnabled() {
 
 /** How far back a replay looks again: the badge's 7 days and the day before. */
 export const TIMER_TRIP_CLASH_REPLAY_LOOKBACK_MS = 8 * 86_400_000;
+/**
+ * A window pass reads finished blocks that started up to this long before the window (as the timeline reads
+ * stays) and every running block; an edit, delete or Stop judges its own block whatever its length.
+ */
+const FINISHED_BLOCK_LOOKBACK_MS = 31 * 86_400_000;
 
 type EntryRow = {
   id: string; startedAt: Date; stoppedAt: Date | null; source: string; eventType: string | null; reviewStatus: string;
@@ -52,8 +57,7 @@ export async function reconcileTimerTripClashes(
   const nowIso = new Date(now).toISOString();
   const byIds = "entryIds" in scope;
   if (byIds && !scope.entryIds.length) return 0;
-  // The blocks in scope, unlocked: the ones named, or those that started in the window or up to two days
-  // before it (a trip asks only within two days of its block's start, so nothing older can ask).
+  // The blocks in scope, unlocked: the ones named, or those running in the window.
   const entries = await readBlocks(client, session, byIds ? { ids: scope.entryIds } : { window: scope, now: nowIso });
   // Questions already asked: about these blocks, or (for a window) about trips that started in it, so a
   // question whose block was deleted is retired too.
@@ -66,7 +70,7 @@ export async function reconcileTimerTripClashes(
   };
   // An answered block is final: never read its trips again.
   const open = entries.filter((entry) => !answered(timerTripClashClientEventId(entry.id)));
-  const firstGuess = clashesFor(open, await readTrips(client, session, open, nowIso), nowIso);
+  const firstGuess = clashesFor(open, await readFirstTrips(client, session, open, nowIso), nowIso);
   // Lock the blocks this may write about (those it would ask about now, and those with a question still
   // unanswered) in id order, then read them again: a delete or edit that committed meanwhile is seen, and one
   // that comes after waits and settles its own question. A window pass (replay, a correction) holds other
@@ -77,23 +81,29 @@ export async function reconcileTimerTripClashes(
   const lockIds = [...new Set([...firstGuess.keys(), ...unanswered])].sort();
   const blocks = lockIds.length ? await lockAndReadBlocks(client, session, lockIds, byIds ? "wait" : "skip") : [];
   const live = blocks.filter((entry) => !answered(timerTripClashClientEventId(entry.id)));
-  const wanted = clashesFor(live, await readTrips(client, session, live, nowIso), nowIso);
+  const proposed = clashesFor(live, await readFirstTrips(client, session, live, nowIso), nowIso);
   const present = new Set(blocks.map((entry) => entry.id));
   // Create the missing events (do nothing on a concurrent insert), then lock every question's event and
   // Review item, in client-id order, before deciding anything.
-  const missing = [...wanted.keys()].map(timerTripClashClientEventId).filter((id) => !asked.has(id)).sort();
+  const missing = [...proposed.keys()].map(timerTripClashClientEventId).filter((id) => !asked.has(id)).sort();
+  const created = new Set<string>();
   for (const clientEventId of missing) {
-    const { clash } = wanted.get(clientEventId.slice("timer-trip-clash:".length))!;
-    await client.query(
+    const { clash } = proposed.get(clientEventId.slice("timer-trip-clash:".length))!;
+    const inserted = await client.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence,
          raw_payload, review_status)
        values ($1, $2, $3, 'location_learning', $4, $5::timestamptz, 'high', $6::jsonb, 'needs_review')
-       on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null do nothing`,
+       on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null do nothing
+       returning id`,
       [session.workspaceId, session.userId, clientEventId, TIMER_TRIP_CLASH_EVENT_TYPE, clash.tripStartedAt, JSON.stringify(clash)]);
+    if (inserted.rows[0]) created.add(inserted.rows[0].id);
   }
-  const touched = [...new Set([...[...wanted.keys()].map(timerTripClashClientEventId), ...asked.keys()])].sort();
+  const touched = [...new Set([...[...proposed.keys()].map(timerTripClashClientEventId), ...asked.keys()])].sort();
   if (!touched.length) return 0;
   const locked = await readQuestions(client, session, touched, null, true);
+  // The trips again, now that every question is locked: a transaction that changed a trip and held one of
+  // these questions has committed, so its trip is seen (Codex r3 on #611).
+  const wanted = clashesFor(live, await readFirstTrips(client, session, live, nowIso), nowIso);
   // Each Review item's status is read under its own lock, never from an earlier snapshot, so an answer that
   // committed while this waited is never undone (Codex r1 on #611). One held by an answer right now is skipped.
   const reviews = await readReviews(client, session, [...locked.values()].map((question) => question.eventId), true);
@@ -110,9 +120,17 @@ export async function reconcileTimerTripClashes(
     if (review && review.status !== "open" && !(review.status === "superseded" && question.payload.retiredByReconcile === true)) continue;
     const want = timeEntryId ? wanted.get(timeEntryId) : undefined;
     if (!want) {
-      // A question whose block this pass didn't lock (a window pass, its block elsewhere) is left alone unless
-      // its block is gone.
-      if (timeEntryId && !present.has(timeEntryId) && !byIds && await blockExists(client, session, timeEntryId)) continue;
+      // An event this pass created for a clash that the fresh trips no longer show goes again.
+      if (!review && created.has(question.eventId)) {
+        await client.query(`delete from activity_events where id = $1 and workspace_id = $2 and user_id = $3`,
+          [question.eventId, session.workspaceId, session.userId]);
+        continue;
+      }
+      // A question whose block this pass didn't lock (a window pass, its block held or elsewhere) is left to
+      // that block's own transaction, unless its block is gone or the trip it asks about is gone or moved: a
+      // pass that changed the trip retires it now (Codex r3 on #611), and a later pass asks again if it holds.
+      if (timeEntryId && !present.has(timeEntryId) && !byIds && await blockExists(client, session, timeEntryId) &&
+        await tripStillAsked(client, session, question.payload)) continue;
       if (review?.status === "open") {
         await retire(client, session, review.id, question.eventId);
         changes += 1;
@@ -169,14 +187,15 @@ export async function timerTripClashStillHolds(
     [session.workspaceId, session.userId, tripId]);
   const row = trip.rows[0];
   if (!row) return false;
-  const clash = clashesFor([entry], [{ id: tripId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() }], nowIso)
+  const clash = clashesFor([entry], new Map([[timeEntryId, [{ id: tripId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() }]]]), nowIso)
     .get(timeEntryId)?.clash;
   return Boolean(clash && clash.tripStartedAt === payload.tripStartedAt);
 }
 
-function clashesFor(entries: readonly EntryRow[], trips: readonly TimerTripClashTrip[], nowIso: string) {
+function clashesFor(entries: readonly EntryRow[], tripsByEntry: ReadonlyMap<string, readonly TimerTripClashTrip[]>, nowIso: string) {
   const clashes = new Map<string, { entry: EntryRow; clash: TimerTripClash }>();
   for (const entry of entries) {
+    const trips = tripsByEntry.get(entry.id) ?? [];
     const clash = timerTripClash({
       id: entry.id, startedAt: entry.startedAt.toISOString(), stoppedAt: iso(entry.stoppedAt), source: entry.source,
       eventType: entry.eventType, reviewStatus: entry.reviewStatus, categoryStarterKey: entry.categoryStarterKey,
@@ -219,29 +238,54 @@ async function readBlocks(
       where te.workspace_id = $1 and te.user_id = $2
         and ${byIds ? "te.id = any($3::uuid[])"
           : `te.review_status = 'confirmed' and te.started_at < $4::timestamptz
-             and te.started_at >= $3::timestamptz - make_interval(secs => $6::double precision / 1000)
-             and coalesce(te.stopped_at, $5::timestamptz) > $3::timestamptz`}
+             and coalesce(te.stopped_at, $5::timestamptz) > $3::timestamptz
+             and (te.started_at >= $3::timestamptz - make_interval(secs => $6::double precision / 1000) or te.stopped_at is null)`}
       order by te.id`,
     byIds ? [session.workspaceId, session.userId, scope.ids]
-      : [session.workspaceId, session.userId, scope.window.from, scope.window.to, scope.now, TIMER_TRIP_CLASH_MAX_LEAD_MS]);
+      : [session.workspaceId, session.userId, scope.window.from, scope.window.to, scope.now, FINISHED_BLOCK_LOOKBACK_MS]);
   return result.rows;
 }
 
-/** The trips these blocks can have run into: those starting within two days of a block's start. */
-async function readTrips(
+/**
+ * Each block's first trip it could have run into: the first completed trip that started at least 5 minutes
+ * after the block and that the block ran on into by more than 5 minutes, one index range read per block
+ * (with a limit), however old a running block is (Codex r3 on #611).
+ */
+async function readFirstTrips(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, entries: readonly EntryRow[], nowIso: string
-): Promise<TimerTripClashTrip[]> {
-  if (!entries.length) return [];
-  const from = Math.min(...entries.map((row) => row.startedAt.getTime()));
-  const to = Math.min(Date.parse(nowIso), Math.max(...entries.map((row) => row.startedAt.getTime())) + TIMER_TRIP_CLASH_MAX_LEAD_MS);
-  const result = await client.query<{ id: string; startedAt: Date; stoppedAt: Date }>(
-    `select c.client_segment_id as "id", c.started_at as "startedAt", c.stopped_at as "stoppedAt"
-       from commute_segments c
-      where c.workspace_id = $1 and c.user_id = $2 and c.status <> 'superseded'
-        and c.started_at > $3::timestamptz and c.started_at <= $4::timestamptz
-      order by c.started_at, c.client_segment_id`,
-    [session.workspaceId, session.userId, new Date(from).toISOString(), new Date(to).toISOString()]);
-  return result.rows.map((row) => ({ id: row.id, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() }));
+): Promise<Map<string, TimerTripClashTrip[]>> {
+  if (!entries.length) return new Map();
+  const result = await client.query<{ entryId: string; id: string; startedAt: Date; stoppedAt: Date }>(
+    `select b.id as "entryId", t.client_segment_id as "id", t.started_at as "startedAt", t.stopped_at as "stoppedAt"
+       from unnest($3::uuid[], $4::timestamptz[], $5::timestamptz[]) as b(id, started_at, ends_at)
+       cross join lateral (
+         select c.client_segment_id, c.started_at, c.stopped_at from commute_segments c
+          where c.workspace_id = $1 and c.user_id = $2 and c.status <> 'superseded'
+            and c.started_at >= b.started_at + make_interval(secs => $6::double precision / 1000)
+            and c.started_at < b.ends_at
+            and least(b.ends_at, c.stopped_at) > c.started_at + make_interval(secs => $7::double precision / 1000)
+          order by c.started_at, c.client_segment_id
+          limit 1
+       ) t`,
+    [session.workspaceId, session.userId, entries.map((row) => row.id), entries.map((row) => row.startedAt.toISOString()),
+      entries.map((row) => (row.stoppedAt ?? new Date(nowIso)).toISOString()), TIMER_TRIP_CLASH_LEAD_MS / 1000, TIMER_TRIP_CLASH_OVERLAP_MS / 1000]);
+  const trips = new Map<string, TimerTripClashTrip[]>();
+  for (const row of result.rows) {
+    trips.set(row.entryId, [{ id: row.id, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() }]);
+  }
+  return trips;
+}
+
+/** Whether the trip a question asks about is still there, at the start it was asked with. */
+async function tripStillAsked(client: Pick<pg.PoolClient, "query">, session: RequestSession, payload: Record<string, unknown>) {
+  if (typeof payload.tripId !== "string" || typeof payload.tripStartedAt !== "string") return false;
+  const result = await client.query(
+    `select 1 from commute_segments
+      where workspace_id = $1 and user_id = $2 and client_segment_id = $3 and status <> 'superseded'
+        and started_at = $4::timestamptz
+      limit 1`,
+    [session.workspaceId, session.userId, payload.tripId, payload.tripStartedAt]);
+  return Boolean(result.rows[0]);
 }
 
 async function readQuestions(

@@ -13,8 +13,6 @@ export const timerTripClashClientEventId = (timeEntryId: string) => `timer-trip-
 
 /** It was already running when you left: started at least this long before the trip. */
 export const TIMER_TRIP_CLASH_LEAD_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
-/** And at most this long before it: a timer left on overnight still asks, a block days long does not. */
-export const TIMER_TRIP_CLASH_MAX_LEAD_MS = 2 * 86_400_000;
 /** It ran on into the trip by more than this (the tolerance automatic logging uses). */
 export const TIMER_TRIP_CLASH_OVERLAP_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
 
@@ -65,7 +63,7 @@ function ranInto(entry: TimerTripClashEntry, trip: TimerTripClashTrip, nowMs: nu
   const entryStop = entry.stoppedAt == null ? nowMs : Date.parse(entry.stoppedAt);
   const tripStart = Date.parse(trip.startedAt), tripStop = Date.parse(trip.stoppedAt);
   if (![entryStart, entryStop, tripStart, tripStop].every(Number.isFinite) || tripStop <= tripStart) return null;
-  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS || entryStart < tripStart - TIMER_TRIP_CLASH_MAX_LEAD_MS) return null;
+  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS) return null;
   const overlapMs = Math.min(entryStop, tripStop) - tripStart;
   return overlapMs > TIMER_TRIP_CLASH_OVERLAP_MS ? overlapMs : null;
 }

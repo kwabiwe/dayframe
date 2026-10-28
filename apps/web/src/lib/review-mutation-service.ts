@@ -52,6 +52,7 @@ type GenericReviewRow = {
   locationSegmentId: string | null;
   resolvedTimeEntryId?: string | null;
   semanticRevision?: Date | string | null;
+  createdAt?: Date | string | null;
 };
 
 export const REVIEW_MUTATION_STATEMENT_TIMEOUT_MS = 8_000;
@@ -454,6 +455,13 @@ async function resolveTimerTripClash(
   const timeEntryId = typeof payload.timeEntryId === "string" ? payload.timeEntryId : null;
   if (item.status !== "open") {
     if (item.status !== wanted) throw resolutionConflict(item.id, item.status);
+    // An End it for the proposal it was shown is the same answer only if that is the proposal accepted:
+    // answered questions never change, so it is the open proposal's hash, from before it was resolved (an
+    // open item's revision is its creation; Codex r3 on #611).
+    if (mutation.action === "accept" && mutation.expectedProposalHash &&
+      mutation.expectedProposalHash !== genericProposalHash({ ...item, semanticRevision: item.createdAt ?? null })) {
+      throw resolutionConflict(item.id, item.status);
+    }
     return {
       ok: true, action: mutation.action, status: wanted, alreadyResolved: true, equivalent: true,
       ...(wanted === "accepted" && item.resolvedTimeEntryId ? { entryId: item.resolvedTimeEntryId } : {})
@@ -514,7 +522,8 @@ async function lockGenericReview(
             ae.raw_payload as "rawPayload",
             ae.resolved_time_entry_id as "resolvedTimeEntryId",
             ri.location_segment_id as "locationSegmentId",
-            coalesce(ri.resolved_at, ri.created_at) as "semanticRevision"
+            coalesce(ri.resolved_at, ri.created_at) as "semanticRevision",
+            ri.created_at as "createdAt"
      from review_items ri
      left join activity_events ae
        on ae.id = ri.event_id
@@ -994,8 +1003,8 @@ function resolutionConflict(reviewItemId: string, canonicalStatus: string) {
   );
 }
 
-function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalHash: string) {
-  const actual = reviewProposalHash({
+function genericProposalHash(item: GenericReviewRow) {
+  return reviewProposalHash({
     reviewItemId: item.id,
     eventId: item.eventId,
     locationSegmentId: null,
@@ -1010,6 +1019,10 @@ function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalH
     eventType: item.eventType,
     semanticRevision: item.semanticRevision ?? null
   });
+}
+
+function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalHash: string) {
+  const actual = genericProposalHash(item);
   if (actual === expectedProposalHash) return;
   throw new ReviewResolutionError(
     "proposal_changed",
