@@ -41,10 +41,17 @@ const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
 
 export type PendingTimeEntryCommand = MobileAccountOwner & {
   clientCommandId: string;
-  operation: "update" | "delete";
+  operation: "update" | "delete" | "split";
   targetEntryId?: string;
   optimisticEntryId?: string;
   patch?: TimeEntryUpdatePatch;
+  /** Split (owner 28 Oct 2026): where the running block ends; its second part runs from here. */
+  splitAt?: string;
+  /**
+   * Split: the local id the second part is shown under until the server names it. The server's id is
+   * recorded against it (as a queued Start's is), so a Stop or Edit of the second part waits for it.
+   */
+  splitEntryLocalId?: string;
   deliverAfter?: string;
   createdAt: string;
   updatedAt: string;
@@ -153,6 +160,31 @@ export async function enqueueTimeEntryDelete(input: {
     owner: input.owner,
     target: input.target,
     operation: "delete",
+    deliverAfter: input.deliverAfter,
+    holdLease: input.holdLease,
+    requestImmediateDelivery: input.requestImmediateDelivery
+  });
+}
+
+/**
+ * Split for the running block (owner 28 Oct 2026, as Toggl): ends `target` at `splitAt` and starts its
+ * second part there, running, with every detail. Held like a sheet Delete for its Undo window
+ * (`deliverAfter` and `holdLease`); Undo removes it before it is sent.
+ */
+export async function enqueueTimeEntrySplit(input: {
+  owner: MobileAccountOwner;
+  target: TimeEntryCommandTarget;
+  splitAt: string;
+  splitEntryLocalId: string;
+  deliverAfter?: string;
+  holdLease?: TimeEntryCommandHoldLease;
+  requestImmediateDelivery?: boolean;
+}) {
+  return enqueueTimeEntryCommand({
+    owner: input.owner,
+    target: input.target,
+    operation: "split",
+    split: { splitAt: input.splitAt, splitEntryLocalId: input.splitEntryLocalId },
     deliverAfter: input.deliverAfter,
     holdLease: input.holdLease,
     requestImmediateDelivery: input.requestImmediateDelivery
@@ -280,7 +312,8 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
   optimisticEntryId: string,
   message: string = REFUSED_START_COMMAND_MESSAGE
 ) {
-  return withMutation(async () => {
+  const refusedSplits: PendingTimeEntryCommand[] = [];
+  const refusedCount = await withMutation(async () => {
     // The fence first, under the same lock as every enqueue: a command written after this is refused
     // as it is written, and one written before is refused below.
     const fence = await readRefusedStartFence();
@@ -303,12 +336,16 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
         return command;
       }
       refusedCount += 1;
+      if (command.operation === "split") refusedSplits.push(command);
       const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
       return { ...rest, failureKind: "permanent" as const, refusedStart: true, lastError: message, updatedAt: now };
     });
     if (refusedCount > 0) await writeAllCommands(next);
     return refusedCount;
   });
+  // A split of a block that never existed never makes its second part either.
+  for (const split of refusedSplits) await settleRefusedSplit(owner, split);
+  return refusedCount;
 }
 
 /** The owner's fenced optimistic block IDs, so correlation pruning keeps what the fence names. */
@@ -657,13 +694,16 @@ async function runTimeEntryCommandDrain(input: {
       return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
     }
     markDispatched(original.clientCommandId);
+    const split = original.operation === "split";
     try {
       const response = await mobileFetchWithTimeout(
-        `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(targetEntryId)}`,
+        split
+          ? `${DAYFRAME_API_BASE}/api/time-entries`
+          : `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(targetEntryId)}`,
         {
-          method: original.operation === "delete" ? "DELETE" : "PATCH",
+          method: split ? "POST" : original.operation === "delete" ? "DELETE" : "PATCH",
           headers: {
-            ...(original.operation === "update" ? { "Content-Type": "application/json" } : {}),
+            ...(original.operation !== "delete" ? { "Content-Type": "application/json" } : {}),
             Authorization: `Bearer ${sessionRead.snapshot.token}`,
             // The same id on every attempt: the server answers a resend of an Edit it already applied
             // as delivered instead of applying it again over a newer change (item 17).
@@ -673,6 +713,10 @@ async function runTimeEntryCommandDrain(input: {
           },
           ...(original.operation === "update"
             ? { body: JSON.stringify(original.patch ?? {}) }
+            : split
+            // The server's split of a running block: one transaction under the timer lock, answered
+            // again for the same command id. It splits the block as it is when this arrives.
+            ? { body: JSON.stringify({ mode: "split", source: "mobile_app", entryId: targetEntryId, splitAt: original.splitAt }) }
             : {}),
           signal: input.signal
         },
@@ -695,6 +739,27 @@ async function runTimeEntryCommandDrain(input: {
       ) {
         return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
       }
+      if (split && response.ok) {
+        const answer = await splitAnswerFrom(response);
+        const newEntryId = answer.newEntryId;
+        if (!newEntryId && answer.replayed) {
+          // Done before, and its second part has gone since (joined back elsewhere): nothing to follow it.
+          await settleRefusedSplit(input.owner, original);
+          if (await removeDeliveredCommand(original.clientCommandId)) deliveredCount += 1;
+          continue;
+        }
+        if (!newEntryId) {
+          const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
+            kind: "retryable",
+            message: "Dayframe didn't name the split block. It will retry automatically."
+          });
+          return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
+        }
+        // Recorded before the command goes, so a Stop or Edit of the second part never loses its target.
+        const { recordTimerEntryIdCorrelation } = await import("./api");
+        await recordTimerEntryIdCorrelation(original.splitEntryLocalId as string, newEntryId, input.owner);
+        input.control.correlations.set(original.splitEntryLocalId as string, newEntryId);
+      }
       if (response.ok || (original.operation === "delete" && response.status === 404)) {
         const removed = await removeDeliveredCommand(original.clientCommandId);
         if (removed) deliveredCount += 1;
@@ -711,6 +776,7 @@ async function runTimeEntryCommandDrain(input: {
       if (!permanent) {
         return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
       }
+      if (split) await settleRefusedSplit(input.owner, original);
     } catch (error) {
       const retryable = input.signal?.aborted ||
         error instanceof MobileRequestTimeoutError ||
@@ -727,11 +793,36 @@ async function runTimeEntryCommandDrain(input: {
   }
 }
 
+/** The second part's id from the server's answer to a split (null when none), and whether it was a repeat. */
+async function splitAnswerFrom(response: Response) {
+  const body = await response.json().catch(() => null) as { newEntryId?: unknown; replayed?: unknown } | null;
+  return {
+    newEntryId: typeof body?.newEntryId === "string" && body.newEntryId ? body.newEntryId : null,
+    replayed: body?.replayed === true
+  };
+}
+
+/**
+ * A split the server refused for good never makes its second part: as for a refused Start, the Stops
+ * written for that part go and its Edits and Deletes become sync issues (fenced), so nothing waits for it.
+ */
+async function settleRefusedSplit(owner: MobileAccountOwner, command: PendingTimeEntryCommand) {
+  if (!command.splitEntryLocalId) return;
+  try {
+    const { removePendingTimerStopsForTarget } = await import("./timerStopOutbox");
+    await removePendingTimerStopsForTarget(owner, { optimisticEntryId: command.splitEntryLocalId });
+    await refuseTimeEntryCommandsForOptimisticEntry(owner, command.splitEntryLocalId, "The split this change was for was never saved.");
+  } catch {
+    // The next pass's dependency check refuses fenced commands; a storage failure here only delays it.
+  }
+}
+
 async function enqueueTimeEntryCommand(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
-  operation: "update" | "delete";
+  operation: "update" | "delete" | "split";
   patch?: TimeEntryUpdatePatch;
+  split?: { splitAt: string; splitEntryLocalId: string };
   deliverAfter?: string;
   holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
@@ -753,6 +844,7 @@ async function enqueueTimeEntryCommand(input: {
       workspaceId: input.owner.workspaceId,
       ...input.target,
       ...(input.operation === "update" ? { patch: input.patch ?? {} } : {}),
+      ...(input.operation === "split" && input.split ? input.split : {}),
       ...(validIso(input.deliverAfter) && !fenced ? { deliverAfter: input.deliverAfter } : {}),
       createdAt: now,
       updatedAt: now,
@@ -1182,9 +1274,11 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   const clientCommandId = optionalText(item.clientCommandId);
-  const operation = item.operation === "update" || item.operation === "delete"
+  const operation = item.operation === "update" || item.operation === "delete" || item.operation === "split"
     ? item.operation
     : null;
+  const splitAt = validIso(item.splitAt);
+  const splitEntryLocalId = optionalText(item.splitEntryLocalId);
   const userId = optionalText(item.userId);
   const workspaceId = optionalText(item.workspaceId);
   const targetEntryId = optionalText(item.targetEntryId);
@@ -1193,7 +1287,8 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   const updatedAt = validIso(item.updatedAt);
   if (
     !clientCommandId || !operation || !userId || !workspaceId ||
-    (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt
+    (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt ||
+    (operation === "split" && (!splitAt || !splitEntryLocalId))
   ) {
     return null;
   }
@@ -1207,6 +1302,7 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
     ...(operation === "update" && item.patch && typeof item.patch === "object"
       ? { patch: item.patch as TimeEntryUpdatePatch }
       : {}),
+    ...(operation === "split" ? { splitAt: splitAt as string, splitEntryLocalId: splitEntryLocalId as string } : {}),
     createdAt,
     updatedAt,
     attemptCount: typeof item.attemptCount === "number" && Number.isFinite(item.attemptCount)

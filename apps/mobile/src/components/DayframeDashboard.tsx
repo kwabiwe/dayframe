@@ -252,6 +252,7 @@ import {
 import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { useRunningSplit } from "@/lib/useRunningSplit";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
@@ -1941,6 +1942,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  // Split for the running block (owner 28 Oct 2026): shown at once, held for its Undo, then delivered in the
+  // timer order with a reload, as a sheet Delete is.
+  const runningSplit = useRunningSplit({
+    read: () => latestData.current,
+    update: updateDashboardData,
+    owner: timerStopOwner,
+    persistedId: persistedTimerEntryId,
+    isOnline: () => connectivityCurrent.current.isOnline,
+    deliver: (owner) => {
+      void enqueueTimerMutation(async () => {
+        if (!connectivityCurrent.current.isOnline) return;
+        const result = await synchroniseTimeEntryCommands({ owner, correlations: await readTimerEntryIdCorrelations(owner), force: true });
+        if (result.reason === "authentication_required") transitionToSignedOut();
+      });
+    },
+    onStorageFailure: () => Alert.alert(
+      "Block not split",
+      "Dayframe could not save this split on your iPhone. Check available storage and try again."
+    )
+  });
   // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
   // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
   const checkAnswers = useCalendarCheckAnswers({
@@ -3799,6 +3820,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             theme={theme}
           />
         ) : null}
+        {runningSplit.held ? (
+          // Split for the running block (owner 28 Oct 2026): the split hook owns the 5 s window; its token
+          // re-mounts the toast, so a second split replaces it (the first is kept).
+          <BlocksToast
+            key={`split-${runningSplit.held.token}`}
+            actionAccessibilityLabel={`Undo splitting ${runningSplit.held.title}`}
+            actionLabel="Undo"
+            actionTestID="today-split-undo"
+            message={`Split ${runningSplit.held.title} at ${formatClockTime(runningSplit.held.splitAt, clockFormat)}`}
+            onAction={() => {
+              void runningSplit.undo().then((undone) => { if (undone) playHaptic("undoRestore"); });
+            }}
+            reduceMotion={reduceMotion}
+            swatchColor={toastSwatchColor(runningSplit.held.swatchEntry, theme.mode)}
+            testID="today-split-toast"
+            theme={theme}
+          />
+        ) : null}
         {pendingDeletion?.phase === "active" ? (
           // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
           // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
@@ -3891,6 +3930,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onDelete={deleteActiveTimer}
+        onSplit={(atMs) => { void runningSplit.split(atMs); }}
         onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}

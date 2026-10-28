@@ -42,7 +42,8 @@ describe("Today Blocks feedback", () => {
     // "Where today went" (user actions).
     // The second "start" is the sheet's Start again for a bare block (a committed user action).
     // The second undoRestore is Calendar › List's answer Undo (location v4 step 14 part 3b), a person's tap.
-    expect(calls.sort()).toEqual(["delete", "delete", "start", "start", "stop", "tick", "tick", "undoRestore", "undoRestore"]);
+    // The third is the running block's split Undo (owner 28 Oct 2026), a person's tap.
+    expect(calls.sort()).toEqual(["delete", "delete", "start", "start", "stop", "tick", "tick", "undoRestore", "undoRestore", "undoRestore"]);
     expect(body("const openCalendarDay = useCallback(")).toContain('playHaptic("tick")');
     expect(body("const openReportsToday = useCallback(")).toContain('playHaptic("tick")');
     for (const path of ["function rejectOptimisticTimerStart(", "async function syncQueuedEventsAndReload("]) {

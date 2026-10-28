@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  ActionSheetIOS,
   Animated,
   AppState,
   Dimensions,
@@ -29,6 +30,7 @@ import {
   normalizeNewTagName,
   normalizeTagName,
   DAYFRAME_APP_ICONS,
+  DAYFRAME_BLOCKS,
   activityControlColor,
   formatClockTime,
   formatClockValue,
@@ -59,6 +61,7 @@ import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityChip, AllActivitiesChip } from "@/components/ActivityChips";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
+import { RunningSplitPanel } from "@/components/RunningSplitPanel";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
@@ -157,6 +160,11 @@ type ActiveTimerEditSheetProps = {
   /** Creates an activity from the All-activities picker; resolves to its id or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onDelete?: (entryId: string) => Promise<boolean>;
+  /**
+   * Split for the running block (owner 28 Oct 2026): ends it at `atMs`, its second part keeps running. Called
+   * once the sheet's own edits are saved and it is leaving; the split shows at once (no spinner).
+   */
+  onSplit?: (atMs: number) => void;
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
@@ -195,6 +203,7 @@ export function ActiveTimerEditSheet({
   onCreateTag,
   onCreateActivity,
   onDelete,
+  onSplit,
   onPresented,
   onApplySuggestion,
   onSave,
@@ -1951,6 +1960,35 @@ export function ActiveTimerEditSheet({
     }
   }
 
+  // The running block's "…" (owner 28 Oct 2026): Split beside Discard running block, in the system's own
+  // action sheet (its presentation, Reduce Motion and VoiceOver are iOS's).
+  const [splitOpen, setSplitOpen] = useState(false);
+  useEffect(() => {
+    if (!visible || !isRunningMode) setSplitOpen(false);
+  }, [isRunningMode, visible]);
+
+  function openRunningBlockActions() {
+    if (busy) return;
+    dismissTransientEditingSurfaces();
+    Keyboard.dismiss();
+    const options = onSplit ? ["Split", "Discard running block", "Cancel"] : ["Discard running block", "Cancel"];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: options.length - 2 },
+      (index) => {
+        const choice = options[index];
+        if (choice === "Split") setSplitOpen(true);
+        else if (choice === "Discard running block") void deleteEntryFromSheet();
+      }
+    );
+  }
+
+  // Split saves the sheet's edits first, as Start again does, so both parts keep them.
+  function splitFromSheet(atMs: number) {
+    if (!onSplit) return;
+    setSplitOpen(false);
+    void saveChanges(() => onSplit(atMs));
+  }
+
   async function deleteEntryFromSheet() {
     if (isAddMode) {
       requestUserDismiss();
@@ -2610,6 +2648,22 @@ export function ActiveTimerEditSheet({
                   textTestID="time-entry-sheet-hero"
                   theme={theme}
                   title={headTitle}
+                  trailing={isRunningMode && onDelete ? (
+                    <Pressable
+                      accessibilityLabel="More block actions"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      onPress={openRunningBlockActions}
+                      style={({ pressed }) => [
+                        sheetStyles.moreAction,
+                        { backgroundColor: theme.surfaceMuted },
+                        pressed && !busy ? styles.buttonPressed : null
+                      ]}
+                      testID="time-entry-sheet-more"
+                    >
+                      <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.more} size={18} />
+                    </Pressable>
+                  ) : null}
                 />
               </Pressable>
 
@@ -2627,6 +2681,21 @@ export function ActiveTimerEditSheet({
                 ]}
                 testID="time-entry-sheet-form"
               >
+                {splitOpen && entry && isRunningMode ? (
+                  // Over the form, which stays laid out beneath it (nothing reflows): Keep as one shows it again.
+                  <View style={[StyleSheet.absoluteFill, sheetStyles.splitOverlay, { backgroundColor: theme.surfaceRaised }]}>
+                    <RunningSplitPanel
+                      categoryColor={entry.categoryColor ?? null}
+                      categoryName={entry.categoryName}
+                      onCancel={() => setSplitOpen(false)}
+                      onConfirm={splitFromSheet}
+                      reduceMotion={reduceMotion}
+                      sheetDismissGestureRef={sheetDismissGestureRef}
+                      startedAt={entry.startedAt}
+                      theme={theme}
+                    />
+                  </View>
+                ) : null}
                 <View
                   pointerEvents="box-none"
                   style={[
@@ -3516,6 +3585,9 @@ function formatSheetDay(date: Date) {
 const sheetStyles = StyleSheet.create({
   // The shared BlocksSheetHead (UIA-006) inside a tap target that dismisses the keyboard.
   head: { alignSelf: "stretch" },
+  // The running block's "…": a 44-point circular icon action beside Done (owner 28 Oct 2026).
+  moreAction: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
+  splitOverlay: { zIndex: 10 },
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chipMeasure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 },

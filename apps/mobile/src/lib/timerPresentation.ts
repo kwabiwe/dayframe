@@ -711,6 +711,34 @@ export function optimisticStartTimer(data: MobileBootstrap | null, pendingEntry:
   };
 }
 
+/**
+ * Split (owner 28 Oct 2026, as Toggl): `entryId` ends at `splitAt` and its second part, `secondId`, starts
+ * there with every detail. A running block's second part keeps running (the running block moves to it);
+ * a block already ended keeps its end on the second part. Unchanged when the time is not inside the block.
+ */
+export function optimisticSplitTimeEntry(
+  data: MobileBootstrap | null,
+  entryId: string,
+  splitAt: string,
+  secondId: string
+) {
+  const entry = mobileTimeEntryById(data, entryId);
+  if (!data || !entry) return data;
+  const atMs = Date.parse(splitAt);
+  const endMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) : Number.POSITIVE_INFINITY;
+  if (!(atMs > Date.parse(entry.startedAt) && atMs < endMs)) return data;
+  const second: MobileTimeEntry = { ...entry, id: secondId, startedAt: splitAt, durationSeconds: 0 };
+  if (data.activeEntry?.id === entryId) return optimisticStartTimer(data, { ...second, stoppedAt: null });
+  const first = patchedMobileTimeEntry(entry, { stoppedAt: splitAt }, data.categories);
+  const withParts = (entries: MobileTimeEntry[]) => upsertMobileEntry(upsertMobileEntry(entries, first), second);
+  return {
+    ...data,
+    entries: withParts(data.entries),
+    dayEntries: data.dayEntries ? withParts(data.dayEntries) : data.dayEntries,
+    weekEntries: data.weekEntries ? withParts(data.weekEntries) : data.weekEntries
+  };
+}
+
 export function replaceOptimisticTimeEntryId(
   data: MobileBootstrap | null,
   optimisticId: string,

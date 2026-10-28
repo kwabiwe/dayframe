@@ -16,6 +16,7 @@ import {
   mobileTimeEntryById,
   optimisticDeleteTimeEntry,
   optimisticPatchTimeEntry,
+  optimisticSplitTimeEntry,
   optimisticStartTimer
 } from "./timerPresentation";
 
@@ -31,6 +32,7 @@ type ProjectionOperation =
   | { kind: "start"; at: string; sequence: string; event: QueuedEvent }
   | { kind: "edit"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "delete"; at: string; sequence: string; command: PendingTimeEntryCommand }
+  | { kind: "split"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop }
   | { kind: "queued_stop"; at: string; sequence: string; entryId: string };
 
@@ -78,6 +80,17 @@ export function projectDurableLocalWork(
         : null
     );
     if (!target) continue;
+    if (operation.kind === "split") {
+      // The second part shows under the server's id once the split has one, else its local id.
+      const localId = operation.command.splitEntryLocalId as string;
+      projected = optimisticSplitTimeEntry(
+        projected,
+        target,
+        operation.command.splitAt as string,
+        durableWork.correlations.get(localId) ?? localId
+      ) as MobileBootstrap;
+      continue;
+    }
     projected = operation.kind === "delete"
       ? optimisticDeleteTimeEntry(projected, target) as MobileBootstrap
       : optimisticPatchTimeEntry(
@@ -108,7 +121,15 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       mobileAccountOwnersEqual(command, work.owner) &&
       command.failureKind !== "permanent"
     )
-    .map((command) => command.operation === "delete"
+    .map((command) => command.operation === "split"
+      ? {
+          // Its place among the Starts: a Stop or Edit of the second part made after it comes later.
+          kind: "split" as const,
+          at: command.createdAt,
+          sequence: `0:${command.createdAt}:${command.clientCommandId}`,
+          command
+        }
+      : command.operation === "delete"
       ? {
           kind: "delete" as const,
           at: command.createdAt,

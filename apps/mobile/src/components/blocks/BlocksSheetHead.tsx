@@ -29,7 +29,8 @@ export function BlocksSheetHead({
   testID,
   textTestID,
   theme,
-  title
+  title,
+  trailing
 }: {
   action?: BlocksSheetHeadAction | null;
   eyebrow: string;
@@ -40,6 +41,8 @@ export function BlocksSheetHead({
   textTestID?: string;
   theme: MobileTheme;
   title: string;
+  /** A circular icon action before the pill (the running block's "…", owner 28 Oct 2026). */
+  trailing?: ReactNode;
 }) {
   const tone = action?.tone ?? "neutral";
   const inactive = Boolean(action?.disabled || action?.busy);
@@ -56,6 +59,7 @@ export function BlocksSheetHead({
           {title}
         </Text>
       </View>
+      {trailing}
       {action ? (
         <Pressable
           accessibilityHint={action.accessibilityHint}
