@@ -258,5 +258,30 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(segments.find((segment) => segment.clientSegmentId === "shop")).toMatchObject({ status: "open", correctionSpan: { startedAt: at(120), stoppedAt: at(150) } });
     expect([...joinedStayIds]).toEqual([["shop2", "shop"]]);
   });
+
+  // Codex r2 on #603.
+  it("still takes the place off the day once replay leaves its trips to the block they became", () => {
+    const decided = day.filter((segment) => segment.clientSegmentId !== "t1" && segment.clientSegmentId !== "t2");
+    const result = applyTimelineCorrections(decided, [correction({ subject: "place", kind: "delete" }, 80, 95)], NOW);
+    expect(result.some((segment) => segment.clientSegmentId === "x")).toBe(false);
+  });
+
+  it("sets the mode of a leg that spans both joined trips", () => {
+    const walks = day.map((segment) => segment.clientSegmentId === "t1"
+      ? { ...segment, tripLegs: [{ startedAt: at(60), stoppedAt: at(80), mode: "walking" as const, confidence: "sure" as const, distanceMeters: 900 }] }
+      : segment);
+    const result = applyTimelineCorrections(walks, [
+      correction({ subject: "place", kind: "delete" }, 80, 95, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 60, 120, 2)
+    ], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t1") as CommuteSegment).tripLegs?.map((leg) => leg.mode)).toEqual(["bus"]);
+  });
+
+  it("drops the trip in's classification from the one trip", () => {
+    const round = day.map((segment) => segment.clientSegmentId === "t1" ? { ...segment, qualificationReason: "same_place_meaningful_round_trip" as const } : segment);
+    const joined = applyTimelineCorrections(round, [correction({ subject: "place", kind: "delete" }, 80, 95)], NOW)
+      .find((segment) => segment.clientSegmentId === "t1") as CommuteSegment;
+    expect(joined).not.toHaveProperty("qualificationReason");
+  });
 });
 

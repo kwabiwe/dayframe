@@ -152,7 +152,10 @@ export function joinTripsAcrossPlace(before: CommuteSegment, after: CommuteSegme
   const travelMode = before.travelMode && before.travelMode === after.travelMode ? before.travelMode : undefined;
   // The earlier trip's identity and start; what the two trips had between them is set again below.
   const rest: CommuteSegment = { ...before };
-  for (const key of ["legs", "outingStayIds", "travelMode", "tripLegs", "stops", "motionSupported", "motionTimed"] as const) delete rest[key];
+  // Its classification described the trip in alone (a round trip, say), so the one trip has none (Codex r2 on #603).
+  for (const key of ["legs", "outingStayIds", "travelMode", "tripLegs", "stops", "motionSupported", "motionTimed", "qualificationReason"] as const) {
+    delete rest[key];
+  }
   return {
     ...rest,
     stoppedAt: after.stoppedAt,
@@ -237,6 +240,20 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
     for (let hops = 0; joined.has(current) && hops < joined.size; hops += 1) current = joined.get(current)!;
     return current;
   };
+  // The item a correction is about: the engine's, by its span; failing that the item as corrected so far (a
+  // leg of a joined trip spans both trips' time, which neither of the engine's covers half of; Codex r2 on #603).
+  const findStay = (correction: TimelineCorrection) => {
+    const found = bestOverlap(engineStays, correction, nowMs);
+    if (found) return survivor(stayJoinedInto, found);
+    const current = bestOverlap([...stays.values()].filter((stay): stay is StaySegment => stay != null), correction, nowMs);
+    return current ? [...stays].find(([, stay]) => stay === current)![0] : null;
+  };
+  const findTrip = (correction: TimelineCorrection) => {
+    const found = bestOverlap(engineTrips, correction, nowMs);
+    if (found) return survivor(tripJoinedInto, found);
+    const current = bestOverlap([...trips.values()].filter((trip): trip is CommuteSegment => trip != null), correction, nowMs);
+    return current ? [...trips].find(([, trip]) => trip === current)![0] : null;
+  };
   const engineSpan = (segment: LocationSegment) => ({ startedAt: segment.startedAt, stoppedAt: segment.stoppedAt ?? new Date(nowMs).toISOString() });
   const stayById = (id: string) => [...stays].find(([, stay]) => stay?.clientSegmentId === id) as [StaySegment, StaySegment] | undefined;
   const tripWhere = (test: (trip: CommuteSegment) => boolean) =>
@@ -245,8 +262,7 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
   const spanOf = (correction: TimelineCorrection) => ({ startedAt: correction.spanStartedAt, stoppedAt: correction.spanStoppedAt });
   for (const correction of ordered) {
     if (correction.subject === "place") {
-      const found = bestOverlap(engineStays, correction, nowMs);
-      const engine = found ? survivor(stayJoinedInto, found) : null;
+      const engine = findStay(correction);
       const stay = engine ? stays.get(engine)! : null;
       if (!engine || !stay) continue;
       if (correction.kind === "place") {
@@ -263,9 +279,15 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
         stays.set(engine, { ...stay, startedAt: correction.target.startedAt, stoppedAt: correction.target.stoppedAt, setByYou: true,
           correctionSpan: spanOf(correction) });
       } else if (correction.kind === "delete") {
-        // "I wasn't here": only between two trips, which become one; otherwise nothing changes.
+        // "I wasn't here": between two trips, which become one. Once the one trip is a block, replay leaves both
+        // trips to it (decided history), and the place still leaves the day while no trip here ends or starts at
+        // it (Codex r2 on #603).
         const before = tripWhere((trip) => trip.toStaySegmentId === stay.clientSegmentId);
         const after = tripWhere((trip) => trip.fromStaySegmentId === stay.clientSegmentId);
+        if (!before && !after) {
+          stays.set(engine, null);
+          continue;
+        }
         if (!before || !after || before[0] === after[0]) continue;
         trips.set(before[0], joinTripsAcrossPlace(before[1], after[1], engineSpan(before[0])));
         trips.set(after[0], null);
@@ -273,8 +295,7 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
         stays.set(engine, null);
       }
     } else if (correction.subject === "trip") {
-      const found = bestOverlap(engineTrips, correction, nowMs);
-      const engine = found ? survivor(tripJoinedInto, found) : null;
+      const engine = findTrip(correction);
       const trip = engine ? trips.get(engine) : null;
       if (!engine || !trip) continue;
       if (correction.kind === "delete") trips.set(engine, null);
@@ -299,8 +320,7 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
           correctionSpan: spanOf(correction) });
       }
     } else if (correction.subject === "leg" && correction.kind === "leg_mode") {
-      const found = bestOverlap(engineTrips, correction, nowMs);
-      const engine = found ? survivor(tripJoinedInto, found) : null;
+      const engine = findTrip(correction);
       const trip = engine ? trips.get(engine) : null;
       if (!engine || !trip?.tripLegs?.length) continue;
       trips.set(engine, { ...trip, tripLegs: legsWithMode(trip.tripLegs, correction) });
