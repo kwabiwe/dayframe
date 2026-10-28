@@ -5,7 +5,8 @@ import {
   type ReviewReconciliationResult,
   DurableLocationReviewMutationSchema,
   type ReviewMutation,
-  type ReviewMutationEdit
+  type ReviewMutationEdit,
+  TIMER_TRIP_CLASH_EVENT_TYPE
 } from "@dayframe/shared";
 import type pg from "pg";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./db";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
+  endBlockAtTripStart,
   reconcileMatchingHealthSleepTimeEntry,
   recordHealthSleepResolution,
   ReviewResolutionError,
@@ -403,6 +405,7 @@ async function resolveGenericMutation(
     );
   }
   const item = await lockGenericReview(client, reviewItemId, session);
+  if (item.eventType === TIMER_TRIP_CLASH_EVENT_TYPE) return resolveTimerTripClash(client, item, mutation, session);
   if (item.status !== "open") {
     return resolveClosedGenericReview(client, item, mutation, session);
   }
@@ -426,6 +429,44 @@ async function resolveGenericMutation(
     );
   }
   return acceptGenericReview(client, item, session);
+}
+
+/**
+ * A timer that ran into a trip (design §7): End it (`accept`) ends the block where the trip started, Keep it
+ * (`ignore_once`) leaves it and never asks again. A resend of the same answer is the same answer; any other
+ * answer to a closed question is a conflict.
+ */
+async function resolveTimerTripClash(
+  client: pg.PoolClient,
+  item: GenericReviewRow,
+  mutation: Extract<ReviewMutation, { action: "accept" | "ignore_once" | "edit_and_confirm" }>,
+  session: RequestSession
+) {
+  if (mutation.action === "edit_and_confirm") {
+    throw new ReviewResolutionError("invalid_action", "Answer this question with End it or Keep it.", {
+      status: 422,
+      details: { reviewItemId: item.id, canonicalStatus: item.status }
+    });
+  }
+  const wanted = mutation.action === "accept" ? "accepted" : "ignored";
+  if (item.status !== "open") {
+    if (item.status !== wanted) throw resolutionConflict(item.id, item.status);
+    return { ok: true, action: mutation.action, status: wanted, alreadyResolved: true, equivalent: true };
+  }
+  const payload = (item.rawPayload ?? {}) as Record<string, unknown>;
+  const timeEntryId = typeof payload.timeEntryId === "string" ? payload.timeEntryId : null;
+  const tripStartedAt = typeof payload.tripStartedAt === "string" ? payload.tripStartedAt : null;
+  const ended = mutation.action === "accept" && timeEntryId && tripStartedAt
+    ? await endBlockAtTripStart(client, session, timeEntryId, tripStartedAt)
+    : { ended: false, wasRunning: false };
+  await resolveGenericReviewAndEvent(client, item, session, wanted);
+  return {
+    ok: true,
+    action: mutation.action,
+    status: wanted,
+    ...(ended.ended ? { timeEntryId, endedAt: new Date(tripStartedAt!).toISOString() } : {}),
+    ...(ended.wasRunning ? { stoppedRunningTimer: true } : {})
+  };
 }
 
 async function lockGenericReview(

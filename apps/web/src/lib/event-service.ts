@@ -1,4 +1,5 @@
 import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
+import { reconcileTimerTripClashes } from "./location/timer-trip-clash-service";
 import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
@@ -31,7 +32,8 @@ import {
   type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences,
-  type PlaceRole
+  type PlaceRole,
+  TIMER_TRIP_CLASH_EVENT_TYPE
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -812,6 +814,10 @@ async function processActivityEventWithClient(
       }
       timeEntryId = stopResult.rows[0]?.id;
       stopOutcome = timeEntryId ? "stopped" : "superseded";
+      // A Stop that ended a block before the trip it ran into (one queued offline) settles its "?" (design §7).
+      if (stopResult.rows.length) {
+        await reconcileTimerTripClashes(client, session, { entryIds: stopResult.rows.map((row) => row.id) });
+      }
       // Server-owned: a Stop that ended a block is a boundary for a Shortcut Start placed later (#403).
       if (timeEntryId) {
         await client.query(
@@ -2660,6 +2666,8 @@ export async function updateTimeEntry(
     if (hasTagNames) {
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
+    // An edit can end a block before the trip it ran into, or make it a move activity (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
     await client.query("commit");
     return { id, updatedAt: new Date(result.rows[0].updatedAt).toISOString() };
   } catch (error) {
@@ -2775,13 +2783,53 @@ function validateResolvedTimeEntryWindow({
   }
 }
 
-export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
-  const result = await query(
-    "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
-    [id, session.workspaceId, session.userId]
+/**
+ * "End it at 14:22" (design §7): the block a timer left running into a trip ends where the trip started, as
+ * the person chose (recorded like an edit, so a Stop queued earlier never pulls it back). A running timer
+ * stops there. A block already ending by then, gone, or started after it is left as it is. The caller holds
+ * the user's timer lock.
+ */
+export async function endBlockAtTripStart(
+  client: pg.PoolClient, session: RequestSession, entryId: string, tripStartedAt: string
+): Promise<{ ended: boolean; wasRunning: boolean }> {
+  const locked = await client.query<{ startedAt: Date; stoppedAt: Date | null }>(
+    `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries
+     where id = $1 and workspace_id = $2 and user_id = $3
+     for update`,
+    [entryId, session.workspaceId, session.userId]
   );
-  if ((result.rowCount ?? 0) === 0) throw new TimeEntryNotFoundError();
-  return { id, deleted: true };
+  const block = locked.rows[0];
+  const endMs = Date.parse(tripStartedAt);
+  if (!block || !Number.isFinite(endMs) || block.startedAt.getTime() >= endMs ||
+    (block.stoppedAt && block.stoppedAt.getTime() <= endMs)) return { ended: false, wasRunning: false };
+  await client.query(
+    `update time_entries set stopped_at = $4::timestamptz, user_edited_at = now(), updated_at = now()
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [entryId, session.workspaceId, session.userId, new Date(endMs).toISOString()]
+  );
+  await recordTimeEntryEdits(client, [entryId], session, [entryId]);
+  return { ended: true, wasRunning: block.stoppedAt === null };
+}
+
+export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query(
+      "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
+      [id, session.workspaceId, session.userId]
+    );
+    if ((result.rowCount ?? 0) === 0) throw new TimeEntryNotFoundError();
+    // A deleted block's "?" goes with it (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
+    await client.query("commit");
+    return { id, deleted: true };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteTimeEntries(ids: string[], session: RequestSession = getDevSession()) {
@@ -2805,6 +2853,7 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
        returning id`,
       [uniqueIds, session.workspaceId, session.userId]
     );
+    await reconcileTimerTripClashes(client, session, { entryIds: uniqueIds });
     await client.query("commit");
     return { ids: deleted.rows.map((row) => row.id), deletedCount: deleted.rows.length };
   } catch (error) {
@@ -3205,6 +3254,11 @@ export async function resolveReviewItem(
     const item = review.rows[0];
     if (!item) {
       throw new ReviewResolutionError("review_item_not_found", "Review item not found.", { status: 404 });
+    }
+    // A timer that ran into a trip is answered through a Review mutation (End it / Keep it): a plain accept
+    // here would add a block from its suggestion (design §7).
+    if (item.eventType === TIMER_TRIP_CLASH_EVENT_TYPE) {
+      throw new ReviewResolutionError("invalid_action", "Answer this question with End it or Keep it.", { status: 422 });
     }
     if (item.status !== "open") {
       const resolvedStatus = item.status === "ignored" ? "ignored" : "accepted";

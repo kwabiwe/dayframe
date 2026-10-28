@@ -223,6 +223,11 @@ jobs:
         env:
           DAYFRAME_CORRECTIONS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-timeline-corrections.postgres.test.ts
+      - name: Timer runs into a trip (location v4 design §7)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_TIMER_TRIP_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/timer-trip-clash.postgres.test.ts
       - name: Integration API location and summary reads
         if: ${{ !cancelled() }}
         env:
