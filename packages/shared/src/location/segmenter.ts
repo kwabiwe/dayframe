@@ -1120,6 +1120,8 @@ function preprocess(input: LocationEngineInput) {
   const learnedIndex = indexPlacesByLatitude(input.acceptedLearnedPlaces, input.config);
   const rejectedEvidence: RejectedEvidence[] = [];
   const broadReadingTimes: number[] = [];
+  // Every genuine reading rejected as too broad, whatever its accuracy: a still silence has none (card J).
+  const rejectedReadingTimes: number[] = [];
   const seen = new Set<string>();
   const sorted = input.evidence.map((evidence) => ({ ...evidence, metadata: evidence.metadata ? { ...evidence.metadata } : undefined })).sort((a, b) => {
     const timeDifference = Date.parse(a.occurredAt) - Date.parse(b.occurredAt);
@@ -1151,14 +1153,23 @@ function preprocess(input: LocationEngineInput) {
       rejectedEvidence.push({ clientEvidenceId: evidence.clientEvidenceId, kind: evidence.kind, occurredAt: evidence.occurredAt, reason: "invalid_accuracy" });
       continue;
     }
+    // The iPhone drops a too-broad reading's position before keeping or sending it, so it arrives without
+    // one: it still shows the phone was awake, so a silence it falls in was no still silence (card J, Codex
+    // r3 on #601). It is not a trip's observation (`broadReadingTimes`), which needs the reading's accuracy
+    // band only for positioned readings replay stored.
+    if (evidence.latitude == null && (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
+      evidence.isSimulated !== true && evidence.horizontalAccuracyMeters != null &&
+      evidence.horizontalAccuracyMeters > input.config.maxAcceptedHorizontalAccuracyMeters) rejectedReadingTimes.push(occurredAtMs);
     if (
       evidence.latitude != null &&
       evidence.horizontalAccuracyMeters != null &&
       evidence.horizontalAccuracyMeters > input.config.maxAcceptedHorizontalAccuracyMeters
     ) {
       rejectedEvidence.push({ clientEvidenceId: evidence.clientEvidenceId, kind: evidence.kind, occurredAt: evidence.occurredAt, reason: "accuracy_too_broad" });
-      if ((evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true &&
-        evidence.horizontalAccuracyMeters < input.config.tripUnseenObservedAccuracyMeters) broadReadingTimes.push(occurredAtMs);
+      if ((evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true) {
+        rejectedReadingTimes.push(occurredAtMs);
+        if (evidence.horizontalAccuracyMeters < input.config.tripUnseenObservedAccuracyMeters) broadReadingTimes.push(occurredAtMs);
+      }
       continue;
     }
     let impliedSpeedMetersPerSecond: number | null = null;
@@ -1217,7 +1228,7 @@ function preprocess(input: LocationEngineInput) {
     }
     accepted.push({ evidence: normalisedEvidence, match, impliedSpeedMetersPerSecond });
   }
-  return { accepted, rejectedEvidence, broadReadingTimes };
+  return { accepted, rejectedEvidence, broadReadingTimes, rejectedReadingTimes };
 }
 
 function resolveCorroboratedCoincidentVisits(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
@@ -1539,6 +1550,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const { accepted: acceptedWithMotion, rejectedEvidence } = preprocessed;
   // This run's own broad readings, and those stored earlier as rejected (times only, never positions).
   const broadReadingTimes = [...preprocessed.broadReadingTimes, ...(input.broadReadingTimes ?? [])].sort((a, b) => a - b);
+  const rejectedReadingTimes = [...preprocessed.rejectedReadingTimes, ...(input.rejectedReadingTimes ?? input.broadReadingTimes ?? [])]
+    .sort((a, b) => a - b);
   // Motion & Fitness activity is not a location observation: stays, physical
   // stops and continuity never see it. Only journey timing uses it, below.
   const accepted = acceptedWithMotion.filter((item) => !isMotionEvidence(item.evidence));
@@ -2004,10 +2017,13 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   // stop (at a silence, an exit or edge matches), so the stop replaces them.
   // It may only claim silences the saved-place rules would bridge. Otherwise
   // promoted stays keep precedence over the same time.
+  // Core Motion's history, built once: physical stops read it for still silences (card J), stays and trips after.
+  const motionTimeline = acceptedWithMotion.length === accepted.length ? null
+    : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt));
   const absorbed = new Set<StaySegment>();
   const physicalStays: StaySegment[] = [];
   const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
-  for (const stop of detectPhysicalStops(accepted, input.config)) {
+  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline, rejectedReadingTimes)) {
     const stopStartMs = Date.parse(stop.startedAt);
     const stopEndMs = Date.parse(stop.stoppedAt);
     const overlapping = promotedStays.filter((stay) =>
@@ -2067,14 +2083,14 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const endMs = Math.max(stopEndMs, fragmentsEndMs);
     if (Math.max(fragmentsStartMs - startMs, endMs - fragmentsEndMs) < input.config.physicalStopAbsorbExtensionMs) continue;
     const fragmentSpans = overlapping.map((stay): [number, number] => [Date.parse(stay.startedAt), Date.parse(stay.stoppedAt!)]);
-    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, visitSpans) > input.config.savedPlaceQuietGapMaxMs) continue;
+    // A silence the device was still through (card J) is covered as a Visit's span is.
+    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, [...visitSpans, ...(stop.stillSpans ?? [])]) >
+      input.config.savedPlaceQuietGapMaxMs) continue;
     for (const stay of overlapping) absorbed.add(stay);
     physicalStays.push(stayAbsorbingFragments(stop, overlapping, identity, startMs, accepted, input));
   }
   const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  const motionTimeline = acceptedWithMotion.length === accepted.length ? null
-    : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt));
   const stays = refineStayDeparturesWithMotion(coalesceCompatibleUnknownStays(rawStays, accepted, input),
     motionTimeline, input.config, accepted, input.processingAt);
   // A stay inherits an inferred boundary from every promoted stay it absorbed
