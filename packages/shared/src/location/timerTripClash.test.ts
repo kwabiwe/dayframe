@@ -25,6 +25,12 @@ describe("timerTripClash (location v4 design §7)", () => {
     expect(timerTripClash(block("14:30", "15:00"), [trip("t1", "14:22", "14:50")], now)).toBeNull();
   });
 
+  it("asks nothing about a trip more than 2 days after the block started", () => {
+    const longAgo = { ...block("13:00", null), startedAt: "2026-10-26T14:00:00.000Z" };
+    expect(timerTripClash(longAgo, [trip("t1", "14:22", "14:50")], now)).toBeNull();
+    expect(timerTripClash({ ...longAgo, startedAt: "2026-10-26T14:30:00.000Z" }, [trip("t1", "14:22", "14:50")], now)).not.toBeNull();
+  });
+
   it("asks about the first trip the block ran into", () => {
     expect(timerTripClash(block("09:00", null), [trip("late", "17:00", "17:30"), trip("early", "12:00", "12:20")], now)?.tripId).toBe("early");
     // The first trip it only touched within tolerance is skipped for the next one it really ran into.
@@ -36,6 +42,8 @@ describe("timerTripClash (location v4 design §7)", () => {
     expect(timerTripClash(block("13:00", "15:00", { source: "health_workout", eventType: "health_workout_import" }), trips, now)).toBeNull();
     expect(timerTripClash(block("13:00", "15:00", { source: "location_learning", eventType: "geofence_exit" }), trips, now)).toBeNull();
     expect(timerTripClash(block("13:00", "15:00", { source: "location_learning", eventType: "commute_detected" }), trips, now)).toBeNull();
+    // Logs as makes its blocks from a `location_place_logged` event (Codex r1 on #611).
+    expect(timerTripClash(block("13:00", "15:00", { source: "location_learning", eventType: "location_place_logged" }), trips, now)).toBeNull();
     expect(timerTripClash(block("13:00", "15:00", { reviewStatus: "needs_review" }), trips, now)).toBeNull();
     for (const key of ["commute", "travel", "errands"]) {
       expect(timerTripClash(block("13:00", "15:00", { categoryStarterKey: key }), trips, now)).toBeNull();

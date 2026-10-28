@@ -24,6 +24,7 @@ import {
 import {
   resolveLocationReviewActionWithClient
 } from "./location/location-review-service";
+import { timerTripClashStillHolds } from "./location/timer-trip-clash-service";
 import { reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
 import { syncTimeEntryTags } from "./tag-service";
@@ -449,22 +450,45 @@ async function resolveTimerTripClash(
     });
   }
   const wanted = mutation.action === "accept" ? "accepted" : "ignored";
-  if (item.status !== "open") {
-    if (item.status !== wanted) throw resolutionConflict(item.id, item.status);
-    return { ok: true, action: mutation.action, status: wanted, alreadyResolved: true, equivalent: true };
-  }
   const payload = (item.rawPayload ?? {}) as Record<string, unknown>;
   const timeEntryId = typeof payload.timeEntryId === "string" ? payload.timeEntryId : null;
+  if (item.status !== "open") {
+    if (item.status !== wanted) throw resolutionConflict(item.id, item.status);
+    return {
+      ok: true, action: mutation.action, status: wanted, alreadyResolved: true, equivalent: true,
+      ...(wanted === "accepted" && item.resolvedTimeEntryId ? { entryId: item.resolvedTimeEntryId } : {})
+    };
+  }
+  if (mutation.action === "ignore_once") {
+    await resolveGenericReviewAndEvent(client, item, session, "ignored");
+    return { ok: true, action: mutation.action, status: "ignored" };
+  }
+  // End it answers the question as it was shown: a queued answer whose proposal has since changed is refused,
+  // and so is one whose block or trip no longer clash (a correction removed the trip, the block was edited
+  // into a move activity, its end was set): the next pass retires or refreshes it (Codex r1 on #611).
+  if (mutation.expectedProposalHash) assertExpectedGenericProposal(item, mutation.expectedProposalHash);
   const tripStartedAt = typeof payload.tripStartedAt === "string" ? payload.tripStartedAt : null;
-  const ended = mutation.action === "accept" && timeEntryId && tripStartedAt
-    ? await endBlockAtTripStart(client, session, timeEntryId, tripStartedAt)
-    : { ended: false, wasRunning: false };
-  await resolveGenericReviewAndEvent(client, item, session, wanted);
+  if (!timeEntryId || !tripStartedAt || !await timerTripClashStillHolds(client, session, payload)) {
+    throw new ReviewResolutionError(
+      "proposal_changed",
+      "This question changed before it could be answered. Refresh it before trying again.",
+      { status: 409, details: { reviewItemId: item.id, canonicalStatus: "open", canonicalReviewStatuses: { [item.id]: "open" } } }
+    );
+  }
+  const ended = await endBlockAtTripStart(client, session, timeEntryId, tripStartedAt);
+  await resolveGenericReviewAndEvent(client, item, session, "accepted");
+  // The block this answer changed, as every accepted Review answer names it (the iPhone outbox's proof).
+  if (item.eventId) {
+    await client.query(
+      `update activity_events set resolved_time_entry_id = $4 where id = $1 and workspace_id = $2 and user_id = $3`,
+      [item.eventId, session.workspaceId, session.userId, timeEntryId]);
+  }
   return {
     ok: true,
     action: mutation.action,
-    status: wanted,
-    ...(ended.ended ? { timeEntryId, endedAt: new Date(tripStartedAt!).toISOString() } : {}),
+    status: "accepted",
+    entryId: timeEntryId,
+    ...(ended.ended ? { endedAt: new Date(tripStartedAt).toISOString() } : {}),
     ...(ended.wasRunning ? { stoppedRunningTimer: true } : {})
   };
 }

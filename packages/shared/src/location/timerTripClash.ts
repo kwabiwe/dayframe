@@ -13,8 +13,15 @@ export const timerTripClashClientEventId = (timeEntryId: string) => `timer-trip-
 
 /** It was already running when you left: started at least this long before the trip. */
 export const TIMER_TRIP_CLASH_LEAD_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
+/** And at most this long before it: a timer left on overnight still asks, a block days long does not. */
+export const TIMER_TRIP_CLASH_MAX_LEAD_MS = 2 * 86_400_000;
 /** It ran on into the trip by more than this (the tolerance automatic logging uses). */
 export const TIMER_TRIP_CLASH_OVERLAP_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
+
+/** Blocks Dayframe made from location (auto-logged visits and Moves, Logs as, Review), never a timer's. */
+const LOCATION_BLOCK_SOURCES: ReadonlySet<string> = new Set([
+  "geofence", "geofence_specific", "geofence_broad", "ha_geofence", "location_learning", "location_auto_log"
+]);
 
 /** Move activities merge with the trip instead (step 16): Commute, Getting around, Errands. */
 export const TIMER_TRIP_MOVE_STARTER_KEYS: ReadonlySet<string> = new Set(["commute", "travel", "errands"]);
@@ -49,7 +56,7 @@ export type TimerTripClash = {
 /** Whether this block can ask at all, whatever trips there are. */
 export function timerTripClashEligible(entry: TimerTripClashEntry) {
   return (entry.reviewStatus ?? "confirmed") === "confirmed" && entry.timerEnd !== false &&
-    classifyAutomaticActivity(entry) === "manual_or_other" &&
+    classifyAutomaticActivity(entry) === "manual_or_other" && !LOCATION_BLOCK_SOURCES.has(entry.source) &&
     !(entry.categoryStarterKey && TIMER_TRIP_MOVE_STARTER_KEYS.has(entry.categoryStarterKey));
 }
 
@@ -58,7 +65,7 @@ function ranInto(entry: TimerTripClashEntry, trip: TimerTripClashTrip, nowMs: nu
   const entryStop = entry.stoppedAt == null ? nowMs : Date.parse(entry.stoppedAt);
   const tripStart = Date.parse(trip.startedAt), tripStop = Date.parse(trip.stoppedAt);
   if (![entryStart, entryStop, tripStart, tripStop].every(Number.isFinite) || tripStop <= tripStart) return null;
-  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS) return null;
+  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS || entryStart < tripStart - TIMER_TRIP_CLASH_MAX_LEAD_MS) return null;
   const overlapMs = Math.min(entryStop, tripStop) - tripStart;
   return overlapMs > TIMER_TRIP_CLASH_OVERLAP_MS ? overlapMs : null;
 }
