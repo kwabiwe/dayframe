@@ -9,6 +9,7 @@ import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import { useClockFormat } from "@/lib/clockFormat";
 import { useMobileTheme } from "@/lib/mobileTheme";
+import { CALENDAR_PROTOTYPE } from "@/lib/calendarPrototype";
 import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation";
 
 // Development-only harness for Calendar titles at every zoom (location v4 C6) and Calendar › List
@@ -62,7 +63,9 @@ const entries = [
   block("b6", "meeting", "Call with Sam", [11, 30], [11, 45]),
   block("b7", "social", "Coffee", [12, 30], [12, 34]),
   block("b4", "meeting", "Team sync", [13, 30], [14, 40]),
-  block("b5", "around", null, [14, 40], [16, 26])
+  block("b5", "around", null, [14, 40], [16, 26]),
+  // The owner's 28 Oct case: a gym visit logged as a block (its place line stands for the place row).
+  { ...block("b8", "health", "PureGym", [17, 10], [17, 40]), placeName: "PureGym" }
 ];
 
 // calendar-v3-mockup's synthetic Friday (Calendar v3, owner 24 Oct 2026): [start, end, title, colour, extra].
@@ -146,19 +149,31 @@ const timeline: LocationTimeline = {
     { kind: "place", id: "qa-office", status: "finalised", startedAt: iso(10, 39), stoppedAt: iso(14, 40), placeId: "p-office", learnedPlaceId: null,
       name: "Office", role: "work", matchKind: "saved", confidence: "high", blockIds: ["b3", "b4"] },
     { kind: "place", id: "qa-unknown", status: "finalised", startedAt: iso(16, 26), stoppedAt: iso(17, 0), placeId: null, learnedPlaceId: null,
-      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] }
+      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] },
+    { kind: "place", id: "qa-gym", status: "finalised", startedAt: iso(17, 10), stoppedAt: iso(17, 40), placeId: "p-gym", learnedPlaceId: null,
+      name: "PureGym", role: null, matchKind: "saved", confidence: "high", blockIds: ["b8"] },
+    { kind: "trip", id: "qa-trip-2", status: "finalised", startedAt: iso(17, 45), stoppedAt: iso(18, 20), fromId: "qa-gym", toId: "qa-home-2",
+      mode: "walking", stopIds: [], distanceMeters: 2_400, confidence: "medium", reason: null, blockIds: [], legs: [
+        { startedAt: iso(17, 45), stoppedAt: iso(18, 20), mode: "walking", confidence: "sure", distanceMeters: 2_400 }] },
+    { kind: "place", id: "qa-home-2", status: "finalised", startedAt: iso(18, 20), stoppedAt: iso(23, 0), placeId: "p-home", learnedPlaceId: null,
+      name: "Home", role: null, matchKind: "saved", confidence: "high", blockIds: [] }
   ]
 };
 
 // Things to check (step 14): the unknown place's question, and Apple Health's sleep.
 const QA_CHECKS = [
   { id: "qa-check-unknown", segmentId: "qa-unknown", startedAt: iso(16, 26), stoppedAt: iso(17, 0) },
-  { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) }
+  { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) },
+  { id: "qa-check-trip", segmentId: "qa-trip-2", startedAt: iso(17, 45), stoppedAt: iso(18, 20) }
 ];
-const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"]]);
+// Calendar prototype: each "?" row's own icon, and how many still ask across the last 7 days (other days too).
+const QA_CHECK_GLYPHS = new Map([["qa-check-unknown", "map-pin"], ["qa-check-sleep", "heart-pulse"], ["qa-check-trip", "route"]] as const);
+const QA_CHECK_TOTAL = 5;
+const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"], ["qa-check-trip", "Getting around"]]);
 // Their questions (step 14 part 3b), as reviewAnswerQuestion words them; answers here do nothing.
 const QA_CHECK_QUESTIONS = new Map([
-  ["qa-check-unknown", { question: "Log Unknown place, 16:26–17:00?", detail: null, logLabel: "Log it", skipLabel: "Not now", more: true, opens: false }],
+  ["qa-check-unknown", { question: "Visited Pret A Manger?", detail: "16:26–17:00", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }],
+  ["qa-check-trip", { question: "Getting around, 17:45–18:20?", detail: "35m · Location", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }],
   ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
 ]);
 
@@ -273,7 +288,9 @@ export default function CalendarQaRoute() {
         />
         {layout === "list" ? (
           <View style={{ flex: 1 }}>
-            <CalendarListView checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
+            <CalendarListView checkGlyphs={dense ? undefined : QA_CHECK_GLYPHS} checkTotal={dense || !CALENDAR_PROTOTYPE ? undefined : QA_CHECK_TOTAL}
+              onNextCheck={CALENDAR_PROTOTYPE ? () => undefined : undefined} prototype={CALENDAR_PROTOTYPE}
+              checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
               onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={dense ? null : timeline} />
