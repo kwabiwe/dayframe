@@ -8,6 +8,7 @@ const QA_ROUTES: Record<string, Href> = {
   "calendar-qa": "/calendar-qa" as Href,
   "calendar-qa-list": "/calendar-qa?layout=list" as Href,
   "calendar-qa-question": "/calendar-qa?layout=list&check=1" as Href,
+  "calendar-qa-grid-day": "/calendar-qa?at=8" as Href,
   "calendar-qa-question-place": "/calendar-qa?layout=list&check=unknown" as Href,
   "calendar-qa-question-trip": "/calendar-qa?layout=list&check=trip" as Href,
   "calendar-qa-dense": "/calendar-qa?day=dense" as Href,

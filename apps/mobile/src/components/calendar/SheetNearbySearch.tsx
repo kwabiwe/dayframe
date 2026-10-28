@@ -64,7 +64,6 @@ export function SheetNearbySearch({ centre, onPick, theme }: {
         }} placeholder="Search places" placeholderTextColor={theme.textSecondary} returnKeyType="search"
           style={[styles.searchInput, { color: theme.textPrimary }]} value={query} />
       </View>
-      {!typed ? <Text {...mobileTextProps("metadata")} style={[styles.label, { color: theme.textSecondary }]}>NEARBY</Text> : null}
       {status === "loading" && !rows.length ? (
         <Text {...mobileTextProps("metadata")} style={[styles.note, { color: theme.textSecondary }]}>Looking nearby…</Text>
       ) : !rows.length ? (
@@ -88,7 +87,6 @@ const styles = StyleSheet.create({
   wrap: { gap: 4 },
   search: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, borderRadius: 12, paddingHorizontal: 12 },
   searchInput: { flex: 1, minHeight: 44, fontSize: 16 },
-  label: { marginTop: 8, fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
   note: { paddingVertical: 8, fontSize: 13 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
   text: { flex: 1, gap: 1 },

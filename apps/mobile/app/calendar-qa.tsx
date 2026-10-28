@@ -263,7 +263,7 @@ export default function CalendarQaRoute() {
       ? withPlacesAndLegs(base, timeline, QA_CHECKS, (ms) => new Date(ms).toTimeString().slice(0, 5)) : base;
   }, [dense, layout, model]);
   if (!__DEV__) return <Redirect href="/" />;
-  if (dense && layout !== "list") {
+  if ((dense || (CALENDAR_PROTOTYPE && params.at)) && layout !== "list") {
     // The whole day at the default 72 points an hour, opened at `at` (the header when absent), so
     // Simulator screenshots of the mock-up's windows need no scrolling (the native view's own scroll
     // has nothing left to move).
@@ -273,7 +273,7 @@ export default function CalendarQaRoute() {
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} testID="calendar-qa">
         <ScrollView key={cycleStep} contentOffset={{ x: 0, y: opensAt !== null && Number.isFinite(opensAt) ? header + opensAt * 72 - 12 : 0 }}>
           <DayframeCalendarView
-            model={model}
+            model={dense ? model : shown}
             onChangeLayout={() => undefined}
             onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
             // The native view also keeps the top safe area inside it: room for it, so 23:59 is drawn too.
@@ -307,6 +307,7 @@ export default function CalendarQaRoute() {
         {/* `?sheet=place|trip|leg` (step 12): a correction sheet open over the List, for Simulator screenshots. */}
         {qaSheetTarget(params.sheet) ? (
           <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(params.sheet)} onDismissed={() => undefined} onQueue={async () => undefined} places={QA_SHEET_PLACES}
+            onSavePlace={CALENDAR_PROTOTYPE ? async () => undefined : undefined}
             presentationId={1} reduceMotion={false} rootHosted={false} target={qaSheetTarget(params.sheet)!} theme={theme} />
         ) : null}
       </View>
