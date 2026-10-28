@@ -3065,7 +3065,7 @@ async function copyFinishedEntry(
       window = { startedAt: new Date(atMs).toISOString(), stoppedAt: row.stoppedAt.toISOString() };
     } else {
       const endMs = stopMs + (stopMs - startMs);
-      if (endMs > (input.now ?? new Date()).getTime()) throw new TimeEntryValidationError("That would end in the future.");
+      if (endMs > (input.now ?? new Date()).getTime()) throw new TimeEntryValidationError("No room after this block yet: the copy would end in the future.");
       window = { startedAt: row.stoppedAt.toISOString(), stoppedAt: new Date(endMs).toISOString() };
     }
     const event = await client.query<{ id: string }>(

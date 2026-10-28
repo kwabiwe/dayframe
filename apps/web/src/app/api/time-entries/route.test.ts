@@ -118,10 +118,10 @@ describe("POST /api/time-entries", () => {
     const conflict = await POST(jsonRequest({ mode: "split", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toMatchObject({ code: "time_entry_details_conflict", entry: { id: entryId } });
-    mocks.duplicateFinishedEntry.mockRejectedValueOnce(new TimeEntryValidationError("That would end in the future."));
+    mocks.duplicateFinishedEntry.mockRejectedValueOnce(new TimeEntryValidationError("No room after this block yet: the copy would end in the future."));
     const future = await POST(jsonRequest({ mode: "duplicate", entryId }));
     expect(future.status).toBe(422);
-    expect(await future.json()).toEqual({ error: "That would end in the future." });
+    expect(await future.json()).toEqual({ error: "No room after this block yet: the copy would end in the future." });
   });
 
   it("rejects an unknown mode instead of treating it as a timer start", async () => {
