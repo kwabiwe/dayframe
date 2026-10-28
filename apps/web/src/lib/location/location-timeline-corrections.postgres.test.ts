@@ -89,7 +89,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
   it("sets a place event-first, marks it as set by you, and a newer correction of it replaces the older", async () => {
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
     const first = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-b", placeId: homeId, learnedPlaceId: null }, session);
-    expect(first.correction).toMatchObject({ subject: "place", kind: "place", spanStartedAt: at(520), spanStoppedAt: at(700),
+    expect(first.correction!).toMatchObject({ subject: "place", kind: "place", spanStartedAt: at(520), spanStoppedAt: at(700),
       target: { placeId: homeId, learnedPlaceId: null } });
     const second = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-b", placeId: null, learnedPlaceId: null }, session);
     // A late retry of a correction a newer one has replaced gets its own answer back, and undoes nothing (step 12).
@@ -99,16 +99,16 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-c", placeId: homeId, learnedPlaceId: null, clientCorrectionId: firstId }, session))
       .toEqual(receipt);
     const active = await database!.query(`select id from location_timeline_corrections where workspace_id = $1 and replaced_at is null and span_started_at = $2`, [workspaceId, at(760)]);
-    expect(active.rows.map((row) => row.id)).toEqual([newer.correction.id]);
-    await database!.query(`delete from location_timeline_corrections where id = any($1::uuid[])`, [[receipt.correction.id, newer.correction.id]]);
+    expect(active.rows.map((row) => row.id)).toEqual([newer.correction!.id]);
+    await database!.query(`delete from location_timeline_corrections where id = any($1::uuid[])`, [[receipt.correction!.id, newer.correction!.id]]);
     await database!.query(`update stay_segments set place_id = null, metadata = metadata - 'setByYou' where client_segment_id = 'seg-c' and workspace_id = $1`, [workspaceId]);
     const rows = await database!.query<{ id: string; replacedById: string | null; eventType: string; label: string | null }>(
       `select c.id, c.replaced_by_id as "replacedById", e.event_type as "eventType", e.raw_payload ->> 'itemId' as label
          from location_timeline_corrections c join activity_events e on e.id = c.created_from_event_id
         where c.workspace_id = $1 order by c.created_at, c.id`, [workspaceId]);
     expect(rows.rows).toEqual([
-      { id: first.correction.id, replacedById: second.correction.id, eventType: "timeline_correction", label: "seg-b" },
-      { id: second.correction.id, replacedById: null, eventType: "timeline_correction", label: "seg-b" }
+      { id: first.correction!.id, replacedById: second.correction!.id, eventType: "timeline_correction", label: "seg-b" },
+      { id: second.correction!.id, replacedById: null, eventType: "timeline_correction", label: "seg-b" }
     ]);
     const stay = await database!.query(`select place_id as "placeId", metadata from stay_segments where client_segment_id = 'seg-b' and workspace_id = $1`, [workspaceId]);
     expect(stay.rows[0]).toMatchObject({ placeId: null, metadata: { placeMatchKind: "unknown", setByYou: true } });
@@ -150,7 +150,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await expect(correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-1" }, session)).rejects.toMatchObject({ status: 409 });
     // A leg's mode on a trip that is a block is still the person's to set.
     const leg = await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: at(480), legStoppedAt: at(490), mode: "running" }, session);
-    expect(leg.correction).toMatchObject({ subject: "leg", kind: "leg_mode", target: { mode: "running" } });
+    expect(leg.correction!).toMatchObject({ subject: "leg", kind: "leg_mode", target: { mode: "running" } });
     await expect(correctLocationTimeline({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(900), stoppedAt: at(950) }, session))
       .rejects.toMatchObject({ status: 422 });
   });
@@ -237,7 +237,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const neighbour = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-b", placeId: homeId, learnedPlaceId: null }, session);
     const own = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-a", placeId: homeId, learnedPlaceId: null }, session);
     expect(own.correction).toMatchObject({ spanStartedAt: at(0), spanStoppedAt: at(480) });
-    const kept = await database!.query(`select replaced_at from location_timeline_corrections where id = $1`, [neighbour.correction.id]);
+    const kept = await database!.query(`select replaced_at from location_timeline_corrections where id = $1`, [neighbour.correction!.id]);
     expect(kept.rows[0].replaced_at).toBeNull();
   });
   it("offers the corrected place and times in the open Review suggestion, routes the trip from it, and skips a deleted place on replay (Codex r2 on #566)", async () => {
@@ -399,7 +399,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
 
     // I wasn't here: one trip from Home to Home, low, set by you; the place and the trip out leave the day.
     const notHereCorrection = await correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-x" }, session);
-    expect(notHereCorrection.correction).toMatchObject({ subject: "place", kind: "delete", spanStartedAt: at(base + 80), spanStoppedAt: at(base + 95) });
+    expect(notHereCorrection.correction!).toMatchObject({ subject: "place", kind: "delete", spanStartedAt: at(base + 80), spanStoppedAt: at(base + 95) });
     const joinedTrip = (await db.query(
       `select stopped_at as "stoppedAt", to_stay_segment_id as "toStayId", route_distance_m as "distance", route_sample_count as "samples",
               confidence, metadata from commute_segments where id = $1`, [t1])).rows[0];
@@ -436,4 +436,73 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const ids = timeline.items.map((item) => item.id).filter((id) => id.startsWith("j-"));
     expect(ids).toEqual(["j-home-1", "j-t1", "j-home-2", "j-t4", "j-last"]);
   });
+
+  // Step 12 part 4: Logs as on a place with no question and no block.
+  it("logs a place as an activity for the time your own blocks don't cover, once per id, and never twice", async () => {
+    const db = database!;
+    const base = 6_000;
+    const placeRow = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'l-place', 'device-1', 'closed', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb) returning id`,
+      [workspaceId, userId, at(base), at(base + 60)])).rows[0].id;
+    await db.query(`insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'l-open', 'device-1', 'open', $3, null, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb)`,
+      [workspaceId, userId, at(base + 100)]);
+    const categoryId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Errands', 'teal') returning id`, [workspaceId])).rows[0].id;
+    // Your own block 10–20 is kept as it is.
+    await db.query(`insert into time_entries (workspace_id, user_id, source, started_at, stopped_at) values ($1, $2, 'manual_app', $3, $4)`,
+      [workspaceId, userId, at(base + 10), at(base + 20)]);
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    await expect(correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-open", categoryId }, session))
+      .rejects.toMatchObject({ status: 422 });
+    await expect(correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId: homeId }, session))
+      .rejects.toMatchObject({ status: 422 });
+    const id = "66000000-0000-4000-8000-0000000000d1";
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, clientCorrectionId: id }, session);
+    expect(logged.logged?.entryIds).toHaveLength(2);
+    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt", category_id as "categoryId", source
+        from time_entries where id = any($1::uuid[]) order by started_at`, [logged.logged!.entryIds]);
+    expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString()]))
+      .toEqual([[at(base), at(base + 10)], [at(base + 20), at(base + 60)]]);
+    expect(blocks.rows.every((row) => row.categoryId === categoryId && row.source === "location_learning")).toBe(true);
+    // The retry after a lost reply gets the same blocks; a second Logs as is refused, the place being in a block now.
+    expect(await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, clientCorrectionId: id }, session))
+      .toEqual(logged);
+    await expect(correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId }, session))
+      .rejects.toMatchObject({ status: 409 });
+    expect((await db.query(`select status, continuity_status as "continuity" from stay_segments where id = $1`, [placeRow])).rows[0])
+      .toEqual({ status: "finalised", continuity: "manual" });
+    expect((await db.query(`select count(*)::int as n from location_timeline_corrections where workspace_id = $1 and span_started_at >= $2`,
+      [workspaceId, at(base)])).rows[0].n).toBe(0);
+    const { getLocationTimeline } = await import("./location-timeline-service");
+    const timeline = await getLocationTimeline(session, { date: at(base).slice(0, 10), timeZone: "UTC", now: new Date(at(base + 200)) });
+    expect(timeline.items.find((item) => item.id === "l-place")?.blockIds).toEqual(logged.logged!.entryIds);
+
+    // Replay's Review emission sees the decision: no question for it, with its blocks or once they're deleted
+    // (Codex r1 on #605).
+    const { emitReviewSemanticSegments } = await import("./location-review-semantic-batch");
+    const segment = {
+      kind: "stay", clientSegmentId: "l-place", algorithmVersion: "location-v2.0", status: "finalised", startedAt: at(base),
+      stoppedAt: at(base + 60), placeId: null, learnedPlaceId: null, placeMatchKind: "unknown", candidatePlaceIds: [], sampleCount: 4,
+      continuityStatus: "continuous", confidence: "high", evidenceIds: []
+    } as never;
+    const emit = async () => {
+      const client = await db.connect();
+      try {
+        await client.query("begin");
+        await emitReviewSemanticSegments(client, session, [segment], new Map([["l-place", placeRow]]), new Map());
+        await client.query("commit");
+      } finally {
+        client.release();
+      }
+    };
+    await emit();
+    await db.query(`delete from time_entries where id = any($1::uuid[])`, [logged.logged!.entryIds]);
+    await emit();
+    expect((await db.query(`select count(*)::int as n from review_items where location_segment_id = $1`, [placeRow])).rows[0].n).toBe(0);
+    expect((await db.query(`select count(*)::int as n from time_entries where workspace_id = $1 and started_at >= $2 and started_at < $3`,
+      [workspaceId, at(base), at(base + 60)])).rows[0].n).toBe(1);
+  });
 });
+

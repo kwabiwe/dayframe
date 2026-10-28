@@ -160,6 +160,9 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(parse({ kind: "delete", subject: "leg", itemId: "t" })).toBe(false);
     expect(parse({ kind: "merge", subject: "trip", itemId: "t" })).toBe(true);
     expect(parse({ kind: "merge", subject: "place", itemId: "a" })).toBe(false);
+    expect(parse({ kind: "log_place", subject: "place", itemId: "a", categoryId: SAVED })).toBe(true);
+    expect(parse({ kind: "log_place", subject: "place", itemId: "a" })).toBe(false);
+    expect(parse({ kind: "log_place", subject: "trip", itemId: "t", categoryId: SAVED })).toBe(false);
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "bus" })).toBe(true);
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "boat" })).toBe(false);
     expect(parse({ kind: "split", subject: "place", itemId: "a" })).toBe(false);
