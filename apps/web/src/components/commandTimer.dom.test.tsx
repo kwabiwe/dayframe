@@ -257,7 +257,7 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Split Plan launch at");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
-    expect(runtime.joinSplitTimer).toHaveBeenCalledWith({ entryId: "running-entry", newEntryId: "second-part" });
+    expect(runtime.joinSplitTimer).toHaveBeenCalledWith({ entryId: "running-entry", newEntryId: "second-part", commandId: expect.stringMatching(/^web-join-/) });
   });
 
   it("keeps the dialog open with the reason when the split is refused, and offers Try again when Undo fails", async () => {
@@ -275,7 +275,28 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     (runtime.joinSplitTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Offline" });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
     expect(screen.getByRole("status").textContent).toContain("Couldn't put Plan launch back together.");
-    expect(screen.getByRole("button", { name: "Try again" })).not.toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Try again" })); });
+    // Try again is the same Undo: the same command id, so one the server already did is answered as done (Codex r1 on #607).
+    const joins = (runtime.joinSplitTimer as ReturnType<typeof vi.fn>).mock.calls.map(([split]) => split.commandId);
+    expect(joins).toHaveLength(2);
+    expect(joins[0]).toMatch(/^web-join-/);
+    expect(joins[1]).toBe(joins[0]);
+  });
+
+  it("never closes while the split is on its way, Escape included (Codex r1 on #607)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ description: "Plan launch" }), description: "Plan launch" });
+    let finish: ((value: unknown) => void) | undefined;
+    (runtime.splitActiveTimer as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm); });
+    fireEvent.keyDown(screen.getByRole("slider", { hidden: true, name: "Split at" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).not.toBeNull();
+    await act(async () => { finish?.({ ok: false, error: "Offline" }); });
   });
 
   it("can't split a block under two minutes yet", async () => {
@@ -316,7 +337,7 @@ function runtimeFixture(overrides: {
     createManualEntry: vi.fn().mockResolvedValue({ ok: true }),
     deleteActiveTimer: vi.fn().mockResolvedValue({ ok: true }),
     joinSplitTimer: vi.fn().mockResolvedValue({ ok: true }),
-    splitActiveTimer: vi.fn().mockResolvedValue({ ok: true, entryId: "running-entry", newEntryId: "second-part" }),
+    splitActiveTimer: vi.fn().mockResolvedValue({ ok: true, entryId: "running-entry", newEntryId: "second-part", running: true }),
     isManualEntryOpen: false,
     isTimerBusy: false,
     openManualEntry: vi.fn(),

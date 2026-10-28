@@ -2999,6 +2999,13 @@ export async function splitFinishedEntry(
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
 }
 
+/** A block's tag names, sorted, as one array (for comparing two blocks' tags). */
+function tagNamesSql(alias: string) {
+  return `coalesce((select array_agg(t.name order by t.name) from time_entry_tags tet
+    join tags t on t.id = tet.tag_id and t.workspace_id = ${alias}.workspace_id
+    where tet.time_entry_id = ${alias}.id and tet.workspace_id = ${alias}.workspace_id), array[]::text[])`;
+}
+
 /**
  * Undo of a split (owner 28 Oct 2026): the block `splitEntryId` that a split of `id` made goes, and `id`
  * takes its end again: running again when it was running, so the running timer moves back in the same
@@ -3027,9 +3034,17 @@ export async function joinSplitEntries(
       }
       throw new TimeEntryNotFoundError();
     }
-    const pair = await client.query<{ firstStoppedAt: Date | null; startedAt: Date; stoppedAt: Date | null; splitFrom: string | null }>(
+    const pair = await client.query<{
+      firstStoppedAt: Date | null; startedAt: Date; stoppedAt: Date | null; splitFrom: string | null; sameDetails: boolean;
+    }>(
       `select first.stopped_at as "firstStoppedAt", second.started_at as "startedAt", second.stopped_at as "stoppedAt",
-              e.raw_payload->>'splitFrom' as "splitFrom"
+              e.raw_payload->>'splitFrom' as "splitFrom",
+              (first.project_id is not distinct from second.project_id
+                and first.category_id is not distinct from second.category_id
+                and first.place_id is not distinct from second.place_id
+                and first.place_label is not distinct from second.place_label
+                and first.description is not distinct from second.description
+                and ${tagNamesSql("first")} = ${tagNamesSql("second")}) as "sameDetails"
        from time_entries first
        join time_entries second on second.id = $2 and second.workspace_id = first.workspace_id and second.user_id = first.user_id
        left join activity_events e on e.id = second.created_from_event_id and e.workspace_id = second.workspace_id
@@ -3039,6 +3054,10 @@ export async function joinSplitEntries(
     const row = pair.rows[0];
     if (!row || row.splitFrom !== id || !row.firstStoppedAt || row.firstStoppedAt.getTime() !== row.startedAt.getTime()) {
       throw new TimeEntryValidationError("These blocks are no longer one split block, so they can't be put back together.");
+    }
+    // Joining keeps the first part's details: never over a change made to either part since the split.
+    if (!row.sameDetails) {
+      throw new TimeEntryValidationError("A part of this split block changed since, so it can't be put back together.");
     }
     await client.query(
       `delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3`,
@@ -3068,6 +3087,8 @@ export async function duplicateFinishedEntry(
   return copyFinishedEntry(id, { kind: "duplicate", ...input }, session);
 }
 
+const RUNNING_SPLIT_MARGIN_MS = 60_000;
+
 async function copyFinishedEntry(
   id: string,
   input: {
@@ -3087,16 +3108,17 @@ async function copyFinishedEntry(
       [id, session.workspaceId, session.userId]
     );
     if (clientEventId) {
-      // Already done (its reply was lost): the block it made, not a second one.
-      const earlier = await client.query<{ id: string }>(
-        `select te.id from activity_events e
-         join time_entries te on te.created_from_event_id = e.id and te.workspace_id = e.workspace_id
+      // Already done (its reply was lost): the block it made, not a second one. The event is the receipt,
+      // so a repeat after that block has gone (an Undo joined it back) is answered too, with no block.
+      const earlier = await client.query<{ entryId: string | null }>(
+        `select te.id as "entryId" from activity_events e
+         left join time_entries te on te.created_from_event_id = e.id and te.workspace_id = e.workspace_id
          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
         [session.workspaceId, session.userId, clientEventId]
       );
       if (earlier.rows[0]) {
         await client.query("commit");
-        return { id, newEntryId: earlier.rows[0].id, replayed: true as const };
+        return { id, newEntryId: earlier.rows[0].entryId, replayed: true as const };
       }
     }
     if (!locked.rows[0]) throw new TimeEntryNotFoundError();
@@ -3131,6 +3153,10 @@ async function copyFinishedEntry(
       const atMs = Date.parse(input.splitAt ?? "");
       if (!Number.isFinite(atMs) || atMs <= startMs || atMs >= stopMs) {
         throw new TimeEntryValidationError("Choose a split time inside the block.");
+      }
+      // A running block keeps a minute either side: never its first minute or the last minute before now.
+      if (running && (atMs - startMs < RUNNING_SPLIT_MARGIN_MS || stopMs - atMs < RUNNING_SPLIT_MARGIN_MS)) {
+        throw new TimeEntryValidationError("Choose a split time at least a minute after the start and a minute before now.");
       }
       window = { startedAt: new Date(atMs).toISOString(), stoppedAt: row.stoppedAt?.toISOString() ?? null };
     } else if (!row.stoppedAt) {

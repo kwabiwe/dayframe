@@ -595,6 +595,25 @@ export function applyOptimisticTimerSplit(data: BootstrapData, splitAt: string, 
   return replaceEntryCollections(replaceEntryCollections({ ...data, activeEntry: second }, first), second);
 }
 
+/** Undo of a split the server accepted: the first part takes the second's end again, and the second goes. */
+export function applyOptimisticTimerJoin(data: BootstrapData, entryId: string, splitEntryId: string) {
+  const all = [data.activeEntry, ...data.entries, ...data.historyEntries, ...data.dayEntries, ...data.weekEntries];
+  const first = all.find((entry) => entry?.id === entryId);
+  const second = all.find((entry) => entry?.id === splitEntryId);
+  if (!first || !second) return data;
+  const joined = { ...first, stoppedAt: second.stoppedAt, durationSeconds: first.durationSeconds + second.durationSeconds };
+  const without = (entries: TimeEntryRow[]) => entries.filter((entry) => entry.id !== splitEntryId);
+  const base = {
+    ...data,
+    activeEntry: data.activeEntry?.id === splitEntryId ? joined : data.activeEntry,
+    entries: without(data.entries),
+    historyEntries: without(data.historyEntries),
+    dayEntries: without(data.dayEntries),
+    weekEntries: without(data.weekEntries)
+  };
+  return replaceEntryCollections(base, joined);
+}
+
 export function applyOptimisticTimerDelete(data: BootstrapData) {
   if (!data.activeEntry) return data;
   const activeId = data.activeEntry.id;

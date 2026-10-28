@@ -32,7 +32,7 @@ import type { BootstrapData } from "@/lib/queries";
 import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { DISCARD_RESTORE_REFUSALS, discardedBlockRestoreBlocker, quickActionTimerDraft } from "@/lib/timer-runtime";
-import { runningSplitBounds } from "@/lib/time-entry-split";
+import { newBlockCommandId, runningSplitBounds } from "@/lib/time-entry-split";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
@@ -539,7 +539,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     if (!outcome.ok) return outcome.error;
     setSplitDialogOpen(false);
     window.requestAnimationFrame(() => timerActionsTriggerRef.current?.focus({ preventScroll: true }));
-    const split = { entryId: outcome.entryId, newEntryId: outcome.newEntryId };
+    // One command id for this Undo, Try again included: a repeat of one that was done is answered as done.
+    const split = { entryId: outcome.entryId, newEntryId: outcome.newEntryId, commandId: newBlockCommandId("join") };
     const token = ++noticeSequence.current;
     const undo = async () => {
       setNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));

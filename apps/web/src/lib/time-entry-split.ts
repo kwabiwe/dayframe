@@ -58,10 +58,10 @@ const CHANGED_ELSEWHERE = "This block changed somewhere else. Open it again to s
 
 const UNKNOWN = "Couldn't confirm this with Dayframe, so it may or may not have saved. Check the day before trying again.";
 
-async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string): Promise<SentOutcome> {
+async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string, commandId?: string): Promise<SentOutcome> {
   const init: RequestInit = {
     method: "POST",
-    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: `web-${body.mode}-${crypto.randomUUID()}` },
+    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: commandId ?? newBlockCommandId(String(body.mode)) },
     body: JSON.stringify(body)
   };
   // A dropped connection or a server error (5xx) may follow a commit: the same command once more is safe, as
@@ -96,7 +96,16 @@ function plain(outcome: SentOutcome): BlockMutationOutcome {
   return outcome.ok ? { ok: true } : outcome;
 }
 
-export type RunningSplitOutcome = { ok: true; newEntryId: string } | { ok: false; error: string; changed?: boolean };
+/** One command id for one intent: Undo's Try again sends the same one, so the server knows it already did it. */
+export function newBlockCommandId(mode: string) {
+  return `web-${mode}-${crypto.randomUUID()}`;
+}
+
+/**
+ * `running`: the second part runs. False when the block had stopped by the time the split arrived: the server
+ * then split it as a finished block, and nothing runs.
+ */
+export type RunningSplitOutcome = { ok: true; newEntryId: string; running: boolean } | { ok: false; error: string; changed?: boolean };
 
 /**
  * Splits the running block `entryId` at `atMs` (already snapped by the dialog): it ends there and its second
@@ -112,12 +121,19 @@ export async function splitRunningTimeEntry(
   }, "Couldn't split this block.");
   if (!outcome.ok) return outcome;
   const newEntryId = outcome.body?.newEntryId;
-  return typeof newEntryId === "string" ? { ok: true, newEntryId } : { ok: false, error: UNKNOWN, changed: true };
+  return typeof newEntryId === "string"
+    ? { ok: true, newEntryId, running: outcome.body?.running !== false }
+    : { ok: false, error: UNKNOWN, changed: true };
 }
 
 /** Undo of a split: `splitEntryId` goes and `entryId` takes its end again (running again if it ran). */
-export async function joinSplitTimeEntries(fetcher: Fetch, input: { entryId: string; splitEntryId: string }): Promise<BlockMutationOutcome> {
-  return plain(await send(fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together."));
+export async function joinSplitTimeEntries(
+  fetcher: Fetch,
+  input: { entryId: string; splitEntryId: string; commandId?: string }
+): Promise<BlockMutationOutcome> {
+  return plain(await send(
+    fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input.commandId
+  ));
 }
 
 /** Duplicates a finished block: a new block with the same details, starting where the original ends. */

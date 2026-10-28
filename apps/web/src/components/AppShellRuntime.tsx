@@ -31,6 +31,7 @@ import {
   applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerDelete,
+  applyOptimisticTimerJoin,
   applyOptimisticTimerSplit,
   applyOptimisticTimerStop,
   applyServerActiveEntry,
@@ -61,7 +62,7 @@ import {
 } from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
-export type ActiveSplitOutcome = { ok: true; entryId: string; newEntryId: string } | { ok: false; error: string };
+export type ActiveSplitOutcome = { ok: true; entryId: string; newEntryId: string; running: boolean } | { ok: false; error: string };
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 type CategoryMutationOutcome =
   | { ok: true; category: CategoryRow }
@@ -88,7 +89,7 @@ type RuntimeContext = {
    */
   splitActiveTimer: (atMs: number) => Promise<ActiveSplitOutcome>;
   /** Undo of a split: puts the two blocks back as one (running again when the second part runs). */
-  joinSplitTimer: (split: { entryId: string; newEntryId: string }) => Promise<MutationOutcome>;
+  joinSplitTimer: (split: { entryId: string; newEntryId: string; commandId?: string }) => Promise<MutationOutcome>;
   data: BootstrapData | null;
   dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
@@ -1047,16 +1048,20 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           if (outcome.changed) await refresh({ force: true });
           return outcome;
         }
-        splitSuccessorsRef.current.set(entry.id, outcome.newEntryId);
-        splitSuccessorsRef.current.set(targetId, outcome.newEntryId);
+        // The block had stopped by the time the split arrived (it was split as a finished block): nothing runs
+        // on, so nothing is shown running before the day loads again (Codex r1 on #607).
+        if (outcome.running) {
+          splitSuccessorsRef.current.set(entry.id, outcome.newEntryId);
+          splitSuccessorsRef.current.set(targetId, outcome.newEntryId);
+        }
         const shown = dataRef.current;
-        if (shown?.activeEntry && serverEntryId(shown.activeEntry.id) === targetId) {
+        if (outcome.running && shown?.activeEntry && serverEntryId(shown.activeEntry.id) === targetId) {
           commitData(applyOptimisticTimerSplit(shown, new Date(atMs).toISOString(), outcome.newEntryId), "optimistic");
         }
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
         await refresh({ force: true });
-        return { ok: true, entryId: targetId, newEntryId: outcome.newEntryId };
+        return { ok: true, entryId: targetId, newEntryId: outcome.newEntryId, running: outcome.running };
       } finally {
         setIsTimerBusy(false);
       }
@@ -1064,14 +1069,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, refresh, saveActiveDetails, serverEntryId, versionOf]);
 
-  const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string }): Promise<MutationOutcome> => {
+  const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
     await mutationGateRef.current.whenIdle();
     const result = await mutationGateRef.current.run(async (): Promise<MutationOutcome> => {
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
       try {
-        const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId });
+        const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
+        if (outcome.ok) {
+          // A Stop asked for the second part while the Undo ran stops the joined block (Codex r1 on #607).
+          splitSuccessorsRef.current.set(split.newEntryId, split.entryId);
+          // Shown joined at once, so a failed reload never leaves the gone part running on screen.
+          const shown = dataRef.current;
+          if (shown) commitData(applyOptimisticTimerJoin(shown, split.entryId, split.newEntryId), "optimistic");
+        }
         // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
         if (outcome.ok || outcome.changed) await refresh({ force: true });
         return outcome.ok ? outcome : { ok: false, error: outcome.error };
@@ -1080,7 +1092,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
     });
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [refresh]);
+  }, [commitData, refresh]);
 
   const updateActiveDetails = useCallback(async (
     draft: TimerDraft,

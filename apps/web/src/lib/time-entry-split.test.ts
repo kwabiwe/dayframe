@@ -91,7 +91,7 @@ describe("splitting the running block (owner 28 Oct 2026)", () => {
   it("splits it by id, fenced and with a command id, and answers with the running second part; Undo joins them", async () => {
     const fetcher = vi.fn<Fetcher>(async () => new Response(JSON.stringify({ ok: true, newEntryId: "entry-2", running: true }), { status: 201 }));
     expect(await splitRunningTimeEntry(fetcher, { entryId: "entry-1", atMs: ms("2026-03-02T10:30:00.000Z"), expectedUpdatedAt: "2026-03-02T10:00:00.000Z" }))
-      .toEqual({ ok: true, newEntryId: "entry-2" });
+      .toEqual({ ok: true, newEntryId: "entry-2", running: true });
     const [, init] = fetcher.mock.calls[0];
     expect(JSON.parse(init!.body as string)).toEqual({ mode: "split", entryId: "entry-1", splitAt: "2026-03-02T10:30:00.000Z", expectedUpdatedAt: "2026-03-02T10:00:00.000Z" });
     expect((init!.headers as Record<string, string>)["X-Dayframe-Client-Command-Id"]).toMatch(/^web-split-/);

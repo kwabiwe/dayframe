@@ -39,6 +39,11 @@ export function RunningSplitDialog({ clock, color, colorName, entry, onClose, on
   const lineRef = useRef<HTMLInputElement | null>(null);
   const atMs = bounds ? clampSplit(bounds, chosenMs ?? defaultSplit(bounds)) : null;
 
+  // Every route out goes through the busy check: SplitLine's own Escape and Keep as one too (Codex r1 on #607).
+  function close() {
+    if (!busyRef.current) onClose();
+  }
+
   async function confirm() {
     if (atMs == null || busyRef.current) return;
     busyRef.current = true;
@@ -62,7 +67,7 @@ export function RunningSplitDialog({ clock, color, colorName, entry, onClose, on
           colorName={colorName ?? undefined}
           disabled={busy}
           lineRef={lineRef}
-          onCancel={onClose}
+          onCancel={close}
           onConfirm={() => void confirm()}
           onMove={(next) => setChosenMs(clampSplit(bounds, next))}
           open

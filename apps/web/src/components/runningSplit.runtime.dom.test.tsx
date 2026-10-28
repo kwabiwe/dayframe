@@ -109,6 +109,70 @@ describe("AppShellRuntime split of the running block", () => {
   });
 });
 
+describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  function server(handlers: { join?: () => Promise<Response> | Response; bootstrap?: () => Response; split?: () => Response }) {
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    mocks.clientFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+      requests.push({ url, ...(body ? { body } : {}) });
+      if (url === "/api/time-entries" && body?.mode === "join" && handlers.join) return handlers.join();
+      if (url === "/api/time-entries" && body?.mode === "split" && handlers.split) return handlers.split();
+      if (url === "/api/events") return response({ eventId: "stop", stopOutcome: "stopped" }, 201);
+      if (url.startsWith("/api/bootstrap") && handlers.bootstrap) return handlers.bootstrap();
+      if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+      return response({}, 500);
+    });
+    return requests;
+  }
+
+  it("Undo shows the joined block even when the day can't load again, and a Stop pressed during it stops that block", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    const requests = server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === "/api/events")).toBe(true));
+    expect(requests.find((request) => request.url === "/api/events")!.body).toEqual(expect.objectContaining({
+      rawPayload: { origin: "web_timer", stopScope: "entry", targetEntryId: FIRST }
+    }));
+  });
+
+  it("shows nothing running when the block had stopped by the time the split arrived", async () => {
+    const running = entry({ id: FIRST });
+    server({
+      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: false }, 201),
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(running)} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    await waitFor(() => expect(mocks.clientFetch.mock.calls.some(([url]) => String(url).startsWith("/api/bootstrap"))).toBe(true));
+    expect(screen.getByTestId("active").textContent).not.toContain(SECOND);
+  });
+});
+
 function Harness({ initial }: { initial: BootstrapData }) {
   const { data, hydrate, joinSplitTimer, splitActiveTimer } = useAppShellRuntime();
   return <>
