@@ -12,11 +12,12 @@ const mocks = vi.hoisted(() => ({
   enqueue: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
   remove: vi.fn(async () => undefined),
   synchronise: vi.fn(async () => undefined),
-  appListeners: new Set<(state: string) => void>()
+  appListeners: new Set<(state: string) => void>(),
+  appState: "active"
 }));
 vi.mock("react-native", () => ({
   AppState: {
-    currentState: "active",
+    get currentState() { return mocks.appState; },
     addEventListener: (_type: string, listener: (state: string) => void) => {
       mocks.appListeners.add(listener);
       return { remove: () => mocks.appListeners.delete(listener) };
@@ -206,6 +207,42 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(mocks.synchronise).toHaveBeenCalledTimes(1);
       expect(api!.heldLog).toBeNull();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Codex r2 on #606.
+  it("queues a hold once, never sends from the background, and never lets another account's late Done replace a hold", async () => {
+    vi.useFakeTimers();
+    try {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+      // Two endings before React commits: queued once.
+      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => {
+        for (const listener of mocks.appListeners) listener("inactive");
+        for (const listener of mocks.appListeners) listener("background");
+      });
+      expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+
+      // The hold ends while storage is slow and the app leaves: kept, not sent.
+      let kept!: (value: unknown[]) => void;
+      mocks.enqueue.mockImplementationOnce(() => new Promise((resolve) => { kept = resolve as never; }));
+      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      mocks.appState = "background";
+      await act(async () => { kept([{ clientCorrectionId: "late" }]); });
+      expect(mocks.synchronise).not.toHaveBeenCalled();
+      mocks.appState = "active";
+
+      // A's sheet finishing after B signed in never touches B's hold.
+      await act(async () => { tree.update(<Probe data={account("b")} />); });
+      act(() => { logAs.onLog("cat-errands"); });
+      expect(api!.heldLog).toBeNull();
+    } finally {
+      mocks.appState = "active";
       vi.useRealTimers();
     }
   });

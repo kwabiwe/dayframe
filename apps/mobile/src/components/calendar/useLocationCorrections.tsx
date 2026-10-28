@@ -188,12 +188,21 @@ export function useLocationCorrections({
   // Kept on the phone for the account it was picked for; sent only while the app is in front (the queue's own
   // recovery sends it otherwise). Read through refs, so a Dashboard render never restarts the hold (Codex r1 on #606).
   const commitLogRef = useRef<(log: NonNullable<typeof heldLog>, send: boolean) => void>(() => undefined);
+  // A hold is consumed once, at once: a second ending (the timer, then leaving the app) never queues it again
+  // (Codex r2 on #606).
+  const heldNow = useRef<NonNullable<typeof heldLog> | null>(null);
+  heldNow.current = heldLog;
+  const consumed = useRef(new Set<number>());
   commitLogRef.current = (log, send) => {
+    if (consumed.current.has(log.token)) return;
+    consumed.current.add(log.token);
     if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
     const owner = { userId, workspaceId };
     void enqueueTimelineCorrections(owner, [{ request: log.request }]).then((items) => {
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
-      return send ? synchroniseTimelineCorrections({ owner, force: true }) : undefined;
+      // Sent only while the app is in front, then and at every step of the send (Codex r2 on #606).
+      const inFront = () => AppState.currentState === "active";
+      return send && inFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: inFront }) : undefined;
     }).catch(() => showNotice("That place wasn't logged. Try again."));
   };
   useEffect(() => {
@@ -218,11 +227,17 @@ export function useLocationCorrections({
     };
   }, [heldLog, ownerKey]);
   // A second Logs as sends the one held now, as the deck's hold does.
+  // A hold for an account no longer signed in (a sheet's Done that finished after a switch) is never held, and
+  // never replaces this account's (Codex r2 on #606).
   const holdLog = (next: NonNullable<typeof heldLog>) => {
-    if (heldLog) commitLogRef.current(heldLog, true);
+    if (next.ownerKey !== currentOwner.current) return;
+    if (heldNow.current) commitLogRef.current(heldNow.current, true);
     setHeldLog(next);
   };
-  const undoLog = useCallback(() => setHeldLog(null), []);
+  const undoLog = useCallback(() => {
+    if (heldNow.current) consumed.current.add(heldNow.current.token);
+    setHeldLog(null);
+  }, []);
   // A Logs as the server has acknowledged (never one refused): read the day's blocks again (Codex r1 on #606).
   const acknowledgedIds = acknowledged.map((item) => item.clientCorrectionId).join("|");
   useEffect(() => {
