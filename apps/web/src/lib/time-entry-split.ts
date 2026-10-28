@@ -23,6 +23,18 @@ export function splitBounds(entry: Pick<TimeEntryRow, "startedAt" | "stoppedAt">
   return maxMs >= minMs ? { startMs, stopMs, minMs, maxMs } : null;
 }
 
+/**
+ * Where a running block can be split (owner 28 Oct 2026, as Toggl): on whole minutes, never within its first
+ * minute or the last minute before now. `nowMs` is the bar's growing end. Null when it is too short yet.
+ */
+export function runningSplitBounds(entry: Pick<TimeEntryRow, "startedAt">, nowMs: number): SplitBounds | null {
+  const startMs = Date.parse(entry.startedAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(nowMs)) return null;
+  const minMs = Math.ceil((startMs + MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
+  const maxMs = Math.floor((nowMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
+  return maxMs >= minMs ? { startMs, stopMs: nowMs, minMs, maxMs } : null;
+}
+
 /** A split time snapped to the minute and kept inside the bounds. */
 export function clampSplit(bounds: SplitBounds, atMs: number) {
   const snapped = Math.round(atMs / MINUTE_MS) * MINUTE_MS;
@@ -40,15 +52,16 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
  * outcome is unknown), so the caller shows the day again.
  */
 export type BlockMutationOutcome = { ok: true } | { ok: false; error: string; changed?: boolean };
+type SentOutcome = { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string; changed?: boolean };
 
 const CHANGED_ELSEWHERE = "This block changed somewhere else. Open it again to see it as it is now.";
 
 const UNKNOWN = "Couldn't confirm this with Dayframe, so it may or may not have saved. Check the day before trying again.";
 
-async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string): Promise<BlockMutationOutcome> {
+async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string, commandId?: string): Promise<SentOutcome> {
   const init: RequestInit = {
     method: "POST",
-    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: `web-${body.mode}-${crypto.randomUUID()}` },
+    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: commandId ?? newBlockCommandId(String(body.mode)) },
     body: JSON.stringify(body)
   };
   // A dropped connection or a server error (5xx) may follow a commit: the same command once more is safe, as
@@ -64,7 +77,7 @@ async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: str
     if (response.status < 500) break;
   }
   if (!response || response.status >= 500) return { ok: false, error: UNKNOWN, changed: true };
-  if (response.ok) return { ok: true };
+  if (response.ok) return { ok: true, body: await response.json().catch(() => null) as Record<string, unknown> | null };
   if (response.status === 409) return { ok: false, error: CHANGED_ELSEWHERE, changed: true };
   const json = await response.json().catch(() => null) as { error?: unknown } | null;
   return { ok: false, error: typeof json?.error === "string" && json.error.trim() ? json.error : fallback };
@@ -74,13 +87,66 @@ async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: str
 export async function splitTimeEntry(fetcher: Fetch, entry: TimeEntryRow, atMs: number): Promise<BlockMutationOutcome> {
   const bounds = splitBounds(entry);
   if (!bounds) return { ok: false, error: "This block is too short to split." };
-  return send(fetcher, {
+  return plain(await send(fetcher, {
     mode: "split", entryId: entry.id, splitAt: new Date(clampSplit(bounds, atMs)).toISOString(), expectedUpdatedAt: entry.updatedAt
+  }, "Couldn't split this block."));
+}
+
+function plain(outcome: SentOutcome): BlockMutationOutcome {
+  return outcome.ok ? { ok: true } : outcome;
+}
+
+/** One command id for one intent: Undo's Try again sends the same one, so the server knows it already did it. */
+export function newBlockCommandId(mode: string) {
+  return `web-${mode}-${crypto.randomUUID()}`;
+}
+
+/**
+ * `entries`: both blocks as the server has them now, so the timer shows them at once. The second part runs
+ * unless the block had stopped by the time the split arrived (then it was split as a finished block).
+ */
+export type RunningSplitOutcome =
+  /** `newEntryId` null: a repeat of a split whose second part has gone since (an Undo joined it back). */
+  | { ok: true; newEntryId: string | null; entries: TimeEntryRow[] }
+  | { ok: false; error: string; changed?: boolean };
+
+/**
+ * Splits the running block `entryId` at `atMs` (already snapped by the dialog): it ends there and its second
+ * part, with every detail, keeps running. `expectedUpdatedAt` is the block's version as this tab has it.
+ */
+export async function splitRunningTimeEntry(
+  fetcher: Fetch,
+  input: { entryId: string; atMs: number; expectedUpdatedAt?: string }
+): Promise<RunningSplitOutcome> {
+  const outcome = await send(fetcher, {
+    mode: "split", entryId: input.entryId, splitAt: new Date(input.atMs).toISOString(),
+    ...(input.expectedUpdatedAt ? { expectedUpdatedAt: input.expectedUpdatedAt } : {})
   }, "Couldn't split this block.");
+  if (!outcome.ok) return outcome;
+  const newEntryId = outcome.body?.newEntryId;
+  const entries = Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [];
+  if (typeof newEntryId === "string") return { ok: true, newEntryId, entries };
+  // Done before and undone since: still reconciled from the blocks it names (Codex r4 on #607).
+  return newEntryId === null && outcome.body?.replayed === true
+    ? { ok: true, newEntryId: null, entries }
+    : { ok: false, error: UNKNOWN, changed: true };
+}
+
+/** Undo of a split: `splitEntryId` goes and `entryId` takes its end again (running again if it ran). */
+export async function joinSplitTimeEntries(
+  fetcher: Fetch,
+  input: { entryId: string; splitEntryId: string; commandId?: string }
+): Promise<{ ok: true; entry: TimeEntryRow | null } | { ok: false; error: string; changed?: boolean }> {
+  const outcome = await send(
+    fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input.commandId
+  );
+  if (!outcome.ok) return outcome;
+  const entry = outcome.body?.entry;
+  return { ok: true, entry: entry && typeof entry === "object" ? entry as TimeEntryRow : null };
 }
 
 /** Duplicates a finished block: a new block with the same details, starting where the original ends. */
 export async function duplicateTimeEntry(fetcher: Fetch, entry: TimeEntryRow): Promise<BlockMutationOutcome> {
   if (!entry.stoppedAt) return { ok: false, error: "Stop this block before duplicating it." };
-  return send(fetcher, { mode: "duplicate", entryId: entry.id, expectedUpdatedAt: entry.updatedAt }, "Couldn't duplicate this block.");
+  return plain(await send(fetcher, { mode: "duplicate", entryId: entry.id, expectedUpdatedAt: entry.updatedAt }, "Couldn't duplicate this block."));
 }
