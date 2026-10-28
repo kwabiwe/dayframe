@@ -279,4 +279,70 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     }
     expect(await question(id)).toBeUndefined();
   });
+  it("a replay pass holding a Log automatically block never deadlocks with a batch delete of it and a timer block (Codex r2 on #611)", async () => {
+    const { deleteTimeEntries } = await import("../event-service");
+    const { reconcileTimerTripClashes } = await import("./timer-trip-clash-service");
+    const manual = await block(845, 900, { description: "Errand prep" });
+    // The auto-logged block sorts after the timer's block, so the delete locks the timer's block first.
+    const auto = (await db().query<{ id: string }>(
+      `insert into time_entries (id, workspace_id, user_id, source, started_at, stopped_at)
+       values ('ffffffff-0000-4000-8000-000000000001', $1, $2, 'location_auto_log', $3, $4) returning id`,
+      [workspaceId, userId, at(600), at(700)])).rows[0].id;
+    expect(manual < auto).toBe(true);
+    const replay = await db().connect();
+    try {
+      await replay.query("begin");
+      await replay.query(`select id from time_entries where id = $1 for update`, [auto]);
+      const deleting = deleteTimeEntries([manual, auto], session);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await reconcileTimerTripClashes(replay, session, window, now);
+      await replay.query("commit");
+      await expect(deleting).resolves.toMatchObject({ deletedCount: 2 });
+    } finally {
+      replay.release();
+    }
+    expect(await question(manual)).toBeUndefined();
+  });
+
+  it("a title edit that commits while the pass waits for its block still asks (Codex r2 on #611)", async () => {
+    const id = await block(850, 940, { description: "Standup" });
+    await reconcile({ entryIds: [id] });
+    const edit = await db().connect();
+    try {
+      await edit.query("begin");
+      // What updateTimeEntry writes for a title edit: user_edited_at and its matching audit row.
+      await edit.query(`update time_entries set description = 'Daily', user_edited_at = $2, updated_at = $2 where id = $1`,
+        [id, "2026-10-28T01:00:00.000Z"]);
+      await edit.query(
+        `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+         values ($1, $2, 'time_entry.edited', 'time_entry', $3, '{}'::jsonb, $4)`,
+        [workspaceId, userId, id, "2026-10-28T01:00:00.000Z"]);
+      const pass = reconcile({ entryIds: [id] });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await edit.query("commit");
+      await pass;
+    } finally {
+      edit.release();
+    }
+    expect(await question(id)).toMatchObject({ status: "open", title: "Daily ran 28m into your trip" });
+  });
+
+  it("a Start that ends the running block before the trip, or a split before it, settles the question (Codex r2 on #611)", async () => {
+    const { processActivityEvent, splitFinishedEntry } = await import("../event-service");
+    await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+    const running = await block(812, null, { description: "Pairing" });
+    await reconcile({ entryIds: [running] });
+    expect((await question(running)).status).toBe("open");
+    await processActivityEvent({
+      clientEventId: "timer-trip-switch", occurredAt: at(851), source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start" }, description: "Lunch"
+    }, session);
+    expect((await question(running)).status).toBe("superseded");
+    await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+    const finished = await block(814, 900, { description: "Write-up" });
+    await reconcile({ entryIds: [finished] });
+    expect((await question(finished)).status).toBe("open");
+    await splitFinishedEntry(finished, { splitAt: at(855) }, session);
+    expect((await question(finished)).status).toBe("superseded");
+  });
 });

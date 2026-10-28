@@ -846,17 +846,21 @@ async function processActivityEventWithClient(
         startOutcome = "superseded";
       } else if (lateStart?.kind === "window") {
         if (lateStart.interruptedEntryIds.length) {
-          await client.query(
+          const interrupted = await client.query<{ id: string }>(
             `update time_entries
              set stopped_at = $1, updated_at = now()
              where workspace_id = $2 and user_id = $3 and id = any($4::uuid[])
-               and started_at < $1 and (stopped_at is null or stopped_at > $1)`,
+               and started_at < $1 and (stopped_at is null or stopped_at > $1)
+             returning id`,
             [startedAt, session.workspaceId, session.userId, lateStart.interruptedEntryIds]
           );
+          // A late Start that ended a block before the trip it ran into settles its "?" (design §7).
+          await reconcileTimerTripClashes(client, session, { entryIds: interrupted.rows.map((row) => row.id) });
         }
         startOutcome = "recorded_completed";
       } else if (candidate.shouldClosePrevious) {
-        await closeActiveTimersForReplacement(client, session, startedAt);
+        const replaced = await closeActiveTimersForReplacement(client, session, startedAt);
+        await reconcileTimerTripClashes(client, session, { entryIds: replaced });
       }
 
       const timeEntryResult = startOutcome === "superseded" ? { rows: [] } : await client.query<{ id: string }>(
@@ -1477,7 +1481,7 @@ async function closeActiveTimersForReplacement(
     [session.workspaceId, session.userId]
   );
   const activeEntry = activeResult.rows[0];
-  if (!activeEntry) return;
+  if (!activeEntry) return [];
 
   const activeStartedMs = new Date(activeEntry.startedAt).getTime();
   const stoppedMs = new Date(stoppedAt).getTime();
@@ -1485,15 +1489,17 @@ async function closeActiveTimersForReplacement(
     throw new TimerReplacementWindowError();
   }
 
-  await client.query(
+  const ended = await client.query<{ id: string }>(
     `update time_entries
      set stopped_at = $1, updated_at = now()
      where workspace_id = $2
        and user_id = $3
        and stopped_at is null
-       and started_at < $1`,
+       and started_at < $1
+     returning id`,
     [stoppedAt, session.workspaceId, session.userId]
   );
+  return ended.rows.map((row) => row.id);
 }
 
 export async function createManualEntry(input: {
@@ -2976,6 +2982,8 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
         eventResult.rows[0].id
       ]
     );
+    // The running block now ends here (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [row.id] });
 
     await client.query("commit");
   } catch (error) {
@@ -3125,6 +3133,8 @@ async function copyFinishedEntry(
     );
     const newEntryId = inserted.rows[0].id;
     await syncTimeEntryTags(client, newEntryId, row.tagNames, session);
+    // The original now ends where the person split it (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
     await client.query("commit");
     return { id, newEntryId, replayed: false as const };
   } catch (error) {

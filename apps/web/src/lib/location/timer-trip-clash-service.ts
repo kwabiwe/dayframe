@@ -68,12 +68,14 @@ export async function reconcileTimerTripClashes(
   const open = entries.filter((entry) => !answered(timerTripClashClientEventId(entry.id)));
   const firstGuess = clashesFor(open, await readTrips(client, session, open, nowIso), nowIso);
   // Lock the blocks this may write about (those it would ask about now, and those with a question still
-  // unanswered) in id order, and read them again under the lock: a delete or edit that committed meanwhile
-  // is seen, and one that comes after waits and settles its own question.
+  // unanswered) in id order, then read them again: a delete or edit that committed meanwhile is seen, and one
+  // that comes after waits and settles its own question. A window pass (replay, a correction) holds other
+  // blocks already, so it skips a block another transaction holds instead of waiting for it (Codex r2 on
+  // #611); that transaction settles the block's question itself.
   const unanswered = [...asked.entries()].flatMap(([clientEventId, question]) =>
     !answered(clientEventId) && typeof question.payload.timeEntryId === "string" ? [question.payload.timeEntryId] : []);
   const lockIds = [...new Set([...firstGuess.keys(), ...unanswered])].sort();
-  const blocks = lockIds.length ? await readBlocks(client, session, { ids: lockIds, lock: true }) : [];
+  const blocks = lockIds.length ? await lockAndReadBlocks(client, session, lockIds, byIds ? "wait" : "skip") : [];
   const live = blocks.filter((entry) => !answered(timerTripClashClientEventId(entry.id)));
   const wanted = clashesFor(live, await readTrips(client, session, live, nowIso), nowIso);
   const present = new Set(blocks.map((entry) => entry.id));
@@ -158,7 +160,7 @@ export async function timerTripClashStillHolds(
   const tripId = typeof payload.tripId === "string" ? payload.tripId : null;
   if (!timeEntryId || !tripId) return false;
   const nowIso = new Date(now).toISOString();
-  const [entry] = await readBlocks(client, session, { ids: [timeEntryId], lock: true });
+  const [entry] = await lockAndReadBlocks(client, session, [timeEntryId], "wait");
   if (!entry) return false;
   const trip = await client.query<{ startedAt: Date; stoppedAt: Date }>(
     `select started_at as "startedAt", stopped_at as "stoppedAt" from commute_segments
@@ -185,9 +187,24 @@ function clashesFor(entries: readonly EntryRow[], trips: readonly TimerTripClash
   return clashes;
 }
 
+/**
+ * Locks the blocks first and reads where their ends came from in a fresh statement: a statement that waits
+ * for a row lock sees the row as committed but keeps its earlier snapshot for subqueries, so it would miss the
+ * audit row of an edit it waited for (as `stopEntryAt` notes; Codex r2 on #611).
+ */
+async function lockAndReadBlocks(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, ids: readonly string[], held: "wait" | "skip"
+) {
+  const locked = await client.query<{ id: string }>(
+    `select id from time_entries where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+      order by id for share${held === "skip" ? " skip locked" : ""}`,
+    [session.workspaceId, session.userId, ids]);
+  return locked.rows.length ? readBlocks(client, session, { ids: locked.rows.map((row) => row.id) }) : [];
+}
+
 async function readBlocks(
   client: Pick<pg.PoolClient, "query">, session: RequestSession,
-  scope: { ids: readonly string[]; lock?: boolean } | { window: { from: string; to: string }; now: string }
+  scope: { ids: readonly string[] } | { window: { from: string; to: string }; now: string }
 ) {
   const byIds = "ids" in scope;
   const result = await client.query<EntryRow>(
@@ -204,8 +221,7 @@ async function readBlocks(
           : `te.review_status = 'confirmed' and te.started_at < $4::timestamptz
              and te.started_at >= $3::timestamptz - make_interval(secs => $6::double precision / 1000)
              and coalesce(te.stopped_at, $5::timestamptz) > $3::timestamptz`}
-      order by te.id
-      ${byIds && scope.lock ? "for share of te" : ""}`,
+      order by te.id`,
     byIds ? [session.workspaceId, session.userId, scope.ids]
       : [session.workspaceId, session.userId, scope.window.from, scope.window.to, scope.now, TIMER_TRIP_CLASH_MAX_LEAD_MS]);
   return result.rows;
