@@ -10,9 +10,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
-import { LocationCorrectionDialog, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { checkQuestionWords } from "@/components/location/ListChecks";
-import { reviewMutationFor } from "@/lib/review-deck";
+import { useGridCorrection } from "@/components/location/useGridCorrection";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -426,35 +424,10 @@ export function TimeReviewViews({
   const gridTimelines = useLocationTimelines(gridDayKeys, gridDayKeys, data, listRefreshToken,
     `${listOwner}|grid|${toTimelineDateKey(ranges.week.start)}`, !isList);
   const todayStartMs = useLocalDayStartMs();
-  const gridAsking = useMemo(() => todayStartMs !== null
-    ? new Map(askingChecks(data.reviewItems, todayStartMs).flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []))
-    : null, [data.reviewItems, todayStartMs]);
-  // Owner item A: a Grid item opens its dialog here, its "?" asked at the top and answered with the deck's mutation.
+  // Owner item A: a Grid item opens its dialog, its "?" asked at the top (fenced to its owner and item).
   const gridClock = useClockFormat();
-  const [gridCorrection, setGridCorrection] = useState<{ target: LocationCorrectionTarget; checkId: string | null } | null>(null);
-  const openGridItem = useCallback((item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => {
-    const names = new Map(timeline.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
-    if (item.kind === "trip") {
-      setGridCorrection({ checkId, target: { kind: "trip", trip: item,
-        route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` } });
-      return;
-    }
-    const trips = timeline.items.filter((each) => each.kind === "trip");
-    const review = checkId ? data.reviewItems.find((each) => each.id === checkId) : undefined;
-    setGridCorrection({ checkId, target: { kind: "place", place: item, label: item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
-      joinsTrips: trips.some((trip) => trip.toId === item.id) && trips.some((trip) => trip.fromId === item.id),
-      closeChecks: review ? [{ id: review.id, mutation: reviewMutationFor(review, "skip", undefined) }] : [] } });
-  }, [data.reviewItems]);
-  const gridQuestion = (() => {
-    const review = gridCorrection?.checkId ? data.reviewItems.find((each) => each.id === gridCorrection.checkId) : undefined;
-    if (!review) return null;
-    const words = checkQuestionWords(review, gridClock);
-    return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now", onAnswer: (yes: boolean) => {
-      void clientFetch(`/api/review/${review.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: reviewMutationFor(review, yes ? "log" : "skip", undefined) }) })
-        .catch(() => null).then(() => refreshData());
-    } };
-  })();
+  const gridCorrection = useGridCorrection({ activities: data.categories, clock: gridClock, owner: listOwner, places: correctionPlaces,
+    refresh: refreshData, reviewItems: data.reviewItems, timelines: gridTimelines, todayStartMs });
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -647,13 +620,10 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
-            locations={{ timelines: gridTimelines, asking: gridAsking ?? new Map(), onOpen: openGridItem }}
+            locations={{ timelines: gridTimelines, asking: gridCorrection.askingBySegment ?? NO_ASKING, onOpen: gridCorrection.open }}
           />
         ) : null}
-        {gridCorrection ? (
-          <LocationCorrectionDialog activities={data.categories} clock={gridClock} onClose={() => setGridCorrection(null)}
-            onCorrected={async () => { await refreshData(); }} places={correctionPlaces} question={gridQuestion} target={gridCorrection.target} />
-        ) : null}
+        {gridCorrection.dialog}
         {state.view === "list" ? (
           <EntriesTable
             capturedNow={capturedNow}
@@ -894,7 +864,14 @@ export function CalendarReview({
   const todayKey = localTimeReady ? formatCalendarDateKey(capturedNow) : todayKeyHint;
   const isToday = (day: Date) => formatCalendarDateKey(day) === todayKey;
   const gridEntries = localTimeReady ? entries : NO_TIMELINE_ENTRIES;
-  const gridReviewItems = localTimeReady ? reviewItems : NO_REVIEW_ITEMS;
+  // Only the "?" that still ask (today and the 6 days before), an outing once on its stay: the badge's and the
+  // List's own list, so an expired or folded one is never an amber block here (Codex r1 on #609).
+  const askingTodayStartMs = useLocalDayStartMs();
+  const gridReviewItems = useMemo(() => {
+    if (!localTimeReady || askingTodayStartMs === null) return NO_REVIEW_ITEMS;
+    const ids = new Set(askingChecks(reviewItems, askingTodayStartMs).map((check) => check.id));
+    return reviewItems.filter((item) => ids.has(item.id));
+  }, [askingTodayStartMs, localTimeReady, reviewItems]);
   // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
   // one shown day (none across midnight), and each part's place in it for its block's name. Drawn
   // from the stored blocks, so a resize draft moves its block but not the bracket until it is saved.
@@ -2432,6 +2409,7 @@ function calendarBlockStyle(
 
 const NO_TIMELINE_ENTRIES: TimeEntryRow[] = [];
 const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
+const NO_ASKING: ReadonlyMap<string, string> = new Map();
 
 function calendarBlockKey(entryId: string, day: Date) {
   return `${entryId}:${formatCalendarDateKey(day)}`;

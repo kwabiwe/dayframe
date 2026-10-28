@@ -2,7 +2,7 @@
 
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 vi.mock("next/navigation", () => ({
@@ -25,9 +25,20 @@ vi.mock("@/components/AppShellRuntime", () => ({
   useRuntimePageData: (value: unknown) => value
 }));
 
+// The viewer's today, which anchors the 7 days a "?" asks (owner, 28 Oct 2026): the shown day, 2 Aug, unless a test moves it.
+const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
+vi.mock("@/components/useCalendarClock", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/components/useCalendarClock")>(),
+  useLocalDayStartMs: () => clock.todayStartMs
+}));
+
 const { CalendarReview } = await import("./TimeReviewViews");
 
 const local = (hour: number, minute = 0) => new Date(2026, 7, 2, hour, minute).toISOString();
+
+beforeEach(() => {
+  clock.todayStartMs = new Date(2026, 7, 2).getTime();
+});
 
 afterEach(() => {
   cleanup();
@@ -237,6 +248,24 @@ describe("Calendar in Blocks", () => {
     expect(links[0].classList.contains("is-v4")).toBe(true);
     expect(links[0].getAttribute("aria-label")).toBe("Gym visit, needs a look, 07:00 to 08:00.");
     expect(links[0].textContent).not.toContain("?");
+  });
+
+  it("draws only the \"?\" that still ask, an outing once on its stay (Codex r1 on #609)", () => {
+    // Today is 9 Aug: the 2nd is 7 days before, so its "?" no longer ask and isn't drawn (nor counted on the badge).
+    clock.todayStartMs = new Date(2026, 7, 9).getTime();
+    renderCalendar([], [review({ id: "old", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) })]);
+    expect(document.querySelectorAll(".calendar-review-block")).toHaveLength(0);
+    cleanup();
+    // Within the 7 days, an outing's trips are folded onto its stay: one block, the stay's.
+    clock.todayStartMs = new Date(2026, 7, 8).getTime();
+    renderCalendar([], [
+      review({ id: "stay", title: "Unknown place", eventType: "unknown_stay", suggestedStartedAt: local(9), suggestedStoppedAt: local(10),
+        rawPayload: { clientSegmentId: "seg-stay", outingKey: "o1", outingRole: "stay" } }),
+      review({ id: "there", title: "Walk", eventType: "commute_detected", suggestedStartedAt: local(8, 40), suggestedStoppedAt: local(9),
+        rawPayload: { clientSegmentId: "seg-in", outingKey: "o1", outingRole: "in" } })
+    ]);
+    const links = [...document.querySelectorAll<HTMLAnchorElement>(".calendar-review-block")];
+    expect(links.map((link) => link.getAttribute("href")?.split("check=")[1])).toEqual(["stay"]);
   });
 
   it("lets a press an open editor takes only dismiss it, never also open Review", async () => {

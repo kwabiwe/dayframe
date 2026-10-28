@@ -232,17 +232,79 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(onAnswer).toHaveBeenLastCalledWith(false);
   });
 
-  it("logs a place's time as an activity and closes its \"?\" as Not now does", async () => {
+  it("logs a place with no \"?\" as an activity through log_place", async () => {
     const onClose = vi.fn();
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
-      places={places} target={{ kind: "place", place: place(), label: "Unknown place", closeChecks: [{ id: "review-1", mutation: { kind: "skip" } }] }} />);
+      places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     expect(screen.getByRole("radio", { name: "Don't log" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections", "/api/review/review-1"]);
-    expect(sent()[0]).toEqual({ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" });
-    expect(sent()[1].mutation).toEqual({ kind: "skip" });
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
+    expect(sent()).toEqual([{ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" }]);
+  });
+
+  it("logs a place that asks by answering its \"?\" with the activity, after the other changes (Codex r1 on #609)", async () => {
+    // The server refuses log_place while the place has an open question: Logs as answers it instead.
+    const order: string[] = [];
+    clientFetch.mockImplementation(async () => { order.push("correction"); return { ok: true, json: async () => ({ ok: true }) }; });
+    const onAnswer = vi.fn((yes: boolean, categoryId?: string) => { order.push(`answer:${yes}:${categoryId}`); });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
+      places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Exampleton Library/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(order).toEqual(["correction", "answer:true:cat-errands"]);
+    expect(sent().map((correction) => correction.kind)).toEqual(["place"]);
+  });
+
+  it("keeps the dialog open and says why when the \"?\"'s answer for Logs as isn't saved (Codex r1 on #609)", async () => {
+    const onClose = vi.fn();
+    const onAnswer = vi.fn(async () => "That visit couldn't be logged.");
+    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
+      places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    // Picking an activity is a change: Done is the primary action.
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("That visit couldn't be logged.");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(clientFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the question open when its own answer isn't saved, and closes once it is", async () => {
+    const onClose = vi.fn();
+    const onAnswer = vi.fn().mockResolvedValueOnce("Couldn't save that answer. Try again.").mockResolvedValueOnce(null);
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Couldn't save that answer. Try again.");
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("makes a saved place once: a retry after the visit wasn't set to it only sets it (Codex r1 on #609)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "That place changed. Try again." }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("That place changed. Try again.");
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/places", "/api/timeline/corrections", "/api/timeline/corrections"]);
+    expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
   });
 
   it("sorts saved places nearest first when the map knows the visit's centre, the far ones behind More places", async () => {

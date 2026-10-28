@@ -116,12 +116,14 @@ export function useListChecks({
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
 
-  const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
+  /** Answers a "?" as the deck does; `categoryId` is "Logs as" (the log then saves that activity). */
+  const answer = useCallback((itemId: string, kind: ReviewDecisionKind, categoryId?: string) => {
     const item = itemsById.get(itemId);
     if (!item || (kind === "log" && !reviewWindow(item))) return;
     const outing = outings.get(item.id);
     const span = reviewWindow(item);
-    const category = reviewCardCategory(item, undefined, categories);
+    const draft = kind === "log" && categoryId !== undefined ? { categoryId } : undefined;
+    const category = reviewCardCategory(item, draft, categories);
     const outingMs = outing ? outing.members.reduce((sum, member) => {
       const memberSpan = reviewWindow(member);
       return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
@@ -131,7 +133,7 @@ export function useListChecks({
     const held = decide({
       itemId: item.id,
       kind,
-      mutation: outing ? outingMutationFor(outing, kind, undefined) : reviewMutationFor(item, kind, undefined),
+      mutation: outing ? outingMutationFor(outing, kind, draft) : reviewMutationFor(item, kind, draft),
       signature: reviewProposalSignature(item),
       label: kind === "log" ? `Logged ${reviewDefaultName(item)}` : `Skipped ${reviewTitle(item)}`,
       durationMs: (span ? span.stopMs - span.startMs : 0) + outingMs,

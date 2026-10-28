@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DAYFRAME_APP_ICONS,
@@ -30,15 +30,21 @@ const LocationEvidenceMap = dynamic(() => import("@/components/location/Location
  */
 export type LocationCorrectionTarget =
   /** `joinsTrips`: a trip comes into the place and one leaves it, so "I wasn't here" can join them (step 12 part 4). */
-  | { kind: "place"; place: TimelinePlace; label: string; joinsTrips?: boolean;
-      /**
-       * the place's open "?", each with the mutation its "Not now" sends — logging the place
-       * (Logs as) closes them that way, so they stop asking (the block is the answer).
-       */
-      closeChecks?: ReadonlyArray<{ id: string; mutation: unknown }> }
+  | { kind: "place"; place: TimelinePlace; label: string; joinsTrips?: boolean }
   | { kind: "leg"; tripId: string; leg: TripLeg; index: number; count: number }
   /** a trip's own dialog (its map, legs, "I didn't leave", "This wasn't a trip"). */
   | { kind: "trip"; trip: TimelineTrip; route: string };
+
+/**
+ * An item's open "?", asked at the top of its dialog (owner item A). `onAnswer(true)` is its Yes; with an
+ * activity it is "Logs as" for a place that asks (the server refuses log_place while a place has an open
+ * question, so the answer logs it, with that activity). An answer that saves at once returns a promise of
+ * its error (null when saved): the dialog stays open on a failure and says why. One held for Undo returns nothing.
+ */
+export type CorrectionQuestion = {
+  text: string; yesLabel: string | null; noLabel: string;
+  onAnswer: (yes: boolean, categoryId?: string) => void | Promise<string | null>;
+};
 
 /** An activity a place can log as ("Logs as"). */
 export type CorrectionActivity = { id: string; name: string };
@@ -134,7 +140,7 @@ export function LocationCorrectionDialog({
    * Owner item A): the item's open "?", asked at the top now that a row or a Grid item opens
    * this dialog directly. An answer closes the dialog.
    */
-  question?: { text: string; yesLabel: string | null; noLabel: string; onAnswer: (yes: boolean) => void } | null;
+  question?: CorrectionQuestion | null;
   /** the activities a place can log as. */
   activities?: readonly CorrectionActivity[];
   clock: ClockFormat;
@@ -152,6 +158,15 @@ export function LocationCorrectionDialog({
   const evidence = useItemEvidence(initialTarget.kind === "place" ? { id: initialTarget.place.id, kind: "place", startedAt: initialTarget.place.startedAt }
     : initialTarget.kind === "trip" ? { id: initialTarget.trip.id, kind: "trip", startedAt: initialTarget.trip.startedAt } : null);
   const [logAs, setLogAs] = useState<string | null>(null);
+  // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
+  // dialog that is gone (Codex r1 on #609).
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  // "Save this place" made the place but couldn't set the visit to it: a retry sets it, and makes no second place.
+  const [createdPlaceId, setCreatedPlaceId] = useState<string | null>(null);
   const [newPlaceName, setNewPlaceName] = useState("");
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
   // Owner item N): saved places nearest the visit first, as far as the map knows; places further
@@ -212,8 +227,9 @@ export function LocationCorrectionDialog({
         out.push({ kind: "times", subject: "place", itemId: place.id, startedAt, stoppedAt });
       }
     }
-    // "Logs as" fills the place's time your blocks don't cover with that activity.
-    if (logAs) out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs });
+    // "Logs as" fills the place's time your blocks don't cover with that activity; a place that asks is
+    // logged by answering its "?" instead (see `apply`).
+    if (logAs && !question) out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs });
     return out;
   }
 
@@ -223,7 +239,8 @@ export function LocationCorrectionDialog({
       setError(pending);
       return;
     }
-    if (!pending.length) {
+    const answerWith = target.kind === "place" && logAs && question ? logAs : null;
+    if (!pending.length && !answerWith) {
       onClose();
       return;
     }
@@ -232,6 +249,7 @@ export function LocationCorrectionDialog({
     let savedAny = false;
     for (const correction of pending) {
       const failure = await sendCorrection(correction).catch(() => "Couldn't save that. Check your connection and try again.");
+      if (!alive.current) return;
       if (failure) {
         // What did save is the new starting point, and the List shows it.
         if (savedAny) await onCorrected();
@@ -244,16 +262,38 @@ export function LocationCorrectionDialog({
         : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
           : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
-    // a place logged here no longer asks; its "?" closes as "Not now" does, with no toast (the
-    // block is the answer).
-    if (target.kind === "place" && pending.some((correction) => correction.kind === "log_place")) {
-      for (const check of target.closeChecks ?? []) {
-        await clientFetch(`/api/review/${check.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: check.mutation }) }).catch(() => null);
+    // A place that asks is logged by its "?": the answer's log, with the picked activity (Codex r1 on #609).
+    if (answerWith && question) {
+      const failure = await question.onAnswer(true, answerWith);
+      if (!alive.current) return;
+      if (failure) {
+        if (savedAny) await onCorrected();
+        setBusy(false);
+        setError(failure);
+        return;
       }
     }
-    await onCorrected();
+    if (savedAny) await onCorrected();
+    if (!alive.current) return;
     setBusy(false);
+    onClose();
+  }
+
+  /** The "?" at the top: held for Undo, it closes at once; saved at once, it closes only once it saved. */
+  async function answer(yes: boolean) {
+    if (!question) return;
+    const result = question.onAnswer(yes);
+    if (result) {
+      setBusy(true);
+      setError(null);
+      const failure = await result;
+      if (!alive.current) return;
+      setBusy(false);
+      if (failure) {
+        setError(failure);
+        return;
+      }
+    }
     onClose();
   }
 
@@ -275,12 +315,14 @@ export function LocationCorrectionDialog({
     const failure = await sendCorrection(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
       : { kind: "delete", subject: "trip", itemId: initialTarget.trip.id })
       .catch(() => "Couldn't save that. Check your connection and try again.");
+    if (!alive.current) return;
     if (failure) {
       setBusy(false);
       setError(failure);
       return;
     }
     await onCorrected();
+    if (!alive.current) return;
     setBusy(false);
     onClose();
   }
@@ -295,20 +337,27 @@ export function LocationCorrectionDialog({
     }
     setBusy(true);
     setError(null);
-    const [longitude, latitude] = evidence.map.centre.coordinates;
-    const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
-    const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
-    const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
-    const placeId = created?.place?.id;
+    let placeId = createdPlaceId;
     if (!placeId) {
-      setBusy(false);
-      setError("The place wasn't saved. Saving a place needs a connection.");
-      return;
+      const [longitude, latitude] = evidence.map.centre.coordinates;
+      const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
+      const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
+      const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
+      if (!alive.current) return;
+      placeId = created?.place?.id ?? null;
+      if (!placeId) {
+        setBusy(false);
+        setError("The place wasn't saved. Saving a place needs a connection.");
+        return;
+      }
+      setCreatedPlaceId(placeId);
     }
     const failure = await sendCorrection({ kind: "place", subject: "place", itemId: target.place.id, placeId, learnedPlaceId: null })
       .catch(() => "Couldn't save that. Check your connection and try again.");
+    if (!alive.current) return;
     await onCorrected();
+    if (!alive.current) return;
     setBusy(false);
     if (failure) {
       setError(failure);
@@ -324,12 +373,14 @@ export function LocationCorrectionDialog({
     setError(null);
     const failure = await sendCorrection({ kind: "delete", subject: "place", itemId: target.place.id })
       .catch(() => "Couldn't save that. Check your connection and try again.");
+    if (!alive.current) return;
     if (failure) {
       setBusy(false);
       setError(failure);
       return;
     }
     await onCorrected();
+    if (!alive.current) return;
     setBusy(false);
     onClose();
   }
@@ -340,16 +391,16 @@ export function LocationCorrectionDialog({
       <div className="location-correction-question-answers">
         {question.yesLabel ? (
           // Card D item 9: the answer is the neutral dark pill; coral stays for Play/Stop and live recording.
-          <button className="ui-button timeline-check-log is-compact" disabled={busy} onClick={() => { question.onAnswer(true); onClose(); }} type="button">{question.yesLabel}</button>
+          <button className="ui-button timeline-check-log is-compact" disabled={busy} onClick={() => void answer(true)} type="button">{question.yesLabel}</button>
         ) : null}
         {/* The owner's compact pill for inline answers (28 Oct 2026). */}
-        <button className="ui-button ui-button-secondary is-compact" disabled={busy} onClick={() => { question.onAnswer(false); onClose(); }} type="button">{question.noLabel}</button>
+        <button className="ui-button ui-button-secondary is-compact" disabled={busy} onClick={() => void answer(false)} type="button">{question.noLabel}</button>
       </div>
     </div>
   ) : null;
 
   const pendingNow = corrections();
-  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim());
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || Boolean(logAs && question);
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>

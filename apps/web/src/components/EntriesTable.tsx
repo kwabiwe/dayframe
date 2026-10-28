@@ -56,7 +56,7 @@ import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY,
 import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
-import { reviewMutationFor, reviewPicture } from "@/lib/review-deck";
+import { reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
@@ -349,11 +349,11 @@ export function EntriesTable({
   // The "?" the open dialog asks at its top, if it was opened from one (owner item A).
   const [correctionCheckId, setCorrectionCheckId] = useState<string | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
-  const correctPlace = (place: TimelinePlace, label: string, closeChecks?: ReadonlyArray<{ id: string; mutation: unknown }>) => {
+  const correctPlace = (place: TimelinePlace, label: string) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips, closeChecks });
+    setCorrection({ kind: "place", place, label, joinsTrips });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
@@ -547,6 +547,8 @@ export function EntriesTable({
     return id ? listChecks.itemsById.get(id) : undefined;
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
+  /** Whether a "?" row opens a dialog (a place, or a trip) rather than its question under it. */
+  const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip));
   /** Opens a "?" by its row and brings the row into view. */
   const openCheckRow = (next: LocationListRow) => {
     const nextId = checkOf(next)!.id;
@@ -582,10 +584,7 @@ export function EntriesTable({
   /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
   const openPlaceDialog = (row: Extract<LocationListRow, { kind: "place" }>) => {
     setCorrectionCheckId(row.checkIds[0] ?? null);
-    correctPlace(row.place, row.place.name ?? (row.place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"), row.checkIds.flatMap((id) => {
-      const open = listChecks.itemsById.get(id);
-      return open ? [{ id, mutation: reviewMutationFor(open, "skip", undefined) }] : [];
-    }));
+    correctPlace(row.place, row.place.name ?? (row.place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
   };
   const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
     setCorrectionCheckId(checkId);
@@ -639,6 +638,19 @@ export function EntriesTable({
     pendingRestore.current = null;
     pendingFocus.current = key;
   };
+  /**
+   * A dialog's "?" answered: held for Undo like an inline answer ("Logs as" is its log with that activity); focus
+   * then goes to the next "?" down the List, else the chip, else the List, as there (Codex r1 on #609: the row
+   * that opened the dialog is gone).
+   */
+  const dialogCheck = correctionCheckId ? listChecks.itemsById.get(correctionCheckId) : undefined;
+  const dialogWords = dialogCheck ? checkQuestionWords(dialogCheck, clock) : null;
+  const answerFromDialog = (checkId: string, yes: boolean, categoryId?: string) => {
+    const at = checkRows.findIndex((other) => checkOf(other)?.id === checkId);
+    const following = at < 0 ? undefined : checkRows.slice(at + 1).find((other) => other.key !== checkRows[at].key);
+    applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip", categoryId));
+    focusCheck(following?.key ?? null);
+  };
   const restoredItemId = listChecks.state.restored?.itemId ?? null;
   const restoredSequence = listChecks.state.restored?.sequence ?? 0;
   useEffect(() => {
@@ -674,6 +686,9 @@ export function EntriesTable({
   // The badge and the chip link to one "?" by its id (owner concern 4); it opens once its row is in.
   const linkedCheckRow = checkParam && !openFirstCheck ? checkRows.find((row) => checkOf(row)?.id === checkParam) : undefined;
   const openedFromLink = useRef<string | null>(null);
+  // A link can open its "?" before that day's places are read: it opens under its own row then. When the place or
+  // trip arrives and the question is still open, its dialog opens in its place, once (Codex r1 on #609).
+  const linkedOpen = useRef<{ id: string; dialog: boolean; seen?: boolean } | null>(null);
   useEffect(() => {
     if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
     if (!openFirstCheck && !linkedCheckRow) return;
@@ -684,9 +699,25 @@ export function EntriesTable({
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
+        const row = checkRows.find((other) => checkOf(other)?.id === opened);
+        linkedOpen.current = row ? { id: opened, dialog: opensDialog(row) } : null;
       }
     });
     return () => cancelAnimationFrame(frame);
+  });
+  useEffect(() => {
+    const linked = linkedOpen.current;
+    if (!linked || linked.dialog) return;
+    if (focusedCheck !== linked.id) {
+      // Closed, or another "?" opened, once it had opened: nothing to bring back.
+      if (linked.seen) linkedOpen.current = null;
+      return;
+    }
+    linked.seen = true;
+    const row = checkRows.find((other) => checkOf(other)?.id === linked.id);
+    if (!row || !opensDialog(row)) return;
+    linkedOpen.current = { id: linked.id, dialog: true };
+    openCheckRow(row);
   });
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
@@ -1573,13 +1604,9 @@ export function EntriesTable({
       </div>
       {correction ? (
         <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => { setCorrection(null); setCorrectionCheckId(null); }}
-          question={(() => {
-            const open = correctionCheckId ? listChecks.itemsById.get(correctionCheckId) : undefined;
-            if (!open) return null;
-            const words = checkQuestionWords(open, clock);
-            return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now",
-              onAnswer: (yes: boolean) => applyTimelineRegroup(() => listChecks.answer(open.id, yes ? "log" : "skip")) };
-          })()}
+          // Held for Undo like an inline answer ("Logs as" is its log with that activity); focus then moves on.
+          question={dialogCheck && dialogWords ? { text: dialogWords.question, yesLabel: dialogWords.yesLabel, noLabel: "Not now",
+            onAnswer: (yes: boolean, categoryId?: string) => answerFromDialog(dialogCheck.id, yes, categoryId) } : null}
           onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
       ) : null}
       {editingEntry ? (

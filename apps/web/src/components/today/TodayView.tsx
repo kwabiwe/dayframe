@@ -163,7 +163,9 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   }, []);
   const [openPatterns, setOpenPatterns] = useState<ReadonlySet<string>>(() => new Set());
   // Today's things to check (location v4 step 14), and the last count shown, so the chip keeps its words while it closes.
-  // Today's "?" from the badge's own list (owner, 28 Oct 2026), and the link opens today's oldest.
+  // Intended, owner-approved (28 Oct 2026): this chip is "N to check today", so it counts only today's "?" (from the
+  // badge's own list) and opens today's oldest. The 7-day count and oldest-first stepping are the sidebar badge's and
+  // the List chip's; this one deliberately differs (Codex r1 on #609, ruled by the orchestrator).
   const todayStartMs = useLocalDayStartMs();
   const todayChecks = useMemo(() => todayStartMs !== null
     ? askingChecks(data.reviewItems, todayStartMs).filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs)

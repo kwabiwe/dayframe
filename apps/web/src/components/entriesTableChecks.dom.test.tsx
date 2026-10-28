@@ -563,4 +563,64 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       search.params = "";
     }
   });
+  it("logs a place that asks with Logs as by answering its \"?\" with that activity, held for Undo (Codex r1 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    render(<EntriesTable {...baseProps()} categories={[errands]} reviewItems={reviewItems} />);
+    fireEvent.click(officeRow()!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    expect(dialog()).toBeNull();
+    expect(screen.getByText("Logged Office")).toBeTruthy();
+    expect(clientFetch).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    // Never log_place, which the server refuses while the place asks: the "?" answered as logged, as Errands.
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual([`/api/review/${PLACE}`]);
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "edit_and_confirm",
+      edit: { categoryId: "cat-errands", startedAt: at(9), stoppedAt: at(10) } });
+  });
+
+  it("moves focus to the next \"?\" when a dialog's question is answered (Codex r1 on #609)", async () => {
+    renderList();
+    const office = officeRow()!;
+    office.focus();
+    fireEvent.click(office);
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    expect(dialog()).toBeNull();
+    // The row that opened it is gone; Sleep is the next "?" down the List.
+    await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
+  });
+
+  it("opens a linked place's dialog once its day's places arrive, if its question is still open (Codex r1 on #609)", async () => {
+    search.params = `view=list&check=${PLACE}`;
+    try {
+      const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+      // The location read hasn't arrived: the "?" opens under its own row.
+      const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={reviewItems} />);
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Visited Office\?/ })).toBeTruthy());
+      expect(dialog()).toBeNull();
+      // The places arrive: the question moves into the place's dialog.
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={reviewItems} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      expect(document.querySelector(".timeline-check-question")).toBeNull();
+      // Once: closed, it stays closed.
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[...reviewItems]} />);
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+      expect(dialog()).toBeNull();
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("asks a covered place's \"?\" on a row of its own, counted once (Codex r1 on #609)", () => {
+    // A meeting covers the Office visit: the place is no row, even with All places, but its "?" still asks.
+    render(<EntriesTable {...baseProps()} entries={[entry("meeting", "Meeting", at(9), at(10))]} reviewItems={[reviewItems[0]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "All places" }));
+    expect(chip(1)).toBeTruthy();
+    expect(document.querySelectorAll('tr[data-location-row="seg-office"]')).toHaveLength(0);
+    expect(document.querySelectorAll(`tr[data-suggestion-id="${PLACE}"]`)).toHaveLength(1);
+    fireEvent.click(officeRow()!);
+    expect(screen.getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+  });
 });

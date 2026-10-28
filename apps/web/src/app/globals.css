@@ -15218,6 +15218,26 @@ button.timeline-location-hit:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 60%, transparent);
 }
 
+/* 44 px targets around the small new controls (Codex r1 on #609; WCAG 2.5.5): the row Yes pills, the List's
+   places filter and the Grid's Places-lane items keep their drawn size, with an invisible hit area of at least
+   44 × 44 px centred on each. */
+.timeline-row-yes,
+.timeline-places-filter button {
+  position: relative;
+}
+
+.timeline-row-yes::before,
+.timeline-places-filter button::before,
+.calendar-places-item::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
 @media (any-pointer: coarse) {
   .df-seg a,
   .ui-segmented-control button,

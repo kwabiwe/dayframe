@@ -75,7 +75,8 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
   options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[];
     /**
      * Owner, 28 Oct 2026 (concern 2): a place whose time your blocks cover is never a row,
-     * even with "Show all places"; the block's place line stands for it. A place with a "?" still shows.
+     * even with "Show all places"; the block's place line stands for it. A "?" about such a place is then a check
+     * row of its own at its time, so it still asks once and is counted once (Codex r1 on #609).
      */
     hideCovered?: boolean }) {
   if (!timeline) return [];
@@ -89,6 +90,8 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
   const dayEndMs = Date.parse(timeline.dayEnd);
   const names = new Map(timeline.items.flatMap((item) => item.kind === "place" ? [[item.id, item.name] as const] : []));
   const rows: LocationListRow[] = [];
+  // Places hidden because your blocks cover them: their "?" become rows of their own below.
+  const coveredPlaceIds = new Set<string>();
   for (const item of timeline.items) {
     if (item.kind !== "place" || item.status === "ignored") continue;
     const fromMs = Math.max(Date.parse(item.startedAt), dayStartMs);
@@ -99,10 +102,14 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     // A place you are still at counts up to now.
     const unlogged = unloggedSeconds >= UNLOGGED_PLACE_MINIMUM_SECONDS;
     const checkIds = checksByPlace.get(item.id) ?? [];
+    if (options.hideCovered && unloggedSeconds < 60) {
+      coveredPlaceIds.add(item.id);
+      continue;
+    }
     if ((!known && unlogged) || checkIds.length) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
         faint: false, checkIds });
-    } else if (options.showAll && !(options.hideCovered && unloggedSeconds < 60)) {
+    } else if (options.showAll) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
         faint: true, checkIds });
     }
@@ -111,7 +118,7 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
   const trips = new Map(timeline.items.flatMap((item) => item.kind === "trip"
     ? [[item.id, { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` }] as const] : []));
   for (const check of options.checks ?? []) {
-    if (check.segmentId && placeIds.has(check.segmentId)) continue;
+    if (check.segmentId && placeIds.has(check.segmentId) && !coveredPlaceIds.has(check.segmentId)) continue;
     const trip = check.segmentId ? trips.get(check.segmentId) ?? null : null;
     const startedAt = trip?.startedAt ?? check.startedAt;
     const atMs = startedAt ? Date.parse(startedAt) : NaN;
