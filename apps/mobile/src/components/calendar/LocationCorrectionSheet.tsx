@@ -104,7 +104,10 @@ export function LocationCorrectionSheet({
     startMs: edited.startMs ?? Date.parse(item.startedAt),
     stopMs: edited.stopMs !== undefined ? edited.stopMs : item.stoppedAt ? Date.parse(item.stoppedAt) : null
   };
-  const setTimes = (next: CorrectionTimes) => setEdited((current) => ({
+  // Nothing in the draft changes while a change is being kept, or once it is: what was kept is what closes
+  // (Codex r3 on #602).
+  const frozen = () => saving || kept.current;
+  const setTimes = (next: CorrectionTimes) => frozen() ? undefined : setEdited((current) => ({
     ...current,
     ...(next.startMs !== times.startMs ? { startMs: next.startMs } : {}),
     ...(next.stopMs !== times.stopMs ? { stopMs: next.stopMs } : {})
@@ -144,13 +147,14 @@ export function LocationCorrectionSheet({
   }
 
   function openLeg(index: number) {
-    if (!trip) return;
+    if (!trip || frozen()) return;
     setDirection(1);
     setLegMode(null);
     setLegKey({ startedAt: trip.legs[index].startedAt, stoppedAt: trip.legs[index].stoppedAt });
   }
 
   function backToTrip() {
+    if (kept.current) return;
     setLeftLeg(true);
     setDirection(-1);
     setLegMode(null);
@@ -233,8 +237,9 @@ export function LocationCorrectionSheet({
       actionTone="neutral"
       calendarLayout={false}
       commitRef={commitRef}
-      // A removal needs no valid times; nothing changes while a change is being kept, or once the item left.
-      disabled={stale || saving || (!leg && !confirmingRemoval && Boolean(problem))}
+      // A removal needs no valid times; nothing changes while a change is being kept, or once the item left. A
+      // kept change always closes.
+      disabled={!closeKept && (stale || saving || (!leg && !confirmingRemoval && Boolean(problem)))}
       onApply={apply}
       onDismissed={onDismissed}
       presentationId={presentationId}
@@ -277,11 +282,11 @@ export function LocationCorrectionSheet({
         style={styles.view}
       >
         {target.kind === "place" ? (
-          <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={setChoice} place={target.place}
+          <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
             places={places} theme={theme} />
         ) : null}
         {trip && leg ? (
-          <LegModes mode={legMode ?? leg.mode} onPick={setLegMode} theme={theme} />
+          <LegModes mode={legMode ?? leg.mode} onPick={(mode) => { if (!frozen()) setLegMode(mode); }} theme={theme} />
         ) : null}
         {trip && !leg ? (
           <Section label="Legs" theme={theme} hint="Tap a leg to change how you travelled.">

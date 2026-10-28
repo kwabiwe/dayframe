@@ -226,5 +226,20 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(onQueue).toHaveBeenCalledTimes(1);
     expect(onQueue.mock.calls[0][1]).toEqual({ closing: true });
   });
+
+  // Codex r3 on #602.
+  it("keeps the draft as it was while a change is being kept, and still closes once it is", async () => {
+    let resolve!: () => void;
+    const onQueue = vi.fn<Queue>(() => new Promise<void>((done) => { resolve = done; }));
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, onQueue);
+    sheet.press(`location-correction-place-${SAVED}`);
+    sheet.press("location-correction-sheet-action");
+    sheet.press("location-correction-place-unknown");
+    expect(sheet.tree.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.accessibilityState).toEqual({ checked: true });
+    await act(async () => { resolve(); });
+    await sheet.settle();
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+    expect(onQueue).toHaveBeenCalledTimes(1);
+  });
 });
 
