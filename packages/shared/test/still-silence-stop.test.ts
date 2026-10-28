@@ -47,6 +47,8 @@ type Shape = {
   rejectedFixNorth?: number;
   /** That reading's accuracy (250 m unless given). */
   rejectedFixAccuracy?: number;
+  /** That reading as the iPhone keeps and sends it: its position dropped. */
+  rejectedFixSanitised?: boolean;
   /** No iOS Visit for the meal. */
   noVisit?: boolean;
   /** Slow readings right after parking, so the stop's own cluster spans the silence. */
@@ -82,7 +84,10 @@ function evening(shape: Shape = {}) {
     ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => fix(`back-${i}`, 165 + i, after - 480 - i * 480, { speedMetersPerSecond: 12 })),
     ...[176, 190, 205, 220].map((m, i) => fix(`home-late-${i}`, m, i % 2 * 3)),
     ...(shape.broadFixNorth == null ? [] : [fix("broad", 120, shape.broadFixNorth, { horizontalAccuracyMeters: 120, speedMetersPerSecond: null })]),
-    ...(shape.rejectedFixNorth == null ? [] : [fix("rejected", 120, shape.rejectedFixNorth, { horizontalAccuracyMeters: shape.rejectedFixAccuracy ?? 250, speedMetersPerSecond: null })]),
+    ...(shape.rejectedFixNorth == null ? [] : [fix("rejected", 120, shape.rejectedFixNorth, {
+      horizontalAccuracyMeters: shape.rejectedFixAccuracy ?? 250, speedMetersPerSecond: null,
+      ...(shape.rejectedFixSanitised ? { latitude: null, longitude: null } : {})
+    })]),
     ...(shape.crossingAt == null ? [] : [fix("crossing", shape.crossingAt, 0, {
       kind: "geofence_exit", savedPlaceId: HOME_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null
     })])
@@ -149,6 +154,9 @@ describe("a still silence inside a trip is a stop (card J)", () => {
     }],
     ["a reading too broad to accept came in the silence", { rejectedFixNorth: 5_300 }],
     ["a cell-only reading far away came in the silence", { rejectedFixNorth: 6_520, rejectedFixAccuracy: 500 }],
+    ["a broad reading the iPhone sent without its position came in the silence", { rejectedFixNorth: 6_520, rejectedFixAccuracy: 250, rejectedFixSanitised: true }],
+    ["a cell-only reading sent without its position came in a silence the stop's own readings span",
+      { parkedSlow: true, noVisit: true, rejectedFixNorth: 6_520, rejectedFixAccuracy: 2_000, rejectedFixSanitised: true }],
     ["a cell-only reading came in a silence the stop's own readings span", { parkedSlow: true, noVisit: true, rejectedFixNorth: 6_520, rejectedFixAccuracy: 2_000 }],
     ["two short drives came in the middle of the silence (an errand)", { noVisit: true, silenceMotion: [[78.5, "stationary"], [100, "automotive"],
       [102, "stationary"], [113, "automotive"], [115, "stationary"], [150, "walking"]] as Step[] }],

@@ -1153,6 +1153,13 @@ function preprocess(input: LocationEngineInput) {
       rejectedEvidence.push({ clientEvidenceId: evidence.clientEvidenceId, kind: evidence.kind, occurredAt: evidence.occurredAt, reason: "invalid_accuracy" });
       continue;
     }
+    // The iPhone drops a too-broad reading's position before keeping or sending it, so it arrives without
+    // one: it still shows the phone was awake, so a silence it falls in was no still silence (card J, Codex
+    // r3 on #601). It is not a trip's observation (`broadReadingTimes`), which needs the reading's accuracy
+    // band only for positioned readings replay stored.
+    if (evidence.latitude == null && (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
+      evidence.isSimulated !== true && evidence.horizontalAccuracyMeters != null &&
+      evidence.horizontalAccuracyMeters > input.config.maxAcceptedHorizontalAccuracyMeters) rejectedReadingTimes.push(occurredAtMs);
     if (
       evidence.latitude != null &&
       evidence.horizontalAccuracyMeters != null &&
