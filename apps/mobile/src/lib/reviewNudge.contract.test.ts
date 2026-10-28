@@ -31,11 +31,13 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
     expect(LocationReplayResponseSchema.safeParse(reply).success).toBe(true);
   });
 
-  it("feeds counts from bootstrap, the event queue and location replies, and cancels at sign-out", () => {
-    expect(api).toContain("noteReviewCountQuietly(owner, bootstrap.stats?.reviewCardCount ?? bootstrap.stats?.reviewCount)");
-    expect(api).toContain("noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount)");
+  it("takes its count from the Dashboard's 7-day \"?\" only, and cancels at sign-out", () => {
+    // Owner item 13 (28 Oct 2026): the reminder counts what the Calendar badge counts; replies' Review counts never feed it.
+    expect(dashboard).toContain("noteReviewCount(owner, askingChecks.length)");
+    expect(api).not.toContain("noteReviewCount");
+    expect(locationStore).not.toContain("noteReviewCount");
+    expect(locationStore).not.toContain("noteLocationReviewCount");
     expect(api).toContain("cancelReviewNudgeForLogout()");
-    expect(locationStore).toContain("noteLocationReviewCount(owner, payload.reviewCount)");
     // Any end of the session (expiry, revocation), not only Sign out.
     expect(api).toMatch(/subscribeAuthenticatedSession\(\(\) => \{\n  void readAuthenticatedSessionSnapshot\(\)/);
     // Settings never feeds its cached count back as new.
@@ -48,7 +50,7 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
   });
 
   it("never puts places in the reminder", () => {
-    expect(nudge).toMatch(/things? to check\./);
+    expect(nudge).toMatch(/things? to check from the last 7 days\./);
     expect(nudge).not.toMatch(/placeName|place\.name|latitude|longitude/);
   });
 

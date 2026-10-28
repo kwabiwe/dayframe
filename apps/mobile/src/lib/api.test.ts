@@ -3700,6 +3700,18 @@ describe("evening Review reminder lifecycle", () => {
     publishMobileSignedOut();
     await vi.waitFor(() => expect(reviewNudge.cancel).toHaveBeenCalled());
   });
+
+  it("never takes its count from bootstrap: the Dashboard notes the Calendar's 7-day \"?\" (owner item 13, 28 Oct 2026)", async () => {
+    storeBoundSession("session-token");
+    reviewNudge.note.mockClear();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
+      user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId },
+      entries: [], places: [], stats: { reviewCount: 9, reviewCardCount: 7 }
+    }))));
+    await fetchBootstrap();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reviewNudge.note).not.toHaveBeenCalled();
+  });
 });
 
 describe("server messages in block wording (UIA-100)", () => {

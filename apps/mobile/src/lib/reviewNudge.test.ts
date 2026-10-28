@@ -52,7 +52,7 @@ describe("planReviewNudge", () => {
   it("fires at the chosen time today when suggestions are waiting", () => {
     const plan = planReviewNudge(on(), at(2026, 10, 9, 15));
     expect(plan?.fireAt).toEqual(at(2026, 10, 9, 20));
-    expect(plan?.body).toBe("3 things to check.");
+    expect(plan?.body).toBe("3 things to check from the last 7 days.");
   });
 
   it("moves to tomorrow once today's time has passed", () => {
@@ -88,8 +88,8 @@ describe("planReviewNudge", () => {
   });
 
   it("words one and many, and never mentions places", () => {
-    expect(reviewNudgeBody(1)).toBe("1 thing to check.");
-    expect(reviewNudgeBody(4)).toBe("4 things to check.");
+    expect(reviewNudgeBody(1)).toBe("1 thing to check from the last 7 days.");
+    expect(reviewNudgeBody(4)).toBe("4 things to check from the last 7 days.");
   });
 
   it("keeps the time inside the evening range in half hours", () => {
@@ -124,7 +124,7 @@ describe("review nudge store", () => {
     await nudge.noteReviewCount(owner, 2, at(2026, 10, 9, 15));
     expect(native.scheduled).toHaveLength(0);
     await nudge.setReviewNudgeEnabled(owner, true);
-    expect(native.scheduled.at(-1)).toMatchObject({ body: "2 things to check.", accountKey: "user-a:ws-1" });
+    expect(native.scheduled.at(-1)).toMatchObject({ body: "2 things to check from the last 7 days.", accountKey: "user-a:ws-1" });
   });
 
   it("cancels when Review is cleared", async () => {

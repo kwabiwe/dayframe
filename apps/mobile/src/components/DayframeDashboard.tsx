@@ -112,8 +112,8 @@ import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/li
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
-import { listCheckOverlaps, type ListCheck } from "@dayframe/shared";
-import { latestCheckDay } from "@/lib/calendarChecks";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
+import { withPlacesAndLegs } from "@/lib/calendarGridPlaces";
 import {
   ActivityNameTakenError,
   AuthRequiredError,
@@ -350,6 +350,8 @@ type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
   /** Things to check today and the 7 days before: the Calendar tab's badge (location v4 step 14). */
   checkCount: number;
+  /** Owner item A (28 Oct 2026): opens the oldest question that still asks (the Calendar tab's badge). */
+  openOldestCheck: () => void;
 };
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -1992,6 +1994,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stoppedAt: item.suggestedStoppedAt
       })),
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      // Owner, 28 Oct 2026 (concern 1): each "?" row's own icon — a trip's route, Apple Health's heart, a place's pin.
+      glyphs: new Map(items.map((item) => [item.id, (item.eventType === "commute_detected" ? DAYFRAME_APP_ICONS.openTrip
+        : item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_") ? DAYFRAME_APP_ICONS.sourceHealth
+          : DAYFRAME_APP_ICONS.places) as DayframeGlyph] as const)),
       questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, {
         outing: outings.has(item.id),
         pendingChange: reviewSyncStateIds.has(item.id),
@@ -2001,15 +2007,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarCheckBase, clockFormat, reviewSyncStateIds, openCalendarCheckId, openCheckVenue.venue]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
+  // Owner, 28 Oct 2026 (concern 4): only "?" from today and the 6 days before ask; the badge,
+  // Today's chip and "N to check" count and step through them oldest first, across days. Older ones stop asking:
+  // their places stay plain rows you can still correct.
+  const askingChecks = useMemo(() => {
+    const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
+    return checksOldestFirst(calendarChecks.checks.filter((check) => check.startedAt && checkStillAsks(check, fromMs)));
+  }, [calendarChecks, todayKey]);
   const checkCounts = useMemo(() => {
     const todayStart = dateFromKey(todayKey).getTime();
-    const weekStart = addDaysToDate(dateFromKey(todayKey), -7).getTime();
     const tomorrowStart = addDaysToDate(dateFromKey(todayKey), 1).getTime();
-    return {
-      week: calendarChecks.checks.filter((check) => listCheckOverlaps(check, weekStart, tomorrowStart)).length,
-      today: calendarChecks.checks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length
-    };
-  }, [calendarChecks, todayKey]);
+    return { week: askingChecks.length, today: askingChecks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length };
+  }, [askingChecks, todayKey]);
+  // Owner item 13 (28 Oct 2026): the end-of-day reminder counts the badge's "?", for this account.
+  const nudgeOwner = authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null;
+  useEffect(() => {
+    if (!nudgeOwner || !data) return;
+    const owner = { userId: data.user.id, workspaceId: data.workspace.id };
+    void import("@/lib/reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, askingChecks.length)).catch(() => undefined);
+    // Only when the count or the account changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askingChecks.length, nudgeOwner]);
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
@@ -2086,7 +2104,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
-    enabled: calendarLayout === "list",
+    // The Grid reads the day's places too (its Places lane and trip legs, steps 16–17).
+    enabled: true,
     fetchTimeline: fetchLocationTimeline,
     owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
     refreshKey: calendarTimelineRefreshKey
@@ -2096,6 +2115,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
+  const gridModel = useMemo(() => calendarLayout === "grid"
+    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat))
+    : nativeCalendarModel,
+  [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel]);
+  const gridModelRefreshing = useMemo(() => gridModel === nativeCalendarModel ? nativeCalendarModelRefreshing : { ...gridModel, refreshing: true },
+    [gridModel, nativeCalendarModel, nativeCalendarModelRefreshing]);
   // The List's place, trip and leg correction sheets (step 12).
   const locationCorrections = useLocationCorrections({
     acknowledged: correctionQueue.acknowledged,
@@ -2104,6 +2130,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // A place logged with Logs as: its blocks come with the next read of the day.
     onLogged: () => { void load(); },
     pending: correctionQueue.pending,
+    // Owner items A, B, I (28 Oct 2026): a sheet opened from a row or the Grid asks its item's "?" on top.
+    questionFor: (kind, itemId) => {
+      const check = askingChecks.find((each) => each.segmentId === itemId);
+      const question = check ? calendarChecks.questions.get(check.id) : undefined;
+      if (!check || !question || !scopedOwnerKey) return null;
+      return {
+        text: question.question,
+        // The row and the sheet already say the times; only words that add something stay.
+        detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
+        yesLabel: question.logLabel ?? null,
+        noLabel: question.skipLabel ?? "Not now",
+        onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null)
+      };
+    },
     reduceMotion,
     showNotice: (message) => showTodayNotice(message, null),
     theme,
@@ -2753,16 +2793,38 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
-  const openTodayChecks = useCallback(() => openChecksOn(formatDateKey(new Date())), [openChecksOn]);
-  // The evening reminder counts every open suggestion, so it opens the latest day that has one, never an
-  // empty today (Codex r1 on #573); with none loaded here, Review, which lists them all.
-  const latestCheckDayKey = useMemo(
-    () => latestCheckDay(calendarChecks.checks, new Date(now), { dayKey: formatDateKey }),
-    [calendarChecks, now]
-  );
+  // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
+  // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
+  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number } | null>(null);
+  const openCheckOn = useCallback((checkId: string) => {
+    const check = calendarChecks.checks.find((each) => each.id === checkId);
+    const startedAtMs = check?.startedAt ? Date.parse(check.startedAt) : NaN;
+    if (!Number.isFinite(startedAtMs)) return false;
+    changeCalendarLayout("list");
+    selectCalendarDay(formatDateKey(new Date(startedAtMs)));
+    calendarCheckRequests.current += 1;
+    setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current });
+    router.navigate("/(tabs)/calendar");
+    return true;
+  }, [calendarChecks, changeCalendarLayout, selectCalendarDay]);
+  const openNextCheck = useCallback((currentId: string | null) => {
+    if (!askingChecks.length) return;
+    const at = currentId ? askingChecks.findIndex((check) => check.id === currentId) : -1;
+    openCheckOn(askingChecks[(at + 1) % askingChecks.length].id);
+  }, [askingChecks, openCheckOn]);
+  const openOldestCheck = useCallback(() => {
+    if (askingChecks[0]) openCheckOn(askingChecks[0].id);
+  }, [askingChecks, openCheckOn]);
+  const openTodayChecks = useCallback(() => {
+    const todayStart = dateFromKey(formatDateKey(new Date())).getTime();
+    const first = askingChecks.find((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStart);
+    if (first && openCheckOn(first.id)) return;
+    openChecksOn(formatDateKey(new Date()));
+  }, [askingChecks, openCheckOn, openChecksOn]);
   useEffect(() => {
-    openTodayChecksRef.current = () => latestCheckDayKey ? openChecksOn(latestCheckDayKey) : router.push("/review");
-  }, [latestCheckDayKey, openChecksOn]);
+    // The reminder opens the oldest question that still asks (no Review page, step 15).
+    openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));
+  }, [askingChecks, openCheckOn, openChecksOn]);
 
   // One stable handler for Today's rows and ribbon, so the per-second header render does not
   // re-render the memoised ribbon. The latest editors are read through the ref.
@@ -3614,9 +3676,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             onOpenCompleted: presentCompletedEntry,
             // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
             // only older needs-review entries ("") opens the Review list.
-            onOpenReview: (reviewItemId) => reviewItemId
-              ? router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
-              : router.push("/review")
+            onOpenReview: (reviewItemId) => {
+              // Step 15: a "?" on the Grid never opens Review. Owner item A (28 Oct 2026): a Grid "?" or Places lane
+              // item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet, opens its
+              // question in the List.
+              const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
+                : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
+              const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
+              if (item?.kind === "place") {
+                locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+                return;
+              }
+              if (item?.kind === "trip") {
+                locationCorrections.openTripLeg(item, null);
+                return;
+              }
+              if (!reviewItemId || reviewItemId.startsWith("lane:") || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
+            }
           }
         );
       };
@@ -3636,7 +3712,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
             </Animated.View>
             <DayframeCalendarView
-              model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
+              model={isFocused && refreshing ? gridModelRefreshing : gridModel}
               onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
               onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
@@ -3670,9 +3746,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  checkGlyphs={calendarChecks.glyphs}
                   checkQuestions={calendarChecks.questions}
-                  checks={calendarChecks.checks}
+                  checks={askingChecks}
                   checkTitles={calendarChecks.titles}
+                  checkTotal={askingChecks.length}
+                  onNextCheck={openNextCheck}
+                  onSwipeDay={shiftSelectedCalendarDay}
+                  openCheckRequest={calendarCheckTarget}
                   clockFormat={clockFormat}
                   dayEndMs={nativeCalendarModel.dayEndMs}
                   dayStartMs={nativeCalendarModel.dayStartMs}
@@ -3718,6 +3799,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
+            {/* Owner item A (28 Oct 2026): the Grid's items open the same sheets, over the Grid. */}
+            {calendarLayout !== "list" ? locationCorrections.sheet : null}
           </View>
         </SafeAreaView>
       );
@@ -3777,7 +3860,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -3977,6 +4060,11 @@ function ScreenFocusReporter({ focused, onChange }: { focused: boolean; onChange
 /** The Calendar tab's badge: things to check today and the 7 days before (location v4 step 14). */
 export function useDashboardCheckCount() {
   return useContext(DashboardContext)?.checkCount ?? 0;
+}
+
+/** Owner, 28 Oct 2026 (concern 4): the Calendar tab's badge opens the oldest question that still asks (concern 4). */
+export function useDashboardOpenOldestCheck() {
+  return useContext(DashboardContext)?.openOldestCheck;
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {

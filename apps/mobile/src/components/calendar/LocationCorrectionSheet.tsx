@@ -26,6 +26,7 @@ import { playHaptic } from "../../lib/haptics";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { SheetNearbySearch } from "./SheetNearbySearch";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
   correctable,
@@ -78,6 +79,7 @@ export function LocationCorrectionSheet({
   logAs,
   places,
   presentationId,
+  question,
   reduceMotion,
   rootHosted,
   stale = false,
@@ -85,6 +87,11 @@ export function LocationCorrectionSheet({
   theme
 }: {
   clockFormat: ClockFormat;
+  /**
+   * Owner item A (28 Oct 2026): the item's open "?", asked at the top of its sheet now that a row or a
+   * Grid item opens the sheet directly. An answer closes the sheet (with any change made in it kept too).
+   */
+  question?: { text: string; detail?: string | null; yesLabel: string | null; noLabel: string; onAnswer: (yes: boolean) => void } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
@@ -291,10 +298,14 @@ export function LocationCorrectionSheet({
     ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${time(Date.parse(leg.startedAt))}–${time(Date.parse(leg.stoppedAt))}`
     : trip?.route ? `${trip.route} · ${span}` : span;
 
+  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || (!problem && (target.kind === "place"
+    ? placeCorrections(target.place, { choice, times }, places).length > 0
+    : tripCorrections(target.trip, { times }).length > 0));
   return (
     <BottomSheetShell
       action="Done"
-      actionTone="neutral"
+      // Owner item O (28 Oct 2026): Done looks secondary until something has changed.
+      actionTone={sheetChanged ? "neutral" : "quiet"}
       calendarLayout={false}
       commitRef={commitRef}
       // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
@@ -321,12 +332,32 @@ export function LocationCorrectionSheet({
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
         </View>
       </View>
+      {question && !leg ? (
+        // Owner items A, B, I (28 Oct 2026): the "?" at the top of its sheet, Yes first when there's a guess. Its
+        // answers are the compact inline pills (owner, 28 Oct 2026), each still a 44-point target.
+        <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
+          <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionText, { color: theme.textPrimary }]}>{question.text}</Text>
+          {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
+          <View style={styles.pills}>
+            {question.yesLabel ? (
+              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => { question.onAnswer(true); commitRef.current?.(); }}
+                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
+                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.surface }]}>{question.yesLabel}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => { question.onAnswer(false); commitRef.current?.(); }}
+              style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
+              <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {/* The map first, on every view (owner feedback, 27 Oct 2026); it stays put as a leg pushes and pops. */}
       <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
         {evidence && evidence !== "unavailable" ? (
           <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
             dangerColor={theme.danger} evidence={evidence} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
-            textColor={theme.textSecondary} />
+            textColor={theme.textSecondary} visitOnly />
         ) : (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>
             {evidence === "unavailable" ? "The map isn't available right now." : "Loading the map…"}
@@ -341,8 +372,22 @@ export function LocationCorrectionSheet({
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
         style={styles.view}
       >
+        {target.kind === "place" && onSavePlace && !stale && !target.place.placeId
+          && evidence && evidence !== "unavailable" && evidence.map.centre ? (
+          // Step 15: Nearby and search, as the Review details screen had; a pick offers to save it.
+          <Section label="Nearby" theme={theme}>
+            <SheetNearbySearch centre={{ latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] }}
+              onPick={(name) => {
+                if (frozen()) return;
+                setPlaceName(name);
+                setConfirming("save_place");
+              }} theme={theme} />
+          </Section>
+        ) : null}
         {target.kind === "place" ? (
           <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
+            distances={evidence && evidence !== "unavailable"
+              ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : undefined}
             places={places} theme={theme} />
         ) : null}
         {target.kind === "place" && logAs && !stale ? (
@@ -519,11 +564,22 @@ function Section({ children, hint, label, theme }: { children: React.ReactNode; 
   );
 }
 
-function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: {
-  choice: PlaceChoice; correctableItem: boolean; onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
+function PlaceView({ choice, correctableItem, distances, onChoose, place, places: allPlaces, theme }: {
+  choice: PlaceChoice; correctableItem: boolean;
+  /**
+   * Owner item N (28 Oct 2026): how far each saved place is from the visit, when known. Places then sort
+   * nearest first; places further than 2 km (or not near at all) wait behind "More places".
+   */
+  distances?: ReadonlyMap<string, number>;
+  onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
   places: readonly CorrectionPlaceOption[]; theme: MobileTheme;
 }) {
+  const [morePlaces, setMorePlaces] = useState(false);
   if (!correctableItem) return null;
+  const near = (id: string) => (distances?.get(id) ?? Infinity) <= 2_000 || id === place.placeId;
+  const sorted = distances ? [...allPlaces].sort((a, b) => (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity)) : allPlaces;
+  const hidden = distances && !morePlaces ? sorted.filter((option) => !near(option.id)) : [];
+  const places = distances && !morePlaces ? sorted.filter((option) => near(option.id)) : sorted;
   // What is ticked: the pick, or the place as it is (its saved place, or unknown).
   const selected = choice.kind === "saved" ? choice.id : choice.kind === "unknown" ? null
     : place.placeId ?? (place.learnedPlaceId ? "learned" : null);
@@ -534,7 +590,8 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
     ...places.map((option) => ({
       key: option.id,
       title: option.name,
-      detail: "Saved place",
+      // Owner item N: how far, when known.
+      detail: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
       glyph: (option.role === "home" ? "house" : DAYFRAME_APP_ICONS.places) as DayframeGlyph,
       pick: { kind: "saved", id: option.id } as PlaceChoice
     })),
@@ -560,8 +617,19 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
           );
         })}
       </View>
+      {hidden.length ? (
+        <Pressable accessibilityHint="Shows your saved places further away" accessibilityRole="button" onPress={() => setMorePlaces(true)}
+          style={({ pressed }) => [styles.morePlaces, { opacity: pressed ? 0.7 : 1 }]} testID="location-correction-more-places">
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textSecondary }]}>More places ({hidden.length})</Text>
+        </Pressable>
+      ) : null}
     </Section>
   );
+}
+
+/** "120 m", "1.4 km". */
+function formatMetres(metres: number) {
+  return metres < 1_000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1_000).toFixed(1)} km`;
 }
 
 function LegModes({ mode, onPick, theme }: { mode: TripLegMode; onPick: (mode: TripLegMode) => void; theme: MobileTheme }) {
@@ -670,7 +738,17 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
   );
 }
 
+/** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
+const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
+
 const styles = StyleSheet.create({
+  // Owner items A, N (28 Oct 2026): the "?" at the top of the sheet, and "More places".
+  question: { gap: 6, borderRadius: 16, padding: 14, marginBottom: 12 },
+  // The compact inline pill (CalendarListView's Yes pill): 32 points tall, its hitSlop making a 44-point target.
+  compactPill: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", paddingHorizontal: 16, borderRadius: DAYFRAME_BLOCKS.radius.pill },
+  compactPillText: { fontSize: 14, fontWeight: "700" },
+  questionText: { fontSize: 17, fontWeight: "700" },
+  morePlaces: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 6 },
   headText: { flex: 1, gap: 2 },
   back: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },

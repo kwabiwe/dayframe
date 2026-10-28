@@ -601,12 +601,6 @@ type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
 
-/** Hands a Review count from any Dayframe reply to the evening reminder. Never blocks or throws. */
-function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown) {
-  if (typeof count !== "number") return;
-  void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
-}
-
 export function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   return withJsTask("bootstrap", () => fetchBootstrapNow(options));
 }
@@ -688,7 +682,6 @@ async function fetchBootstrapNow(options: { date?: string; signal?: AbortSignal;
     requireBootstrapCurrent();
     await activateMobileAccount(owner);
     requireBootstrapCurrent();
-    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCardCount ?? bootstrap.stats?.reviewCount);
   }
   const reviewStore = await reviewSyncStore();
   requireLogoutAllowsResponse();
@@ -1709,7 +1702,6 @@ async function syncQueueItems(
           throw new Error("The Health acknowledgement backend is not verified.");
         }
       }
-      noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount);
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;

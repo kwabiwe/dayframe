@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import {
@@ -38,11 +39,14 @@ export function useLocationCorrections({
   data,
   onLogged,
   pending,
+  questionFor,
   reduceMotion,
   showNotice,
   theme,
   timeline
 }: {
+  /** Owner item A (28 Oct 2026): the open "?" an item's sheet asks at its top, if any. */
+  questionFor?: (kind: "place" | "trip", itemId: string) => React.ComponentProps<typeof LocationCorrectionSheet>["question"];
   /** The corrections the server has had, this account's (useTimelineCorrectionQueue). */
   acknowledged?: readonly AcknowledgedTimelineCorrection[];
   clockFormat: ClockFormat;
@@ -312,6 +316,7 @@ export function useLocationCorrections({
         ? (name, rest) => savePlace(open.id, open.ownerKey, shown.place, name, rest) : undefined}
       places={places}
       presentationId={open.id}
+      question={questionFor?.(open.kind, open.itemId) ?? null}
       reduceMotion={reduceMotion}
       rootHosted={false}
       stale={stale}

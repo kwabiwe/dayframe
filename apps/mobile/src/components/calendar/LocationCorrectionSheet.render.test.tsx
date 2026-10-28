@@ -2,6 +2,8 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
 
+// The place sheet's Nearby and search (native Apple Maps search) is not part of these tests.
+vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: () => null }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -343,3 +345,67 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
   });
 });
 
+
+describe("the correction sheet's question, Done and saved places (owner, 28 Oct 2026)", () => {
+  const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
+  const nearMap = (distances: Record<string, number>) => ({
+    map: { acceptedSamples: [], centre: null, nearbySavedPlaces: Object.entries(distances).map(([id, distanceMeters]) => ({ id, distanceMeters })) },
+    segment: { kind: "stay" }
+  }) as never;
+  const NEAR = "6f000000-0000-4000-8000-000000000002";
+  const FAR = "6f000000-0000-4000-8000-000000000003";
+  function sheetWith(props: Partial<Parameters<typeof LocationCorrectionSheet>[0]>) {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={vi.fn()} onQueue={vi.fn(async () => undefined)}
+        places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
+        target={{ kind: "place", place, label: "Unknown place" }} theme={theme} {...props} />);
+    });
+    return tree;
+  }
+  const action = (tree: ReturnType<typeof create>) => tree.root.findByProps({ testID: "location-correction-sheet-action" });
+
+  it("asks the item's \"?\" at its top in compact pills, each a 44-point target, and an answer closes the sheet", () => {
+    const onAnswer = vi.fn();
+    const onDismissed = vi.fn();
+    const tree = sheetWith({ onDismissed, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    const question = tree.root.findByProps({ testID: "location-correction-question" });
+    expect(JSON.stringify(question.props.children)).toContain("Visited Pret?");
+    for (const id of ["location-correction-question-yes", "location-correction-question-no"]) {
+      const pill = tree.root.findByProps({ testID: id });
+      const style = flat(pill.props.style({ pressed: false }));
+      expect(style).toMatchObject({ minHeight: 32, paddingHorizontal: 16 });
+      expect(flat(pill.findByType("Text" as never).props.style)).toMatchObject({ fontSize: 14, fontWeight: "700" });
+      expect((style.minHeight as number) + pill.props.hitSlop.top + pill.props.hitSlop.bottom).toBeGreaterThanOrEqual(44);
+    }
+    act(() => { tree.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("keeps Done quiet until something changes (owner item O)", () => {
+    const tree = sheetWith({});
+    expect(flat(action(tree).props.style).backgroundColor).toBe("surfaceMuted");
+    act(() => { tree.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    expect(flat(action(tree).props.style).backgroundColor).toBe("textPrimary");
+  });
+
+  it("shows the visit's own map, saved places nearest first with how far, and the rest behind More places (owner items L, N)", () => {
+    const tree = sheetWith({
+      evidence: nearMap({ [NEAR]: 140, [SAVED]: 1_400, [FAR]: 8_000 }),
+      places: [{ id: FAR, name: "Far Gym", role: null }, { id: SAVED, name: "Exampleton Library", role: null }, { id: NEAR, name: "Near Café", role: null }]
+    });
+    expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props.visitOnly).toBe(true);
+    const shown = () => tree.root.findAll((node) => typeof node.props.testID === "string" && /^location-correction-place-6f/.test(node.props.testID)
+      && typeof node.props.onPress === "function").map((node) => node.props.testID.replace("location-correction-place-", ""));
+    expect(shown()).toEqual([NEAR, SAVED]);
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain("Saved place · 140 m away");
+    expect(text).toContain("Saved place · 1.4 km away");
+    const more = tree.root.findByProps({ testID: "location-correction-more-places" });
+    expect(JSON.stringify(more.props.children)).toContain("More places (");
+    act(() => { more.props.onPress(); });
+    expect(shown()).toEqual([NEAR, SAVED, FAR]);
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-more-places")).toHaveLength(0);
+  });
+});
