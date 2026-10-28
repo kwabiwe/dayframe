@@ -31,8 +31,11 @@ const LocationEvidenceMap = dynamic(() => import("@/components/location/Location
 export type LocationCorrectionTarget =
   /** `joinsTrips`: a trip comes into the place and one leaves it, so "I wasn't here" can join them (step 12 part 4). */
   | { kind: "place"; place: TimelinePlace; label: string; joinsTrips?: boolean;
-      /** Calendar prototype: the place's open "?" — logging it (Logs as) answers them, so they stop asking. */
-      checkIds?: readonly string[] }
+      /**
+       * Calendar prototype: the place's open "?", each with the mutation its "Not now" sends — logging the place
+       * (Logs as) closes them that way, so they stop asking (the block is the answer).
+       */
+      closeChecks?: ReadonlyArray<{ id: string; mutation: unknown }> }
   | { kind: "leg"; tripId: string; leg: TripLeg; index: number; count: number }
   /** Calendar prototype: a trip's own dialog (its map, legs, "I didn't leave", "This wasn't a trip"). */
   | { kind: "trip"; trip: TimelineTrip; route: string };
@@ -230,9 +233,9 @@ export function LocationCorrectionDialog({
     // Calendar prototype: a place logged here no longer asks; its "?" closes as "Not now" does, with no toast (the
     // block is the answer).
     if (prototype && target.kind === "place" && pending.some((correction) => correction.kind === "log_place")) {
-      for (const checkId of target.checkIds ?? []) {
-        await clientFetch(`/api/review/${checkId}`, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: { action: "ignore_once_location" } }) }).catch(() => null);
+      for (const check of target.closeChecks ?? []) {
+        await clientFetch(`/api/review/${check.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: check.mutation }) }).catch(() => null);
       }
     }
     await onCorrected();

@@ -57,7 +57,7 @@ import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { hasV2Evidence, reviewPicture } from "@/lib/review-deck";
+import { hasV2Evidence, reviewMutationFor, reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
@@ -350,11 +350,11 @@ export function EntriesTable({
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
-  const correctPlace = (place: TimelinePlace, label: string, checkIds?: readonly string[]) => {
+  const correctPlace = (place: TimelinePlace, label: string, closeChecks?: ReadonlyArray<{ id: string; mutation: unknown }>) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips, checkIds });
+    setCorrection({ kind: "place", place, label, joinsTrips, closeChecks });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
@@ -630,7 +630,10 @@ export function EntriesTable({
             onEdit={prototype && row.kind === "place"
               // Calendar prototype (step 15): a place's Edit opens its dialog — the map first, Where were you?, times,
               // Logs as, Save this place — and a trip's opens the trip's own.
-              ? () => correctPlace(row.place, row.place.name ?? "Unknown place", row.checkIds)
+              ? () => correctPlace(row.place, row.place.name ?? "Unknown place", row.checkIds.flatMap((id) => {
+                const check = listChecks.itemsById.get(id);
+                return check ? [{ id, mutation: reviewMutationFor(check, "skip", undefined) }] : [];
+              }))
               : prototype && row.kind === "check" && row.trip
                 ? () => setCorrection({ kind: "trip", trip: row.trip!, route: row.trip!.route })
                 : hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
