@@ -76,6 +76,8 @@ export function BottomSheetShell({
   disabled = false,
   fixedHeader,
   testID,
+  commitRef,
+  actionTone,
   children,
 }: {
   rootHosted: boolean;
@@ -96,6 +98,13 @@ export function BottomSheetShell({
   fixedHeader?: React.ReactNode;
   /** The sheet's test id; its body, scroll and action are `${testID}-body`, `-scroll`, `-action`. */
   testID: string;
+  /**
+   * Set to the action's own commit, so a control in the sheet (the trip sheet's "This wasn't a trip") can
+   * close it as the action does: `onApply` runs, then the sheet leaves with its usual exit.
+   */
+  commitRef?: { current: (() => void) | null };
+  /** The action's fill: coral for a filter's primary "Show", neutral for a Done (the date sheet's). Defaults by layout. */
+  actionTone?: "accent" | "neutral";
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -107,6 +116,7 @@ export function BottomSheetShell({
     value: BottomSheetOutcome;
   } | null>(null);
   const [closing, setClosing] = useState(false);
+  const neutralAction = (actionTone ?? (calendarLayout ? "neutral" : "accent")) === "neutral";
   const [keyboardInset, setKeyboardInset] = useState(0);
   const bottomGeometry = bottomSheetGeometry({
     rootHosted,
@@ -175,6 +185,13 @@ export function BottomSheetShell({
   };
 
   const requestDiscard = () => sheetRef.current?.dismiss();
+  useEffect(() => {
+    if (!commitRef) return;
+    commitRef.current = requestCommit;
+    return () => {
+      if (commitRef.current === requestCommit) commitRef.current = null;
+    };
+  });
 
   const overlay = (
     <View style={s.modal}>
@@ -209,6 +226,8 @@ export function BottomSheetShell({
         style={[
           s.sheet,
           calendarLayout ? s.dateSheet : s.filterSheet,
+          // A tall sheet stops below the status bar (step 12 Simulator check).
+          calendarLayout ? null : { maxHeight: windowHeight - insets.top - 8 },
           compactCalendarLayout ? s.compactDateSheet : null,
           {
             backgroundColor: theme.surfaceRaised,
@@ -270,7 +289,7 @@ export function BottomSheetShell({
                 backgroundColor:
                   disabled || closing
                     ? theme.surfaceMuted
-                    : calendarLayout
+                    : neutralAction
                       ? theme.textPrimary
                       : theme.accent,
               },
@@ -284,7 +303,7 @@ export function BottomSheetShell({
                   color:
                     disabled || closing
                       ? theme.textSecondary
-                      : calendarLayout
+                      : neutralAction
                         ? theme.background
                         : theme.onAccent,
                 },

@@ -191,6 +191,35 @@ export async function enqueueTimelineCorrection(
   return item;
 }
 
+/**
+ * Several corrections from one Done, kept together or not at all: a failed write keeps none, so trying again
+ * never queues one twice (step 12, Codex r1 on #602).
+ */
+export async function enqueueTimelineCorrections(
+  owner: MobileAccountOwner,
+  corrections: ReadonlyArray<{ request: TimelineCorrectionRequest; preview?: TimelineCorrectionPreview }>,
+  options: { now?: Date; createId?: () => string } = {}
+) {
+  const createdAt = (options.now ?? new Date()).toISOString();
+  const items = corrections.map(({ request, preview }): PendingTimelineCorrection => {
+    const clientCorrectionId = request.clientCorrectionId ?? (options.createId ?? createTimelineCorrectionId)();
+    const parsed = TimelineCorrectionRequestSchema.parse({ ...request, clientCorrectionId });
+    return {
+      userId: owner.userId,
+      workspaceId: owner.workspaceId,
+      clientCorrectionId,
+      request: { ...parsed, clientCorrectionId },
+      ...(preview ? { preview } : {}),
+      createdAt,
+      attemptCount: 0
+    };
+  });
+  if (!items.length) return items;
+  await withMutation(() => updateAll((current) => [...current, ...items]));
+  notify();
+  return items;
+}
+
 /** This owner's corrections, oldest first, refused ones included. */
 export async function readPendingTimelineCorrections(owner: MobileAccountOwner) {
   // In the mutation chain: a read may set an unreadable queue aside, which must not race a write.
