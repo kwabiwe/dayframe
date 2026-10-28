@@ -3688,10 +3688,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   // The editor's Nearby search takes the native search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
-                    router.push(calendarCheckRoute(
-                      shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
-                      reviewItemId
-                    ) as never);
+                    const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
+                    // A trip's question edits the trip on its own sheet (mock-up #ios-list editorTrip; Codex r1 on #602):
+                    // its times, legs and "This wasn't a trip". Anything else keeps its screen.
+                    const segmentId = typeof reviewItem?.rawPayload?.clientSegmentId === "string" ? reviewItem.rawPayload.clientSegmentId : null;
+                    const trip = reviewItem?.eventType === "commute_detected" && segmentId
+                      ? calendarTimeline?.items.find((each) => each.kind === "trip" && each.id === segmentId && !each.blockIds.length)
+                      : undefined;
+                    if (trip?.kind === "trip") {
+                      locationCorrections.openTripLeg(trip, null);
+                      return;
+                    }
+                    router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onOpenPlace={locationCorrections.openPlace}

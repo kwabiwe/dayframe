@@ -64,6 +64,8 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
   it("opens each \"?\" where its kind is handled, and asks none with a pending change of its own (Codex r10 on #582)", () => {
     expect(dashboard).toContain("onOpenCheck={(reviewItemId) => {");
+    // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602).
+    expect(dashboard).toContain("locationCorrections.openTripLeg(trip, null);");
     expect(dashboard).toContain("router.push(calendarCheckRoute(");
     expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");

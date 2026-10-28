@@ -116,9 +116,12 @@ export function useLocationCorrections({
     [data?.places]
   );
 
-  // Kept on the phone for the sheet's own account before its Done closes it; sending follows on its own.
+  // Kept on the phone for the sheet's own account before its Done closes it, never once another account (or
+  // none) is signed in, however late the Done; sending follows on its own.
+  const currentOwner = useRef(ownerKey);
+  useEffect(() => { currentOwner.current = ownerKey; }, [ownerKey]);
   const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[]) => {
-    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey) throw new Error("The account changed.");
+    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
     await enqueueTimelineCorrections(owner, corrections.map((correction) => ({
       request: correction.request, ...(correction.preview ? { preview: correction.preview } : {})
