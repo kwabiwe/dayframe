@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
   enqueue: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
   remove: vi.fn(async () => undefined),
-  synchronise: vi.fn(async () => undefined),
+  synchronise: vi.fn(async (..._args: unknown[]) => undefined),
   appListeners: new Set<(state: string) => void>(),
   appState: "active"
 }));
