@@ -71,9 +71,15 @@ export async function readLocationReviewEvidence(
 }
 
 export async function revalidateLocationReviewEvidence(
-  input: EvidenceOwner
+  input: EvidenceOwner,
+  /**
+   * `fresh`: never join a read already under way, which may have begun before the suggestion changed; that
+   * read is superseded (card B part 2, Codex r2 on #600).
+   */
+  options: { fresh?: boolean } = {}
 ): Promise<LocationReviewEvidenceReadResult> {
   throwIfAborted(input.signal);
+  if (options.fresh) inFlightEvidenceRequests.get(`${input.workspaceId}:${input.userId}:${input.reviewItemId}`)?.invalidate();
   const {request,release} = networkLocationReviewEvidence(input);
   try {
     const evidence = await awaitWithAbort(
