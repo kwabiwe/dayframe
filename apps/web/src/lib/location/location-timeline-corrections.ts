@@ -162,7 +162,8 @@ function targetFor(request: TimelineCorrectionRequest): TimelineCorrection["targ
     case "times": return { startedAt: iso(request.startedAt), stoppedAt: iso(request.stoppedAt) };
     case "leg_mode": return { mode: request.mode };
     case "delete":
-    case "merge": return {};
+    case "merge":
+    case "log_place": return {};
   }
 }
 
@@ -281,9 +282,9 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     // the two attempts; the activity_events client id index backs it.
     const clientEventId = request.clientCorrectionId ? `timeline_correction:${request.clientCorrectionId}` : null;
     if (clientEventId) {
-      const earlier = await client.query<CorrectionRow | { id: null }>(
+      const earlier = await client.query<(CorrectionRow | { id: null }) & { eventId: string; eventKind: string | null }>(
         `select c.id, c.subject, c.kind, c.span_started_at as "spanStartedAt", c.span_stopped_at as "spanStoppedAt", c.target,
-                c.created_at as "createdAt"
+                c.created_at as "createdAt", e.id as "eventId", e.raw_payload ->> 'kind' as "eventKind"
            from activity_events e
            left join location_timeline_corrections c
              on c.created_from_event_id = e.id and c.workspace_id = e.workspace_id and c.user_id = e.user_id
@@ -291,6 +292,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         [session.workspaceId, session.userId, clientEventId]);
       const found = earlier.rows[0];
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
+      // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
+      if (found && found.eventKind === "log_place" && request.kind === "log_place") {
+        return { ok: true as const, logged: { entryIds: await entriesFromEvent(client, session, found.eventId) } };
+      }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
       if (found) throw new TimelineCorrectionError("That change was already used for something else. Try again.", 409);
     }
@@ -303,6 +308,7 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);
     }
+    if (request.kind === "log_place") return logPlace(client, session, request, row, clientEventId);
     const joined = await joinedItems(client, session, request, row);
     const itemStartedAt = iso(row.startedAt);
     const itemStoppedAt = iso(row.stoppedAt ?? new Date());
@@ -533,5 +539,79 @@ async function applyJoin(
     `update review_items set suggested_stopped_at = $4
       where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open'`,
     [...owner, first.id, second.stoppedAt]);
+}
+
+async function entriesFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {
+  return (await client.query<{ id: string }>(
+    `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3 order by started_at`,
+    [session.workspaceId, session.userId, eventId])).rows.map((row) => row.id);
+}
+
+/** The parts of [from, to) no interval covers, a minute or longer, in order. */
+export function freeSpans(fromMs: number, toMs: number, taken: ReadonlyArray<{ fromMs: number; toMs: number }>) {
+  const out: Array<{ fromMs: number; toMs: number }> = [];
+  let cursor = fromMs;
+  for (const span of [...taken].sort((a, b) => a.fromMs - b.fromMs)) {
+    if (span.toMs <= cursor) continue;
+    if (span.fromMs > cursor) out.push({ fromMs: cursor, toMs: Math.min(span.fromMs, toMs) });
+    cursor = Math.max(cursor, span.toMs);
+    if (cursor >= toMs) break;
+  }
+  if (cursor < toMs) out.push({ fromMs: cursor, toMs });
+  return out.filter((span) => span.toMs - span.fromMs >= 60_000);
+}
+
+/**
+ * "Logs as" (step 12 part 4, orchestrator 28 Oct 2026): a finished place with no question and no block becomes
+ * blocks with the picked activity, for the time the person's own blocks don't cover. Event-first: a
+ * `location_place_logged` event naming the place's segment, then its blocks, then the place kept as decided,
+ * as a confirmed suggestion is, so replay never replaces it.
+ */
+async function logPlace(
+  client: pg.PoolClient, session: RequestSession, request: Extract<TimelineCorrectionRequest, { kind: "log_place" }>, row: SegmentRow,
+  clientEventId: string | null
+) {
+  if (!row.stoppedAt) throw new TimelineCorrectionError("This place hasn't ended yet. Log it once you've left.", 422);
+  const asked = await client.query(
+    `select 1 from review_items where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open' limit 1`,
+    [session.workspaceId, session.userId, row.id]);
+  if (asked.rowCount) throw new TimelineCorrectionError("This place has a question. Answer it instead.", 409);
+  const category = await client.query(
+    `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
+  if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
+  const place = await client.query<{ placeId: string | null }>(
+    `select place_id as "placeId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
+    [row.id, session.workspaceId, session.userId]);
+  const fromMs = new Date(row.startedAt).getTime();
+  const toMs = new Date(row.stoppedAt).getTime();
+  // The person's own blocks, running ones to now, decide what is free.
+  const taken = await client.query<{ startedAt: Date; stoppedAt: Date }>(
+    `select started_at as "startedAt", coalesce(stopped_at, now()) as "stoppedAt" from time_entries
+      where workspace_id = $1 and user_id = $2 and started_at < $4 and coalesce(stopped_at, now()) > $3`,
+    [session.workspaceId, session.userId, iso(row.startedAt), iso(row.stoppedAt)]);
+  const free = freeSpans(fromMs, toMs, taken.rows.map((entry) => ({ fromMs: entry.startedAt.getTime(), toMs: entry.stoppedAt.getTime() })));
+  if (!free.length) throw new TimelineCorrectionError("Your blocks already cover this place's time.", 409);
+  const event = await client.query<{ id: string }>(
+    `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
+     values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
+     returning id`,
+    [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId }),
+      clientEventId]);
+  const entryIds: string[] = [];
+  for (const span of free) {
+    const entry = await client.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, category_id, place_id, source, confidence, review_status, started_at, stopped_at,
+         created_from_event_id)
+       values ($1, $2, $3, $4, 'location_learning', 'high', 'confirmed', $5, $6, $7)
+       returning id`,
+      [session.workspaceId, session.userId, request.categoryId, place.rows[0]?.placeId ?? null,
+        new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id]);
+    entryIds.push(entry.rows[0].id);
+  }
+  await client.query(
+    `update stay_segments set status = 'finalised', continuity_status = 'manual', updated_at = now()
+      where id = $1 and workspace_id = $2 and user_id = $3`,
+    [row.id, session.workspaceId, session.userId]);
+  return { ok: true as const, logged: { entryIds } };
 }
 
