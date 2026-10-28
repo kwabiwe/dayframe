@@ -14,6 +14,7 @@ vi.mock("react-native", () => ({
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   Text: "Text",
+  TextInput: "TextInput",
   View: "View",
   useWindowDimensions: () => ({ width: 390, height: 844 }),
   StyleSheet: { create: (s: unknown) => s, absoluteFill: {}, hairlineWidth: 1 }
@@ -72,11 +73,12 @@ const trip: TimelineTrip & { route: string } = {
 const theme = new Proxy({}, { get: (_target, key) => String(key) }) as never;
 
 type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
-function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined)) {
+function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string, rest: unknown[]) => Promise<void>,
+  logAs?: { activities: Array<{ id: string; name: string }>; onLog: (categoryId: string) => void }) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
-    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue}
+    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace} logAs={logAs}
       places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
       stale={stale} target={next} theme={theme} />
   );
@@ -227,6 +229,53 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(onQueue.mock.calls[0][1]).toEqual({ closing: true });
   });
 
+  // Step 12 part 4.
+  it("takes a place you weren't at off the day once you confirm, and only when the List can join its trips", async () => {
+    const plain = mount({ kind: "place", place, label: "Unknown place" });
+    expect(plain.has("location-correction-not-here")).toBe(false);
+    const sheet = mount({ kind: "place", place, label: "Unknown place", notHere: true });
+    sheet.press("location-correction-not-here");
+    sheet.press("location-correction-keep-not-here");
+    expect(sheet.has("location-correction-confirm-not-here")).toBe(false);
+    expect(sheet.onQueue).not.toHaveBeenCalled();
+    sheet.press("location-correction-not-here");
+    sheet.press("location-correction-confirm-not-here");
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "delete", subject: "place", itemId: "seg-a" } }], { closing: true });
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("makes a trip's two visits one stay when you didn't leave, offered only when the List allows it", async () => {
+    const plain = mount({ kind: "trip", trip, legIndex: null });
+    expect(plain.has("location-correction-didnt-leave")).toBe(false);
+    const sheet = mount({ kind: "trip", trip, legIndex: null, didntLeave: true });
+    sheet.press("location-correction-didnt-leave");
+    sheet.press("location-correction-confirm-didnt-leave");
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "merge", subject: "trip", itemId: "trip-1" } }], { closing: true });
+  });
+
+  it("saves an unknown place under the name typed, closing once it is saved, and says so when it can't be", async () => {
+    const onSavePlace = vi.fn(async (_name: string, _rest: unknown[]) => undefined);
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace);
+    sheet.press("location-correction-save-place");
+    expect(sheet.tree.root.findByProps({ testID: "location-correction-confirm-save-place" }).props.disabled).toBe(true);
+    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("  Exampleton Bakery "); });
+    sheet.press("location-correction-confirm-save-place");
+    await sheet.settle();
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+
+    const failing = mount({ kind: "place", place, label: "Unknown place" }, undefined, vi.fn(async () => { throw new Error("offline"); }));
+    failing.press("location-correction-save-place");
+    act(() => { failing.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
+    failing.press("location-correction-confirm-save-place");
+    await failing.settle();
+    expect(failing.has("location-correction-error")).toBe(true);
+    expect(failing.onDismissed).not.toHaveBeenCalled();
+    expect(mount({ kind: "place", place, label: "Unknown place" }).has("location-correction-save-place")).toBe(false);
+  });
+
   // Codex r3 on #602.
   it("keeps the draft as it was while a change is being kept, and still closes once it is", async () => {
     let resolve!: () => void;
@@ -240,6 +289,57 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     await sheet.settle();
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
     expect(onQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a place as the activity picked, after its own changes are kept, and Don't log leaves it as it is (step 12 part 4c)", async () => {
+    const onLog = vi.fn();
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
+    expect(plain.tree.root.findByProps({ testID: "location-correction-log-none" }).props.accessibilityState).toEqual({ checked: true });
+    plain.press("location-correction-sheet-action");
+    expect(onLog).not.toHaveBeenCalled();
+
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
+    sheet.press(`location-correction-place-${SAVED}`);
+    sheet.press("location-correction-log-cat-errands");
+    sheet.press("location-correction-sheet-action");
+    expect(onLog).not.toHaveBeenCalled();
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledTimes(1);
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
+  });
+
+  // Codex r1 on #606.
+  it("saves a place with the sheet's Logs as, in one Done", async () => {
+    const onSavePlace = vi.fn(async (_name: string, _rest: unknown[]) => undefined);
+    const onLog = vi.fn();
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace,
+      { activities: [{ id: "cat-errands", name: "Errands" }], onLog });
+    sheet.press("location-correction-log-cat-errands");
+    sheet.press("location-correction-save-place");
+    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
+    sheet.press("location-correction-confirm-save-place");
+    await sheet.settle();
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("never sends a join the List no longer allows, and holds the shape actions still while a change is kept", async () => {
+    const sheet = mount({ kind: "trip", trip, legIndex: null, didntLeave: true });
+    sheet.press("location-correction-didnt-leave");
+    sheet.update({ kind: "trip", trip, legIndex: null, didntLeave: false });
+    expect(sheet.has("location-correction-confirm-didnt-leave")).toBe(false);
+
+    let resolve!: () => void;
+    const slow = mount({ kind: "place", place, label: "Unknown place", notHere: true }, vi.fn<Queue>(() => new Promise<void>((done) => { resolve = done; })));
+    slow.press(`location-correction-place-${SAVED}`);
+    slow.press("location-correction-sheet-action");
+    slow.press("location-correction-not-here");
+    expect(slow.has("location-correction-confirm-not-here")).toBe(false);
+    await act(async () => { resolve(); });
+    await slow.settle();
+    expect(slow.onDismissed).toHaveBeenCalledWith(1);
   });
 });
 

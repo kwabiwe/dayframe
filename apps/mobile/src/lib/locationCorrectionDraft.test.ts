@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
-import { correctable, legCorrection, notATrip, placeCorrections, timesProblem, tripCorrections } from "./locationCorrectionDraft";
+import {
+  canSayDidntLeave, canSayNotHere, correctable, didntLeave, legCorrection, notATrip, notHere, placeCorrections, timesProblem, tripCorrections
+} from "./locationCorrectionDraft";
 
 // Location v4 step 12: synthetic ids, names and times only.
 const at = (minutes: number) => Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000;
@@ -58,4 +60,33 @@ describe("what a correction sheet sends on Done (location v4 step 12)", () => {
     ]);
     expect(notATrip(trip)).toEqual({ request: { kind: "delete", subject: "trip", itemId: "trip-1" } });
   });
+
+  // Step 12 part 4: synthetic ids and times.
+  it("offers I wasn't here only between two trips with no block, and I didn't leave only between visits to one place", () => {
+    const iso = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
+    const SAVED = "6f000000-0000-4000-8000-000000000009";
+    const stay = (id: string, from: number, to: number | null, placeId: string | null = null): TimelinePlace => ({
+      kind: "place", id, status: "finalised", startedAt: iso(from), stoppedAt: to == null ? null : iso(to), placeId, learnedPlaceId: null,
+      name: null, role: null, matchKind: placeId ? "saved" : "unknown", confidence: "low", blockIds: []
+    });
+    const hop = (id: string, fromId: string, toId: string): TimelineTrip => ({
+      kind: "trip", id, status: "finalised", startedAt: iso(0), stoppedAt: iso(1), fromId, toId, mode: null, legs: [], stopIds: [],
+      distanceMeters: null, confidence: "low", reason: null, blockIds: []
+    });
+    const a = stay("a", 0, 10, SAVED);
+    const x = stay("x", 20, 30);
+    const b = stay("b", 40, 50, SAVED);
+    const items = [a, hop("t1", "a", "x"), x, hop("t2", "x", "b"), b, hop("t3", "b", "c"), stay("c", 60, null, SAVED)];
+    expect(canSayNotHere(x, items)).toBe(true);
+    expect(canSayNotHere(a, items)).toBe(false);
+    expect(canSayNotHere({ ...x, stoppedAt: null }, items)).toBe(false);
+    expect(canSayNotHere(x, items.map((item) => item.id === "t2" ? { ...item, blockIds: ["e"] } : item))).toBe(false);
+    expect(notHere(x)).toEqual({ request: { kind: "delete", subject: "place", itemId: "x" } });
+    const t3 = items[5] as TimelineTrip;
+    expect(canSayDidntLeave(t3, items)).toBe(true);
+    expect(canSayDidntLeave(items[1] as TimelineTrip, items)).toBe(false);
+    expect(canSayDidntLeave(t3, items.map((item) => item.id === "c" ? { ...item, blockIds: ["e"] } : item))).toBe(false);
+    expect(didntLeave(t3)).toEqual({ request: { kind: "merge", subject: "trip", itemId: "t3" } });
+  });
 });
+

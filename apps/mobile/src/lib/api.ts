@@ -2454,12 +2454,26 @@ export type NewPlaceRole = {
  * Creates a place in one request that returns it, so an accepted save never depends on a later
  * read (a retry after a failed follow-up read would add the place twice).
  */
-export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole) {
+export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole,
+  /**
+   * The account the place is for: it is sent under that account's own session, or not at all, however the
+   * session changes meanwhile (step 12 part 4b, Codex r1 on #606).
+   */
+  owner?: MobileAccountOwner) {
+  let headers: Record<string, string>;
+  if (owner) {
+    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+    if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+    if (session.status !== "authenticated") throw new AuthRequiredError();
+    headers = { Authorization: `Bearer ${session.snapshot.token}` };
+  } else {
+    headers = await authHeaders();
+  }
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(await authHeaders())
+      ...headers
     },
     body: JSON.stringify({
       name: input.name.trim(),

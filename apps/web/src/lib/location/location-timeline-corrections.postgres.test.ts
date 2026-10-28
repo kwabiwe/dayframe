@@ -504,5 +504,47 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect((await db.query(`select count(*)::int as n from time_entries where workspace_id = $1 and started_at >= $2 and started_at < $3`,
       [workspaceId, at(base), at(base + 60)])).rows[0].n).toBe(1);
   });
+
+  it("never logs a place automatically once you logged it yourself, even a saved place set to log automatically (Codex r2 on #605)", async () => {
+    const db = database!;
+    const base = 7_000;
+    const categoryId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Gym', 'teal') returning id`, [workspaceId])).rows[0].id;
+    const otherId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Errands', 'amber') returning id`, [workspaceId])).rows[0].id;
+    const savedId = (await db.query<{ id: string }>(
+      `insert into places (workspace_id, name, latitude, longitude, radius_meters, default_category_id, auto_log)
+       values ($1, 'Exampleton Gym', 10, 20, 100, $2, true) returning id`, [workspaceId, categoryId])).rows[0].id;
+    const placeRow = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, place_id, centre, metadata)
+       values ($1, $2, 'l-saved', 'device-1', 'closed', $3, $4, $5, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+         '{"placeMatchKind":"saved"}'::jsonb) returning id`,
+      [workspaceId, userId, at(base), at(base + 60), savedId])).rows[0].id;
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-saved", categoryId: otherId }, session);
+    const { emitReviewSemanticSegments } = await import("./location-review-semantic-batch");
+    const segment = {
+      kind: "stay", clientSegmentId: "l-saved", algorithmVersion: "location-v2.0", status: "finalised", startedAt: at(base),
+      stoppedAt: at(base + 60), placeId: savedId, learnedPlaceId: null, placeMatchKind: "saved", candidatePlaceIds: [savedId], sampleCount: 6,
+      continuityStatus: "continuous", confidence: "high", evidenceIds: []
+    } as never;
+    const emit = async () => {
+      const client = await db.connect();
+      try {
+        await client.query("begin");
+        await emitReviewSemanticSegments(client, session, [segment], new Map([["l-saved", placeRow]]), new Map());
+        await client.query("commit");
+      } finally {
+        client.release();
+      }
+    };
+    await emit();
+    await db.query(`delete from time_entries where id = any($1::uuid[])`, [logged.logged!.entryIds]);
+    await emit();
+    const entries = await db.query(`select category_id as "categoryId" from time_entries where workspace_id = $1 and started_at >= $2 and started_at < $3`,
+      [workspaceId, at(base), at(base + 60)]);
+    expect(entries.rows).toEqual([]);
+    expect((await db.query(`select count(*)::int as n from review_items where location_segment_id = $1`, [placeRow])).rows[0].n).toBe(0);
+  });
 });
 

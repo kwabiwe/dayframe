@@ -1,4 +1,4 @@
-import type { TimelineCorrectionRequest, TimelinePlace, TimelineTrip, TripLegMode } from "@dayframe/shared";
+import { sameKnownPlace, type TimelineCorrectionRequest, type TimelinePlace, type TimelineTrip, type TripLegMode } from "@dayframe/shared";
 import type { TimelineCorrectionPreview } from "./timelineCorrectionOutbox";
 
 /**
@@ -72,6 +72,37 @@ export function legCorrection(trip: TimelineTrip, index: number, mode: TripLegMo
   const leg = trip.legs[index];
   if (!leg || leg.mode === mode) return null;
   return { request: { kind: "leg_mode", subject: "leg", itemId: trip.id, legStartedAt: leg.startedAt, legStoppedAt: leg.stoppedAt, mode } };
+}
+
+/**
+ * Whether "I wasn't here" can join a place's trips (step 12 part 4): a finished place with a trip in and a trip
+ * out, none of them in a block (the server refuses a join that touches a block).
+ */
+export function canSayNotHere(place: TimelinePlace, items: ReadonlyArray<TimelinePlace | TimelineTrip>) {
+  const before = items.find((item): item is TimelineTrip => item.kind === "trip" && item.toId === place.id);
+  const after = items.find((item): item is TimelineTrip => item.kind === "trip" && item.fromId === place.id);
+  return Boolean(place.stoppedAt && correctable(place) && before && after && before !== after && correctable(before) && correctable(after));
+}
+
+/** "I wasn't here": the place leaves the day, and its trips either side become one. */
+export function notHere(place: TimelinePlace): QueuedCorrection {
+  return { request: { kind: "delete", subject: "place", itemId: place.id } };
+}
+
+/**
+ * Whether "I didn't leave" can make a trip's two visits one stay: both to one saved or learned place, and none
+ * of the three in a block.
+ */
+export function canSayDidntLeave(trip: TimelineTrip, items: ReadonlyArray<TimelinePlace | TimelineTrip>) {
+  const first = items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.fromId);
+  const second = items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.toId);
+  return Boolean(first && second && first !== second && sameKnownPlace(first, second) &&
+    correctable(trip) && correctable(first) && correctable(second));
+}
+
+/** "I didn't leave": the trip leaves the day, and the visits either side become one stay. */
+export function didntLeave(trip: TimelineTrip): QueuedCorrection {
+  return { request: { kind: "merge", subject: "trip", itemId: trip.id } };
 }
 
 /** "This wasn't a trip": takes it off the List (only a trip with no block). */
