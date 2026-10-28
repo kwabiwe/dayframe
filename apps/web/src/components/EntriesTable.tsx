@@ -55,7 +55,7 @@ import { useCalendarPrototype, useLocalDayStartMs, useMediaQuery } from "@/compo
 import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-prototype";
 import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
+import { CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
 import { hasV2Evidence, reviewMutationFor, reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -349,6 +349,8 @@ export function EntriesTable({
   });
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
+  // Calendar prototype (owner item A): the "?" the open dialog asks at its top, if it was opened from one.
+  const [correctionCheckId, setCorrectionCheckId] = useState<string | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
   const correctPlace = (place: TimelinePlace, label: string, closeChecks?: ReadonlyArray<{ id: string; mutation: unknown }>) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
@@ -606,11 +608,26 @@ export function EntriesTable({
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
-          ? item && check ? <CheckRowView check={check} clock={clock} item={item} prototype={prototype} row={row} /> : null
+          ? item && check ? <CheckRowView check={check} clock={clock} item={item} prototype={prototype} row={row}
+            onOpen={prototype && row.trip ? () => {
+              setCorrectionCheckId(item.id);
+              setCorrection({ kind: "trip", trip: row.trip!, route: row.trip!.route });
+            } : undefined}
+            onYes={prototype && checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />
+            : null
           : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
-            nowMs={nowMs} onCorrect={correctPlace} prototype={prototype} row={row} />}
+            nowMs={nowMs} prototype={prototype} row={row}
+            onCorrect={prototype && row.kind === "place" ? (place, label) => {
+              // Owner item A: the row opens its dialog, its "?" at the top; logging it there closes the "?".
+              setCorrectionCheckId(item?.id ?? null);
+              correctPlace(place, label, row.checkIds.flatMap((id) => {
+                const open = listChecks.itemsById.get(id);
+                return open ? [{ id, mutation: reviewMutationFor(open, "skip", undefined) }] : [];
+              }));
+            } : correctPlace}
+            onYes={prototype && item && checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />}
         {item && expanded ? (
-          <CheckQuestionRow clock={clock} item={item}
+          <CheckQuestionRow clock={clock} hideTimes={prototype} item={item}
             editor={editingCheck === item.id ? (
               <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
                 // Only its own editor: a late save closes after resolving, by then perhaps over another trip's
@@ -1263,6 +1280,15 @@ export function EntriesTable({
         }}
       >
         {localTimeReady ? <ChecksChip count={prototype ? askingOrder.length : checkRows.length} onNext={nextCheck} prototype={prototype} /> : null}
+        {/* Calendar prototype (owner item H): a quiet filter at the top of the List, not a filled pill under it. */}
+        {localTimeReady && prototype && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
+          <div className="timeline-places-filter">
+            <button aria-pressed={showEveryPlace} onClick={() => setShowEveryPlace((current) => !current)} type="button">
+              {showEveryPlace ? "Fewer places" : "All places"}
+            </button>
+            {wide ? <button onClick={() => setPlacesColumn(true)} type="button">Places beside the List</button> : null}
+          </div>
+        ) : null}
         {continuous && localTimeReady ? (
           <ContinuousEdge direction="later" error={continuousError === "later"} loading={continuousLoading === "later"}
             onRetry={() => continuous.onLoad("later")} reachedEnd={continuous.reachedLatest} sentinelRef={laterSentinelRef} />
@@ -1361,7 +1387,7 @@ export function EntriesTable({
                           {renderInlineDescription(entry, groupEditTarget)}
                         </span>
                         {/* Calendar v3 (owner choice A): the place (pin, or a trip's route) or the tags, with its icon. */}
-                        <ListSecondaryLine entry={entry} />
+                        <ListSecondaryLine entry={entry} prototype={prototype} />
                         {!isGrouped && tripByBlock.get(entry.id) ? (
                           <TripModesLine legs={tripByBlock.get(entry.id)!.legs} route={tripByBlock.get(entry.id)!.route} />
                         ) : null}
@@ -1476,7 +1502,7 @@ export function EntriesTable({
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
                             </span>
-                            <ListSecondaryLine entry={occurrence} />
+                            <ListSecondaryLine entry={occurrence} prototype={prototype} />
                             {occurrenceTrip ? <TripModesLine legs={occurrenceTrip.legs} route={occurrenceTrip.route} /> : null}
                             {renderInlineStatus(occurrence)}
                             {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
@@ -1563,7 +1589,7 @@ export function EntriesTable({
           <ContinuousEdge direction="earlier" error={continuousError === "earlier"} loading={continuousLoading === "earlier"}
             onRetry={() => continuous.onLoad("earlier")} reachedEnd={continuous.reachedEarliest} sentinelRef={earlierSentinelRef} />
         ) : null}
-        {localTimeReady && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
+        {localTimeReady && !columnShown && !prototype && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
           <ShowEveryPlaceToggle onShowColumn={prototype && wide ? () => setPlacesColumn(true) : undefined}
             onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} prototype={prototype} />
         ) : null}
@@ -1592,8 +1618,15 @@ export function EntriesTable({
       })() : null}
       </div>
       {correction ? (
-        <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => setCorrection(null)}
+        <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => { setCorrection(null); setCorrectionCheckId(null); }}
           prototype={prototype}
+          question={(() => {
+            const open = correctionCheckId ? listChecks.itemsById.get(correctionCheckId) : undefined;
+            if (!prototype || !open) return null;
+            const words = checkQuestionWords(open, clock);
+            return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now",
+              onAnswer: (yes: boolean) => applyTimelineRegroup(() => listChecks.answer(open.id, yes ? "log" : "skip")) };
+          })()}
           onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
@@ -1772,8 +1805,10 @@ function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | n
  * route for a block a Move logged), else the tags with a tag; neither, no second line (the block mark's
  * colour and icon carry the activity, and the row's name says it).
  */
-function ListSecondaryLine({ entry }: { entry: TimeEntryRow }) {
-  if (entry.placeName) {
+function ListSecondaryLine({ entry, prototype = false }: { entry: TimeEntryRow; prototype?: boolean }) {
+  // Calendar prototype (owner item F): a place line that only repeats the title ("PureGym" / "📍 PureGym") is dropped.
+  const repeatsTitle = prototype && entry.placeName?.trim().toLowerCase() === timeEntryTitle(entry).trim().toLowerCase();
+  if (entry.placeName && !repeatsTitle) {
     return (
       <span className="timeline-task-secondary-line">
         <DayframeIcon glyph={entry.automaticMoveEventId ? "route" : "map-pin"} size={12} />

@@ -170,12 +170,15 @@ export function ChecksChip({ count, onNext, prototype = false }: { count: number
  */
 export function CheckQuestionRow({
   clock,
+  hideTimes = false,
   editor,
   item,
   onAnswer,
   onEdit
 }: {
   clock: ClockFormat;
+  /** Calendar prototype (owner item I): the row already shows the times, so they aren't repeated here. */
+  hideTimes?: boolean;
   /** The trip's or place's editor while it is open, under the question. */
   editor?: ReactNode;
   item: ReviewItemRow;
@@ -215,7 +218,7 @@ export function CheckQuestionRow({
       <td colSpan={4}>
         <div className="timeline-check-question" role="group" aria-label={question}>
           <b>{question}</b>
-          <small>{detail}</small>
+          {hideTimes && visited ? null : <small>{detail}</small>}
           <div className="timeline-check-answers">
             {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
                 stays for Play/Stop and live recording. An outing's trips there and back are logged with it. */}
@@ -236,9 +239,28 @@ export function CheckQuestionRow({
   );
 }
 
+/**
+ * Calendar prototype (owner items A, B): a "?"'s words for its dialog and its row's Yes pill — what it asks, and the
+ * one-tap answer when there is a confident one (a trip, or a place with a guess).
+ */
+export function checkQuestionWords(item: ReviewItemRow, clock: ClockFormat) {
+  const span = reviewWindow(item);
+  const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
+  const picture = reviewPicture(item);
+  const trip = item.eventType === "commute_detected";
+  const visited = !trip && picture === "place" ? placeQuestion(reviewTitle(item)) : null;
+  const question = visited ? visited.question : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
+  const yesLabel = !span ? null : trip || visited?.guess ? "Yes" : visited ? null : `Log ${reviewDefaultName(item)}`;
+  return { question, yesLabel, confident: Boolean(span && (trip || visited?.guess)) };
+}
+
 /** A "?" with no place row: a trip not yet in a block, Apple Health, or another suggestion, at its time. */
-export function CheckRowView({ check, clock, item, prototype = false, row }: {
+export function CheckRowView({ check, clock, item, onOpen, onYes, prototype = false, row }: {
   check: { expanded: boolean; onToggle: () => void };
+  /** Calendar prototype (item A): a trip's row opens its dialog; anything else (Apple Health) its question. */
+  onOpen?: () => void;
+  /** Calendar prototype (item B): the one-tap Yes on the row. */
+  onYes?: () => void;
   clock: ClockFormat;
   item: ReviewItemRow;
   prototype?: boolean;
@@ -256,21 +278,24 @@ export function CheckRowView({ check, clock, item, prototype = false, row }: {
     return (
       <tr className="timeline-list-row timeline-location-row align-middle is-prototype" data-location-row={row.key} data-suggestion-id={item.id}>
         <td className="px-3 py-3" colSpan={2}>
-          <PrototypeRowButton asking checkKey={row.key} expanded={check.expanded} hint={check.expanded ? "Hides the question" : "Shows the question"}
-            label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={check.onToggle}>
+          <PrototypeRowButton asking checkKey={row.key} expanded={onOpen ? undefined : check.expanded}
+            hint={onOpen ? "Opens the trip" : check.expanded ? "Hides the question" : "Shows the question"}
+            label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={onOpen ?? check.onToggle}>
             <PrototypeMark asking glyph={glyph} />
             <span className="timeline-task-details">
               <span className="timeline-task-primary-line"><b>{title}</b></span>
               {row.trip?.legs.length ? <TripModesLine legs={row.trip.legs} route={row.trip.route} />
                 : <span className="timeline-location-secondary">{reviewSourceLabel(picture)}</span>}
             </span>
-            <span className="tabular timeline-location-span">{when}</span>
+            {span ? <StackedTimes clock={clock} fromMs={span.startMs} toMs={span.stopMs} /> : null}
           </PrototypeRowButton>
         </td>
         <td className="tabular px-3 py-3 timeline-list-duration">
           <div className="timeline-list-duration-content">{span ? formatDuration(Math.round((span.stopMs - span.startMs) / 1000)) : null}</div>
         </td>
-        <td className="px-3 py-3" />
+        <td className="px-3 py-3">
+          {onYes ? <button className="ui-button timeline-check-log is-compact timeline-row-yes" onClick={onYes} type="button">Yes</button> : null}
+        </td>
       </tr>
     );
   }
@@ -298,5 +323,15 @@ export function CheckRowView({ check, clock, item, prototype = false, row }: {
         <div className="timeline-list-actions"><CheckToggle checkKey={row.key} expanded={check.expanded} label={title} onToggle={check.onToggle} /></div>
       </td>
     </tr>
+  );
+}
+
+/** Calendar prototype (item D): start over end, as a block's row shows its times. */
+export function StackedTimes({ clock, fromMs, toMs }: { clock: ClockFormat; fromMs: number; toMs: number | null }) {
+  return (
+    <span className="tabular timeline-location-span is-stacked">
+      <span>{formatTime(new Date(fromMs), clock)}</span>
+      <span>{toMs == null ? "now" : formatTime(new Date(toMs), clock)}</span>
+    </span>
   );
 }

@@ -9,7 +9,10 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { tripsByBlockId, type LocationTimeline } from "@dayframe/shared";
+import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
+import { LocationCorrectionDialog, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
+import { checkQuestionWords } from "@/components/location/ListChecks";
+import { reviewMutationFor } from "@/lib/review-deck";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -427,6 +430,32 @@ export function TimeReviewViews({
   const gridAsking = useMemo(() => calendarPrototype && prototypeTodayStartMs !== null
     ? new Map(askingChecks(data.reviewItems, prototypeTodayStartMs).flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []))
     : null, [calendarPrototype, data.reviewItems, prototypeTodayStartMs]);
+  // Owner item A: a Grid item opens its dialog here, its "?" asked at the top and answered with the deck's mutation.
+  const gridClock = useClockFormat();
+  const [gridCorrection, setGridCorrection] = useState<{ target: LocationCorrectionTarget; checkId: string | null } | null>(null);
+  const openGridItem = useCallback((item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => {
+    const names = new Map(timeline.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
+    if (item.kind === "trip") {
+      setGridCorrection({ checkId, target: { kind: "trip", trip: item,
+        route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` } });
+      return;
+    }
+    const trips = timeline.items.filter((each) => each.kind === "trip");
+    const review = checkId ? data.reviewItems.find((each) => each.id === checkId) : undefined;
+    setGridCorrection({ checkId, target: { kind: "place", place: item, label: item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
+      joinsTrips: trips.some((trip) => trip.toId === item.id) && trips.some((trip) => trip.fromId === item.id),
+      closeChecks: review ? [{ id: review.id, mutation: reviewMutationFor(review, "skip", undefined) }] : [] } });
+  }, [data.reviewItems]);
+  const gridQuestion = (() => {
+    const review = gridCorrection?.checkId ? data.reviewItems.find((each) => each.id === gridCorrection.checkId) : undefined;
+    if (!review) return null;
+    const words = checkQuestionWords(review, gridClock);
+    return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now", onAnswer: (yes: boolean) => {
+      void clientFetch(`/api/review/${review.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientMutationId: crypto.randomUUID(), mutation: reviewMutationFor(review, yes ? "log" : "skip", undefined) }) })
+        .catch(() => null).then(() => refreshData());
+    } };
+  })();
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -620,8 +649,12 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
-            prototypePlaces={calendarPrototype ? { timelines: gridTimelines, asking: gridAsking ?? new Map() } : undefined}
+            prototypePlaces={calendarPrototype ? { timelines: gridTimelines, asking: gridAsking ?? new Map(), onOpen: openGridItem } : undefined}
           />
+        ) : null}
+        {gridCorrection ? (
+          <LocationCorrectionDialog activities={data.categories} clock={gridClock} onClose={() => setGridCorrection(null)}
+            onCorrected={async () => { await refreshData(); }} places={correctionPlaces} prototype question={gridQuestion} target={gridCorrection.target} />
         ) : null}
         {state.view === "list" ? (
           <EntriesTable
@@ -741,7 +774,9 @@ export function CalendarReview({
   undoToastVisible?: boolean;
   visibleDays: Date[];
   /** Calendar prototype (steps 16–17): each shown day's places and trips, and the "?" still asking by segment. */
-  prototypePlaces?: { timelines: ReadonlyMap<string, LocationTimeline>; asking: ReadonlyMap<string, string> };
+  prototypePlaces?: { timelines: ReadonlyMap<string, LocationTimeline>; asking: ReadonlyMap<string, string>;
+    /** Owner item A: a Grid item (a lane item, or a "?") opens its own dialog. */
+    onOpen: (item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => void };
 }) {
   const prototype = useCalendarPrototype();
   // Step 16: every shown day's trips by the blocks made from them, for the leg strip.
@@ -1893,7 +1928,7 @@ export function CalendarReview({
                   return (
                     <Link
                       aria-label={prototype ? `${item.title}, needs a look, ${range}. Opens its question in the List.` : `${item.title}, needs review, ${range}. Open Review.`}
-                      className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
+                      className={["calendar-review-block", prototype ? "is-prototype" : "", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
                       data-calendar-block-key={key}
                       data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
                       // Calendar prototype (step 15): a "?" on the grid opens its question in the List, never Review.
@@ -1901,6 +1936,19 @@ export function CalendarReview({
                       key={key}
                       tabIndex={visibleSelectedTarget ? -1 : undefined}
                       onClick={(event) => {
+                        // Calendar prototype (owner item A): a "?" whose place or trip is on the Grid opens its dialog.
+                        if (prototype && prototypePlaces && !visibleSelectedTarget) {
+                          const payload = reviewItems.find((review) => review.id === item.id)?.rawPayload;
+                          const segmentId = typeof payload?.clientSegmentId === "string" ? payload.clientSegmentId : null;
+                          for (const timeline of prototypePlaces.timelines.values()) {
+                            const found = segmentId ? timeline.items.find((each) => each.id === segmentId) : undefined;
+                            if (found) {
+                              event.preventDefault();
+                              prototypePlaces.onOpen(found, timeline, item.id);
+                              return;
+                            }
+                          }
+                        }
                         // A press an open editor took for its own dismissal (and any discard
                         // prompt) only dismisses, as on blank time: it never also leaves Calendar.
                         const pointer = reviewLinkPointerRef.current;
@@ -1929,7 +1977,7 @@ export function CalendarReview({
                     >
                       {/* Padding inside the query container, so its width thresholds match a block's. */}
                       <span className="calendar-review-content">
-                        <span className="calendar-entry-title"><span className="calendar-review-mark" aria-hidden="true">?</span><CalendarTitleWords text={item.title} /></span>
+                        <span className="calendar-entry-title">{prototype ? null : <span className="calendar-review-mark" aria-hidden="true">?</span>}<CalendarTitleWords text={item.title} /></span>
                       </span>
                     </Link>
                   );
@@ -2097,7 +2145,8 @@ export function CalendarReview({
                 return [...suggestionBlocks, ...dayEntries.map((entry) => byEntry.get(entry.id) ?? null)];
               })()}
               {dayPlaces && lanePx ? (
-                <CalendarPlacesLane asking={prototypePlaces?.asking ?? new Map()} clock={clock} dateKey={dayKey}
+                <CalendarPlacesLane asking={prototypePlaces?.asking ?? new Map()} clock={clock}
+                  onOpen={(item, checkId) => prototypePlaces?.onOpen(item, dayPlaces, checkId)}
                   geometry={(startedAt, stoppedAt) => {
                     const box = calendarBlockStyle({ startedAt, stoppedAt }, null, day, rowHeight, calendarHeight, calendarHours, capturedNow);
                     return box ? { top: box.top, height: box.height } : null;

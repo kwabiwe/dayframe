@@ -128,8 +128,14 @@ export function LocationCorrectionDialog({
   onCorrected,
   places,
   prototype = false,
+  question = null,
   target: initialTarget
 }: {
+  /**
+   * Calendar prototype (owner item A): the item's open "?", asked at the top now that a row or a Grid item opens
+   * this dialog directly. An answer closes the dialog.
+   */
+  question?: { text: string; yesLabel: string | null; noLabel: string; onAnswer: (yes: boolean) => void } | null;
   /** Calendar prototype: the activities a place can log as. */
   activities?: readonly CorrectionActivity[];
   clock: ClockFormat;
@@ -310,6 +316,18 @@ export function LocationCorrectionDialog({
     onClose();
   }
 
+  const questionCard = question && legOfTrip === null ? (
+    <div className="location-correction-question" role="group" aria-label={question.text}>
+      <b>{question.text}</b>
+      <div className="location-correction-question-answers">
+        {question.yesLabel ? (
+          <Button disabled={busy} onClick={() => { question.onAnswer(true); onClose(); }} variant="primary">{question.yesLabel}</Button>
+        ) : null}
+        <Button disabled={busy} onClick={() => { question.onAnswer(false); onClose(); }}>{question.noLabel}</Button>
+      </div>
+    </div>
+  ) : null;
+
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>
@@ -323,6 +341,7 @@ export function LocationCorrectionDialog({
       <ModalDialog busy={busy} description={`${formatTime(trip.startedAt, clock)}–${formatTime(trip.stoppedAt, clock)}`}
         footer={<Button disabled={busy} onClick={onClose}>Done</Button>} onClose={onClose} size="compact" title={target.route}>
         <div className="location-correction">
+          {questionCard}
           <EvidenceMap evidence={evidence} />
           <span className="location-correction-label" id="location-correction-legs">Legs</span>
           <div aria-labelledby="location-correction-legs" className="location-correction-legs" role="group">
@@ -394,6 +413,7 @@ export function LocationCorrectionDialog({
       : `${formatTime(place.startedAt, clock)}–${formatTime(place.stoppedAt!, clock)}`}
       footer={footer} onClose={onClose} size="compact" title={target.label}>
       <div className="location-correction">
+        {questionCard}
         {prototype ? <EvidenceMap evidence={evidence} /> : null}
         <span className="location-correction-label" id="location-correction-place">Where were you?</span>
         <div aria-labelledby="location-correction-place" className="location-correction-options" role="radiogroup">

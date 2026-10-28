@@ -15185,3 +15185,94 @@ button.timeline-location-hit:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Calendar prototype (owner item A): a dialog opened from a row asks its "?" at the top. */
+.location-correction-question {
+  display: grid;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-question-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Calendar prototype (owner items B, D, E, H, K). */
+.timeline-location-span.is-stacked {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timeline-location-span.is-stacked > span + span {
+  color: var(--text-secondary);
+}
+
+.timeline-location-row.is-quiet .timeline-location-mark.is-prototype {
+  background: var(--surface-muted);
+}
+
+.timeline-row-yes {
+  min-height: 32px;
+}
+
+.timeline-places-filter {
+  display: flex;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.timeline-places-filter button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.timeline-places-filter button[aria-pressed="true"] {
+  color: var(--text-primary);
+}
+
+.timeline-places-filter button:hover {
+  background: var(--surface-muted);
+}
+
+/* Owner item K: a question on the Grid is a light fill, a dashed amber edge and the amber dot (no hatching). */
+.calendar-review-block.is-prototype {
+  background: color-mix(in oklab, var(--warning) 7%, var(--surface)) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 55%, transparent);
+  outline: 1px dashed color-mix(in oklab, var(--warning) 70%, transparent);
+  outline-offset: -1px;
+}
+
+.calendar-review-block.is-prototype::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.calendar-places-item.is-asking {
+  background: color-mix(in oklab, var(--warning) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 60%, transparent);
+}

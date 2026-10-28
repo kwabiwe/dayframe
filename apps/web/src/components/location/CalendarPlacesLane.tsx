@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_LEG_MODE_ICONS,
   legModeLabel,
   type ClockFormat,
   type LocationTimeline,
+  type TimelinePlace,
+  type TimelineTrip,
   type TripLeg
 } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -49,11 +50,12 @@ export function CalendarLegStrip({ fromMs, legs, toMs }: { fromMs: number; legs:
   );
 }
 
-export function CalendarPlacesLane({ asking, clock, dateKey, geometry, timeline, widthPx }: {
+export function CalendarPlacesLane({ asking, clock, geometry, onOpen, timeline, widthPx }: {
+  /** Owner item A: every item opens its own dialog (its "?" asked at the top). */
+  onOpen: (item: TimelinePlace | TimelineTrip, checkId: string | null) => void;
   /** The "?" still asking, by the place or trip it is about. */
   asking: ReadonlyMap<string, string>;
   clock: ClockFormat;
-  dateKey: string;
   /** Where a span sits in this day column, or null when it falls outside the shown hours. */
   geometry: (startedAt: string, stoppedAt: string) => { top: number; height: number } | null;
   timeline: LocationTimeline;
@@ -74,14 +76,14 @@ export function CalendarPlacesLane({ asking, clock, dateKey, geometry, timeline,
         const legs = item.kind === "trip" && item.legs.length ? `. ${item.legs.map((leg) => legModeLabel(leg)).join(", ")}` : "";
         const glyph = item.kind === "trip" ? DAYFRAME_APP_ICONS.openTrip : item.role === "home" ? DAYFRAME_APP_ICONS.placeHome
           : item.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
-        const href = `/timeline?view=list&scope=day&date=${dateKey}${checkId ? `&check=${encodeURIComponent(checkId)}` : ""}`;
         return (
-          <Link aria-label={`${label}, ${when}${legs}${checkId ? ". Needs a look" : ""}`}
-            className={`calendar-places-item is-${item.kind}${checkId ? " is-asking" : ""}`} data-tip={`${label} · ${when}`} href={href}
-            key={item.id} style={{ top: box.top, height: Math.max(box.height, 3) }}>
+          <button aria-label={`${label}, ${when}${legs}${checkId ? ". Needs a look" : ""}`}
+            className={`calendar-places-item is-${item.kind}${checkId ? " is-asking" : ""}`} data-tip={`${label} · ${when}`}
+            key={item.id} onClick={(event) => { event.stopPropagation(); onOpen(item, checkId ?? null); }}
+            onPointerDown={(event) => event.stopPropagation()} style={{ top: box.top, height: Math.max(box.height, 3) }} type="button">
             {box.height >= 18 && widthPx >= 30 ? <DayframeIcon glyph={glyph} size={12} /> : null}
             {checkId ? <span className="calendar-places-dot" /> : null}
-          </Link>
+          </button>
         );
       })}
     </div>

@@ -193,7 +193,9 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
  * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
  * journey in progress. A place not in a block can be corrected (location v4 step 13).
  */
-export function LocationListRowView({ check, clock, guess = null, nowMs, onCorrect, prototype = false, row }: {
+export function LocationListRowView({ check, clock, guess = null, nowMs, onCorrect, onYes, prototype = false, row }: {
+  /** Calendar prototype (item B): the one-tap Yes on the row, for a confident guess. */
+  onYes?: () => void;
   /** Calendar prototype (Q7, 28 Oct): the question's best guess, shown on the row as "Boots?". */
   guess?: string | null;
   /** The row's "?" (location v4 step 14): whether its question is open, and the toggle. */
@@ -233,7 +235,8 @@ export function LocationListRowView({ check, clock, guess = null, nowMs, onCorre
     const asking = Boolean(check && row.checkIds.length);
     // Q7: an unnamed place that asks "Visited Boots?" reads "Boots?" on its row.
     const shownLabel = asking && guess && !place.name ? `${guess}?` : label;
-    const opens = asking ? check!.onToggle : onCorrect && !place.blockIds.length ? () => onCorrect(place, label) : undefined;
+    // Owner item A: the row opens the place's dialog (its "?" asked at the top).
+    const opens = onCorrect ? () => onCorrect(place, label) : asking ? check!.onToggle : undefined;
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
       : DAYFRAME_APP_ICONS.places;
     const notInBlock = row.unloggedSeconds >= 60 && row.unloggedSeconds < length - 59 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
@@ -242,21 +245,26 @@ export function LocationListRowView({ check, clock, guess = null, nowMs, onCorre
       <tr className={`timeline-list-row timeline-location-row align-middle is-prototype${row.faint ? " is-quiet" : ""}`} data-location-row={place.id}
         data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
         <td className="px-3 py-3" colSpan={2}>
-          <PrototypeRowButton asking={asking} checkKey={asking ? row.key : undefined} expanded={check?.expanded}
-            hint={asking ? (check!.expanded ? "Hides the question" : "Shows the question") : opens ? "Opens it to change the place or its times" : undefined}
+          <PrototypeRowButton asking={asking} checkKey={asking ? row.key : undefined} expanded={onCorrect ? undefined : check?.expanded}
+            hint={opens ? "Opens the place" : undefined}
             label={`${shownLabel}, ${span}${asking ? ". Needs a look" : ""}${place.setByYou ? ". You set this" : ""}`} onPress={opens}>
             <PrototypeMark asking={asking} glyph={glyph} quiet={row.faint} />
             <span className="timeline-task-details">
               <span className="timeline-task-primary-line">{row.faint ? <span>{shownLabel}</span> : <b>{shownLabel}</b>}</span>
               {secondary ? <span className="timeline-location-secondary">{secondary}</span> : null}
             </span>
-            <span className="tabular timeline-location-span">{span}</span>
+            <span className="tabular timeline-location-span is-stacked">
+              <span>{formatTime(new Date(row.fromMs), clock)}</span>
+              <span>{open ? "now" : formatTime(new Date(row.spanEndMs), clock)}</span>
+            </span>
           </PrototypeRowButton>
         </td>
         <td className="tabular px-3 py-3 timeline-list-duration">
           <div className="timeline-list-duration-content">{row.faint && notInBlock ? <span className="timeline-location-note">{notInBlock}</span> : formatDuration(length)}</div>
         </td>
-        <td className="px-3 py-3" />
+        <td className="px-3 py-3">
+          {onYes ? <button className="ui-button timeline-check-log is-compact timeline-row-yes" onClick={onYes} type="button">Yes</button> : null}
+        </td>
       </tr>
     );
   }
