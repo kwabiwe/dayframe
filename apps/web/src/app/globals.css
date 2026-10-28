@@ -14481,6 +14481,12 @@ button.timeline-location-hit:focus-visible {
   padding: 0 12px;
 }
 
+@media (max-width: 760px) {
+  .timeline-checks-bar.is-sticky {
+    justify-content: flex-end;
+  }
+}
+
 .timeline-checks-bar.is-sticky .timeline-checks-chip {
   margin-top: 6px;
   box-shadow: 0 4px 14px color-mix(in oklab, black 18%, transparent);

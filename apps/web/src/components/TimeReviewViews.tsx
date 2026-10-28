@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarPrototypePill } from "@/components/CalendarPrototype";
+import { CalendarPrototypePill, NotRealYet, useCalendarPrototype } from "@/components/CalendarPrototype";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -210,6 +210,7 @@ export function TimeReviewViews({
   } = useAppShellRuntime();
   const searchParams = useSearchParams();
   const state = timelineStateFromSearchParams(searchParams, { preference: initialPreference });
+  const calendarPrototype = useCalendarPrototype();
   const isList = state.view === "list";
   const listOwner = `${data.workspace.id}:${data.user.id}`;
   // Saved places a location row can be corrected to (location v4 step 13): names and roles only.
@@ -577,6 +578,9 @@ export function TimeReviewViews({
           />
           <CalendarPrototypePill />
         </div>
+        {calendarPrototype && !isList ? (
+          <NotRealYet>the trip leg strip (step 16) and the Places lane (step 17) come in the next prototype round</NotRealYet>
+        ) : null}
       </section>
       {dateLoadError || isDateLoading ? (
         <p
@@ -726,6 +730,7 @@ export function CalendarReview({
   undoToastVisible?: boolean;
   visibleDays: Date[];
 }) {
+  const prototype = useCalendarPrototype();
   const clock = useClockFormat();
   const router = useRouter();
   const {
@@ -1868,11 +1873,12 @@ export function CalendarReview({
                   const label = denseBlockLabel(height, false, 0);
                   return (
                     <Link
-                      aria-label={`${item.title}, needs review, ${range}. Open Review.`}
+                      aria-label={prototype ? `${item.title}, needs a look, ${range}. Opens its question in the List.` : `${item.title}, needs review, ${range}. Open Review.`}
                       className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
                       data-calendar-block-key={key}
                       data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
-                      href={`/review#review-${item.id}`}
+                      // Calendar prototype (step 15): a "?" on the grid opens its question in the List, never Review.
+                      href={prototype ? `/timeline?view=list&scope=day&date=${toTimelineDateKey(new Date(item.fromMs))}&check=${encodeURIComponent(item.id)}` : `/review#review-${item.id}`}
                       key={key}
                       tabIndex={visibleSelectedTarget ? -1 : undefined}
                       onClick={(event) => {
