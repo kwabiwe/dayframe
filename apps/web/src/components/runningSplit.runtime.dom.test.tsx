@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
@@ -36,11 +37,11 @@ describe("AppShellRuntime split of the running block", () => {
         await splitPending;
         const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
         serverData = bootstrap(second, [second, { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }]);
-        return response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: true }, 201);
+        return response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: true, entries: [{ ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }, entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" })] }, 201);
       }
       if (url === "/api/time-entries" && body?.mode === "join") {
         serverData = bootstrap(running);
-        return response({ ok: true, id: FIRST, replayed: false, running: true });
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: running });
       }
       if (url === "/api/events") {
         serverData = bootstrap(null, [{ ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }, entry({ id: SECOND, stoppedAt: "2026-08-17T05:00:00.000Z" })]);
@@ -90,7 +91,7 @@ describe("AppShellRuntime split of the running block", () => {
       if (body) bodies.push(body);
       if (url === "/api/time-entries" && body?.mode === "join") {
         serverData = bootstrap(running);
-        return response({ ok: true, id: FIRST, replayed: false, running: true });
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: running });
       }
       if (url.startsWith("/api/bootstrap")) return response(serverData);
       if (url === "/api/timer-state") return response({ activeEntryId: serverData.activeEntry?.id ?? null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
@@ -133,7 +134,7 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     let releaseJoin: (() => void) | undefined;
     const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
     const requests = server({
-      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true }); },
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
       bootstrap: () => response({ error: "down" }, 503)
     });
     render(
@@ -154,10 +155,30 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     }));
   });
 
+  it("never lets Undo lose edits typed into the second part and not saved yet", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    const requests = server({ join: () => response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }) });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(screen.getByTestId("undo").textContent).toContain("Save your edits"));
+    expect(requests.some((request) => request.body?.mode === "join")).toBe(false);
+  });
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
-      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: false }, 201),
+      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: false, entries: [
+        { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" },
+        entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z", stoppedAt: "2026-08-17T04:50:00.000Z" })
+      ] }, 201),
       bootstrap: () => response({ error: "down" }, 503)
     });
     render(
@@ -169,16 +190,20 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
     await waitFor(() => expect(mocks.clientFetch.mock.calls.some(([url]) => String(url).startsWith("/api/bootstrap"))).toBe(true));
-    expect(screen.getByTestId("active").textContent).not.toContain(SECOND);
+    // Nothing runs: neither the second part nor the block it was split from (Codex r2 on #607).
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
   });
 });
 
 function Harness({ initial }: { initial: BootstrapData }) {
-  const { data, hydrate, joinSplitTimer, splitActiveTimer } = useAppShellRuntime();
+  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer } = useAppShellRuntime();
+  const [undo, setUndo] = useState("");
   return <>
+    <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed, not saved" }))}>Type</button>
+    <output data-testid="undo">{undo}</output>
     <button onClick={() => hydrate(initial)}>Hydrate</button>
     <button onClick={() => void splitActiveTimer(SPLIT_AT)}>Split</button>
-    <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND })}>Undo split</button>
+    <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND }).then((outcome) => setUndo(outcome.ok ? "ok" : outcome.error))}>Undo split</button>
     <output data-testid="active">{data?.activeEntry ? `${data.activeEntry.id}@${data.activeEntry.startedAt}` : "idle"}</output>
   </>;
 }

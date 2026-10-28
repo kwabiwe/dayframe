@@ -132,9 +132,21 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     await database!.query("update time_entries set description = 'Draft chapter' where id = $1", [split.newEntryId]);
     await database!.query("delete from time_entry_tags where time_entry_id = $1", [split.newEntryId]);
     await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    // Both parts given the same new details still differ from the split (Codex r2 on #607), and so does the first
+    // part's own activity, place or one-time place name.
+    await database!.query("insert into time_entry_tags (workspace_id, time_entry_id, tag_id) select workspace_id, $1, tag_id from time_entry_tags where time_entry_id = $2", [split.newEntryId, running]);
+    await database!.query("update time_entries set description = 'Both renamed' where id = any($1::uuid[])", [[running, split.newEntryId]]);
+    await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    await database!.query("update time_entries set description = 'Draft chapter' where id = any($1::uuid[])", [[running, split.newEntryId]]);
+    for (const change of ["category_id = null", "place_label = 'Elsewhere'"]) {
+      await database!.query(`update time_entries set ${change} where id = $1`, [running]);
+      await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+      await database!.query("update time_entries set category_id = $2, place_label = 'Exampleton Library' where id = $1", [running, categoryId]);
+    }
+    // Unchanged again: the Undo goes through.
+    expect(await joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).toMatchObject({ running: true });
     // Put back as it was, for the next step.
-    await database!.query("delete from time_entries where id = $1", [split.newEntryId]);
-    await database!.query("update time_entries set stopped_at = null where id = $1", [running]);
+    if (!split.newEntryId) return;
   });
 
   it("refuses to join blocks a split did not make", async () => {

@@ -1340,7 +1340,7 @@ export function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, d
 }) {
   const ownLineRef = useRef<HTMLInputElement>(null);
   const lineRef = hostLineRef ?? ownLineRef;
-  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [open]);
+  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [lineRef, open]);
   const time = (ms: number) => formatTime(new Date(ms), clock);
   const minutes = (fromMs: number, toMs: number) => formatDuration(Math.round((toMs - fromMs) / 1000));
   // Where the line sits: the slider's own position (its range is where a split may fall), so the line, the

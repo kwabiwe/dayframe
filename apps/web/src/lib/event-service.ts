@@ -2999,6 +2999,22 @@ export async function splitFinishedEntry(
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
 }
 
+/**
+ * Whether a split block still has the details both parts had at the split (`e`: the split's event, which keeps
+ * them): its activity, project, place, one-time place name, description and tags (Codex r2 on #607).
+ */
+function unchangedSinceSplitSql(alias: string) {
+  return `(e.raw_payload ? 'splitDetails'
+    and ${alias}.project_id is not distinct from (e.raw_payload->'splitDetails'->>'projectId')::uuid
+    and ${alias}.category_id is not distinct from (e.raw_payload->'splitDetails'->>'categoryId')::uuid
+    and ${alias}.place_id is not distinct from (e.raw_payload->'splitDetails'->>'placeId')::uuid
+    and ${alias}.place_label is not distinct from e.raw_payload->'splitDetails'->>'placeLabel'
+    and ${alias}.description is not distinct from e.raw_payload->'splitDetails'->>'description'
+    and ${tagNamesSql(alias)} = coalesce(array(
+      select jsonb_array_elements_text(e.raw_payload->'splitDetails'->'tagNames') as name order by name
+    ), array[]::text[]))`;
+}
+
 /** A block's tag names, sorted, as one array (for comparing two blocks' tags). */
 function tagNamesSql(alias: string) {
   return `coalesce((select array_agg(t.name order by t.name) from time_entry_tags tet
@@ -3039,12 +3055,7 @@ export async function joinSplitEntries(
     }>(
       `select first.stopped_at as "firstStoppedAt", second.started_at as "startedAt", second.stopped_at as "stoppedAt",
               e.raw_payload->>'splitFrom' as "splitFrom",
-              (first.project_id is not distinct from second.project_id
-                and first.category_id is not distinct from second.category_id
-                and first.place_id is not distinct from second.place_id
-                and first.place_label is not distinct from second.place_label
-                and first.description is not distinct from second.description
-                and ${tagNamesSql("first")} = ${tagNamesSql("second")}) as "sameDetails"
+              coalesce(${unchangedSinceSplitSql("first")} and ${unchangedSinceSplitSql("second")}, false) as "sameDetails"
        from time_entries first
        join time_entries second on second.id = $2 and second.workspace_id = first.workspace_id and second.user_id = first.user_id
        left join activity_events e on e.id = second.created_from_event_id and e.workspace_id = second.workspace_id
@@ -3181,7 +3192,12 @@ async function copyFinishedEntry(
           // The running part is a block the timer runs (server-1), as a Switch's.
           ? {
               origin: input.source === "mobile_app" ? "mobile_timer_split" : "web_timer_split",
-              description: row.description, tagNames: row.tagNames, splitFrom: id, [SERVER_TIMER_START_KEY]: true
+              description: row.description, tagNames: row.tagNames, splitFrom: id, [SERVER_TIMER_START_KEY]: true,
+              // Both parts' details at the split: Undo joins them only while both still have them.
+              splitDetails: {
+                projectId: row.projectId, categoryId: row.categoryId, placeId: row.placeId, placeLabel: row.placeLabel,
+                description: row.description, tagNames: row.tagNames
+              }
             }
           // No `origin` key: a manual block, as createManualEntry's.
           : { description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id }),

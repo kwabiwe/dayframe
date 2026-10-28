@@ -119,7 +119,11 @@ describe("POST /api/time-entries", () => {
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: splitEntryId, replayed: false, running: true });
     const split = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
     expect(split.status).toBe(201);
-    expect(await split.json()).toEqual({ ok: true, id: entryId, newEntryId: splitEntryId, replayed: false, running: true });
+    // Both blocks as they are now come back with the answer, so the timer can show them at once.
+    expect(await split.json()).toEqual({
+      ok: true, id: entryId, newEntryId: splitEntryId, replayed: false, running: true,
+      entries: [{ id: "11111111-1111-4111-8111-111111111111" }, { id: "11111111-1111-4111-8111-111111111111" }]
+    });
     expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
       { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: undefined, clientCommandId: undefined, source: "mobile_app" }, session);
 

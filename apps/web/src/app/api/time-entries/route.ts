@@ -88,7 +88,8 @@ export async function POST(request: Request) {
       if (!entryId || !splitEntryId) throw new BadRequestError("entryId and splitEntryId are required.");
       const result = await joinSplitEntries(entryId, { splitEntryId, clientCommandId: requestClientCommandId(request) }, session);
       scheduleLiveActivityNotification(session);
-      return NextResponse.json({ ok: true, ...result }, { status: 200 });
+      // The joined block as it is now, so the timer shows it without waiting for the day to load again.
+      return NextResponse.json({ ok: true, ...result, entry: await getTimeEntryById(session, entryId) }, { status: 200 });
     }
 
     // Card G: Split (at `splitAt`) or Duplicate a block, `entryId`, with every detail, in one transaction;
@@ -105,7 +106,11 @@ export async function POST(request: Request) {
         }, session)
         : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
       scheduleLiveActivityNotification(session);
-      return NextResponse.json({ ok: true, ...result }, { status: result.replayed ? 200 : 201 });
+      // Both blocks as they are now (on a repeat too): whether the second part runs is read from them.
+      const reader = session;
+      const entries = (await Promise.all([finishedEntryId, result.newEntryId].map((id) => id ? getTimeEntryById(reader, id) : null)))
+        .filter((entry) => entry !== null);
+      return NextResponse.json({ ok: true, ...result, entries }, { status: result.replayed ? 200 : 201 });
     }
     if (mode === "duplicate") throw new BadRequestError("entryId is required.");
 

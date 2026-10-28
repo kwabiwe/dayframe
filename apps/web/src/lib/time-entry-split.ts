@@ -102,10 +102,12 @@ export function newBlockCommandId(mode: string) {
 }
 
 /**
- * `running`: the second part runs. False when the block had stopped by the time the split arrived: the server
- * then split it as a finished block, and nothing runs.
+ * `entries`: both blocks as the server has them now, so the timer shows them at once. The second part runs
+ * unless the block had stopped by the time the split arrived (then it was split as a finished block).
  */
-export type RunningSplitOutcome = { ok: true; newEntryId: string; running: boolean } | { ok: false; error: string; changed?: boolean };
+export type RunningSplitOutcome =
+  | { ok: true; newEntryId: string; entries: TimeEntryRow[] }
+  | { ok: false; error: string; changed?: boolean };
 
 /**
  * Splits the running block `entryId` at `atMs` (already snapped by the dialog): it ends there and its second
@@ -122,7 +124,7 @@ export async function splitRunningTimeEntry(
   if (!outcome.ok) return outcome;
   const newEntryId = outcome.body?.newEntryId;
   return typeof newEntryId === "string"
-    ? { ok: true, newEntryId, running: outcome.body?.running !== false }
+    ? { ok: true, newEntryId, entries: Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [] }
     : { ok: false, error: UNKNOWN, changed: true };
 }
 
@@ -130,10 +132,13 @@ export async function splitRunningTimeEntry(
 export async function joinSplitTimeEntries(
   fetcher: Fetch,
   input: { entryId: string; splitEntryId: string; commandId?: string }
-): Promise<BlockMutationOutcome> {
-  return plain(await send(
+): Promise<{ ok: true; entry: TimeEntryRow | null } | { ok: false; error: string; changed?: boolean }> {
+  const outcome = await send(
     fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input.commandId
-  ));
+  );
+  if (!outcome.ok) return outcome;
+  const entry = outcome.body?.entry;
+  return { ok: true, entry: entry && typeof entry === "object" ? entry as TimeEntryRow : null };
 }
 
 /** Duplicates a finished block: a new block with the same details, starting where the original ends. */
