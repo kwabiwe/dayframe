@@ -26,6 +26,8 @@ import { playHaptic } from "../../lib/haptics";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { CALENDAR_PROTOTYPE } from "../../lib/calendarPrototype";
+import { SheetNearbySearch } from "./SheetNearbySearch";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
   correctable,
@@ -341,6 +343,18 @@ export function LocationCorrectionSheet({
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
         style={styles.view}
       >
+        {CALENDAR_PROTOTYPE && target.kind === "place" && onSavePlace && !stale && !target.place.placeId
+          && evidence && evidence !== "unavailable" && evidence.map.centre ? (
+          // Calendar prototype (step 15): Nearby and search, as the Review details screen had; a pick offers to save it.
+          <Section label="Nearby" theme={theme}>
+            <SheetNearbySearch centre={{ latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] }}
+              onPick={(name) => {
+                if (frozen()) return;
+                setPlaceName(name);
+                setConfirming("save_place");
+              }} theme={theme} />
+          </Section>
+        ) : null}
         {target.kind === "place" ? (
           <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
             places={places} theme={theme} />
