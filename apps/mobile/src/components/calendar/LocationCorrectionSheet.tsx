@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
 import {
@@ -84,7 +84,7 @@ export function LocationCorrectionSheet({
    * Keeps these corrections on the phone and sends them (the List shows them at once). Resolves once they are
    * kept: the sheet closes only then, and keeps its draft when they couldn't be (Codex r1 on #602).
    */
-  onQueue: (corrections: QueuedCorrection[]) => Promise<void>;
+  onQueue: (corrections: QueuedCorrection[], options: { closing: boolean }) => Promise<void>;
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
@@ -126,6 +126,11 @@ export function LocationCorrectionSheet({
   const kept = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Kept: the sheet closes on the next render, once Done is enabled again (Codex r2 on #602).
+  const [closeKept, setCloseKept] = useState(false);
+  useEffect(() => {
+    if (closeKept) commitRef.current?.();
+  }, [closeKept]);
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
   const span = `${time(Date.parse(item.startedAt))}–${item.stoppedAt ? time(Date.parse(item.stoppedAt)) : "now"}`;
   const problem = correctable(item) ? timesProblem(item, times) : null;
@@ -156,14 +161,14 @@ export function LocationCorrectionSheet({
   function keep(corrections: QueuedCorrection[], then: "close" | "trip") {
     setSaving(true);
     setSaveError(null);
-    onQueue(corrections).then(() => {
+    onQueue(corrections, { closing: then === "close" }).then(() => {
       setSaving(false);
       if (then === "trip") {
         backToTrip();
         return;
       }
       kept.current = true;
-      commitRef.current?.();
+      setCloseKept(true);
     }, () => {
       intent.current = null;
       setSaving(false);

@@ -71,7 +71,8 @@ const trip: TimelineTrip & { route: string } = {
 };
 const theme = new Proxy({}, { get: (_target, key) => String(key) }) as never;
 
-function mount(target: LocationCorrectionTarget, onQueue = vi.fn(async () => undefined)) {
+type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
+function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined)) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
@@ -110,7 +111,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.onQueue).toHaveBeenCalledWith([{
       request: { kind: "place", subject: "place", itemId: "seg-a", placeId: SAVED, learnedPlaceId: null },
       preview: { name: "Exampleton Library", role: null }
-    }]);
+    }], { closing: true });
     await sheet.settle();
     expect(sheet.onQueue).toHaveBeenCalledTimes(1);
   });
@@ -136,7 +137,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     sheet.press("location-correction-sheet-action");
     expect(sheet.onQueue).toHaveBeenCalledWith([{
       request: { kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: iso(70), legStoppedAt: iso(100), mode: "bus" }
-    }]);
+    }], { closing: false });
     await sheet.settle();
     // Back at the trip, still open.
     expect(sheet.has("location-correction-leg-0")).toBe(true);
@@ -150,7 +151,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.onQueue).not.toHaveBeenCalled();
     sheet.press("location-correction-not-a-trip");
     sheet.press("location-correction-remove-trip");
-    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "delete", subject: "trip", itemId: "trip-1" } }]);
+    expect(sheet.onQueue).toHaveBeenCalledWith([{ request: { kind: "delete", subject: "trip", itemId: "trip-1" } }], { closing: true });
     const logged = mount({ kind: "trip", trip: { ...trip, blockIds: ["entry-1"] }, legIndex: 0 });
     expect(logged.has("location-correction-not-a-trip")).toBe(false);
   });
@@ -178,14 +179,14 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     await sheet.settle();
     expect(sheet.onQueue).toHaveBeenCalledWith([{
       request: { kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: iso(70), legStoppedAt: iso(100), mode: "bus" }
-    }]);
+    }], { closing: false });
     sheet.press("location-correction-leg-1");
     sheet.update({ kind: "trip", trip: { ...trip, legs: [{ ...trip.legs[0], stoppedAt: iso(100) }] }, legIndex: null });
     expect(sheet.has("location-correction-back")).toBe(false);
   });
 
   it("stays open with its draft, saying so, when the change couldn't be kept on the phone", async () => {
-    const onQueue = vi.fn(async () => { throw new Error("storage full"); });
+    const onQueue = vi.fn<Queue>(async () => { throw new Error("storage full"); });
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, onQueue);
     sheet.press(`location-correction-place-${SAVED}`);
     sheet.press("location-correction-sheet-action");
@@ -210,4 +211,20 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(sheet.has("location-correction-stale")).toBe(true);
     expect(sheet.tree.root.findByProps({ testID: "location-correction-sheet-action" }).props.disabled).toBe(true);
   });
+
+  // Codex r2 on #602.
+  it("closes once the change is kept, after Done is enabled again", async () => {
+    let resolve!: () => void;
+    const onQueue = vi.fn<Queue>(() => new Promise<void>((done) => { resolve = done; }));
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, onQueue);
+    sheet.press(`location-correction-place-${SAVED}`);
+    sheet.press("location-correction-sheet-action");
+    expect(sheet.tree.root.findByProps({ testID: "location-correction-sheet-action" }).props.disabled).toBe(true);
+    await act(async () => { resolve(); });
+    await sheet.settle();
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+    expect(onQueue).toHaveBeenCalledTimes(1);
+    expect(onQueue.mock.calls[0][1]).toEqual({ closing: true });
+  });
 });
+

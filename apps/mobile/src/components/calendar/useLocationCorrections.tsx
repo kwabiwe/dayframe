@@ -120,30 +120,47 @@ export function useLocationCorrections({
   // none) is signed in, however late the Done; sending follows on its own.
   const currentOwner = useRef(ownerKey);
   useEffect(() => { currentOwner.current = ownerKey; }, [ownerKey]);
-  const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[]) => {
+  const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[], closing: boolean) => {
     if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
     await enqueueTimelineCorrections(owner, corrections.map((correction) => ({
       request: correction.request, ...(correction.preview ? { preview: correction.preview } : {})
     })));
-    setClosingId(presentationId);
+    // Only a Done that closes the sheet lets its item leave the List unremarked (a leg's Done goes back to the trip).
+    if (closing) setClosingId(presentationId);
     void synchroniseTimelineCorrections({ owner, force: true }).catch(() => undefined);
   }, [ownerKey, userId, workspaceId]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
+  // Several at once are said together (Codex r2 on #602).
   const announced = useRef(new Set<string>());
+  const [removalRetry, setRemovalRetry] = useState(0);
+  const removalAttempts = useRef({ key: "", count: 0 });
   const refusedKey = pending.filter((item) => item.failureKind === "permanent").map((item) => item.clientCorrectionId).join("|");
   useEffect(() => {
     if (!refusedKey) return;
     const refused = pending.filter((item) => item.failureKind === "permanent");
     const fresh = refused.filter((item) => !announced.current.has(item.clientCorrectionId));
     for (const item of fresh) announced.current.add(item.clientCorrectionId);
-    if (fresh.length) showNotice(fresh[0].lastError ?? "That change wasn't saved.");
-    void removeTimelineCorrections(refused.map((item) => item.clientCorrectionId)).catch(() => undefined);
-    // Only a new refusal shows a notice.
+    if (fresh.length === 1) showNotice(fresh[0].lastError ?? "That change wasn't saved.");
+    else if (fresh.length > 1) showNotice(`${fresh.length} changes weren't saved. ${fresh[0].lastError ?? ""}`.trim());
+    if (removalAttempts.current.key !== refusedKey) removalAttempts.current = { key: refusedKey, count: 0 };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let current = true;
+    removeTimelineCorrections(refused.map((item) => item.clientCorrectionId)).catch(() => {
+      // Tried again a few times, a little later, without saying it again.
+      if (!current) return;
+      removalAttempts.current.count += 1;
+      if (removalAttempts.current.count < 3) timer = setTimeout(() => setRemovalRetry((count) => count + 1), 2_000);
+    });
+    return () => {
+      current = false;
+      if (timer) clearTimeout(timer);
+    };
+    // Only a new refusal shows a notice; a failed removal runs again on its own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refusedKey]);
+  }, [refusedKey, removalRetry]);
 
   const sheet = open && shown ? (
     <LocationCorrectionSheet
@@ -151,7 +168,7 @@ export function useLocationCorrections({
       clockFormat={clockFormat}
       evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
-      onQueue={(corrections) => queue(open.id, open.ownerKey, corrections)}
+      onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing)}
       places={places}
       presentationId={open.id}
       reduceMotion={reduceMotion}

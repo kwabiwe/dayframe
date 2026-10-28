@@ -58,9 +58,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
-    const onQueue = sheetOf(tree)!.props.onQueue as (corrections: unknown[]) => Promise<void>;
+    const onQueue = sheetOf(tree)!.props.onQueue as (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
     await act(async () => { tree.update(<Probe data={account("b")} />); });
-    await expect(onQueue([{ request: { kind: "times" } }])).rejects.toThrow();
+    await expect(onQueue([{ request: { kind: "times" } }], { closing: true })).rejects.toThrow();
     expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
@@ -81,4 +81,41 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(showNotice.mock.calls.map(([message]) => message)).toEqual(["First", "Second"]);
     expect(mocks.remove).toHaveBeenLastCalledWith(["r1", "r2"]);
   });
+
+  // Codex r2 on #602.
+  it("says two refusals that arrive together in one notice", async () => {
+    const showNotice = vi.fn();
+    const refusal = (id: string, lastError: string) => ({ clientCorrectionId: id, failureKind: "permanent", lastError }) as never;
+    await act(async () => { create(<Probe data={account("a")} pending={[refusal("r1", "First."), refusal("r2", "Second.")]} showNotice={showNotice} />); });
+    expect(showNotice.mock.calls.map(([message]) => message)).toEqual(["2 changes weren't saved. First."]);
+  });
+
+  it("tries a failed removal again on its own, without a second notice", async () => {
+    vi.useFakeTimers();
+    try {
+      const showNotice = vi.fn();
+      mocks.remove.mockRejectedValueOnce(new Error("busy")).mockResolvedValue(undefined);
+      const refusal = { clientCorrectionId: "r1", failureKind: "permanent", lastError: "First." } as never;
+      await act(async () => { create(<Probe data={account("a")} pending={[refusal]} showNotice={showNotice} />); });
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { vi.advanceTimersByTime(2_000); });
+      expect(mocks.remove).toHaveBeenCalledTimes(2);
+      expect(showNotice).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still guards a sheet whose trip leaves the List after a leg's Done kept it open", async () => {
+    const trip = { kind: "trip", id: "trip-1", startedAt: iso(60), stoppedAt: iso(90), fromId: "seg-a", toId: "seg-b", legs: [], blockIds: [] };
+    const withTrip = { items: [place, trip] } as unknown as LocationTimeline;
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} timeline={withTrip} />); });
+    act(() => { api!.openTripLeg(trip as never, null); });
+    const onQueue = sheetOf(tree)!.props.onQueue as (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
+    await act(async () => { await onQueue([{ request: { kind: "leg_mode" } }], { closing: false }); });
+    await act(async () => { tree.update(<Probe data={account("a")} timeline={{ items: [place] } as unknown as LocationTimeline} />); });
+    expect(sheetOf(tree)?.props.stale).toBe(true);
+  });
 });
+
