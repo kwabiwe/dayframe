@@ -26,6 +26,8 @@ const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
 vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => clock.todayStartMs, useMediaQuery: () => false }));
 
 const { EntriesTable } = await import("./EntriesTable");
+const { projectReviewItems, useCheckProjection } = await import("@/lib/check-projection-store");
+const { askingChecks } = await import("@/lib/calendar-checks");
 
 // Location v4 step 14: a synthetic day, made-up names and ids.
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 11, hour, minute)).toISOString();
@@ -563,21 +565,24 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       search.params = "";
     }
   });
-  it("logs a place that asks with Logs as by answering its \"?\" with that activity, held for Undo (Codex r1 on #609)", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  it("logs a place that asks with Logs as through log_place, and the refresh hides its \"?\" (Codex r2 on #609)", async () => {
+    clientFetch.mockImplementation(async (url: string, init: RequestInit) => url === "/api/timeline/corrections"
+      ? new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e1"], resolvedReviewItemIds: [PLACE] } }), { status: 200 })
+      : new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
-    render(<EntriesTable {...baseProps()} categories={[errands]} reviewItems={reviewItems} />);
+    const onChanged = vi.fn(async () => undefined);
+    const { rerender } = render(<EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={reviewItems} />);
     fireEvent.click(officeRow()!);
     fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
     await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
-    expect(dialog()).toBeNull();
-    expect(screen.getByText("Logged Office")).toBeTruthy();
-    expect(clientFetch).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    // Never log_place, which the server refuses while the place asks: the "?" answered as logged, as Errands.
-    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual([`/api/review/${PLACE}`]);
-    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "edit_and_confirm",
-      edit: { categoryId: "cat-errands", startedAt: at(9), stoppedAt: at(10) } });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands" });
+    expect(onChanged).toHaveBeenCalled();
+    // The refresh no longer lists the closed "?": its row and count go.
+    rerender(<EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={reviewItems.filter((item) => item.id !== PLACE)} />);
+    expect(officeRow()).toBeNull();
+    expect(chip(2)).toBeTruthy();
   });
 
   it("moves focus to the next \"?\" when a dialog's question is answered (Codex r1 on #609)", async () => {
@@ -620,7 +625,66 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(chip(1)).toBeTruthy();
     expect(document.querySelectorAll('tr[data-location-row="seg-office"]')).toHaveLength(0);
     expect(document.querySelectorAll(`tr[data-suggestion-id="${PLACE}"]`)).toHaveLength(1);
+    // It keeps its place: the row opens the place's dialog with its map and choices, never the inline question.
     fireEvent.click(officeRow()!);
-    expect(screen.getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    expect(document.querySelector(".timeline-check-question")).toBeNull();
+  });
+  it("stops asking in an open dialog once its \"?\" expires at midnight (Codex r2 on #609)", () => {
+    const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
+    fireEvent.click(officeRow()!);
+    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+    // Midnight on 18 Aug: the 11th's "?" no longer ask. The dialog stays, as the place's correction, asking nothing.
+    clock.todayStartMs = localDayStart(new Date(Date.UTC(2026, 7, 18, 12)).toISOString());
+    rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
+    expect(dialog()).toBeTruthy();
+    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
+    expect(within(dialog()!).queryByRole("button", { name: "Not now" })).toBeNull();
+  });
+
+  it("opens a linked \"?\" again when the link comes back after leaving the URL (Codex r2 on #609)", async () => {
+    search.params = `view=list&check=${TRIP}`;
+    try {
+      const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy());
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" }));
+      search.params = "view=list";
+      rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
+      search.params = `view=list&check=${TRIP}`;
+      rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy());
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("shares its held answers with the badge and Today, so their counts agree through answer, Undo and failure (Codex r2 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    // What AppShell's badge and Today count: the bootstrap's items as the List projects them.
+    function Badge() {
+      const projection = useCheckProjection();
+      return <output data-testid="badge">{askingChecks(projectReviewItems(reviewItems, projection), clock.todayStartMs).length}</output>;
+    }
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
+    render(<><Badge /><EntriesTable {...baseProps()} reviewItems={reviewItems} /></>);
+    const badge = () => Number(screen.getByTestId("badge").textContent);
+    expect(badge()).toBe(3);
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(chip(2)).toBeTruthy();
+    expect(badge()).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(chip(3)).toBeTruthy();
+    expect(badge()).toBe(3);
+    // A refused save brings it back in both.
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(badge()).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(sleepRow()).toBeTruthy();
+    expect(chip(3)).toBeTruthy();
+    expect(badge()).toBe(3);
   });
 });

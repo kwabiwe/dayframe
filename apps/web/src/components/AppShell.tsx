@@ -20,6 +20,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { projectReviewItems, useCheckProjection } from "@/lib/check-projection-store";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -98,7 +99,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
   // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
   const todayStartMs = useLocalDayStartMs();
-  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(data.reviewItems, todayStartMs) : null, [data, todayStartMs]);
+  // As the List shows them: its held answers away, its revived ones back (Codex r2 on #609).
+  const projection = useCheckProjection();
+  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectReviewItems(data.reviewItems, projection), todayStartMs) : null,
+    [data, projection, todayStartMs]);
   const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
   const calendarHref = asking?.length ? oldestCheckHref(asking) : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);

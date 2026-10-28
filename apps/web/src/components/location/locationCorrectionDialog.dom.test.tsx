@@ -244,36 +244,56 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(sent()).toEqual([{ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" }]);
   });
 
-  it("logs a place that asks by answering its \"?\" with the activity, after the other changes (Codex r1 on #609)", async () => {
-    // The server refuses log_place while the place has an open question: Logs as answers it instead.
-    const order: string[] = [];
-    clientFetch.mockImplementation(async () => { order.push("correction"); return { ok: true, json: async () => ({ ok: true }) }; });
-    const onAnswer = vi.fn((yes: boolean, categoryId?: string) => { order.push(`answer:${yes}:${categoryId}`); });
+  it("logs a place that asks through log_place, after the other changes, and never answers its \"?\" for it (Codex r2 on #609)", async () => {
+    // The server closes the place's open "?" as their own Not now does, in the same transaction, and logs only the
+    // time your blocks don't cover: so Logs as is log_place whether or not the place asks.
+    const onAnswer = vi.fn();
     const onClose = vi.fn();
-    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
+    const onCorrected = vi.fn();
+    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={onCorrected}
       places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    fireEvent.click(screen.getByRole("radio", { name: /Exampleton Library/ }));
+    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:45" } });
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(order).toEqual(["correction", "answer:true:cat-errands"]);
-    expect(sent().map((correction) => correction.kind)).toEqual(["place"]);
+    // The time correction first, so log_place reads the corrected place.
+    expect(sent()).toEqual([
+      { kind: "times", subject: "place", itemId: "seg-cafe", startedAt: at(8, 45), stoppedAt: at(10) },
+      { kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" }
+    ]);
+    expect(onAnswer).not.toHaveBeenCalled();
+    // The refresh after it is what hides the "?".
+    expect(onCorrected).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the dialog open and says why when the \"?\"'s answer for Logs as isn't saved (Codex r1 on #609)", async () => {
+  it("keeps the dialog open and says why when Logs as is refused", async () => {
+    clientFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Your blocks already cover this place's time." }) });
     const onClose = vi.fn();
-    const onAnswer = vi.fn(async () => "That visit couldn't be logged.");
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
-      places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
+      places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn() }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    // Picking an activity is a change: Done is the primary action.
     expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("That visit couldn't be logged.");
+    expect((await screen.findByRole("alert")).textContent).toBe("Your blocks already cover this place's time.");
     expect(onClose).not.toHaveBeenCalled();
-    expect(clientFetch).not.toHaveBeenCalled();
+  });
+
+  it("starts its fields again from the place a refresh moved, once nothing is saving (Codex r2 on #609)", () => {
+    const view = render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("08:40");
+    view.rerender(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place({ startedAt: at(8, 50) }), label: "Unknown place" }} />);
+    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("08:50");
+    // Nothing changed from the new copy: Done is secondary and sends nothing.
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-secondary");
+    // Its map is read again for the new times.
+    expect(evidenceFetch.mock.calls.map(([url]) => url)).toEqual([
+      `/api/timeline/items/seg-cafe/evidence?kind=place&startedAt=${encodeURIComponent(at(8, 40))}`,
+      `/api/timeline/items/seg-cafe/evidence?kind=place&startedAt=${encodeURIComponent(at(8, 50))}`
+    ]);
   });
 
   it("keeps the question open when its own answer isn't saved, and closes once it is", async () => {

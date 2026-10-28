@@ -36,14 +36,14 @@ export type LocationCorrectionTarget =
   | { kind: "trip"; trip: TimelineTrip; route: string };
 
 /**
- * An item's open "?", asked at the top of its dialog (owner item A). `onAnswer(true)` is its Yes; with an
- * activity it is "Logs as" for a place that asks (the server refuses log_place while a place has an open
- * question, so the answer logs it, with that activity). An answer that saves at once returns a promise of
- * its error (null when saved): the dialog stays open on a failure and says why. One held for Undo returns nothing.
+ * An item's open "?", asked at the top of its dialog (owner item A). An answer that saves at once returns a
+ * promise of its error (null when saved): the dialog stays open on a failure and says why. One held for Undo
+ * returns nothing. "Logs as" is never an answer: it is log_place, which closes the place's open "?" itself as
+ * their own Not now does, and logs only the time your blocks don't cover (Codex r2 on #609).
  */
 export type CorrectionQuestion = {
   text: string; yesLabel: string | null; noLabel: string;
-  onAnswer: (yes: boolean, categoryId?: string) => void | Promise<string | null>;
+  onAnswer: (yes: boolean) => void | Promise<string | null>;
 };
 
 /** An activity a place can log as ("Logs as"). */
@@ -198,6 +198,18 @@ export function LocationCorrectionDialog({
     stoppedAt: target.kind === "place" ? target.place.stoppedAt : null,
     mode: target.kind === "leg" ? target.leg.mode : "walking" as TripLegMode
   }));
+  // The place as the newest data has it (a refresh moved its times or set its place): once nothing is saving,
+  // its fields and what "changed" compares with start again from it; its map follows by its own key (Codex r2 on #609).
+  const placeVersion = target.kind === "place"
+    ? `${target.place.startedAt}|${target.place.stoppedAt ?? ""}|${target.place.placeId ?? ""}|${target.place.learnedPlaceId ?? ""}` : "";
+  const [seenPlaceVersion, setSeenPlaceVersion] = useState(placeVersion);
+  if (placeVersion !== seenPlaceVersion && !busy && target.kind === "place") {
+    setSeenPlaceVersion(placeVersion);
+    setPicked(original);
+    setStart(timeValue(target.place.startedAt));
+    setEnd(target.place.stoppedAt ? timeValue(target.place.stoppedAt) : "");
+    setSaved((current) => ({ ...current, picked: original, startedAt: target.place.startedAt, stoppedAt: target.place.stoppedAt }));
+  }
 
   function corrections(): TimelineCorrectionRequest[] | string {
     // Only what changed is sent: an untouched leg, place or time is left as it is.
@@ -227,9 +239,9 @@ export function LocationCorrectionDialog({
         out.push({ kind: "times", subject: "place", itemId: place.id, startedAt, stoppedAt });
       }
     }
-    // "Logs as" fills the place's time your blocks don't cover with that activity; a place that asks is
-    // logged by answering its "?" instead (see `apply`).
-    if (logAs && !question) out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs });
+    // "Logs as" fills the place's time your blocks don't cover with that activity, after any other change, so it
+    // reads the corrected place; the server closes the place's open "?" with it.
+    if (logAs) out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs });
     return out;
   }
 
@@ -239,8 +251,7 @@ export function LocationCorrectionDialog({
       setError(pending);
       return;
     }
-    const answerWith = target.kind === "place" && logAs && question ? logAs : null;
-    if (!pending.length && !answerWith) {
+    if (!pending.length) {
       onClose();
       return;
     }
@@ -262,18 +273,7 @@ export function LocationCorrectionDialog({
         : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
           : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
-    // A place that asks is logged by its "?": the answer's log, with the picked activity (Codex r1 on #609).
-    if (answerWith && question) {
-      const failure = await question.onAnswer(true, answerWith);
-      if (!alive.current) return;
-      if (failure) {
-        if (savedAny) await onCorrected();
-        setBusy(false);
-        setError(failure);
-        return;
-      }
-    }
-    if (savedAny) await onCorrected();
+    await onCorrected();
     if (!alive.current) return;
     setBusy(false);
     onClose();
@@ -400,7 +400,7 @@ export function LocationCorrectionDialog({
   ) : null;
 
   const pendingNow = corrections();
-  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || Boolean(logAs && question);
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim());
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>

@@ -15,7 +15,8 @@ describe("locationListRows hideCovered (Codex r1 on #609)", () => {
     for (const showAll of [false, true]) {
       const rows = locationListRows(timeline, meeting, { nowMs: Date.parse(at(12)), showAll, checks: [check], hideCovered: true });
       expect(rows.map((row) => row.kind === "check" ? `check:${row.checkId}` : row.kind)).toEqual(["check:q-office"]);
-      expect(rows[0]).toMatchObject({ kind: "check", startedAt: at(9), stoppedAt: at(10), trip: null });
+      // It keeps its place, so the row opens the place's dialog (Codex r2 on #609).
+      expect(rows[0]).toMatchObject({ kind: "check", startedAt: at(9), stoppedAt: at(10), trip: null, place: office });
     }
   });
 

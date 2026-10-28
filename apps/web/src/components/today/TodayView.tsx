@@ -15,6 +15,7 @@ import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { projectReviewItems, useCheckProjection } from "@/lib/check-projection-store";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { blockStyle } from "@/lib/block-style";
@@ -167,9 +168,11 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   // badge's own list) and opens today's oldest. The 7-day count and oldest-first stepping are the sidebar badge's and
   // the List chip's; this one deliberately differs (Codex r1 on #609, ruled by the orchestrator).
   const todayStartMs = useLocalDayStartMs();
+  const projection = useCheckProjection();
   const todayChecks = useMemo(() => todayStartMs !== null
-    ? askingChecks(data.reviewItems, todayStartMs).filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs)
-    : null, [data.reviewItems, todayStartMs]);
+    ? askingChecks(projectReviewItems(data.reviewItems, projection), todayStartMs)
+      .filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs)
+    : null, [data.reviewItems, projection, todayStartMs]);
   const liveCheckCount = todayChecks ? todayChecks.length : data.stats.dayCheckCount ?? 0;
   const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);
   if (liveCheckCount > 0 && liveCheckCount !== shownCheckCount) setShownCheckCount(liveCheckCount);

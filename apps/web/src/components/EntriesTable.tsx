@@ -548,13 +548,14 @@ export function EntriesTable({
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
   /** Whether a "?" row opens a dialog (a place, or a trip) rather than its question under it. */
-  const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip));
+  const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip || row.place));
   /** Opens a "?" by its row and brings the row into view. */
   const openCheckRow = (next: LocationListRow) => {
     const nextId = checkOf(next)!.id;
     applyTimelineRegroup(() => setFocusedCheck(nextId));
     // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
-    if (next.kind === "place") openPlaceDialog(next);
+    if (next.kind === "place") openPlaceDialog(next.place, next.checkIds[0] ?? null);
+    else if (next.kind === "check" && next.place) openPlaceDialog(next.place, next.checkId);
     else if (next.kind === "check" && next.trip) openTripDialog(next.checkId, next.trip);
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
@@ -582,9 +583,9 @@ export function EntriesTable({
   /** "N to check": the next "?", oldest first across days, opens and comes into view. Returns its id. */
   const nextCheck = () => nextAskingCheck();
   /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
-  const openPlaceDialog = (row: Extract<LocationListRow, { kind: "place" }>) => {
-    setCorrectionCheckId(row.checkIds[0] ?? null);
-    correctPlace(row.place, row.place.name ?? (row.place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+  const openPlaceDialog = (place: TimelinePlace, checkId: string | null) => {
+    setCorrectionCheckId(checkId);
+    correctPlace(place, place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
   };
   const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
     setCorrectionCheckId(checkId);
@@ -601,16 +602,17 @@ export function EntriesTable({
       <Fragment key={row.key}>
         {row.kind === "check"
           ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row}
-            onOpen={row.trip ? () => openTripDialog(item.id, row.trip!) : undefined}
+            // A covered place's "?" keeps its place: its dialog, map and Save this place (Codex r2 on #609).
+            onOpen={row.place ? () => openPlaceDialog(row.place!, item.id) : row.trip ? () => openTripDialog(item.id, row.trip!) : undefined}
             onYes={checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />
             : null
           : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
             nowMs={nowMs} row={row}
-            onCorrect={row.kind === "place" ? () => openPlaceDialog(row) : undefined}
+            onCorrect={row.kind === "place" ? () => openPlaceDialog(row.place, row.checkIds[0] ?? null) : undefined}
             onYes={item && checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />}
         {/* Owner final change 1 (28 Oct 2026): a row that opens a dialog shows no question under it (the dialog asks
             it); Apple Health, which has no dialog, asks here with the compact pills. */}
-        {item && expanded && row.kind === "check" && !row.trip ? (
+        {item && expanded && row.kind === "check" && !row.trip && !row.place ? (
           <CheckQuestionRow clock={clock} item={item}
             onAnswer={(kind) => {
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
@@ -638,17 +640,18 @@ export function EntriesTable({
     pendingRestore.current = null;
     pendingFocus.current = key;
   };
-  /**
-   * A dialog's "?" answered: held for Undo like an inline answer ("Logs as" is its log with that activity); focus
-   * then goes to the next "?" down the List, else the chip, else the List, as there (Codex r1 on #609: the row
-   * that opened the dialog is gone).
-   */
-  const dialogCheck = correctionCheckId ? listChecks.itemsById.get(correctionCheckId) : undefined;
+  // Only while it still asks (the asking list): past midnight on its 7th day the dialog stops asking it (Codex r2 on #609).
+  const dialogCheck = correctionCheckId && shownChecks.some((check) => check.id === correctionCheckId)
+    ? listChecks.itemsById.get(correctionCheckId) : undefined;
   const dialogWords = dialogCheck ? checkQuestionWords(dialogCheck, clock) : null;
-  const answerFromDialog = (checkId: string, yes: boolean, categoryId?: string) => {
+  /**
+   * A dialog's "?" answered: held for Undo like an inline answer; focus then goes to the next "?" down the List,
+   * else the chip, else the List, as there (Codex r1 on #609: the row that opened the dialog is gone).
+   */
+  const answerFromDialog = (checkId: string, yes: boolean) => {
     const at = checkRows.findIndex((other) => checkOf(other)?.id === checkId);
     const following = at < 0 ? undefined : checkRows.slice(at + 1).find((other) => other.key !== checkRows[at].key);
-    applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip", categoryId));
+    applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip"));
     focusCheck(following?.key ?? null);
   };
   const restoredItemId = listChecks.state.restored?.itemId ?? null;
@@ -689,6 +692,13 @@ export function EntriesTable({
   // A link can open its "?" before that day's places are read: it opens under its own row then. When the place or
   // trip arrives and the question is still open, its dialog opens in its place, once (Codex r1 on #609).
   const linkedOpen = useRef<{ id: string; dialog: boolean; seen?: boolean } | null>(null);
+  // A link leaving the URL ends that visit: coming back to it on purpose opens its "?" again, while a refresh
+  // with the link still there never does (Codex r2 on #609).
+  useEffect(() => {
+    if (checkParam) return;
+    openedFromLink.current = null;
+    linkedOpen.current = null;
+  }, [checkParam]);
   useEffect(() => {
     if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
     if (!openFirstCheck && !linkedCheckRow) return;
@@ -1604,9 +1614,9 @@ export function EntriesTable({
       </div>
       {correction ? (
         <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => { setCorrection(null); setCorrectionCheckId(null); }}
-          // Held for Undo like an inline answer ("Logs as" is its log with that activity); focus then moves on.
+          // Held for Undo like an inline answer; focus then moves on. "Logs as" is log_place, which closes the "?" itself.
           question={dialogCheck && dialogWords ? { text: dialogWords.question, yesLabel: dialogWords.yesLabel, noLabel: "Not now",
-            onAnswer: (yes: boolean, categoryId?: string) => answerFromDialog(dialogCheck.id, yes, categoryId) } : null}
+            onAnswer: (yes: boolean) => answerFromDialog(dialogCheck.id, yes) } : null}
           onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
       ) : null}
       {editingEntry ? (

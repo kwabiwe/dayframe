@@ -5,6 +5,7 @@ import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, ty
 import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
+import { clearCheckProjection, publishCheckProjection } from "@/lib/check-projection-store";
 import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
@@ -116,14 +117,20 @@ export function useListChecks({
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
 
-  /** Answers a "?" as the deck does; `categoryId` is "Logs as" (the log then saves that activity). */
-  const answer = useCallback((itemId: string, kind: ReviewDecisionKind, categoryId?: string) => {
+  // Shared with the badge and Today's chip, so they count what the List shows through answer, Undo and failure.
+  useEffect(() => {
+    const hiddenIds = new Set([...state.hiddenIds, ...closedByServer.keys(), ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId))
+      .flatMap(([, members]) => members.map((member) => member.id))]);
+    publishCheckProjection({ hiddenIds, revived: [...revived.values()].filter((item) => !loadedIds.has(item.id)) });
+  }, [closedByServer, heldOutings, loadedIds, revived, state.hiddenIds]);
+  useEffect(() => () => clearCheckProjection(), []);
+
+  const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);
     if (!item || (kind === "log" && !reviewWindow(item))) return;
     const outing = outings.get(item.id);
     const span = reviewWindow(item);
-    const draft = kind === "log" && categoryId !== undefined ? { categoryId } : undefined;
-    const category = reviewCardCategory(item, draft, categories);
+    const category = reviewCardCategory(item, undefined, categories);
     const outingMs = outing ? outing.members.reduce((sum, member) => {
       const memberSpan = reviewWindow(member);
       return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
@@ -133,7 +140,7 @@ export function useListChecks({
     const held = decide({
       itemId: item.id,
       kind,
-      mutation: outing ? outingMutationFor(outing, kind, draft) : reviewMutationFor(item, kind, draft),
+      mutation: outing ? outingMutationFor(outing, kind, undefined) : reviewMutationFor(item, kind, undefined),
       signature: reviewProposalSignature(item),
       label: kind === "log" ? `Logged ${reviewDefaultName(item)}` : `Skipped ${reviewTitle(item)}`,
       durationMs: (span ? span.stopMs - span.startMs : 0) + outingMs,
@@ -259,7 +266,7 @@ export function CheckRowView({ check, clock, item, onOpen, onYes, row }: {
     <tr className="timeline-list-row timeline-location-row align-middle is-v4" data-location-row={row.key} data-suggestion-id={item.id}>
       <td className="px-3 py-3" colSpan={2}>
         <LocationRowButton asking checkKey={row.key} expanded={onOpen ? undefined : check.expanded}
-          hint={onOpen ? "Opens the trip" : check.expanded ? "Hides the question" : "Shows the question"}
+          hint={onOpen ? row.trip ? "Opens the trip" : "Opens the place" : check.expanded ? "Hides the question" : "Shows the question"}
           label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={onOpen ?? check.onToggle}>
           <LocationMark asking glyph={glyph} />
           <span className="timeline-task-details">

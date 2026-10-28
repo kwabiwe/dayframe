@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { validReviewAcknowledgement, type ClockFormat, type LocationTimeline, type ReviewMutationEnvelope, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { LocationCorrectionDialog, type CorrectionActivity, type CorrectionPlace, type CorrectionQuestion, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { checkQuestionWords } from "@/components/location/ListChecks";
@@ -34,32 +34,52 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
     ? new Map(asking.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : [])) : null, [asking]);
   const outings = useMemo(() => reviewOutings(reviewItems.filter((item) => item.status === "open")), [reviewItems]);
   const [opened, setOpened] = useState<Opened | null>(null);
+  // The control that opened the dialog, and whether an answer closed it: focus then moves on (Codex r2 on #609).
+  const opener = useRef<HTMLElement | null>(null);
+  const answered = useRef(false);
 
   const open = useCallback((item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => {
-    const names = new Map(timeline.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
-    if (item.kind === "trip") {
-      setOpened({ owner, checkId, target: { kind: "trip", trip: item,
-        route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` } });
-      return;
-    }
-    const trips = timeline.items.filter((each) => each.kind === "trip");
-    setOpened({ owner, checkId, target: { kind: "place", place: item,
-      label: item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
-      joinsTrips: trips.some((trip) => trip.toId === item.id) && trips.some((trip) => trip.fromId === item.id) } });
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    answered.current = false;
+    setOpened({ owner, checkId, target: targetFor(item, timeline) });
   }, [owner]);
 
-  // Its owner's, and its item still on the days shown: otherwise it closes (and anything it had in flight stops).
+  // Its owner's, and its item still on the days shown, as the newest data has it (its times, place and route):
+  // otherwise it closes, and anything it had in flight stops (Codex r1, r2 on #609).
   const targetId = opened ? opened.target.kind === "trip" ? opened.target.trip.id : opened.target.place.id : null;
-  const present = Boolean(targetId) && [...timelines.values()].some((timeline) => timeline.items.some((item) => item.id === targetId));
-  const current = opened && opened.owner === owner && present ? opened : null;
+  const fresh = targetId ? [...timelines.values()].flatMap((timeline) => timeline.items.flatMap((item) =>
+    item.id === targetId && (item.kind === "place" || item.kind === "trip") ? [targetFor(item, timeline)] : [])).at(-1) ?? null : null;
+  const current = opened && opened.owner === owner && fresh ? { ...opened, target: fresh } : null;
   if (opened && !current) setOpened(null);
+
+  // An answer that closed the dialog: focus goes to the next question on the Grid, else the Grid itself, when the
+  // control that opened it is gone (Codex r2 on #609).
+  useEffect(() => {
+    if (current || !answered.current) return;
+    answered.current = false;
+    const from = opener.current;
+    opener.current = null;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const questions = [...document.querySelectorAll<HTMLElement>(".calendar-places-item.is-asking, .calendar-review-block")];
+      const next = (from?.isConnected ? questions.find((each) => each !== from && Boolean(from.compareDocumentPosition(each) & Node.DOCUMENT_POSITION_FOLLOWING)) : undefined)
+        ?? questions.find((each) => each !== from);
+      (next ?? document.querySelector<HTMLElement>(".calendar-grid-scroller"))?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   const review = current?.checkId && asking?.some((check) => check.id === current.checkId)
     ? reviewItems.find((item) => item.id === current.checkId && item.status === "open") : undefined;
   const question: CorrectionQuestion | null = review ? (() => {
     const words = checkQuestionWords(review, clock);
     return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now",
-      onAnswer: (yes: boolean, categoryId?: string) => answerReview(review, outings.get(review.id), yes, categoryId, refresh) };
+      onAnswer: async (yes: boolean) => {
+        const failure = await answerReview(review, outings.get(review.id), yes, refresh);
+        if (!failure) answered.current = true;
+        return failure;
+      } };
   })() : null;
 
   const dialog = current ? (
@@ -69,20 +89,39 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
   return { askingBySegment, dialog, open };
 }
 
+/** A dialog's target from the timeline's copy of the item: a place with its label, a trip with its route. */
+function targetFor(item: TimelinePlace | TimelineTrip, timeline: LocationTimeline): Opened["target"] {
+  const names = new Map(timeline.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
+  if (item.kind === "trip") {
+    return { kind: "trip", trip: item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` };
+  }
+  const trips = timeline.items.filter((each) => each.kind === "trip");
+  return { kind: "place", place: item, label: item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
+    joinsTrips: trips.some((trip) => trip.toId === item.id) && trips.some((trip) => trip.fromId === item.id) };
+}
+
 /** Saves a Grid answer at once: null when the server acknowledged it (or it was decided elsewhere), else why not. */
 async function answerReview(review: ReviewItemRow, outing: ReturnType<typeof reviewOutings> extends Map<string, infer O> ? O | undefined : never,
-  yes: boolean, categoryId: string | undefined, refresh: () => Promise<unknown>): Promise<string | null> {
+  yes: boolean, refresh: () => Promise<unknown>): Promise<string | null> {
   const kind = yes ? "log" : "skip";
-  const draft = yes && categoryId !== undefined ? { categoryId } : undefined;
   const envelope: ReviewMutationEnvelope = {
     clientMutationId: crypto.randomUUID(),
-    mutation: outing ? outingMutationFor(outing, kind, draft) : reviewMutationFor(review, kind, draft)
+    mutation: outing ? outingMutationFor(outing, kind, undefined) : reviewMutationFor(review, kind, undefined)
   };
   const response = await clientFetch(`/api/review/${review.id}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(envelope)
   }).catch(() => null);
   if (!response) return "Couldn't save that answer. Check your connection and try again.";
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+  // An outing that changed (one of its cards decided elsewhere) saved nothing: as the List's controller does, its
+  // question stays while the stay is still open, and says why; a stay decided elsewhere has nothing left to ask.
+  if (outing && response.status === 409 && body.code === "resolution_conflict") {
+    await refresh().catch(() => undefined);
+    const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
+      ? body.canonicalReviewStatuses as Record<string, string> : null;
+    if (statuses && statuses[review.id] !== undefined && statuses[review.id] !== "open") return null;
+    return "Part of this outing was decided elsewhere, so nothing was saved. Answer it again.";
+  }
   // Decided elsewhere (another device or tab): nothing left to ask.
   if (response.status === 404 || (response.status === 409 && body.code === "resolution_conflict") || (response.ok && body.alreadyResolved === true)) {
     await refresh().catch(() => undefined);
