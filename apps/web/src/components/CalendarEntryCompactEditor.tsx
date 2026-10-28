@@ -46,6 +46,8 @@ type CalendarEntryCompactEditorProps = CalendarEntryCompactEditorSharedProps & (
       onDelete: () => void;
       onSave: (plan: CalendarEntryCompactSavePlan) => Promise<MutationOutcome>;
       onStartAgain: () => Promise<MutationOutcome>;
+      onSplit?: (atMs: number) => Promise<MutationOutcome>;
+      onDuplicate?: () => Promise<MutationOutcome>;
     }
   | {
       mode: "create";
