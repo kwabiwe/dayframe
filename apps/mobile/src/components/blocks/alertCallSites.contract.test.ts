@@ -54,6 +54,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',
+    '"Block not split"', // a running block's split could not be saved on this iPhone (owner 28 Oct 2026)
     '"Unable to add time"',
     '"Time not added"',
     '"Block not started"',

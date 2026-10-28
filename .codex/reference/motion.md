@@ -512,6 +512,15 @@ Block pull-to-refresh:
 - Async outcome: no optimistic split before the server answers (the second part's id comes from it); success shows the parts at once from the answer and loads the day again inside the timer queue; Undo, or its Try again after a failure, is one request and a reload.
 - Accessibility: focus starts on the line (a slider with a spoken value: the time and both halves); Reduce Motion keeps the web dialog rule; the toast is a polite status.
 
+## iPhone running block Split (owner 28 Oct 2026)
+
+- Trigger: "…" in the running block's sheet head opens the iOS action sheet; Split there lays the split panel over the sheet's form; Keep as one closes it; Split at HH:MM saves the sheet's edits and the sheet leaves; Undo in the Today toast.
+- Owner: the system for the action sheet (`ActionSheetIOS`); the panel's own `Reanimated.View` (`localPresenceEntering` / `localPresenceExiting`) for its presence; the bar's single `Gesture.Pan` (which the sheet's dismiss swipe waits for) for the line, following the finger with no animation of its own; the existing sheet owner for leaving; `BlocksToast` for the toast; Today's and the Calendar's existing owners for the blocks changing.
+- Entrance/update/exit: the panel fades in over the form (which stays laid out beneath it, so nothing reflows) and fades out on Keep as one; the line tracks the finger and snaps to whole minutes with a selection tick on each new minute; the now label and the second half's length update in place once a second while the panel is open (its own interval, cleared when it closes); after Split the block ends and the second part runs at once, through the same optimistic path as a Switch.
+- Interruption: closing the sheet by any route closes the panel; a second split while the first's Undo is open lets the first go and shows the second's toast (token re-mount); Undo is refused (the toast closes) once a request was sent or the second part no longer runs.
+- Async outcome: no spinner; the split is durable at once and held for the window; Undo restores one running block; a storage failure restores the block and says so; a refusal by the server shows the server's blocks and a sync issue for Edits made to the second part.
+- Accessibility: the bar is an adjustable element ("Split at", its value the time and both halves; swipe up or down moves it a minute); the action sheet and its Cancel are the system's; Reduce Motion gives the panel its short fade (90/70 ms) and keeps the line's tracking; the toast's Undo is a 44-point button announced with the split.
+
 ## Web Today (Blocks parity step 12a)
 
 - Trigger: entries change (start, stop, edit, delete, Undo, refresh), the clock (each second while a block records, otherwise every 20 s), pointer movement over the ribbon, a row delete (button, editor, Backspace/Delete) and Undo (toast button or ⌘Z/Ctrl+Z).
