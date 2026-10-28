@@ -14,11 +14,16 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     setItem: async (key: string, value: string) => { storage.set(key, value); }
   }
 }));
+vi.mock("react-native", () => ({ AppState: { currentState: "active" } }));
 const outbox = vi.hoisted(() => ({
   pending: [] as Array<{ clientCorrectionId: string; failureKind?: string }>,
-  listeners: new Set<() => void>()
+  listeners: new Set<() => void>(),
+  enqueue: vi.fn(async (_owner: unknown, items: unknown[]) => items),
+  synchronise: vi.fn(async () => ({}))
 }));
 vi.mock("../../lib/timelineCorrectionOutbox", () => ({
+  enqueueTimelineCorrections: outbox.enqueue,
+  synchroniseTimelineCorrections: outbox.synchronise,
   readPendingTimelineCorrections: async () => outbox.pending,
   subscribeTimelineCorrectionOutbox: (listener: () => void) => { outbox.listeners.add(listener); return () => outbox.listeners.delete(listener); }
 }));
@@ -69,6 +74,40 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.update(<Probe owner={{ userId: "user-b", workspaceId: "ws-b" }} />); });
     await flush();
     expect(probe.current!.waitingIds.size).toBe(0);
+    act(() => { tree.unmount(); });
+  });
+
+  it("queues a waiting Logs as as log_place only once its corrections are acknowledged, and never after a refusal (Codex r4 on #610)", async () => {
+    storage.clear();
+    outbox.enqueue.mockClear();
+    const LOG = "6f000000-0000-4000-8000-0000000000aa";
+    outbox.pending = [{ clientCorrectionId: C1 }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: LOG, reviewItemId: "", logged: true,
+      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
+    await answers.commitAnswerAfterCorrections(LOG);
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    // Waiting: nothing logged, and the place's "?" stays out meanwhile.
+    expect(outbox.enqueue).not.toHaveBeenCalled();
+    expect(probe.current!.waitingSegments.has("seg-a")).toBe(true);
+    await answers.noteTimelineCorrectionAcknowledged(OWNER, C1);
+    outbox.pending = [];
+    act(() => { for (const listener of outbox.listeners) listener(); });
+    await flush();
+    expect(outbox.enqueue).toHaveBeenCalledWith(OWNER, [{ request: { kind: "log_place", subject: "place", itemId: "seg-a",
+      categoryId: "6f000000-0000-4000-8000-0000000000c1", clientCorrectionId: LOG } }]);
+    expect(probe.current!.waitingSegments.size).toBe(0);
+    // Refused: dropped, nothing logged.
+    outbox.enqueue.mockClear();
+    outbox.pending = [{ clientCorrectionId: C1, failureKind: "permanent" }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: LOG, reviewItemId: "", logged: true,
+      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
+    await answers.commitAnswerAfterCorrections(LOG);
+    await flush();
+    expect(outbox.enqueue).not.toHaveBeenCalled();
+    expect(await answers.readAnswersAfterCorrections(OWNER)).toEqual([]);
+    act(() => { tree.unmount(); });
   });
 
   it("says at once which \"?\" to show again when its change is refused (Codex r3 on #610)", async () => {

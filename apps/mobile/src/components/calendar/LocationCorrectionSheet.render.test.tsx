@@ -265,7 +265,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("  Exampleton Bakery "); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
 
     const failing = mount({ kind: "place", place, label: "Unknown place" }, undefined, vi.fn(async () => { throw new Error("offline"); }));
@@ -322,8 +322,33 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
     expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("saves a place with a Logs as that waits for the server to accept its corrections, never logging at once (Codex r4 on #610)", async () => {
+    const order: string[] = [];
+    const start = vi.fn(() => { order.push("start"); });
+    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+      return { start, cancel: vi.fn(async () => undefined) }; });
+    // The List's save: the place on the server, then the waiting log with the corrections' ids, then the corrections.
+    const onSavePlace = vi.fn(async (_name: string, _rest: unknown[], beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }>) => {
+      order.push("place created");
+      const waiting = await beforeEnqueue?.(["cid-1"]);
+      order.push("queued");
+      waiting?.start();
+    });
+    const onLog = vi.fn();
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace as never,
+      { activities: [{ id: "cat-errands", name: "Errands" }], onLog, onLogAfter } as never);
+    sheet.press("location-correction-log-cat-errands");
+    sheet.press("location-correction-save-place");
+    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
+    sheet.press("location-correction-confirm-save-place");
+    await sheet.settle();
+    expect(order).toEqual(["place created", "hold cat-errands cid-1", "queued", "start"]);
+    expect(onLog).not.toHaveBeenCalled();
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
   });
 
@@ -448,18 +473,26 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const answerAfter = vi.fn();
     const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
     const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
-    // Yes with Errands picked and a place change: the change is kept, then Logs as goes (log_place, #609 closes the "?").
+    // Yes with Errands picked and a place change: the change is kept with Logs as waiting for it (log_place only once
+    // the server has acknowledged the change, Codex r4 on #610; #609 then closes the "?").
     const order: string[] = [];
-    onLog.mockImplementation(() => { order.push("log"); });
-    const onQueue = vi.fn(async () => { order.push("queue"); });
+    const start = vi.fn(() => { order.push("start"); });
+    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+      return { start, cancel: vi.fn(async () => undefined) }; });
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"]);
+      order.push("queue");
+      waiting?.start();
+    });
     const onDismissed = vi.fn();
-    const yes = sheetWith({ logAs, question, onQueue, onDismissed });
+    const yes = sheetWith({ logAs: { ...logAs, onLogAfter }, question, onQueue: onQueue as never, onDismissed });
     act(() => { yes.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
     act(() => { yes.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
     act(() => { yes.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
     await settle();
-    expect(order).toEqual(["queue", "log"]);
-    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(order).toEqual(["hold cat-errands cid-1", "queue", "start"]);
+    // Never logged straight away.
+    expect(onLog).not.toHaveBeenCalled();
     expect(onAnswer).not.toHaveBeenCalled();
     expect(answerAfter).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledWith(1);

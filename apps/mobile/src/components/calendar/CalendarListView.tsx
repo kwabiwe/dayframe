@@ -69,6 +69,7 @@ export function CalendarListView({
   onSwipeDay,
   openCheckRequest = null,
   timelineReadAt = null,
+  onRequestFreshRead,
   clockFormat,
   dayEndMs,
   dayStartMs,
@@ -118,6 +119,8 @@ export function CalendarListView({
    * the read lacks waits for the next read of that day before asking under its row (Codex r3 on #610).
    */
   timelineReadAt?: number | null;
+  /** Reads the shown day's places again: a tap on a "?" whose item they lack waits for that read (Codex r4 on #610). */
+  onRequestFreshRead?: () => void;
   /** Each suggestion's title, for its own row. */
   checkTitles?: ReadonlyMap<string, string>;
   clockFormat: ClockFormat;
@@ -272,7 +275,7 @@ export function CalendarListView({
   const [handledCheckRequest, setHandledCheckRequest] = useState(0);
   // A tap on a "?" not known yet waits the same way, as a request of the List's own (negative numbers).
   // It stands until the caller makes a new request after it.
-  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number } | null>(null);
+  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number } | null>(null);
   const tapRequests = useRef(0);
   const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
@@ -329,6 +332,21 @@ export function CalendarListView({
       tapRequests.current -= 1;
       setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0 });
       return;
+    }
+    if (shownOpenCheckId === id) {
+      setOpenCheckId(null);
+      return;
+    }
+    // A place's or trip's whose item the places read lack: it asks under its row only once they are read again after
+    // this tap, as a request does (Codex r4 on #610).
+    if (row.fallback) {
+      const at = Date.now();
+      if (timelineReadAt == null || timelineReadAt < at) {
+        tapRequests.current -= 1;
+        setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at });
+        onRequestFreshRead?.();
+        return;
+      }
     }
     if (!row.inline) {
       openCheckRow(row, false);

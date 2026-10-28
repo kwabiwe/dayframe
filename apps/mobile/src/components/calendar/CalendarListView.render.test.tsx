@@ -401,6 +401,24 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(questions(tree)).toHaveLength(1);
   });
 
+  it("waits for a read newer than a tap before asking a missing item's \"?\" under its row (Codex r4 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onRequestFreshRead = vi.fn();
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      onRequestFreshRead };
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(questions(tree)).toHaveLength(0);
+    expect(onRequestFreshRead).toHaveBeenCalledOnce();
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} timelineReadAt={Date.now() + 1_000} />);
+    });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
   it("opens a trip's \"?\" in the trip's own sheet, at no leg", () => {
     const onOpenTripLeg = vi.fn();
     const onOpenCheck = vi.fn();

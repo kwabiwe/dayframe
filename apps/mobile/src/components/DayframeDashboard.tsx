@@ -1981,10 +1981,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
     // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
     const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id) && !answersAfterCorrections.waitingIds.has(item.id) && !resolvedByCorrections.has(item.id));
+      && !checkAnswers.hiddenIds.has(item.id) && !answersAfterCorrections.waitingIds.has(item.id) && !resolvedByCorrections.has(item.id)
+      && !(typeof item.rawPayload?.clientSegmentId === "string" && answersAfterCorrections.waitingSegments.has(item.rawPayload.clientSegmentId)));
     return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds, locallyDecidedIds, resolvedByCorrections,
-    reviewSyncStateIds]);
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds, answersAfterCorrections.waitingSegments,
+    locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
   const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);
   const openCalendarCheck = openCalendarCheckId
@@ -3798,6 +3799,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onSwipeDay={shiftSelectedCalendarDay}
                   openCheckRequest={calendarCheckTarget}
                   timelineReadAt={calendarTimelineRequestedAt}
+                  onRequestFreshRead={() => setCheckTimelineReads((count) => count + 1)}
                   clockFormat={clockFormat}
                   dayEndMs={nativeCalendarModel.dayEndMs}
                   dayStartMs={nativeCalendarModel.dayStartMs}

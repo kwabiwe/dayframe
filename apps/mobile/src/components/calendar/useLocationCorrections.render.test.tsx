@@ -32,6 +32,12 @@ vi.mock("../../lib/timelineCorrectionOutbox", () => ({
   synchroniseTimelineCorrections: mocks.synchronise
 }));
 vi.mock("./LocationCorrectionSheet", () => ({ LocationCorrectionSheet: "LocationCorrectionSheet" }));
+const waiting = vi.hoisted(() => ({
+  holdAnswerAfterCorrections: vi.fn(async (..._args: unknown[]) => undefined),
+  commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+  cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined)
+}));
+vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
 
 const { useLocationCorrections } = await import("./useLocationCorrections");
 
@@ -217,6 +223,34 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)!.props.places).toContainEqual({ id: "6f000000-0000-4000-8000-0000000000aa", name: "Exampleton Bakery", role: null });
   });
 
+  it("saves a place, then keeps a waiting Logs as with the visit's corrections' ids before queueing them (Codex r4 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    await settle();
+    type Save = (name: string, rest: unknown[], beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }>) => Promise<void>;
+    const onSavePlace = sheetOf(tree)!.props.onSavePlace as Save;
+    const order: string[] = [];
+    mocks.createPlace.mockImplementationOnce(async () => { order.push("place"); return { ok: true, place: { id: "6f000000-0000-4000-8000-0000000000bb" } }; });
+    mocks.enqueue.mockImplementationOnce(async (...args: unknown[]) => {
+      const items = args[1] as Array<{ request: { kind: string; clientCorrectionId?: string } }>;
+      order.push(`enqueue ${items.map((item) => `${item.request.kind}:${item.request.clientCorrectionId}`).join(",")}`);
+      return items;
+    });
+    const start = vi.fn(() => { order.push("start"); });
+    const cancel = vi.fn(async () => { order.push("cancel"); });
+    await act(async () => {
+      await onSavePlace("Exampleton Bakery", [], async (ids) => { order.push(`hold ${ids.join(",")}`); return { start, cancel }; });
+    });
+    expect(order).toHaveLength(4);
+    expect(order[0]).toBe("place");
+    expect(order[1]).toMatch(/^hold .+$/);
+    // The place's correction carries the id the waiting log waits for; log_place itself is never queued here.
+    expect(order[2]).toBe(`enqueue place:${order[1].slice(5)}`);
+    expect(order[3]).toBe("start");
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it("holds Logs as for Undo, sends it after the hold, and reads the day again once the server has it (step 12 part 4c)", async () => {
     vi.useFakeTimers();
     try {
@@ -242,6 +276,40 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(onLogged).not.toHaveBeenCalled();
       await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} acknowledged={[{ clientCorrectionId: "log-0" }] as never} />); });
       expect(onLogged).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a Logs as after the sheet's corrections waiting for them, held for Undo, never queued here (Codex r4 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.enqueue.mockClear();
+      waiting.holdAnswerAfterCorrections.mockClear();
+      waiting.commitAnswerAfterCorrections.mockClear();
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> };
+      let handle!: { start: () => void; cancel: () => Promise<void> };
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+      expect(waiting.holdAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ reviewItemId: "", log: { itemId: "seg-a", categoryId: "cat-errands" }, waitsFor: ["cid-1"] }));
+      const recordId = (waiting.holdAnswerAfterCorrections.mock.calls[0][1] as { id: string }).id;
+      act(() => { handle.start(); });
+      expect(api!.heldLog?.title).toBe("Unknown place as Errands");
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Its Undo ended: the record may go once the corrections are acknowledged; log_place isn't queued from here.
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+      expect(mocks.enqueue).not.toHaveBeenCalled();
+      // Undo takes back the Logs as only.
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"]); });
+      act(() => { handle.start(); });
+      act(() => { api!.undoLog(); });
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledOnce();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

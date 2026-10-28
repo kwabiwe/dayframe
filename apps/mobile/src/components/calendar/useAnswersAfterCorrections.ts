@@ -11,7 +11,13 @@ import {
   type AnswerAfterCorrectionsRelease
 } from "../../lib/reviewAnswersAfterCorrections";
 import { enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
-import { readPendingTimelineCorrections, subscribeTimelineCorrectionOutbox } from "../../lib/timelineCorrectionOutbox";
+import {
+  enqueueTimelineCorrections,
+  readPendingTimelineCorrections,
+  subscribeTimelineCorrectionOutbox,
+  synchroniseTimelineCorrections
+} from "../../lib/timelineCorrectionOutbox";
+import { AppState } from "react-native";
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -34,7 +40,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
   const userId = owner?.userId ?? null;
   const workspaceId = owner?.workspaceId ?? null;
   const key = userId && workspaceId ? `${workspaceId}:${userId}` : null;
-  const [waiting, setWaiting] = useState<{ key: string; ids: ReadonlySet<string> } | null>(null);
+  const [waiting, setWaiting] = useState<{ key: string; ids: ReadonlySet<string>; segments: ReadonlySet<string> } | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
   const releaseRef = useRef(release);
@@ -54,6 +60,14 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
     const ownerKey = `${workspaceId}:${userId}`;
     let live = true;
     const viaReviewOutbox: AnswerAfterCorrectionsRelease = async (record) => {
+      if (record.log) {
+        // A Logs as (Codex r4 on #610): its corrections are acknowledged, so `log_place` goes now, under the record's
+        // own id (a repeat after a crash is answered once, #597); the server closes the place's "?" with it (#609).
+        await enqueueTimelineCorrections(who, [{ request: { kind: "log_place", subject: "place", itemId: record.log.itemId,
+          categoryId: record.log.categoryId, clientCorrectionId: record.id } }]);
+        void synchroniseTimelineCorrections({ owner: who, force: true, isForeground: () => AppState.currentState === "active" }).catch(() => undefined);
+        return "released";
+      }
       const bootstrap = dataRef.current;
       if (!bootstrap || bootstrap.user.id !== who.userId || bootstrap.workspace.id !== who.workspaceId) return "wait";
       const item = bootstrap.reviewItems.find((each) => each.id === record.reviewItemId);
@@ -67,7 +81,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
     };
     const read = () => {
       void readAnswersAfterCorrections(who).then((records) => {
-        if (live) setWaiting({ key: ownerKey, ids: new Set(records.map((record) => record.reviewItemId)) });
+        if (live) setWaiting({ key: ownerKey, ids: new Set(records.flatMap((record) => record.reviewItemId ? [record.reviewItemId] : [])),
+          segments: new Set(records.flatMap((record) => record.log ? [record.log.itemId] : [])) });
       }, () => undefined);
     };
     let draining = false;
@@ -79,7 +94,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       }
       draining = true;
       void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections, release: releaseRef.current ?? viaReviewOutbox,
-        onDropped: (record) => { if (live) droppedRef.current?.(record.reviewItemId); } })
+        onDropped: (record) => { if (live && record.reviewItemId) droppedRef.current?.(record.reviewItemId); } })
         .catch(() => undefined)
         .finally(() => {
           draining = false;
@@ -103,5 +118,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
     };
   }, [dataRead, userId, workspaceId]);
   const ids = waiting && waiting.key === key ? waiting.ids : NONE;
-  return useMemo(() => ({ waitingIds: ids }), [ids]);
+  const segments = waiting && waiting.key === key ? waiting.segments : NONE;
+  // `waitingSegments`: places whose Logs as waits; their "?" stay out until it is sent (the server then closes them).
+  return useMemo(() => ({ waitingIds: ids, waitingSegments: segments }), [ids, segments]);
 }

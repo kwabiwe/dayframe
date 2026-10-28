@@ -117,12 +117,22 @@ export function LocationCorrectionSheet({
    * "Save this place" (step 12 part 4, card D item 14): saves the visit's place under this name and sets the
    * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
    */
-  onSavePlace?: (name: string, rest: QueuedCorrection[]) => Promise<void>;
+  /** `beforeEnqueue`: a Logs as that waits for the server to accept the visit's corrections (Codex r4 on #610). */
+  onSavePlace?: (name: string, rest: QueuedCorrection[], beforeEnqueue?: LocationCorrectionBeforeEnqueue) => Promise<void>;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
    */
-  logAs?: { activities: ReadonlyArray<{ id: string; name: string }>; onLog: (categoryId: string) => void };
+  logAs?: {
+    activities: ReadonlyArray<{ id: string; name: string }>;
+    /** Logs the place now (held for Undo): the sheet has no corrections of its own to go first. */
+    onLog: (categoryId: string) => void;
+    /**
+     * Logs it after the sheet's corrections (Codex r4 on #610): kept on the phone before they are queued, and sent as
+     * `log_place` only once the server has acknowledged every one; a refused one means nothing is logged.
+     */
+    onLogAfter?: (categoryId: string, ids: readonly string[]) => ReturnType<LocationCorrectionBeforeEnqueue>;
+  };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
@@ -264,6 +274,13 @@ export function LocationCorrectionSheet({
       log?.();
       return true;
     }
+    const logAfter = target.kind === "place" && logAs?.onLogAfter && logCategoryId ? logAs.onLogAfter : null;
+    if (logAfter && logCategoryId) {
+      // Logs as waits for these corrections to be acknowledged, never merely kept on the phone (Codex r4 on #610).
+      const categoryId = logCategoryId;
+      keep(corrections, "close", (ids) => logAfter(categoryId, ids));
+      return false;
+    }
     pendingLog.current = log;
     keep(corrections, "close");
     return false;
@@ -279,10 +296,15 @@ export function LocationCorrectionSheet({
     if (problem) return;
     // The place saved, then the sheet's other changes (its times) and its Logs as, in one Done (Codex r1 on #606).
     const rest = placeCorrections(target.place, { choice: { kind: "keep" }, times }, places);
-    const log = logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
+    // With a Logs as picked, the log waits on the phone until the server has the place's corrections (the place
+    // itself is created on the server first), never merely their keeping here; a refused one logs nothing and the
+    // "?" stays (Codex r4 on #610). Without `onLogAfter` it logs once they are kept, as before.
+    const categoryId = logCategoryId;
+    const logAfter = logAs?.onLogAfter && categoryId ? logAs.onLogAfter : null;
+    const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
     setSaving(true);
     setSaveError(null);
-    onSavePlace(placeName.trim(), rest).then(() => {
+    onSavePlace(placeName.trim(), rest, logAfter && categoryId ? (ids) => logAfter(categoryId, ids) : undefined).then(() => {
       setSaving(false);
       kept.current = true;
       log?.();

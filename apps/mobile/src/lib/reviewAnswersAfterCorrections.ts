@@ -27,9 +27,15 @@ const KEY = "dayframe.reviewAnswersAfterCorrections.v1";
 export type AnswerAfterCorrections = MobileAccountOwner & {
   /** The Review mutation's own id, so a release repeated after a crash is answered once. */
   id: string;
+  /** The "?" it answers ("" for a Logs as without one). */
   reviewItemId: string;
   logged: boolean;
   venue?: ReviewAnswerVenue | null;
+  /**
+   * A Logs as instead of an answer (Codex r4 on #610): `log_place` for this place with this activity, queued only
+   * once the sheet's corrections are acknowledged; its `id` is the log's own `clientCorrectionId`.
+   */
+  log?: { itemId: string; categoryId: string };
   /** The corrections it waits for, and those the server has acknowledged. */
   waitsFor: string[];
   acknowledged: string[];
@@ -73,9 +79,12 @@ function parse(value: unknown): AnswerAfterCorrections | null {
     ? item.venue as ReviewAnswerVenue : null;
   const held = item.held && typeof item.held === "object" && typeof (item.held as { run?: unknown }).run === "string"
     ? { run: (item.held as { run: string }).run } : undefined;
+  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown } | undefined;
+  const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && typeof rawLog.categoryId === "string"
+    ? { itemId: rawLog.itemId, categoryId: rawLog.categoryId } : undefined;
   return {
     userId: item.userId, workspaceId: item.workspaceId, id: item.id, reviewItemId: item.reviewItemId, logged: item.logged,
-    ...(venue ? { venue } : {}), waitsFor, acknowledged, ...(item.refused === true ? { refused: true } : {}),
+    ...(venue ? { venue } : {}), ...(log ? { log } : {}), waitsFor, acknowledged, ...(item.refused === true ? { refused: true } : {}),
     ...(held ? { held } : {}), createdAt: item.createdAt
   };
 }
@@ -118,11 +127,13 @@ export async function readAnswersAfterCorrections(owner: MobileAccountOwner) {
  * acknowledgement always finds it.
  */
 export async function holdAnswerAfterCorrections(owner: MobileAccountOwner,
-  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; waitsFor: readonly string[] }, now = new Date()) {
+  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: { itemId: string; categoryId: string };
+    waitsFor: readonly string[] }, now = new Date()) {
   if (!answer.waitsFor.length) throw new Error("An answer after corrections needs its corrections.");
   const record: AnswerAfterCorrections = {
     userId: owner.userId, workspaceId: owner.workspaceId, id: answer.id, reviewItemId: answer.reviewItemId, logged: answer.logged,
-    ...(answer.venue ? { venue: answer.venue } : {}), waitsFor: [...answer.waitsFor], acknowledged: [], held: { run },
+    ...(answer.venue ? { venue: answer.venue } : {}), ...(answer.log ? { log: answer.log } : {}), waitsFor: [...answer.waitsFor],
+    acknowledged: [], held: { run },
     createdAt: now.toISOString()
   };
   await update((items) => [...items.filter((item) => item.id !== record.id), record]);
@@ -176,6 +187,7 @@ export async function releaseAnswersAfterCorrections(input: {
 }) {
   const released: string[] = [];
   const dropped: AnswerAfterCorrections[] = [];
+  let changed = false;
   await serialised(async () => {
     const pending = await input.readPending(input.owner);
     const items = await readAll();
@@ -202,11 +214,12 @@ export async function releaseAnswersAfterCorrections(input: {
       }
       const outcome = await input.release(item).catch(() => "wait" as const);
       if (outcome === "wait") keep.push(item);
-      else if (outcome === "released") released.push(item.reviewItemId);
+      else if (outcome === "released" && item.reviewItemId) released.push(item.reviewItemId);
     }
-    if (keep.length !== items.length) await writeAll(keep);
+    changed = keep.length !== items.length;
+    if (changed) await writeAll(keep);
   });
-  if (released.length || dropped.length) notify();
+  if (changed) notify();
   for (const item of dropped) input.onDropped?.(item);
   return { released, dropped };
 }

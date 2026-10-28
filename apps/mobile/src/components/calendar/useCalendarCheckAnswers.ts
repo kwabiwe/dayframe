@@ -397,13 +397,18 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    */
   const restoreAnswered = useCallback((itemIds: readonly string[]) => {
     const owner = ownerRef.current;
+    // Still in its Undo window: that hold ends here, so its end can't hide the "?" again (Codex r4 on #610).
+    const current = hold.current();
+    if (current?.kind === "single" && (current as HeldAnswer).afterCorrections && itemIds.includes((current as HeldAnswer).itemId)) {
+      hold.undo(current.token);
+    }
     setSaving((now) => now && now.owner === owner
       ? { ...now, ids: new Set([...now.ids].filter((id) => !itemIds.includes(id))), awaiting: new Set([...now.awaiting].filter((id) => !itemIds.includes(id))) }
       : now);
     restore(owner, itemIds);
     // The refs hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hold]);
 
   const shownHeld = held && held.owner === ownerKey ? held : null;
   /** Every suggestion out of the List for now: the held answer's, and those saving or not yet handed over. */

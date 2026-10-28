@@ -134,6 +134,19 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.hiddenIds.has("a")).toBe(false);
   });
 
+  it("ends a waiting answer's Undo too when its change is refused before Undo runs out, so the “?” stays back (Codex r4 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(result.current.held).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalled();
+  });
+
   it("Undo brings the “?” back and saves nothing", async () => {
     const { result } = mount(bootstrap([suggestion("a")]));
     act(() => { result.current.answer("a", false); });
