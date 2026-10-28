@@ -113,3 +113,34 @@ export const LocationReviewEvidenceDtoSchema = z.object({
 });
 
 export type LocationReviewEvidenceDto = z.infer<typeof LocationReviewEvidenceDtoSchema>;
+
+/**
+ * A timeline item's evidence (location v4 step 12, the correction sheets' map): the same as a Review item's,
+ * found by the timeline item (its client segment id), with its open Review item and its event when it has them.
+ */
+export const TimelineItemEvidenceDtoSchema = LocationReviewEvidenceDtoSchema.extend({
+  itemId: z.string(),
+  reviewItemId: z.string().uuid().nullable(),
+  eventId: z.string().uuid().nullable()
+});
+export type TimelineItemEvidenceDto = z.infer<typeof TimelineItemEvidenceDtoSchema>;
+
+/**
+ * The map's words for people (location v4 step 12, owner feedback 27 Oct 2026), in place of the server's
+ * diagnostic `textualSummary`: how many readings, each silence and each stop, in the viewer's own clock,
+ * e.g. "25 readings · No readings 18:06–19:21". `time` formats an ISO instant on the viewer's clock.
+ */
+export function evidencePlainSummary(
+  evidence: Pick<LocationReviewEvidenceDto, "segment" | "map" | "stops" | "evidenceExpired" | "rawEvidenceAvailable">,
+  time: (iso: string) => string
+) {
+  if (evidence.evidenceExpired) return "Its readings have been deleted; only the times remain.";
+  const count = evidence.segment.evidenceCount;
+  const parts = [count === 0 ? "No readings" : `${count} reading${count === 1 ? "" : "s"}`];
+  for (const stop of evidence.stops ?? []) {
+    const minutes = Math.max(1, Math.round(stop.durationSeconds / 60));
+    parts.push(`Stopped ${stop.approximate ? "about " : ""}${minutes} min ${time(stop.startedAt)}–${time(stop.stoppedAt)}`);
+  }
+  for (const gap of evidence.map.gaps) parts.push(`No readings ${time(gap.startedAt)}–${time(gap.stoppedAt)}`);
+  return parts.join(" · ");
+}

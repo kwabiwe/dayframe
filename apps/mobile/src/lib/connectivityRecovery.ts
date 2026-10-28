@@ -6,6 +6,7 @@ export type ConnectivityRecoveryStepName =
   | "time_entry_outbox"
   | "timer_stops_after_correlation"
   | "review_outbox"
+  | "timeline_corrections"
   | "location_intelligence"
   | "bootstrap";
 

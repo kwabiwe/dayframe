@@ -31,7 +31,7 @@ const evidence = (timeAway: boolean) => ({
 function render(value: LocationReviewEvidenceDto) {
   let tree: ReactTestRenderer | undefined;
   act(() => {
-    tree = create(<LocationEvidenceMap accentColor="#f00" dangerColor="#f00" evidence={value} showDetails={false}
+    tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#f00" dangerColor="#f00" evidence={value} showDetails={false}
       surfaceColor="#000" textColor="#fff" />);
   });
   return tree!;
@@ -43,7 +43,7 @@ describe("time away on the mobile evidence map", () => {
     expect(tree.root.findAllByType("Circle" as never)).toHaveLength(2);
     expect(tree.root.findAllByType("Polyline" as never)).toHaveLength(0);
     expect(tree.root.findAllByType("Marker" as never)).toHaveLength(0);
-    expect(tree.root.findByType("MapView" as never).props.accessibilityLabel).toBe("Map of readings while you were away.");
+    expect(tree.root.findByType("MapView" as never).props.accessibilityLabel).toMatch(/^Map of readings while you were away\. \d+ reading/);
   });
 });
 
@@ -52,7 +52,7 @@ describe("map appearance (UIA-027)", () => {
     for (const appearance of ["light", "dark"] as const) {
       let tree: ReactTestRenderer | undefined;
       act(() => {
-        tree = create(<LocationEvidenceMap accentColor="#f00" appearance={appearance} dangerColor="#f00" evidence={evidence(true)}
+        tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#f00" appearance={appearance} dangerColor="#f00" evidence={evidence(true)}
           showDetails={false} surfaceColor="#000" textColor="#fff" />);
       });
       expect(tree!.root.findByType("MapView" as never).props.userInterfaceStyle).toBe(appearance);

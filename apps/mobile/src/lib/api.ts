@@ -845,6 +845,14 @@ export async function logout() {
       return clearActiveReviewAccountData();
     }).catch(() => undefined);
     requireCurrent();
+    // Location timeline corrections the phone still holds leave with the account (step 12).
+    if (activeOwner) {
+      await import("./timelineCorrectionOutbox").then(({ clearTimelineCorrectionsForOwner }) => {
+        requireCurrent();
+        return clearTimelineCorrectionsForOwner(activeOwner);
+      }).catch(() => undefined);
+      requireCurrent();
+    }
     await import("./shortcuts").then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
       requireCurrent();
       if (activeOwner) await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
