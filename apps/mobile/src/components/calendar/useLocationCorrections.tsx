@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 import {
   placeDisplayName,
   type ClockFormat,
@@ -15,6 +16,7 @@ import {
   enqueueTimelineCorrections,
   removeTimelineCorrections,
   synchroniseTimelineCorrections,
+  type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
 import { LocationCorrectionSheet, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
@@ -29,6 +31,7 @@ type Open = ({ kind: "place"; itemId: string; label: string } | { kind: "trip"; 
  * set, and saying once why a refused correction came back (the row is already back as it was).
  */
 export function useLocationCorrections({
+  acknowledged = [],
   clockFormat,
   data,
   onLogged,
@@ -38,6 +41,8 @@ export function useLocationCorrections({
   theme,
   timeline
 }: {
+  /** The corrections the server has had, this account's (useTimelineCorrectionQueue). */
+  acknowledged?: readonly AcknowledgedTimelineCorrection[];
   clockFormat: ClockFormat;
   data: Pick<MobileBootstrap, "categories" | "places" | "user" | "workspace"> | null;
   /** A place logged with Logs as reached the server: the day's blocks are read again. */
@@ -118,10 +123,14 @@ export function useLocationCorrections({
   const shown = target ?? last;
   const stale = Boolean(open && !target && last && closingId !== open.id);
 
-  const places = useMemo(
-    () => (data?.places ?? []).map((place) => ({ id: place.id, name: placeDisplayName(place), role: place.role ?? null })),
-    [data?.places]
-  );
+  // Places saved here show as choices at once, until the account's places are read again (Codex r1 on #606).
+  const [savedHere, setSavedHere] = useState<Array<{ ownerKey: string; id: string; name: string }>>([]);
+  const places = useMemo(() => {
+    const listed = (data?.places ?? []).map((place) => ({ id: place.id, name: placeDisplayName(place), role: place.role ?? null }));
+    const known = new Set(listed.map((place) => place.id));
+    return [...listed, ...savedHere.filter((place) => place.ownerKey === ownerKey && !known.has(place.id))
+      .map((place) => ({ id: place.id, name: place.name, role: null }))];
+  }, [data?.places, ownerKey, savedHere]);
 
   // Kept on the phone for the sheet's own account before its Done closes it, never once another account (or
   // none) is signed in, however late the Done; sending follows on its own.
@@ -142,19 +151,33 @@ export function useLocationCorrections({
   // person typed, then the visit set to it. Saving a place needs the server; the sheet says so if it fails.
   const shownCentre = shownEvidence && shownEvidence !== "unavailable" ? shownEvidence.map.centre : null;
   const shownRadius = shownEvidence && shownEvidence !== "unavailable" ? shownEvidence.map.stayRadiusMeters : null;
-  const savePlace = useCallback(async (presentationId: number, sheetOwnerKey: string, place: TimelinePlace, name: string) => {
+  // A place saved for a visit under a name is kept, so trying again after the visit's change wasn't kept never
+  // saves it twice (Codex r1 on #606).
+  const createdPlaces = useRef(new Map<string, string>());
+  const savePlace = useCallback(async (presentationId: number, sheetOwnerKey: string, place: TimelinePlace, name: string,
+    rest: QueuedCorrection[]) => {
     if (!userId || !workspaceId || !shownCentre || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) {
       throw new Error("The place can't be saved now.");
     }
-    const [longitude, latitude] = shownCentre.coordinates;
-    const created = await createPlace({ name, latitude, longitude, radiusMeters: Math.round(Math.min(250, Math.max(75, shownRadius ?? 100))) });
-    const placeId = (created as { place?: { id?: string } })?.place?.id;
-    if (!placeId) throw new Error("The place wasn't saved.");
+    const key = `${sheetOwnerKey}|${place.id}|${name}`;
+    let placeId = createdPlaces.current.get(key) ?? null;
+    if (!placeId) {
+      const [longitude, latitude] = shownCentre.coordinates;
+      // Under the sheet's own account's session, or not at all (Codex r1 on #606).
+      const created = await createPlace({ name, latitude, longitude, radiusMeters: Math.round(Math.min(250, Math.max(75, shownRadius ?? 100))) },
+        undefined, { userId, workspaceId });
+      placeId = (created as { place?: { id?: string } })?.place?.id ?? null;
+      if (!placeId) throw new Error("The place wasn't saved.");
+      createdPlaces.current.set(key, placeId);
+      const saved = placeId;
+      setSavedHere((current) => [...current, { ownerKey: sheetOwnerKey, id: saved, name }]);
+    }
     if (currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
+    // The visit set to it, then the sheet's other changes (its times), in one Done.
     await queue(presentationId, sheetOwnerKey, [{
       request: { kind: "place", subject: "place", itemId: place.id, placeId, learnedPlaceId: null },
       preview: { name, role: null }
-    }], true);
+    }, ...rest], true);
   }, [ownerKey, queue, shownCentre, shownRadius, userId, workspaceId]);
 
   // "Logs as" (step 12 part 4c): held for Undo for the deck's 4.8 s, then queued as `log_place`; once the server
@@ -162,14 +185,17 @@ export function useLocationCorrections({
   const [heldLog, setHeldLog] = useState<{ token: number; ownerKey: string; title: string; request: QueuedCorrection["request"] } | null>(null);
   const logTokens = useRef(0);
   const sentLogs = useRef(new Set<string>());
-  const commitLog = useCallback((log: NonNullable<typeof heldLog>) => {
+  // Kept on the phone for the account it was picked for; sent only while the app is in front (the queue's own
+  // recovery sends it otherwise). Read through refs, so a Dashboard render never restarts the hold (Codex r1 on #606).
+  const commitLogRef = useRef<(log: NonNullable<typeof heldLog>, send: boolean) => void>(() => undefined);
+  commitLogRef.current = (log, send) => {
     if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
     const owner = { userId, workspaceId };
     void enqueueTimelineCorrections(owner, [{ request: log.request }]).then((items) => {
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
-      return synchroniseTimelineCorrections({ owner, force: true });
+      return send ? synchroniseTimelineCorrections({ owner, force: true }) : undefined;
     }).catch(() => showNotice("That place wasn't logged. Try again."));
-  }, [showNotice, userId, workspaceId]);
+  };
   useEffect(() => {
     if (!heldLog) return;
     // Another account (or none): the held log is dropped, never sent for it.
@@ -177,28 +203,35 @@ export function useLocationCorrections({
       setHeldLog(null);
       return;
     }
-    const timer = setTimeout(() => {
+    const finish = (send: boolean) => {
       setHeldLog((current) => current?.token === heldLog.token ? null : current);
-      commitLog(heldLog);
-    }, REVIEW_DECK_UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [commitLog, heldLog, ownerKey]);
+      commitLogRef.current(heldLog, send);
+    };
+    const timer = setTimeout(() => finish(true), REVIEW_DECK_UNDO_MS);
+    // Leaving the app keeps the decision now, as the deck's hold does, and sends it on return (Codex r1 on #606).
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") finish(false);
+    });
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [heldLog, ownerKey]);
   // A second Logs as sends the one held now, as the deck's hold does.
   const holdLog = (next: NonNullable<typeof heldLog>) => {
-    if (heldLog) commitLog(heldLog);
+    if (heldLog) commitLogRef.current(heldLog, true);
     setHeldLog(next);
   };
   const undoLog = useCallback(() => setHeldLog(null), []);
-  // A Logs as the server has answered (it left the queue): read the day's blocks again.
-  const pendingIds = pending.map((item) => item.clientCorrectionId).join("|");
+  // A Logs as the server has acknowledged (never one refused): read the day's blocks again (Codex r1 on #606).
+  const acknowledgedIds = acknowledged.map((item) => item.clientCorrectionId).join("|");
   useEffect(() => {
-    const waiting = new Set(pending.map((item) => item.clientCorrectionId));
-    const answered = [...sentLogs.current].filter((id) => !waiting.has(id));
-    if (!answered.length) return;
-    for (const id of answered) sentLogs.current.delete(id);
+    const delivered = acknowledged.filter((item) => sentLogs.current.has(item.clientCorrectionId));
+    if (!delivered.length) return;
+    for (const item of delivered) sentLogs.current.delete(item.clientCorrectionId);
     onLogged?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingIds]);
+  }, [acknowledgedIds]);
   const activities = useMemo(() => [...(data?.categories ?? [])]
     .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
     .slice(0, 8)
@@ -252,7 +285,7 @@ export function useLocationCorrections({
         }
       } : undefined}
       onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
-        ? (name) => savePlace(open.id, open.ownerKey, shown.place, name) : undefined}
+        ? (name, rest) => savePlace(open.id, open.ownerKey, shown.place, name, rest) : undefined}
       places={places}
       presentationId={open.id}
       reduceMotion={reduceMotion}

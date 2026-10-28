@@ -26,6 +26,7 @@ export function projectTimelineCorrections(
   const waiting = pending.filter((item) => item.failureKind !== "permanent");
   if (waiting.length === 0) return timeline;
   let items: Array<TimelinePlace | TimelineTrip> = timeline.items;
+  let openTrip = timeline.openTrip;
   for (const { request, preview } of waiting) {
     if (request.kind === "delete" && request.subject === "trip") {
       items = items.filter((item) => !(item.kind === "trip" && item.id === request.itemId));
@@ -36,7 +37,10 @@ export function projectTimelineCorrections(
       continue;
     }
     if (request.kind === "merge") {
+      const folded = foldedVisits(items, request.itemId);
       items = withoutTrip(items, request.itemId);
+      // The journey in progress from the second visit leaves the one stay, as the server moves it (Codex r1 on #606).
+      if (folded && openTrip?.fromId === folded.second) openTrip = { ...openTrip, fromId: folded.first };
       continue;
     }
     items = items.map((item): TimelinePlace | TimelineTrip => {
@@ -71,7 +75,7 @@ export function projectTimelineCorrections(
       return item;
     });
   }
-  return { ...timeline, items };
+  return { ...timeline, items, openTrip };
 }
 
 /**
@@ -91,6 +95,8 @@ function withoutPlace(items: Array<TimelinePlace | TimelineTrip>, placeId: strin
     stopIds: [...before.stopIds, ...after.stopIds],
     distanceMeters: before.distanceMeters == null || after.distanceMeters == null ? null : before.distanceMeters + after.distanceMeters,
     confidence: "low",
+    // Its classification was the trip in's alone, as the server drops it (Codex r1 on #606).
+    reason: null,
     setByYou: true
   };
   return items.flatMap((item) => item === before ? [joined] : item === after || (item.kind === "place" && item.id === placeId) ? [] : [item]);
@@ -106,10 +112,19 @@ function withoutTrip(items: Array<TimelinePlace | TimelineTrip>, tripId: string)
   const second = trip && items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.toId);
   if (!trip || !first || !second || first === second || !sameKnownPlace(first, second)) return items;
   return items.flatMap((item): Array<TimelinePlace | TimelineTrip> => {
-    if (item === first) return [{ ...first, stoppedAt: second.stoppedAt, setByYou: true }];
+    // As finished as its last part, as the server makes it (Codex r1 on #606).
+    if (item === first) return [{ ...first, stoppedAt: second.stoppedAt, status: second.status, setByYou: true }];
     if (item === trip || item === second) return [];
     if (item.kind === "trip" && item.fromId === second.id) return [{ ...item, fromId: first.id }];
     return [item];
   });
+}
+
+/** The two visits "I didn't leave" would make one, when it would. */
+function foldedVisits(items: ReadonlyArray<TimelinePlace | TimelineTrip>, tripId: string) {
+  const trip = items.find((item): item is TimelineTrip => item.kind === "trip" && item.id === tripId);
+  const first = trip && items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.fromId);
+  const second = trip && items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.toId);
+  return first && second && first !== second && sameKnownPlace(first, second) ? { first: first.id, second: second.id } : null;
 }
 

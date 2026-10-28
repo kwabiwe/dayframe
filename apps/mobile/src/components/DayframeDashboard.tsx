@@ -2098,6 +2098,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
   // The List's place, trip and leg correction sheets (step 12).
   const locationCorrections = useLocationCorrections({
+    acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
     // A place logged with Logs as: its blocks come with the next read of the day.

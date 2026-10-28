@@ -123,5 +123,17 @@ describe("the List with the corrections the phone still holds (location v4 step 
     expect(projectTimelineCorrections(day, [queued({ kind: "delete", subject: "place", itemId: "y" })])!.items).toEqual(day.items);
     expect(projectTimelineCorrections(day, [queued({ kind: "merge", subject: "trip", itemId: "t2" })])!.items).toEqual(day.items);
   });
+
+  // Codex r1 on #606: as the server makes them.
+  it("gives the one stay its last visit's status and journey, and the joined trip no reason", () => {
+    const open = { ...day, items: day.items.map((item) => item.id === "h3" ? { ...item, status: "open" } : item),
+      openTrip: { kind: "open_trip", fromId: "h3", startedAt: at(200), legs: [] } } as unknown as LocationTimeline;
+    const merged = projectTimelineCorrections(open, [queued({ kind: "merge", subject: "trip", itemId: "t3" })])!;
+    expect(merged.items.find((item) => item.id === "h2")).toMatchObject({ status: "open" });
+    expect(merged.openTrip).toMatchObject({ fromId: "h2" });
+    const reasoned = { ...day, items: day.items.map((item) => item.id === "t1" ? { ...item, reason: "same_place_meaningful_round_trip" } : item) };
+    const joined = projectTimelineCorrections(reasoned, [queued({ kind: "delete", subject: "place", itemId: "x" })])!;
+    expect(joined.items.find((item) => item.id === "t1")).toMatchObject({ reason: null });
+  });
 });
 

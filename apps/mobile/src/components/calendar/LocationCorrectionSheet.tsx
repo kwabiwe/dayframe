@@ -97,7 +97,7 @@ export function LocationCorrectionSheet({
    * "Save this place" (step 12 part 4, card D item 14): saves the visit's place under this name and sets the
    * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
    */
-  onSavePlace?: (name: string) => Promise<void>;
+  onSavePlace?: (name: string, rest: QueuedCorrection[]) => Promise<void>;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
@@ -207,11 +207,14 @@ export function LocationCorrectionSheet({
     if (kept.current) return true;
     if (stale || saving) return false;
     if (intent.current) {
+      // A join is offered only while the List allows it; one that no longer is (a neighbour in a block now) is
+      // not sent (Codex r1 on #606).
       const change = intent.current === "remove" && trip ? notATrip(trip)
-        : intent.current === "didnt_leave" && trip ? didntLeave(trip)
-          : intent.current === "not_here" && target.kind === "place" ? notHere(target.place) : null;
+        : intent.current === "didnt_leave" && trip && target.kind === "trip" && target.didntLeave ? didntLeave(trip)
+          : intent.current === "not_here" && target.kind === "place" && target.notHere ? notHere(target.place) : null;
       if (!change) {
         intent.current = null;
+        setConfirming(null);
         return false;
       }
       keep([change], "close");
@@ -251,12 +254,17 @@ export function LocationCorrectionSheet({
   // The activity picked under Logs as; none is "Don't log", as the place is now.
   const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
   function savePlace() {
-    if (!onSavePlace || !placeName.trim() || saving) return;
+    if (!onSavePlace || !placeName.trim() || frozen() || target.kind !== "place") return;
+    if (problem) return;
+    // The place saved, then the sheet's other changes (its times) and its Logs as, in one Done (Codex r1 on #606).
+    const rest = placeCorrections(target.place, { choice: { kind: "keep" }, times }, places);
+    const log = logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
     setSaving(true);
     setSaveError(null);
-    onSavePlace(placeName.trim()).then(() => {
+    onSavePlace(placeName.trim(), rest).then(() => {
       setSaving(false);
       kept.current = true;
+      log?.();
       setCloseKept(true);
     }, () => {
       setSaving(false);
@@ -264,10 +272,12 @@ export function LocationCorrectionSheet({
     });
   }
   function confirmJoin(join: Join) {
+    if (frozen()) return;
     intent.current = join;
     commitRef.current?.();
   }
   function keepAsIs() {
+    if (frozen()) return;
     intent.current = null;
     setConfirming(null);
   }
@@ -400,12 +410,12 @@ export function LocationCorrectionSheet({
         ) : null}
         {target.kind === "place" && (target.notHere || onSavePlace) && !stale ? (
           <Section label="Fix the shape" theme={theme}>
-            {confirming === "not_here" ? (
+            {confirming === "not_here" && target.notHere ? (
               <ConfirmRow confirmLabel="Take it off your day" danger message="It comes off your day, and the trips either side become one."
                 onConfirm={() => confirmJoin("not_here")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="not-here" theme={theme} />
             ) : confirming === "save_place" ? (
               <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}>
-                <TextInput accessibilityLabel="Name of this place" autoFocus onChangeText={setPlaceName} onSubmitEditing={savePlace}
+                <TextInput accessibilityLabel="Name of this place" autoFocus onChangeText={(text) => { if (!frozen()) setPlaceName(text); }} onSubmitEditing={savePlace}
                   placeholder="Name this place" placeholderTextColor={theme.textSecondary} returnKeyType="done"
                   style={[styles.nameInput, { backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
                   testID="location-correction-place-name" value={placeName} />
@@ -424,10 +434,10 @@ export function LocationCorrectionSheet({
             ) : (
               <View style={styles.pills}>
                 {onSavePlace ? (
-                  <ShapeAction label="Save this place" onPress={() => setConfirming("save_place")} testID="location-correction-save-place" theme={theme} />
+                  <ShapeAction label="Save this place" onPress={() => { if (!frozen()) setConfirming("save_place"); }} testID="location-correction-save-place" theme={theme} />
                 ) : null}
                 {target.notHere ? (
-                  <ShapeAction danger label="I wasn't here" onPress={() => setConfirming("not_here")} testID="location-correction-not-here" theme={theme} />
+                  <ShapeAction danger label="I wasn't here" onPress={() => { if (!frozen()) setConfirming("not_here"); }} testID="location-correction-not-here" theme={theme} />
                 ) : null}
               </View>
             )}
@@ -435,7 +445,7 @@ export function LocationCorrectionSheet({
         ) : null}
         {trip && !leg && correctable(trip) ? (
           <Section label="Fix the shape" theme={theme}>
-            {confirming === "didnt_leave" ? (
+            {confirming === "didnt_leave" && target.kind === "trip" && target.didntLeave ? (
               <ConfirmRow confirmLabel="Make it one stay" message="The trip comes off your day, and the visits either side become one stay."
                 onConfirm={() => confirmJoin("didnt_leave")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="didnt-leave" theme={theme} />
             ) : confirming === "remove" ? (
@@ -444,9 +454,9 @@ export function LocationCorrectionSheet({
             ) : (
               <View style={styles.pills}>
                 {target.kind === "trip" && target.didntLeave ? (
-                  <ShapeAction label="I didn't leave" onPress={() => setConfirming("didnt_leave")} testID="location-correction-didnt-leave" theme={theme} />
+                  <ShapeAction label="I didn't leave" onPress={() => { if (!frozen()) setConfirming("didnt_leave"); }} testID="location-correction-didnt-leave" theme={theme} />
                 ) : null}
-                <ShapeAction danger label="This wasn't a trip" onPress={() => setConfirming("remove")} testID="location-correction-not-a-trip" theme={theme} />
+                <ShapeAction danger label="This wasn't a trip" onPress={() => { if (!frozen()) setConfirming("remove"); }} testID="location-correction-not-a-trip" theme={theme} />
               </View>
             )}
           </Section>

@@ -11,7 +11,17 @@ const mocks = vi.hoisted(() => ({
   createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
   enqueue: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
   remove: vi.fn(async () => undefined),
-  synchronise: vi.fn(async () => undefined)
+  synchronise: vi.fn(async () => undefined),
+  appListeners: new Set<(state: string) => void>()
+}));
+vi.mock("react-native", () => ({
+  AppState: {
+    currentState: "active",
+    addEventListener: (_type: string, listener: (state: string) => void) => {
+      mocks.appListeners.add(listener);
+      return { remove: () => mocks.appListeners.delete(listener) };
+    }
+  }
 }));
 vi.mock("../../lib/api", () => ({ createPlace: mocks.createPlace, fetchTimelineItemEvidence: mocks.fetchEvidence }));
 vi.mock("../../lib/timelineCorrectionOutbox", () => ({
@@ -34,9 +44,10 @@ const account = (userId: string) => ({ categories: [{ id: "cat-errands", name: "
   user: { id: userId }, workspace: { id: "w" } }) as never;
 let api: ReturnType<typeof useLocationCorrections> | null = null;
 function Probe(props: { data: ReturnType<typeof account> | null; pending?: never[]; showNotice?: (message: string) => void; timeline?: LocationTimeline | null;
-  onLogged?: () => void }) {
-  api = useLocationCorrections({ clockFormat: "24h", data: props.data, onLogged: props.onLogged, pending: props.pending ?? [], reduceMotion: false,
-    showNotice: props.showNotice ?? vi.fn(), theme: {} as never, timeline: props.timeline === undefined ? timeline : props.timeline });
+  onLogged?: () => void; acknowledged?: never[] }) {
+  api = useLocationCorrections({ acknowledged: props.acknowledged, clockFormat: "24h", data: props.data, onLogged: props.onLogged,
+    pending: props.pending ?? [], reduceMotion: false,
+    showNotice: props.showNotice ?? (() => undefined), theme: {} as never, timeline: props.timeline === undefined ? timeline : props.timeline });
   return api.sheet;
 }
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -126,13 +137,21 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
     await settle();
-    const onSavePlace = sheetOf(tree)!.props.onSavePlace as (name: string) => Promise<void>;
-    await act(async () => { await onSavePlace("Exampleton Bakery"); });
-    expect(mocks.createPlace).toHaveBeenCalledWith({ name: "Exampleton Bakery", latitude: 10, longitude: 20, radiusMeters: 75 });
-    expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, [{
+    const onSavePlace = sheetOf(tree)!.props.onSavePlace as (name: string, rest: unknown[]) => Promise<void>;
+    // The visit's change isn't kept the first time; trying again never saves the place twice (Codex r1 on #606).
+    mocks.enqueue.mockRejectedValueOnce(new Error("storage full"));
+    await act(async () => { await expect(onSavePlace("Exampleton Bakery", [])).rejects.toThrow(); });
+    const times = { request: { kind: "times", subject: "place", itemId: "seg-a", startedAt: iso(5), stoppedAt: iso(55) } };
+    await act(async () => { await onSavePlace("Exampleton Bakery", [times]); });
+    expect(mocks.createPlace).toHaveBeenCalledTimes(1);
+    expect(mocks.createPlace).toHaveBeenCalledWith({ name: "Exampleton Bakery", latitude: 10, longitude: 20, radiusMeters: 75 },
+      undefined, { userId: "a", workspaceId: "w" });
+    expect(mocks.enqueue).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" }, [{
       request: { kind: "place", subject: "place", itemId: "seg-a", placeId: "6f000000-0000-4000-8000-0000000000aa", learnedPlaceId: null },
       preview: { name: "Exampleton Bakery", role: null }
-    }]);
+    }, times]);
+    // The saved place is a choice at once, before the account's places are read again.
+    expect(sheetOf(tree)!.props.places).toContainEqual({ id: "6f000000-0000-4000-8000-0000000000aa", name: "Exampleton Bakery", role: null });
   });
 
   it("holds Logs as for Undo, sends it after the hold, and reads the day again once the server has it (step 12 part 4c)", async () => {
@@ -155,11 +174,37 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
         [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
-      const queued = { clientCorrectionId: "log-0", failureKind: undefined } as never;
-      await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[queued]} />); });
-      expect(onLogged).not.toHaveBeenCalled();
+      // Only the server's acknowledgement reads the day again; leaving the queue (a refusal) does not (Codex r1 on #606).
       await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[]} />); });
+      expect(onLogged).not.toHaveBeenCalled();
+      await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} acknowledged={[{ clientCorrectionId: "log-0" }] as never} />); });
       expect(onLogged).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the Logs as hold through Dashboard renders, and keeps it on the phone when the app leaves (Codex r1 on #606)", async () => {
+    vi.useFakeTimers();
+    try {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={() => undefined} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { vi.advanceTimersByTime(4_000); });
+      // A Dashboard render with a new notice callback doesn't restart the 4.8 s.
+      await act(async () => { tree.update(<Probe data={account("a")} showNotice={() => undefined} />); });
+      await act(async () => { vi.advanceTimersByTime(900); });
+      expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+      expect(mocks.synchronise).toHaveBeenCalledTimes(1);
+
+      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { for (const listener of mocks.appListeners) listener("background"); });
+      expect(mocks.enqueue).toHaveBeenCalledTimes(2);
+      // Kept, not sent from the background.
+      expect(mocks.synchronise).toHaveBeenCalledTimes(1);
+      expect(api!.heldLog).toBeNull();
     } finally {
       vi.useRealTimers();
     }
