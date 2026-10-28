@@ -172,6 +172,49 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     expect(requests.some((request) => request.body?.mode === "join")).toBe(false);
   });
 
+  it("keeps text typed while the Undo is on its way, on the joined block (Codex r3 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(mocks.clientFetch.mock.calls.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    expect(screen.getByTestId("draft").textContent).toBe("Typed, not saved");
+  });
+
+  it("shows nothing running when the split's answer leaves out the block (deleted elsewhere meanwhile) (Codex r3 on #607)", async () => {
+    const running = entry({ id: FIRST });
+    server({
+      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: true, entries: [
+        entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z", stoppedAt: "2026-08-17T04:50:00.000Z" })
+      ] }),
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(running)} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
+  });
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
@@ -196,11 +239,12 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
 });
 
 function Harness({ initial }: { initial: BootstrapData }) {
-  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer } = useAppShellRuntime();
+  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer, timerDraft } = useAppShellRuntime();
   const [undo, setUndo] = useState("");
   return <>
     <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed, not saved" }))}>Type</button>
     <output data-testid="undo">{undo}</output>
+    <output data-testid="draft">{timerDraft.description}</output>
     <button onClick={() => hydrate(initial)}>Hydrate</button>
     <button onClick={() => void splitActiveTimer(SPLIT_AT)}>Split</button>
     <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND }).then((outcome) => setUndo(outcome.ok ? "ok" : outcome.error))}>Undo split</button>

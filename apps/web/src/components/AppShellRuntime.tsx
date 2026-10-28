@@ -1056,7 +1056,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           splitSuccessorsRef.current.set(targetId, outcome.newEntryId);
         }
         const shown = dataRef.current;
-        if (shown && outcome.entries.length) commitData(applyServerTimerBlocks(shown, outcome.entries, entry.id === targetId ? [] : [entry.id]), "optimistic");
+        // A part the answer leaves out is gone (deleted elsewhere meanwhile): never left running on screen (Codex r3 on #607).
+        const answered = new Set(outcome.entries.map((block) => block.id));
+        const gone = [...new Set([entry.id, targetId, outcome.newEntryId])].filter((id) => !answered.has(id));
+        if (shown) commitData(applyServerTimerBlocks(shown, outcome.entries, gone), "optimistic");
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
         await refresh({ force: true });
@@ -1080,8 +1083,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setTimerError(null);
       refreshRequestRef.current += 1;
       try {
+        const draftAtSend = draftRef.current;
         const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
         if (outcome.ok) {
+          // Typed while the Undo was on its way: the text goes on to the joined block (saved as its edit), never
+          // reset by the change of block (Codex r3 on #607).
+          if (!timerDraftsEqual(draftRef.current, draftAtSend)) rollbackDraftRef.current = { draft: draftRef.current, entryId: split.entryId };
           // A Stop asked for the second part while the Undo ran stops the joined block (Codex r1 on #607).
           splitSuccessorsRef.current.set(split.newEntryId, split.entryId);
           // Shown joined at once, as the server has it, so a failed reload never leaves the gone part running.

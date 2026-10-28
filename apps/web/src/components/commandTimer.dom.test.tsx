@@ -296,6 +296,9 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     await act(async () => { fireEvent.click(confirm); });
     fireEvent.keyDown(screen.getByRole("slider", { hidden: true, name: "Split at" }), { key: "Escape" });
     expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).not.toBeNull();
+    const keep = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent === "Keep as one")!;
+    fireEvent.click(keep);
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).not.toBeNull();
     await act(async () => { finish?.({ ok: false, error: "Offline" }); });
   });
 

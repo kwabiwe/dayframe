@@ -127,6 +127,12 @@ describe("POST /api/time-entries", () => {
     expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
       { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: undefined, clientCommandId: undefined, source: "mobile_app" }, session);
 
+    // A repeat is answered with both blocks as they are now too, so the client reads whether the part runs.
+    mocks.splitFinishedEntry.mockResolvedValueOnce({ id: entryId, newEntryId: splitEntryId, replayed: true });
+    const replay = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true, entries: [expect.objectContaining({ id: entryId }), expect.anything()] });
+
     mocks.joinSplitEntries.mockResolvedValue({ id: entryId, replayed: false, running: true });
     const join = await POST(new Request("http://localhost/api/time-entries", {
       method: "POST",
