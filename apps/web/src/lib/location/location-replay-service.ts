@@ -156,13 +156,15 @@ export async function replayLocationEvidence(
   // Readings ingest stored as rejected for being too broad (positions dropped) still show the phone was
   // seen: their times, never their positions, keep a trip's silence from reading as Underground (location
   // v4 step 7, Codex r3 on #563).
-  const broadResult = await client.query<{ occurredAt: Date | string }>(
-    `select occurred_at as "occurredAt"
+  // Every such reading, whatever its accuracy, also shows a silence was no still silence (card J, Codex r2
+  // on #601); only those better than cell-only count as the phone seen on a trip.
+  const broadResult = await client.query<{ occurredAt: Date | string; observed: boolean }>(
+    `select occurred_at as "occurredAt", coalesce(horizontal_accuracy_m < $6, false) as "observed"
      from location_evidence
      where workspace_id = $1 and user_id = $2 and device_id = $3
        and algorithm_version = $4 and accepted = false and rejection_reason = 'accuracy_too_broad'
        and evidence_type in ('standard_location', 'significant_change') and is_simulated is not true
-       and horizontal_accuracy_m < $6 and expires_at > $5::timestamptz
+       and expires_at > $5::timestamptz
      order by occurred_at`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
       LOCATION_ENGINE_V2_CONFIG.tripUnseenObservedAccuracyMeters]
@@ -232,7 +234,8 @@ export async function replayLocationEvidence(
     acceptedLearnedPlaces: places.learnedPlaces,
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
     processingAt: options.processingAt,
-    broadReadingTimes: (broadResult.rows ?? []).map((row) => new Date(row.occurredAt).getTime())
+    broadReadingTimes: (broadResult.rows ?? []).filter((row) => row.observed !== false).map((row) => new Date(row.occurredAt).getTime()),
+    rejectedReadingTimes: (broadResult.rows ?? []).map((row) => new Date(row.occurredAt).getTime())
   });
   observeLocationTiming(options, "engine_computation", "completed");
 
@@ -245,16 +248,28 @@ export async function replayLocationEvidence(
     : new Set<string>();
   observeLocationTiming(options, "protected_replacement_checks", "started");
   // What the person set on their timeline (location v4 step 11) wins over what the engine derived again. It is
-  // applied before decided history is protected as well as after: a place they weren't at, or a trip they didn't
+  // applied once, in order, before decided history is protected: a place they weren't at, or a trip they didn't
   // take, joined items that decided history (the one trip or stay, once logged) now stands for, so protection
-  // must see the joined day, not the engine's parts of it (Codex r3 on #603). Applying again after protection is
-  // a no-op for what already applied and covers segments protection rebuilt.
+  // must see the joined day, not the engine's parts of it (Codex r3 on #603). Only the trips protection rebuilt
+  // inside decided stays, which that pass never saw, have the corrections applied to them afterwards; applying
+  // them again to the whole day would undo the order they were made in (Codex r4 on #603).
   // Stays "I didn't leave" folded into another: the journey in progress from one leaves the one that stands for it.
   const joinedStayIds = new Map<string, string>();
   const corrected = await withTimelineCorrections(client, session, output.segmentUpserts, options.processingAt, joinedStayIds);
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, corrected, output.acceptedEvidence, places,
     output.broadReadingTimes);
-  const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt, joinedStayIds);
+  const seen = new Set<LocationSegment>(corrected);
+  // A corrected trip protection only clipped is corrected already: applying the corrections again would undo
+  // their order (Codex r6 on #603).
+  const rebuilt = protectedReplacement.segments.filter((segment) => !seen.has(segment) &&
+    !(segment.kind === "commute" && segment.shapedByCorrection));
+  const rebuiltCorrected = rebuilt.length
+    ? new Map((await withTimelineCorrections(client, session, rebuilt, options.processingAt)).map((segment) => [segment.clientSegmentId, segment]))
+    : null;
+  const segments = rebuiltCorrected
+    ? protectedReplacement.segments.flatMap((segment) => seen.has(segment) || (segment.kind === "commute" && segment.shapedByCorrection) ? [segment]
+      : rebuiltCorrected.has(segment.clientSegmentId) ? [rebuiltCorrected.get(segment.clientSegmentId)!] : [])
+    : protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
   const nextStayClientIds = segments
@@ -477,12 +492,14 @@ async function excludeProtectedReplacements(
   // keep an endpoint that decided history has moved: its qualified legs are
   // re-derived, and a trip with none is omitted rather than rebuilt without
   // its stops. Trips are identified by their stops, not by fallback legs.
+  // A trip a correction joined keeps its stops' ownership checks, but a moved end is only clipped, never
+  // derived again, so its stops don't stop it (Codex r6 on #603).
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
       !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
-      !(segment.stops?.length && movesEndpoint(segment))));
+      !(segment.stops?.length && !segment.shapedByCorrection && movesEndpoint(segment))));
   const kept = segments.flatMap((segment) => replaceable(segment)
-    ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
+    ? segment.kind === "commute" && (!segment.stops?.length || segment.shapedByCorrection) && movesEndpoint(segment)
       ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places, broadReadingTimes)
       : [segment]
     : segment.kind === "commute"
@@ -606,11 +623,33 @@ function rebuildLegWithinDecidedStops(
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
+  // A trip a correction joined or re-pointed is the person's: derivation would give it another identity and lose
+  // it, so it keeps its own, between the decided ends, with its legs clipped to them (Codex r5 on #603).
+  if (leg.shapedByCorrection) return [withinDecidedEnds(leg, from.stoppedAt, to.startedAt)].filter((trip): trip is CommuteSegment => trip != null);
   // A rebuilt journey gets legs over its new times (location v4 step 6).
   return withTripLegs(deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt, undefined, broadReadingTimes)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
+}
+
+/** A corrected trip between the decided ends it now has, its legs clipped to them; none once nothing is left. */
+export function withinDecidedEnds(trip: CommuteSegment, fromStoppedAt: string, toStartedAt: string): CommuteSegment | null {
+  const startMs = Math.max(Date.parse(trip.startedAt), Date.parse(fromStoppedAt));
+  const stopMs = Math.min(Date.parse(trip.stoppedAt), Date.parse(toStartedAt));
+  if (!(stopMs > startMs)) return null;
+  const legs = (trip.tripLegs ?? []).flatMap((leg) => {
+    const from = Math.max(startMs, Date.parse(leg.startedAt));
+    const to = Math.min(stopMs, Date.parse(leg.stoppedAt));
+    return to > from ? [{ ...leg, startedAt: new Date(from).toISOString(), stoppedAt: new Date(to).toISOString() }] : [];
+  });
+  return {
+    ...trip,
+    startedAt: new Date(startMs).toISOString(),
+    stoppedAt: new Date(stopMs).toISOString(),
+    gapDurationSeconds: Math.round((stopMs - startMs) / 1_000),
+    ...(trip.tripLegs ? { tripLegs: legs } : {})
+  };
 }
 
 /**
