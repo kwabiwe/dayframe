@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarPrototypePill } from "@/components/CalendarPrototype";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -574,6 +575,7 @@ export function TimeReviewViews({
             options={viewItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
             value={state.view}
           />
+          <CalendarPrototypePill />
         </div>
       </section>
       {dateLoadError || isDateLoading ? (

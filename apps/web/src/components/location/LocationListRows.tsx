@@ -8,6 +8,7 @@ import {
   legDetail,
   legModeLabel,
   type ClockFormat,
+  type DayframeGlyph,
   type LocationListRow,
   type LocationTimeline,
   type TimelinePlace,
@@ -192,10 +193,12 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
  * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
  * journey in progress. A place not in a block can be corrected (location v4 step 13).
  */
-export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
+export function LocationListRowView({ check, clock, nowMs, onCorrect, prototype = false, row }: {
   /** The row's "?" (location v4 step 14): whether its question is open, and the toggle. */
   check?: { expanded: boolean; onToggle: () => void };
   clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void;
+  /** The Calendar prototype's row (owner, 28 Oct 2026): one amber dot, the whole row opens it. */
+  prototype?: boolean;
   row: Exclude<LocationListRow, { kind: "check" }>;
 }) {
   if (row.kind === "open_trip") {
@@ -224,6 +227,35 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
   const span = timeSpan(row.fromMs, row.spanEndMs, open, clock);
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
+  if (prototype) {
+    const asking = Boolean(check && row.checkIds.length);
+    const opens = asking ? check!.onToggle : onCorrect && !place.blockIds.length ? () => onCorrect(place, label) : undefined;
+    const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
+      : DAYFRAME_APP_ICONS.places;
+    const notInBlock = row.unloggedSeconds >= 60 && row.unloggedSeconds < length - 59 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
+    const secondary = [row.faint ? null : notInBlock, place.setByYou ? "You set this" : null].filter(Boolean).join(" · ");
+    return (
+      <tr className={`timeline-list-row timeline-location-row align-middle is-prototype${row.faint ? " is-quiet" : ""}`} data-location-row={place.id}
+        data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
+        <td className="px-3 py-3" colSpan={2}>
+          <PrototypeRowButton asking={asking} checkKey={asking ? row.key : undefined} expanded={check?.expanded}
+            hint={asking ? (check!.expanded ? "Hides the question" : "Shows the question") : opens ? "Opens it to change the place or its times" : undefined}
+            label={`${label}, ${span}${asking ? ". Needs a look" : ""}${place.setByYou ? ". You set this" : ""}`} onPress={opens}>
+            <PrototypeMark asking={asking} glyph={glyph} quiet={row.faint} />
+            <span className="timeline-task-details">
+              <span className="timeline-task-primary-line">{row.faint ? <span>{label}</span> : <b>{label}</b>}</span>
+              {secondary ? <span className="timeline-location-secondary">{secondary}</span> : null}
+            </span>
+            <span className="tabular timeline-location-span">{span}</span>
+          </PrototypeRowButton>
+        </td>
+        <td className="tabular px-3 py-3 timeline-list-duration">
+          <div className="timeline-list-duration-content">{row.faint && notInBlock ? <span className="timeline-location-note">{notInBlock}</span> : formatDuration(length)}</div>
+        </td>
+        <td className="px-3 py-3" />
+      </tr>
+    );
+  }
   const correct = (onCorrect && !place.blockIds.length) || (check && row.checkIds.length) ? (
     <div className="timeline-list-actions">
       {check && row.checkIds.length ? <CheckToggle checkKey={row.key} expanded={check.expanded} label={label} onToggle={check.onToggle} /> : null}
@@ -274,6 +306,32 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
       <td className="tabular px-3 py-3 timeline-list-duration"><div className="timeline-list-duration-content">{formatDuration(length)}</div></td>
       <td className="px-3 py-3">{correct}</td>
     </tr>
+  );
+}
+
+/**
+ * Calendar prototype (owner, 28 Oct 2026, concern 1): a location row's mark is its normal icon in the usual
+ * filled square, with one small amber dot when it asks something. No outline, no second "?" box.
+ */
+export function PrototypeMark({ asking, glyph, quiet = false }: { asking: boolean; glyph: DayframeGlyph; quiet?: boolean }) {
+  return (
+    <span aria-hidden="true" className={`timeline-location-mark is-prototype${quiet ? " is-faint" : ""}`}>
+      <DayframeIcon glyph={glyph} size={16} />
+      {asking ? <span className="timeline-location-dot" /> : null}
+    </span>
+  );
+}
+
+/** The whole row is the control: it opens its question (or, with none, the place or trip itself). */
+export function PrototypeRowButton({ asking, checkKey, children, expanded, hint, label, onPress }: {
+  asking: boolean; checkKey?: string; children: ReactNode; expanded?: boolean; hint?: string; label: string; onPress?: () => void;
+}) {
+  if (!onPress) return <div aria-label={label} className="timeline-location-hit" role="group">{children}</div>;
+  return (
+    <button aria-expanded={asking ? Boolean(expanded) : undefined} aria-label={label} className="timeline-location-hit" data-check-key={checkKey}
+      data-tip={hint} onClick={onPress} type="button">
+      {children}
+    </button>
   );
 }
 
@@ -394,13 +452,17 @@ function LegButton({ children, label, onPress }: { children: ReactNode; label: s
 const TRIP_LEGS_MOTION_MS = 220;
 
 /** "Show Home and every place" under the List. */
-export function ShowEveryPlaceToggle({ onToggle, pressed }: { onToggle: () => void; pressed: boolean }) {
+export function ShowEveryPlaceToggle({ onShowColumn, onToggle, pressed, prototype = false }: {
+  /** Card F (prototype, wide web): brings the "Places and trips" column back. */
+  onShowColumn?: () => void; onToggle: () => void; pressed: boolean; prototype?: boolean;
+}) {
   return (
     <div className="timeline-location-foot">
       {/* A secondary text button is text only (web buttons rule W10). */}
       <button aria-pressed={pressed} className="timeline-location-chip" onClick={onToggle} type="button">
-        {pressed ? "Hide Home and logged places" : "Show Home and every place"}
+        {prototype ? pressed ? "Show fewer places" : "Show all places" : pressed ? "Hide Home and logged places" : "Show Home and every place"}
       </button>
+      {onShowColumn ? <button className="timeline-location-chip" onClick={onShowColumn} type="button">Show places beside the List</button> : null}
     </div>
   );
 }

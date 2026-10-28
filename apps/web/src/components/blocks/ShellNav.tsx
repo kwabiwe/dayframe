@@ -10,8 +10,22 @@ function reviewLabel(count: number) {
   return `Review, ${count} to review`;
 }
 
-function checkLabel(count: number) {
-  return `Calendar, ${count} to check`;
+function checkLabel(count: number, prototype?: NavPrototype) {
+  return prototype ? `Calendar, ${count} to check in the last 7 days. Opens the oldest.` : `Calendar, ${count} to check`;
+}
+
+/**
+ * Calendar prototype (owner, 28 Oct 2026): Review leaves the navigation (step 15), and while something is to
+ * check, Calendar opens its oldest question (concern 4).
+ */
+export type NavPrototype = { hideReview: boolean; calendarHref?: string };
+
+function sectionsFor(prototype?: NavPrototype) {
+  return prototype?.hideReview ? SHELL_SECTIONS.filter((section) => section.id !== "review") : SHELL_SECTIONS;
+}
+
+function hrefFor(section: (typeof SHELL_SECTIONS)[number], prototype?: NavPrototype) {
+  return section.id === "calendar" && prototype?.calendarHref ? prototype.calendarHref : section.href;
 }
 
 /**
@@ -20,8 +34,9 @@ function checkLabel(count: number) {
  * (which retargets from wherever it is when the route changes again), and Reduce Motion moves it
  * without travel. Pages outside the five sections (Settings) fade the thumb out.
  */
-export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
+export function ShellSidebarNav({ activeId, checkCount = 0, prototype, reviewCount }: {
   activeId: ShellSectionId | null;
+  prototype?: NavPrototype;
   /** Things to check today and the 7 days before, on Calendar (location v4 step 14). */
   checkCount?: number;
   reviewCount: number;
@@ -71,16 +86,16 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
   return (
     <nav ref={navRef} className="df-nav" aria-label="Main navigation">
       <span ref={thumbRef} className="df-nav-thumb" aria-hidden="true" />
-      {SHELL_SECTIONS.map((section) => {
+      {sectionsFor(prototype).map((section) => {
         const active = section.id === activeId;
         const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
-            href={section.href}
+            href={hrefFor(section, prototype)}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
+            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count, prototype) : reviewLabel(count)) : undefined}
           >
             <DayframeIcon glyph={section.glyph} size={19} />
             <span>{section.label}</span>
@@ -93,18 +108,20 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
 }
 
 /** Below 860 px the sections move to a glass bar along the bottom edge. */
-export function ShellTabBar({ activeId, checkCount = 0, reviewCount }: { activeId: ShellSectionId | null; checkCount?: number; reviewCount: number }) {
+export function ShellTabBar({ activeId, checkCount = 0, prototype, reviewCount }: {
+  activeId: ShellSectionId | null; checkCount?: number; prototype?: NavPrototype; reviewCount: number;
+}) {
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
-      {SHELL_SECTIONS.map((section) => {
+      {sectionsFor(prototype).map((section) => {
         const active = section.id === activeId;
         const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
-            href={section.href}
+            href={hrefFor(section, prototype)}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
+            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count, prototype) : reviewLabel(count)) : undefined}
           >
             <span className="df-tab-icon">
               <DayframeIcon glyph={section.glyph} size={22} />

@@ -72,7 +72,12 @@ export function uncoveredSeconds(fromMs: number, toMs: number, intervals: readon
  * faint only with `showAll`. Superseded and ignored items never show.
  */
 export function locationListRows(timeline: LocationTimeline | null, entries: readonly Interval[],
-  options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[] }) {
+  options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[];
+    /**
+     * Calendar prototype (owner, 28 Oct 2026, concern 2): a place whose time your blocks cover is never a row,
+     * even with "Show all places"; the block's place line stands for it. A place with a "?" still shows.
+     */
+    hideCovered?: boolean }) {
   if (!timeline) return [];
   // A check about a place shows on its row (which then always shows); any other check is a row of its own.
   const placeIds = new Set(timeline.items.flatMap((item) => item.kind === "place" ? [item.id] : []));
@@ -97,7 +102,7 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     if ((!known && unlogged) || checkIds.length) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
         faint: false, checkIds });
-    } else if (options.showAll) {
+    } else if (options.showAll && !(options.hideCovered && unloggedSeconds < 60)) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
         faint: true, checkIds });
     }
@@ -153,4 +158,30 @@ export function legDetail(leg: TripLeg) {
     ? leg.mode === "underground" ? "no GPS underground, guessed from the gap" : "no GPS for this leg"
     : null;
   return [km, how, leg.confidence === "likely" ? "likely" : null].filter(Boolean).join(" · ");
+}
+
+/**
+ * Calendar prototype (owner, 28 Oct 2026, concern 4): a "?" asks for 7 days — today and the 6 days before.
+ * The badge, the chips and the reminder count only these; an older one stops asking (no dot, not counted) and
+ * its place stays an ordinary row you can still correct. Nothing is answered for you.
+ */
+export const CHECK_ASKING_DAYS = 7;
+
+/** The start of the asking window: local midnight of the day 6 days before `todayStartMs`'s day. */
+export function checkAskingStartMs(todayStartMs: number) {
+  const start = new Date(todayStartMs);
+  start.setDate(start.getDate() - (CHECK_ASKING_DAYS - 1));
+  start.setHours(0, 0, 0, 0);
+  return start.getTime();
+}
+
+/** Whether a check still asks: it ends (or, without an end, starts) inside the asking window. */
+export function checkStillAsks(check: Pick<ListCheck, "startedAt" | "stoppedAt">, askingStartMs: number) {
+  const endMs = Date.parse(check.stoppedAt ?? check.startedAt ?? "");
+  return Number.isFinite(endMs) && endMs > askingStartMs;
+}
+
+/** Checks in the order the badge and "N to check" step through them: oldest first, across days. */
+export function checksOldestFirst<T extends Pick<ListCheck, "id" | "startedAt">>(checks: readonly T[]) {
+  return [...checks].sort((a, b) => (Date.parse(a.startedAt ?? "") || 0) - (Date.parse(b.startedAt ?? "") || 0) || a.id.localeCompare(b.id));
 }

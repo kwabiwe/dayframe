@@ -50,7 +50,10 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
-import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { useCalendarPrototype, useLocalDayStartMs, useMediaQuery } from "@/components/CalendarPrototype";
+import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-prototype";
+import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
@@ -324,7 +327,26 @@ export function EntriesTable({
   // empty list; the rows appear once the page has hydrated, without motion (React #418).
   const localTimeReady = useIsHydrated();
   const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
-  const [showEveryPlace, setShowEveryPlace] = useState(false);
+  // Calendar prototype (owner, 28 Oct 2026): "Show all places" is remembered on this device (concern 3). The List's
+  // location rows draw only after hydration, so reading storage on the first client render is safe.
+  const prototype = useCalendarPrototype();
+  const [showEveryPlace, setShowEveryPlaceState] = useState(() => prototype && typeof window !== "undefined"
+    ? readStoredFlag(SHOW_ALL_PLACES_STORAGE_KEY, false) : false);
+  // Card F (prototype): on wide web a "Places and trips" column sits beside the blocks, remembered on this device.
+  const [placesColumn, setPlacesColumnState] = useState(() => typeof window === "undefined" || readStoredFlag(PLACES_COLUMN_STORAGE_KEY, true));
+  const wide = useMediaQuery("(min-width: 1200px)");
+  const setPlacesColumn = (next: boolean) => {
+    setPlacesColumnState(next);
+    storeFlag(PLACES_COLUMN_STORAGE_KEY, next);
+  };
+  const columnShown = prototype && wide && placesColumn && localTimeReady;
+  // The day at the top of the List, whose places the column shows.
+  const [columnDayStartMs, setColumnDayStartMs] = useState<number | null>(null);
+  const setShowEveryPlace = (update: (current: boolean) => boolean) => setShowEveryPlaceState((current) => {
+    const next = update(current);
+    if (prototype) storeFlag(SHOW_ALL_PLACES_STORAGE_KEY, next);
+    return next;
+  });
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
@@ -338,6 +360,13 @@ export function EntriesTable({
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
   const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  // Calendar prototype (concern 4): only "?" from today and the 6 days before ask; an older one's place stays a
+  // plain row. The chip counts and steps through all of them, oldest first, across days.
+  const todayStartMs = useLocalDayStartMs();
+  const askingStartMs = todayStartMs === null ? null : checkAskingStartMs(todayStartMs);
+  const shownChecks = useMemo(() => prototype && askingStartMs !== null ? listChecks.checks.filter((check) => checkStillAsks(check, askingStartMs)) : listChecks.checks,
+    [askingStartMs, listChecks.checks, prototype]);
+  const askingOrder = useMemo(() => checksOldestFirst(shownChecks), [shownChecks]);
   // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
   // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setOpenCheck] = useState<string | null>(null);
@@ -369,7 +398,7 @@ export function EntriesTable({
       .map((timeline) => ({
         dayStartMs: Date.parse(timeline.dayStart),
         dayLabel: formatDate(timeline.dayStart),
-        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks })
+        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace && !columnShown, checks: shownChecks, hideCovered: prototype })
       }))
       .sort((a, b) => b.dayStartMs - a.dayStartMs);
     const onPlace = new Set<string>();
@@ -400,7 +429,7 @@ export function EntriesTable({
       }
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
-  }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
+  }, [columnShown, dayTimelines, entries, localTimeReady, nowMs, prototype, shownChecks, showEveryPlace]);
   // A trip read on two days (it spans midnight): the freshest copy wins. `locationTimelines` come in
   // read order (oldest read first), so the last one read is last here (Codex r2, r5 on #584).
   const tripByBlock = useMemo(
@@ -462,6 +491,17 @@ export function EntriesTable({
       : null;
   };
   const anchorFrameRef = useRef<number | null>(null);
+  /** Card F: the column follows the day whose heading is at (or last passed) the top of the List. */
+  const trackColumnDay = () => {
+    const root = listScrollRef.current;
+    if (!root) return;
+    const top = root.getBoundingClientRect().top + 48;
+    const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
+    const passed = headings.filter((heading) => heading.getBoundingClientRect().top <= top);
+    const heading = passed[passed.length - 1] ?? headings[0];
+    const dayStart = heading ? Number(heading.dataset.dayStartMs) : NaN;
+    if (Number.isFinite(dayStart)) setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
+  };
   useEffect(() => () => {
     if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current);
   }, []);
@@ -517,8 +557,34 @@ export function EntriesTable({
     return id ? listChecks.itemsById.get(id) : undefined;
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
+  /** Opens a "?" by its row and brings the row into view. */
+  const openCheckRow = (next: LocationListRow) => {
+    const nextId = checkOf(next)!.id;
+    applyTimelineRegroup(() => setFocusedCheck(nextId));
+    const anchor = next.kind === "place" ? next.place.id : next.key;
+    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
+      .find((element) => element.dataset.locationRow === anchor)
+      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+    return nextId;
+  };
+  /**
+   * Calendar prototype (concern 4): "N to check" steps oldest first through every "?" that still asks, across
+   * days. A "?" on a day the List hasn't loaded opens that day (the List then opens it, see `check=` below).
+   */
+  const nextAskingCheck = () => {
+    if (!askingOrder.length) return null;
+    const at = askingOrder.findIndex((check) => check.id === focusedCheck);
+    const next = askingOrder[(at + 1) % askingOrder.length];
+    const row = checkRows.find((other) => checkOf(other)?.id === next.id);
+    if (row) return openCheckRow(row);
+    const day = new Date(next.startedAt ?? nowMs);
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    router.push(`/timeline?view=list&scope=day&date=${key}&check=${encodeURIComponent(next.id)}`);
+    return next.id;
+  };
   /** "N to check": the next "?" down the List opens, and comes into view. Returns its suggestion's id. */
   const nextCheck = () => {
+    if (prototype) return nextAskingCheck();
     if (!checkRows.length) return null;
     const at = checkRows.findIndex((row) => checkOf(row)?.id === focusedCheck);
     const next = checkRows[(at + 1) % checkRows.length];
@@ -540,8 +606,8 @@ export function EntriesTable({
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
-          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
-          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
+          ? item && check ? <CheckRowView check={check} clock={clock} item={item} prototype={prototype} row={row} /> : null
+          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} prototype={prototype} row={row} />}
         {item && expanded ? (
           <CheckQuestionRow clock={clock} item={item}
             editor={editingCheck === item.id ? (
@@ -618,14 +684,18 @@ export function EntriesTable({
   });
   // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
   // (location v4 step 14), once per visit.
-  const openFirstCheck = searchParams.get("check") === "first";
-  const openedFromLink = useRef(false);
+  const checkParam = searchParams.get("check");
+  const openFirstCheck = checkParam === "first";
+  // Calendar prototype: the badge and the chip link to one "?" by its id (concern 4); it opens once its row is in.
+  const linkedCheckRow = prototype && checkParam && !openFirstCheck ? checkRows.find((row) => checkOf(row)?.id === checkParam) : undefined;
+  const openedFromLink = useRef<string | null>(null);
   useEffect(() => {
-    if (!openFirstCheck || openedFromLink.current || !checkRows.length) return;
+    if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
+    if (!openFirstCheck && !linkedCheckRow) return;
     const frame = requestAnimationFrame(() => {
-      openedFromLink.current = true;
+      openedFromLink.current = checkParam;
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
-      const opened = nextCheck();
+      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : nextCheck();
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
@@ -1150,6 +1220,7 @@ export function EntriesTable({
       ) : null}
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
+      <div className={`timeline-list-body${columnShown ? " has-places-column" : ""}`}>
       <div
         aria-busy={localTimeReady && !continuousLoading ? undefined : true}
         className="timeline-list-scroll"
@@ -1169,6 +1240,7 @@ export function EntriesTable({
             anchorFrameRef.current = requestAnimationFrame(() => {
               anchorFrameRef.current = null;
               recordScrollAnchor();
+              if (columnShown) trackColumnDay();
             });
           }
           onScroll(event);
@@ -1180,7 +1252,7 @@ export function EntriesTable({
           scrollContainerRef(element);
         }}
       >
-        {localTimeReady ? <ChecksChip count={checkRows.length} onNext={nextCheck} /> : null}
+        {localTimeReady ? <ChecksChip count={prototype ? askingOrder.length : checkRows.length} onNext={nextCheck} prototype={prototype} /> : null}
         {continuous && localTimeReady ? (
           <ContinuousEdge direction="later" error={continuousError === "later"} loading={continuousLoading === "later"}
             onRetry={() => continuous.onLoad("later")} reachedEnd={continuous.reachedLatest} sentinelRef={laterSentinelRef} />
@@ -1481,8 +1553,9 @@ export function EntriesTable({
           <ContinuousEdge direction="earlier" error={continuousError === "earlier"} loading={continuousLoading === "earlier"}
             onRetry={() => continuous.onLoad("earlier")} reachedEnd={continuous.reachedEarliest} sentinelRef={earlierSentinelRef} />
         ) : null}
-        {localTimeReady && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
-          <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
+        {localTimeReady && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
+          <ShowEveryPlaceToggle onShowColumn={prototype && wide ? () => setPlacesColumn(true) : undefined}
+            onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} prototype={prototype} />
         ) : null}
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
@@ -1490,6 +1563,22 @@ export function EntriesTable({
             message={listChecks.state.notice.label} onAction={listChecks.undo}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
+      </div>
+      {columnShown ? (() => {
+        const dayStart = columnDayStartMs ?? continuous?.focusDayStartMs ?? (dayTimelines[0] ? Date.parse(dayTimelines[0].dayStart) : null);
+        const timeline = dayTimelines.find((candidate) => Date.parse(candidate.dayStart) === dayStart) ?? null;
+        const askingBySegment = new Map(shownChecks.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []));
+        return (
+          <PlacesColumn askingBySegment={askingBySegment} blocks={entries} clock={clock} nowMs={nowMs}
+            onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
+            onHide={() => setPlacesColumn(false)}
+            onOpenCheck={(checkId) => {
+              const row = checkRows.find((other) => checkOf(other)?.id === checkId);
+              if (row) openCheckRow(row);
+            }}
+            timeline={timeline} />
+        );
+      })() : null}
       </div>
       {correction ? (
         <LocationCorrectionDialog clock={clock} onClose={() => setCorrection(null)}

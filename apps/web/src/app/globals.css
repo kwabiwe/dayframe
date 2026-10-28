@@ -14405,6 +14405,253 @@ dialog.ui-dialog.df-palette {
   color: var(--surface);
 }
 
+/* Calendar prototype (owner, 28 Oct 2026): one signal per row. A location row's mark is its normal icon in
+   the usual filled square; a row that asks something adds one amber dot at the mark's corner (concern 1).
+   The whole row is the control, so there is no second "?" box. */
+.timeline-location-mark.is-prototype {
+  position: relative;
+}
+
+.timeline-location-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.timeline-location-hit {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.timeline-location-hit {
+  cursor: pointer;
+}
+
+button.timeline-location-hit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.timeline-location-span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.timeline-location-row.is-quiet .timeline-task-primary-line {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.timeline-location-row.is-quiet .timeline-location-mark {
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .timeline-location-row.is-prototype:has(button.timeline-location-hit:hover) {
+    background: var(--surface-muted);
+  }
+}
+
+/* The prototype's "N to check" stays in view while the List scrolls across days (concern 4). */
+.timeline-checks-bar.is-sticky {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  height: 0;
+  overflow: visible;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.timeline-checks-bar.is-sticky .timeline-checks-chip {
+  margin-top: 6px;
+  box-shadow: 0 4px 14px color-mix(in oklab, black 18%, transparent);
+}
+
+/* Card F (prototype): on wide web the List and a "Places and trips" column sit side by side. */
+.timeline-list-body {
+  display: contents;
+}
+
+.timeline-list-body.has-places-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.timeline-places-column {
+  display: flex;
+  width: 320px;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.timeline-places-column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  background: var(--surface);
+}
+
+.timeline-places-column-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.timeline-places-column-head small,
+.timeline-places-column-item small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.timeline-location-chip.is-compact {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.timeline-places-column-empty {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.timeline-places-column-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 8px 16px;
+  list-style: none;
+}
+
+.timeline-places-column-item {
+  border-radius: 12px;
+  padding: 6px 8px;
+}
+
+.timeline-places-column-item .timeline-location-hit {
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.timeline-places-column-item b {
+  font-size: 13.5px;
+}
+
+@media (hover: hover) {
+  .timeline-places-column-item:has(> button.timeline-location-hit:hover) {
+    background: var(--surface-muted);
+  }
+}
+
+.timeline-places-column-legs {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0 48px;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-places-column-leg {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-places-column-leg:hover {
+  background: var(--surface-muted);
+}
+
+.timeline-places-column-leg.is-unsure {
+  color: var(--warning-text);
+}
+
+/* The prototype pill shares the toolbar row; on phones the row wraps rather than crowding the switches. */
+@media (max-width: 560px) {
+  .timeline-range-controls:has(.calendar-prototype-pill) {
+    flex-wrap: wrap;
+  }
+
+  .calendar-prototype-pill {
+    min-height: 44px;
+    margin-left: auto;
+  }
+}
+
+/* The "Prototype on/off" pill in the Calendar header (staging and local only). */
+.calendar-prototype-pill {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.calendar-prototype-pill.is-on {
+  background: color-mix(in oklab, var(--info, #3b82f6) 14%, var(--surface));
+  color: var(--text-primary, var(--foreground));
+}
+
+/* A part of the prototype that can't work yet says so, visibly. */
+.calendar-prototype-not-real {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-secondary) 14%, transparent) 0 4px, transparent 4px 8px);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 /* A leg whose mode can be set is one button laid out as the leg (location v4 step 13). */
 .timeline-trip-leg-button {
   display: grid;

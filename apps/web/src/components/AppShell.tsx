@@ -18,6 +18,8 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { useCalendarPrototype, useLocalDayStartMs } from "@/components/CalendarPrototype";
+import { askingChecks, oldestCheckHref } from "@/lib/calendar-prototype-checks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -93,7 +95,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // Review cards: an outing counts once (PRD D19, PR 12c).
   const reviewCount = data?.stats.reviewCardCount ?? 0;
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
-  const checkCount = data?.stats.checkCount ?? 0;
+  const serverCheckCount = data?.stats.checkCount ?? 0;
+  // Calendar prototype (concern 4): the badge counts the "?" that still ask (today and the 6 days before), in
+  // the viewer's own days, and opens the oldest one; Review leaves the navigation (step 15).
+  const prototype = useCalendarPrototype();
+  const todayStartMs = useLocalDayStartMs();
+  const prototypeChecks = useMemo(() => prototype && todayStartMs !== null && data ? askingChecks(data.reviewItems, todayStartMs) : null,
+    [data, prototype, todayStartMs]);
+  const checkCount = prototypeChecks ? prototypeChecks.length : prototype ? 0 : serverCheckCount;
+  const navOptions = prototype ? { hideReview: true, calendarHref: prototypeChecks?.length ? oldestCheckHref(prototypeChecks) : undefined } : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -266,7 +276,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} prototype={navOptions} reviewCount={reviewCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -337,7 +347,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} prototype={navOptions} reviewCount={reviewCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

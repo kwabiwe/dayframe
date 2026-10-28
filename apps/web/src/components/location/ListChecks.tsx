@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
-import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
+import { CheckToggle, PrototypeMark, PrototypeRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
 import { formatDuration, formatTime } from "@/lib/format";
@@ -149,11 +149,13 @@ export function useListChecks({
 }
 
 /** "3 to check" at the top of the day's List: each press moves to the next "?" and opens its question. */
-export function ChecksChip({ count, onNext }: { count: number; onNext: () => void }) {
+export function ChecksChip({ count, onNext, prototype = false }: { count: number; onNext: () => void; prototype?: boolean }) {
   if (!count) return null;
   return (
-    <div className="timeline-checks-bar">
-      <button className="timeline-checks-chip" data-tip="Go to the next one" onClick={onNext} type="button">
+    <div className={`timeline-checks-bar${prototype ? " is-sticky" : ""}`}>
+      {/* Calendar prototype (concern 4): every "?" from the last 7 days, oldest first, across days. */}
+      <button aria-label={prototype ? `${count} to check, oldest first` : undefined} className="timeline-checks-chip"
+        data-tip={prototype ? "Go to the next one, oldest first" : "Go to the next one"} onClick={onNext} type="button">
         <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
         {count} to check
       </button>
@@ -235,14 +237,43 @@ export function CheckQuestionRow({
 }
 
 /** A "?" with no place row: a trip not yet in a block, Apple Health, or another suggestion, at its time. */
-export function CheckRowView({ check, clock, item, row }: {
+export function CheckRowView({ check, clock, item, prototype = false, row }: {
   check: { expanded: boolean; onToggle: () => void };
   clock: ClockFormat;
   item: ReviewItemRow;
+  prototype?: boolean;
   row: Extract<LocationListRow, { kind: "check" }>;
 }) {
   const span = reviewWindow(item);
   const title = reviewTitle(item);
+  if (prototype) {
+    // Calendar prototype (concern 1): its own icon (a trip's route, Apple Health's heart, a place's pin) with the
+    // amber dot; the whole row opens its question.
+    const picture = reviewPicture(item);
+    const glyph = picture === "commute" ? DAYFRAME_APP_ICONS.openTrip : picture === "sleep" || picture === "workout"
+      ? DAYFRAME_APP_ICONS.sourceHealth : DAYFRAME_APP_ICONS.places;
+    const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : "";
+    return (
+      <tr className="timeline-list-row timeline-location-row align-middle is-prototype" data-location-row={row.key} data-suggestion-id={item.id}>
+        <td className="px-3 py-3" colSpan={2}>
+          <PrototypeRowButton asking checkKey={row.key} expanded={check.expanded} hint={check.expanded ? "Hides the question" : "Shows the question"}
+            label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={check.onToggle}>
+            <PrototypeMark asking glyph={glyph} />
+            <span className="timeline-task-details">
+              <span className="timeline-task-primary-line"><b>{title}</b></span>
+              {row.trip?.legs.length ? <TripModesLine legs={row.trip.legs} route={row.trip.route} />
+                : <span className="timeline-location-secondary">{reviewSourceLabel(picture)}</span>}
+            </span>
+            <span className="tabular timeline-location-span">{when}</span>
+          </PrototypeRowButton>
+        </td>
+        <td className="tabular px-3 py-3 timeline-list-duration">
+          <div className="timeline-list-duration-content">{span ? formatDuration(Math.round((span.stopMs - span.startMs) / 1000)) : null}</div>
+        </td>
+        <td className="px-3 py-3" />
+      </tr>
+    );
+  }
   return (
     <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={row.key} data-suggestion-id={item.id}>
       <td className="px-3 py-3">

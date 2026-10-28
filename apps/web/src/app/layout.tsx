@@ -10,6 +10,8 @@ import { AppShell } from "@/components/AppShell";
 import { ClockFormatProvider } from "@/components/ClockFormat";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 import { CLOCK_FORMAT_COOKIE, clockFormatFromCookieValue } from "@/lib/clock-format";
+import { CalendarPrototypeProvider } from "@/components/CalendarPrototype";
+import { CALENDAR_PROTOTYPE_COOKIE, calendarPrototypeOn } from "@/lib/calendar-prototype";
 
 // Bricolage Grotesque (SIL OFL, `fonts/BricolageGrotesque-OFL.txt`) is bundled and self-hosted:
 // it is the Blocks display face for titles, the timer and large totals only.
@@ -34,7 +36,10 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await getOptionalPageSession();
   // The browser's 12/24-hour format from its last visit, so the first paint matches it.
-  const serverClockFormat = clockFormatFromCookieValue((await cookies()).get(CLOCK_FORMAT_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const serverClockFormat = clockFormatFromCookieValue(cookieStore.get(CLOCK_FORMAT_COOKIE)?.value);
+  // The Calendar prototype (staging and local only), decided once so the server render and first paint agree.
+  const calendarPrototype = calendarPrototypeOn(cookieStore.get(CALENDAR_PROTOTYPE_COOKIE)?.value);
 
   return (
     <html lang="en" className={displayFont.variable} suppressHydrationWarning>
@@ -48,9 +53,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           }}
         />
         <ClockFormatProvider serverFormat={serverClockFormat}>
-          <Suspense fallback={<AppLoadingState />}>
-            {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
-          </Suspense>
+          <CalendarPrototypeProvider on={calendarPrototype}>
+            <Suspense fallback={<AppLoadingState />}>
+              {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
+            </Suspense>
+          </CalendarPrototypeProvider>
         </ClockFormatProvider>
       </body>
     </html>
