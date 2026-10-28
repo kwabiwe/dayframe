@@ -58,6 +58,7 @@ import { locationSyncChangedDashboard } from "@/lib/location/locationSyncChange"
 import { drainNativeShortcutQueue } from "@/lib/shortcuts";
 import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
 import { synchroniseTimeEntryCommands } from "@/lib/timeEntryOutbox";
+import { synchroniseTimelineCorrections } from "@/lib/timelineCorrectionOutbox";
 import {
   beginTimerBackgroundExecution,
   endAllTimerBackgroundExecution,
@@ -392,6 +393,23 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
             }
             const result=await synchroniseReviewMutations();changed ||= result.acknowledgedCount>0;
             return reviewConnectivityRecoveryStepResult(result);
+          }
+        },
+        {
+          // Location timeline corrections (step 12), in the Review lane: foreground-owned, sent in order.
+          name: "timeline_corrections",
+          run: async () => {
+            if(!due.has("review"))return "continue";
+            const result = await synchroniseTimelineCorrections({
+              owner,
+              force: !context?.dueOnly,
+              // Checked before each send: a pass that runs on when the app leaves sends nothing more.
+              isForeground: () => AppState.currentState === "active"
+            });
+            changed ||= result.deliveredCount>0||result.refused.length>0;
+            if (result.reason === "authentication_required" || result.reason === "session_changed") throw new AuthRequiredError();
+            if (result.reason === "retryable_failure") return "transport_failure";
+            return result.waitingCount > 0 ? "application_failure" : "continue";
           }
         },
         {

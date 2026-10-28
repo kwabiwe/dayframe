@@ -1,6 +1,8 @@
 import {
   LOCATION_ENGINE_V2_CONFIG,
   LocationReviewEvidenceDtoSchema,
+  TimelineItemEvidenceDtoSchema,
+  type TimelineItemEvidenceDto,
   MotionTravelModeSchema,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
@@ -9,10 +11,11 @@ import type { RequestSession } from "../session";
 import { placeDisplayNameSql } from "../place-display";
 
 type ReviewSegmentRow = {
-  reviewItemId: string;
+  /** Null for a timeline item with no open Review item (step 12). */
+  reviewItemId: string | null;
   venuePlaceId?: string | null;
   suggestedVenuePlaceId?: string | null;
-  eventId: string;
+  eventId: string | null;
   title: string;
   notes: string | null;
   placeId: string | null;
@@ -121,18 +124,11 @@ export async function getLocationReviewEvidence(
   }
 }
 
-async function buildLocationReviewEvidence(
-  reviewItemId: string,
-  session: RequestSession,
-  timings: LocationEvidenceTimings
-): Promise<LocationReviewEvidenceDto> {
-  const reviewLookupStartedAt = Date.now();
-  const reviewResult = await query<ReviewSegmentRow>(
-    `select ri.id as "reviewItemId",
-            ri.event_id as "eventId",
-            ri.title,
-            ri.notes,
-            coalesce(st.place_id, cs.from_place_id) as "placeId",
+/**
+ * The segment columns the evidence is built from, for a Review item's segment (`st`, `cs`) or a timeline item's
+ * (step 12): place, times, bounds, centre, the trip's ends, stops and mode.
+ */
+const SEGMENT_COLUMNS = `coalesce(st.place_id, cs.from_place_id) as "placeId",
             ${placeDisplayNameSql("pl")} as "placeName",
             null::text as "addressSummary",
             coalesce(st.device_id, cs.device_id) as "deviceId",
@@ -153,15 +149,38 @@ async function buildLocationReviewEvidence(
             st.venue_place_id as "venuePlaceId",
             st.suggested_venue_place_id as "suggestedVenuePlaceId",
             coalesce(st.confidence, cs.confidence) as confidence,
-            coalesce(st.continuity_status, cs.continuity_status) as "continuityStatus",
-            coalesce(st.algorithm_version, cs.algorithm_version) as "algorithmVersion",
+            coalesce(st.continuity_status, cs.continuity_status, 'unknown') as "continuityStatus",
+            coalesce(st.algorithm_version, cs.algorithm_version, 'unknown') as "algorithmVersion",
             case when from_stay.centre is null then null else ST_X(from_stay.centre::geometry) end as "fromLongitude",
             case when from_stay.centre is null then null else ST_Y(from_stay.centre::geometry) end as "fromLatitude",
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
             case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
             cs.metadata->'stops' as "tripStops",
             cs.metadata->>'travelMode' as "travelMode",
-            coalesce(cs.metadata->>'qualificationReason' = 'same_place_outing', false) as "timeAway"
+            coalesce(cs.metadata->>'qualificationReason' = 'same_place_outing', false) as "timeAway"`;
+
+/** The trip's two stays and the place, scoped to the owner (`$1` workspace, `$2` user). */
+const SEGMENT_JOINS = `     left join stay_segments from_stay
+       on from_stay.id = cs.from_stay_segment_id
+      and from_stay.workspace_id = $1 and from_stay.user_id = $2
+     left join stay_segments to_stay
+       on to_stay.id = cs.to_stay_segment_id
+      and to_stay.workspace_id = $1 and to_stay.user_id = $2
+     left join places pl
+       on pl.id = coalesce(st.place_id, cs.from_place_id) and pl.workspace_id = $1`;
+
+async function buildLocationReviewEvidence(
+  reviewItemId: string,
+  session: RequestSession,
+  timings: LocationEvidenceTimings
+): Promise<LocationReviewEvidenceDto> {
+  const reviewLookupStartedAt = Date.now();
+  const reviewResult = await query<ReviewSegmentRow>(
+    `select ri.id as "reviewItemId",
+            ri.event_id as "eventId",
+            ri.title,
+            ri.notes,
+            ${SEGMENT_COLUMNS}
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -169,22 +188,85 @@ async function buildLocationReviewEvidence(
        on st.id = ri.location_segment_id and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
      left join commute_segments cs
        on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
-     left join stay_segments from_stay
-       on from_stay.id = cs.from_stay_segment_id
-      and from_stay.workspace_id = ri.workspace_id and from_stay.user_id = ri.user_id
-     left join stay_segments to_stay
-       on to_stay.id = cs.to_stay_segment_id
-      and to_stay.workspace_id = ri.workspace_id and to_stay.user_id = ri.user_id
-     left join places pl
-       on pl.id = coalesce(st.place_id, cs.from_place_id) and pl.workspace_id = ri.workspace_id
-     where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3
+     ${SEGMENT_JOINS}
+     where ri.id = $3 and ri.workspace_id = $1 and ri.user_id = $2
        and (st.id is not null or cs.id is not null)
      limit 1`,
-    [reviewItemId, session.workspaceId, session.userId]
+    [session.workspaceId, session.userId, reviewItemId]
   );
   timings.reviewLookupMs = Date.now() - reviewLookupStartedAt;
   const review = reviewResult.rows[0];
   if (!review) throw new LocationEvidenceNotFoundError("Location review evidence was not found.");
+  const dto = await assembleSegmentEvidence(review, session, timings);
+  const assemblyStartedAt = Date.now();
+  const parsed = LocationReviewEvidenceDtoSchema.parse(dto);
+  timings.assemblyMs = (timings.assemblyMs ?? 0) + Date.now() - assemblyStartedAt;
+  return parsed;
+}
+
+/**
+ * A timeline item's evidence (location v4 step 12): the map for the correction sheets, found by the item the
+ * timeline names (its client segment id; never a superseded segment), with no Review item needed. Its open
+ * Review item and event come along when it has them.
+ */
+export async function getTimelineItemEvidence(
+  itemId: string,
+  session: RequestSession,
+  /**
+   * Which item exactly: a client segment id is unique per device only, so the timeline's kind and start pick
+   * the one the person is looking at (Codex r1 on #599).
+   */
+  match: { kind: "place" | "trip"; startedAt: string }
+): Promise<TimelineItemEvidenceDto> {
+  const startedAt = Date.now();
+  const timings: LocationEvidenceTimings = {};
+  try {
+    const lookupStartedAt = Date.now();
+    const found = await query<ReviewSegmentRow>(
+      `select open_ri.id as "reviewItemId",
+              coalesce(st.created_from_event_id, cs.created_from_event_id) as "eventId",
+              case when st.id is not null
+                then coalesce(case when st.place_id is not null then ${placeDisplayNameSql("pl")} end, learned.name, 'Unknown place')
+                else 'Trip' end as title,
+              null::text as notes,
+              ${SEGMENT_COLUMNS}
+       from (select $3::text as item) wanted
+       left join stay_segments st
+         on $4::text = 'place' and st.workspace_id = $1 and st.user_id = $2 and st.client_segment_id = wanted.item
+        and st.status <> 'superseded' and st.started_at = $5::timestamptz
+       left join commute_segments cs
+         on $4::text = 'trip' and cs.workspace_id = $1 and cs.user_id = $2 and cs.client_segment_id = wanted.item
+        and cs.status <> 'superseded' and cs.started_at = $5::timestamptz
+       ${SEGMENT_JOINS}
+       left join learned_places learned on learned.id = st.learned_place_id and learned.workspace_id = $1
+       left join lateral (
+         select ri.id from review_items ri
+          where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = coalesce(st.id, cs.id) and ri.status = 'open'
+          order by ri.created_at desc
+          limit 1
+       ) open_ri on true
+       where st.id is not null or cs.id is not null
+       order by coalesce(st.updated_at, cs.updated_at) desc
+       limit 1`,
+      [session.workspaceId, session.userId, itemId, match.kind, match.startedAt]
+    );
+    timings.reviewLookupMs = Date.now() - lookupStartedAt;
+    const segment = found.rows[0];
+    if (!segment) throw new LocationEvidenceNotFoundError("That place or trip is no longer in your day.");
+    const dto = await assembleSegmentEvidence(segment, session, timings);
+    const result = TimelineItemEvidenceDtoSchema.parse({ ...dto, itemId });
+    timings.totalMs = Date.now() - startedAt;
+    logLocationEvidenceTiming(timings, result, null);
+    return result;
+  } catch (error) {
+    timings.totalMs = Date.now() - startedAt;
+    logLocationEvidenceTiming(timings, null, error);
+    throw error;
+  }
+}
+
+/** A segment's evidence for the map, whichever way it was found (a Review item, or a timeline item). */
+async function assembleSegmentEvidence(review: ReviewSegmentRow, session: RequestSession, timings: LocationEvidenceTimings) {
   const kind = review.stayId ? "stay" as const : "commute" as const;
   const centre = point(review.centreLongitude, review.centreLatitude);
   const [evidenceResult, rejectedResult, nearbyPlaces, venueHistory] = await Promise.all([
@@ -372,9 +454,8 @@ async function buildLocationReviewEvidence(
       stops
     )
   };
-  const parsed = LocationReviewEvidenceDtoSchema.parse(dto);
   timings.assemblyMs = Date.now() - assemblyStartedAt;
-  return parsed;
+  return dto;
 }
 
 /** How near a past stay must be for its picked venue to count as "picked here before" (design §8 cell). */
@@ -416,7 +497,7 @@ async function timedPhase<K extends keyof LocationEvidenceTimings, T>(
 
 function logLocationEvidenceTiming(
   timings: LocationEvidenceTimings,
-  evidence: LocationReviewEvidenceDto | null,
+  evidence: Pick<LocationReviewEvidenceDto, "segment" | "map"> | null,
   error: unknown
 ) {
   if ((timings.totalMs ?? 0) < SLOW_LOCATION_EVIDENCE_REQUEST_MS) {

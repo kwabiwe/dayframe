@@ -38,7 +38,7 @@ function mount(reduceMotion = false) {
   // StrictMode replays effects, as development builds do (Codex r4 on #482).
   const element = (value: LocationReviewEvidenceDto = stay) => (
     <StrictMode>
-      <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
+      <LocationEvidenceMap clockFormat="24h" accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
         revealChoiceToken={token} selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
     </StrictMode>
   );
@@ -48,6 +48,7 @@ function mount(reduceMotion = false) {
     });
   });
   return {
+    tree: () => tree!,
     animateToRegion,
     fitToCoordinates,
     moves: () => fitToCoordinates.mock.calls.length + animateToRegion.mock.calls.length,
@@ -63,6 +64,38 @@ function mount(reduceMotion = false) {
 const far = { latitude: 10.0032, longitude: 20 };
 const near = { latitude: 10.0002, longitude: 20.0002 };
 const opening = { ...centre, latitudeDelta: 0.004, longitudeDelta: 0.004 };
+
+describe("the evidence map's plain words (owner feedback, 27 Oct 2026)", () => {
+  it("shows and says them with its details off, as the review screen and the sheets draw it (Codex r1 on #599)", () => {
+    const map = mount();
+    expect(map.tree().root.findByProps({ testID: "location-evidence-summary" }).props.children).toBe("1 reading");
+    expect(map.tree().root.findByType("MapView" as never).props.accessibilityLabel).toBe("Map showing the detected visit location. 1 reading");
+  });
+});
+
+describe("the evidence map frames a whole trip (step 12)", () => {
+  it("fits the route's ends, the stays either side, not only the readings (Codex r2 on #599)", () => {
+    const trip = {
+      ...stay,
+      segment: { ...stay.segment, kind: "commute" },
+      map: {
+        ...stay.map, centre: null, stayRadiusMeters: null,
+        acceptedSamples: [10.02, 10.03].map((latitude, index) => ({ id: `s${index}`, point: { type: "Point", coordinates: [20, latitude] },
+          occurredAt: "2026-08-20T08:00:00.000Z", accuracyMeters: 10, kind: "location", role: null })),
+        route: { type: "LineString", coordinates: [[20, 10], [20, 10.02], [20, 10.03], [20, 10.05]] }
+      }
+    } as unknown as LocationReviewEvidenceDto;
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#000" dangerColor="#f00" evidence={trip} showDetails={false}
+        surfaceColor="#fff" textColor="#111" />);
+    });
+    const region = tree.root.findByType("MapView" as never).props.initialRegion;
+    expect(region.latitude).toBeCloseTo(10.025, 6);
+    expect(region.latitude - region.latitudeDelta / 2).toBeLessThan(10);
+    expect(region.latitude + region.latitudeDelta / 2).toBeGreaterThan(10.05);
+  });
+});
 
 describe("the evidence map shows the chosen place's pin with the stay's area", () => {
   it("leaves the camera alone for the opening choice, a re-render and new evidence (Codex r3 on #482)", () => {

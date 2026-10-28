@@ -118,6 +118,30 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(timeline.items.find((item) => item.id === "seg-a")).not.toHaveProperty("setByYou");
   });
 
+  it("reads a timeline item's evidence for its sheet's map by the item, with its open Review item when it has one (step 12)", async () => {
+    const { getTimelineItemEvidence } = await import("./location-query-service");
+    const place = await getTimelineItemEvidence("seg-a", session, { kind: "place", startedAt: at(0) });
+    expect(place).toMatchObject({ itemId: "seg-a", segment: { kind: "stay", startedAt: at(0), stoppedAt: at(480) }, display: { title: "Unknown place" } });
+    expect(place.reviewItemId).toEqual(expect.any(String));
+    const trip = await getTimelineItemEvidence("trip-2", session, { kind: "trip", startedAt: at(700) });
+    // A trip is titled as a trip, never after the place it left (Codex r1 on #599).
+    expect(trip).toMatchObject({ itemId: "trip-2", segment: { kind: "commute" }, display: { title: "Trip" } });
+    expect(trip.reviewItemId).toEqual(expect.any(String));
+    expect((await getTimelineItemEvidence("seg-c", session, { kind: "place", startedAt: at(760) })).reviewItemId).toBeNull();
+    await expect(getTimelineItemEvidence("seg-missing", session, { kind: "place", startedAt: at(0) })).rejects.toMatchObject({ status: 404 });
+    await expect(getTimelineItemEvidence("seg-a", { ...session, workspaceId: otherWorkspaceId }, { kind: "place", startedAt: at(0) }))
+      .rejects.toMatchObject({ status: 404 });
+    // Another device's stay with the same client id, on another day: the item's own start picks the right one.
+    await database!.query(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'seg-a', 'device-2', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb)`,
+      [workspaceId, userId, at(-2_000), at(-1_900)]);
+    expect((await getTimelineItemEvidence("seg-a", session, { kind: "place", startedAt: at(0) })).segment.startedAt).toBe(at(0));
+    expect((await getTimelineItemEvidence("seg-a", session, { kind: "place", startedAt: at(-2_000) })).segment.startedAt).toBe(at(-2_000));
+    await expect(getTimelineItemEvidence("seg-a", session, { kind: "trip", startedAt: at(0) })).rejects.toMatchObject({ status: 404 });
+    await database!.query(`delete from stay_segments where workspace_id = $1 and device_id = 'device-2'`, [workspaceId]);
+  });
+
   it("refuses another workspace's place, an item that isn't there, and a trip that already has a block", async () => {
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
     await expect(correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-a", placeId: otherPlaceId, learnedPlaceId: null }, session))
