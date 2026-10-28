@@ -3265,8 +3265,9 @@ async function copyFinishedEntry(
     );
     const newEntryId = inserted.rows[0].id;
     await syncTimeEntryTags(client, newEntryId, row.tagNames, session);
-    // The original now ends where the person split it (design §7).
-    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
+    // The original now ends where the person split it, and the new part (still running, for a running split)
+    // may be the one that ran into the trip (design §7; Codex r6 on #611).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id, newEntryId] });
     await client.query("commit");
     return { id, newEntryId, replayed: false as const, running };
   } catch (error) {

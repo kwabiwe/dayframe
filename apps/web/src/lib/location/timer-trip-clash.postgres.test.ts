@@ -419,4 +419,16 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     await db().query(`delete from commute_segments where workspace_id = $1 and client_segment_id = 'trip-hop'`, [workspaceId]);
     await db().query(`delete from time_entries where id = $1`, [id]);
   });
+  it("splitting a running block before the trip moves the question to the part still running (Codex r6 on #611)", async () => {
+    const { splitFinishedEntry } = await import("../event-service");
+    await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+    const running = await block(780, null, { description: "Deep work" });
+    await reconcile({ entryIds: [running] });
+    expect((await question(running)).status).toBe("open");
+    const split = await splitFinishedEntry(running, { splitAt: at(840), now: new Date(at(900)) }, session);
+    expect(split.newEntryId).toBeTruthy();
+    expect((await question(running)).status).toBe("superseded");
+    expect(await question(split.newEntryId!)).toMatchObject({ status: "open", payload: { tripId: "trip-home", tripStartedAt: at(862) } });
+    await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+  });
 });
