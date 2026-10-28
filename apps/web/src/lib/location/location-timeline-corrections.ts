@@ -583,8 +583,8 @@ async function logPlace(
   const category = await client.query(
     `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
   if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
-  const place = await client.query<{ placeId: string | null }>(
-    `select place_id as "placeId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
+  const place = await client.query<{ placeId: string | null; learnedPlaceId: string | null }>(
+    `select place_id as "placeId", learned_place_id as "learnedPlaceId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
     [row.id, session.workspaceId, session.userId]);
   const fromMs = new Date(row.startedAt).getTime();
   const toMs = new Date(row.stoppedAt).getTime();
@@ -616,6 +616,19 @@ async function logPlace(
     `update stay_segments set status = 'finalised', continuity_status = 'manual', updated_at = now()
       where id = $1 and workspace_id = $2 and user_id = $3`,
     [row.id, session.workspaceId, session.userId]);
+  // The place's own location event, the one replay offers it from, says the person decided it: replay then
+  // never asks about it nor logs it automatically, even before it first offered it or once a block is deleted
+  // (Codex r1 on #605).
+  const eventType = place.rows[0]?.placeId ? "geofence_exit" : place.rows[0]?.learnedPlaceId ? "learned_place_visit" : "unknown_stay";
+  await client.query(
+    `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+     values ($1, $2, $3, 'location_learning', $4, $5, 'high', $6::jsonb, 'confirmed')
+     on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null
+     do update set review_status = 'confirmed',
+       raw_payload = activity_events.raw_payload || jsonb_build_object('semanticDisposition', 'logged_by_you')`,
+    [session.workspaceId, session.userId, `location-segment:${request.itemId}`.slice(0, 160), eventType, iso(row.startedAt),
+      JSON.stringify({ clientSegmentId: request.itemId, startedAt: iso(row.startedAt), stoppedAt: iso(row.stoppedAt),
+        semanticDisposition: "logged_by_you" })]);
   return { ok: true as const, logged: { entryIds } };
 }
 

@@ -478,6 +478,31 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const { getLocationTimeline } = await import("./location-timeline-service");
     const timeline = await getLocationTimeline(session, { date: at(base).slice(0, 10), timeZone: "UTC", now: new Date(at(base + 200)) });
     expect(timeline.items.find((item) => item.id === "l-place")?.blockIds).toEqual(logged.logged!.entryIds);
+
+    // Replay's Review emission sees the decision: no question for it, with its blocks or once they're deleted
+    // (Codex r1 on #605).
+    const { emitReviewSemanticSegments } = await import("./location-review-semantic-batch");
+    const segment = {
+      kind: "stay", clientSegmentId: "l-place", algorithmVersion: "location-v2.0", status: "finalised", startedAt: at(base),
+      stoppedAt: at(base + 60), placeId: null, learnedPlaceId: null, placeMatchKind: "unknown", candidatePlaceIds: [], sampleCount: 4,
+      continuityStatus: "continuous", confidence: "high", evidenceIds: []
+    } as never;
+    const emit = async () => {
+      const client = await db.connect();
+      try {
+        await client.query("begin");
+        await emitReviewSemanticSegments(client, session, [segment], new Map([["l-place", placeRow]]), new Map());
+        await client.query("commit");
+      } finally {
+        client.release();
+      }
+    };
+    await emit();
+    await db.query(`delete from time_entries where id = any($1::uuid[])`, [logged.logged!.entryIds]);
+    await emit();
+    expect((await db.query(`select count(*)::int as n from review_items where location_segment_id = $1`, [placeRow])).rows[0].n).toBe(0);
+    expect((await db.query(`select count(*)::int as n from time_entries where workspace_id = $1 and started_at >= $2 and started_at < $3`,
+      [workspaceId, at(base), at(base + 60)])).rows[0].n).toBe(1);
   });
 });
 
