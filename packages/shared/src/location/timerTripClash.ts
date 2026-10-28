@@ -13,6 +13,12 @@ export const timerTripClashClientEventId = (timeEntryId: string) => `timer-trip-
 
 /** It was already running when you left: started at least this long before the trip. */
 export const TIMER_TRIP_CLASH_LEAD_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
+/**
+ * And at most this long before it (contract decision, 28 Oct 2026): a timer left on for days still asks, a
+ * block a month long is not a timer left running. The 31 days the timeline reads stays back, so every pass can
+ * find the blocks that may ask with a bounded read.
+ */
+export const TIMER_TRIP_CLASH_MAX_LEAD_MS = 31 * 86_400_000;
 /** It ran on into the trip by more than this (the tolerance automatic logging uses). */
 export const TIMER_TRIP_CLASH_OVERLAP_MS = AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS;
 
@@ -63,7 +69,7 @@ function ranInto(entry: TimerTripClashEntry, trip: TimerTripClashTrip, nowMs: nu
   const entryStop = entry.stoppedAt == null ? nowMs : Date.parse(entry.stoppedAt);
   const tripStart = Date.parse(trip.startedAt), tripStop = Date.parse(trip.stoppedAt);
   if (![entryStart, entryStop, tripStart, tripStop].every(Number.isFinite) || tripStop <= tripStart) return null;
-  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS) return null;
+  if (entryStart > tripStart - TIMER_TRIP_CLASH_LEAD_MS || entryStart < tripStart - TIMER_TRIP_CLASH_MAX_LEAD_MS) return null;
   const overlapMs = Math.min(entryStop, tripStop) - tripStart;
   return overlapMs > TIMER_TRIP_CLASH_OVERLAP_MS ? overlapMs : null;
 }

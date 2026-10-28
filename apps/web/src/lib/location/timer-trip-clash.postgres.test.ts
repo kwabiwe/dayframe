@@ -52,6 +52,8 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const client = await db().connect();
     try {
       await client.query("begin");
+      // As every caller does: the owner lock first.
+      await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [owner.workspaceId, owner.userId]);
       const changes = await reconcileTimerTripClashes(client, owner, scope, now);
       await client.query("commit");
       return changes;
@@ -269,6 +271,8 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const deleting = await db().connect();
     try {
       await deleting.query("begin");
+      // A delete takes the owner lock before its rows, as deleteTimeEntry does.
+      await deleting.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
       await deleting.query(`delete from time_entries where id = $1`, [id]);
       const pass = reconcile(window);
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -292,6 +296,7 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const replay = await db().connect();
     try {
       await replay.query("begin");
+      await replay.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
       await replay.query(`select id from time_entries where id = $1 for update`, [auto]);
       const deleting = deleteTimeEntries([manual, auto], session);
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -301,7 +306,8 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     } finally {
       replay.release();
     }
-    expect(await question(manual)).toBeUndefined();
+    // The pass asked first; the delete, waiting for the owner lock, then retired it.
+    expect((await question(manual)).status).toBe("superseded");
   });
 
   it("a title edit that commits while the pass waits for its block still asks (Codex r2 on #611)", async () => {
@@ -310,6 +316,7 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const edit = await db().connect();
     try {
       await edit.query("begin");
+      await edit.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
       // What updateTimeEntry writes for a title edit: user_edited_at and its matching audit row.
       await edit.query(`update time_entries set description = 'Daily', user_edited_at = $2, updated_at = $2 where id = $1`,
         [id, "2026-10-28T01:00:00.000Z"]);
@@ -357,6 +364,7 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
       const correction = await db().connect();
       try {
         await correction.query("begin");
+        await correction.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
         await correction.query(`update commute_segments set status = 'superseded' where workspace_id = $1 and client_segment_id = 'trip-home'`, [workspaceId]);
         const { reconcileTimerTripClashes } = await import("./timer-trip-clash-service");
         await reconcileTimerTripClashes(correction, session, window, now);
@@ -392,6 +400,23 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const id = await block(-3 * 24 * 60, null, { description: "Forgotten" });
     expect(await reconcile(window)).toBeGreaterThanOrEqual(1);
     expect(await question(id)).toMatchObject({ status: "open", payload: { tripId: "trip-home", tripStartedAt: at(862) } });
+    await db().query(`delete from time_entries where id = $1`, [id]);
+  });
+  it("skips a brief trip the block only touched and asks about the next one it ran into (Codex r4 on #611)", async () => {
+    const work = (await db().query<{ id: string }>(`select id from stay_segments where client_segment_id = 'seg-work' and workspace_id = $1`,
+      [workspaceId])).rows[0].id;
+    const home = (await db().query<{ id: string }>(`select id from stay_segments where client_segment_id = 'seg-home' and workspace_id = $1`,
+      [workspaceId])).rows[0].id;
+    // A 4-minute hop at 12:00, inside the tolerance, before the trip home at 14:22.
+    await db().query(
+      `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
+         from_stay_segment_id, to_stay_segment_id, confidence)
+       values ($1, $2, 'device-1', 'trip-hop', 'location-v2.0', 'finalised', $3, $4, $5, $6, 'medium')`,
+      [workspaceId, userId, at(720), at(724), work, home]);
+    const id = await block(660, 1080, { description: "Long day" });
+    await reconcile({ entryIds: [id] });
+    expect(await question(id)).toMatchObject({ status: "open", payload: { tripId: "trip-home", tripStartedAt: at(862) } });
+    await db().query(`delete from commute_segments where workspace_id = $1 and client_segment_id = 'trip-hop'`, [workspaceId]);
     await db().query(`delete from time_entries where id = $1`, [id]);
   });
 });

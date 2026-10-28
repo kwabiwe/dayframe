@@ -23,7 +23,10 @@ vi.mock("./queries", () => ({
 }));
 
 // Its own disposable-PostgreSQL suite covers it; these mocked clients answer only the queries they expect.
-vi.mock("./location/timer-trip-clash-service", () => ({ reconcileTimerTripClashes: vi.fn(async () => 0) }));
+vi.mock("./location/timer-trip-clash-service", () => ({
+  reconcileTimerTripClashes: vi.fn(async () => 0),
+  timerTripChecksEnabled: () => false
+}));
 vi.mock("./location/location-rollout", () => ({
   getServerLocationRolloutMode: mocks.getServerLocationRolloutMode
 }));

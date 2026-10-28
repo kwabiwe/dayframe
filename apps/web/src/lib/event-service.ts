@@ -1,5 +1,5 @@
 import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
-import { reconcileTimerTripClashes } from "./location/timer-trip-clash-service";
+import { reconcileTimerTripClashes, timerTripChecksEnabled } from "./location/timer-trip-clash-service";
 import {
   LEGACY_PERSON_EDIT_SQL, PERSON_EDIT_ACTION, PERSON_SET_END_ACTION, PERSON_SET_END_SQL, SERVER_TIMER_START_KEY, TIMER_STARTED_SQL
 } from "./time-entry-provenance";
@@ -736,7 +736,9 @@ async function processActivityEventWithClient(
 
     if (
       candidate.action === "start_timer" ||
-      (candidate.action === "stop_timer" && stopScope.mode !== "entry")
+      (candidate.action === "stop_timer" && stopScope.mode !== "entry") ||
+      // A timer's "?" about a trip is settled under the owner lock, as replay and answers decide it (design §7).
+      (candidate.action === "stop_timer" && timerTripChecksEnabled())
     ) {
       const lockStartedAt = Date.now();
       await lockUserTimerState(client, session);
@@ -2497,6 +2499,8 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    // The owner lock before any row, so a timer's "?" about a trip is decided with replay's view (design §7).
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
     // snapshot, so the reads below (after any concurrent save has committed and released the lock)
     // see that save's description, category, tags, times and recorded edits. Reading them in the
@@ -2779,6 +2783,7 @@ export async function deleteTimeEntry(id: string, session: RequestSession = getD
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const result = await client.query(
       "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
       [id, session.workspaceId, session.userId]
@@ -2801,6 +2806,7 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const existing = await client.query<{ id: string }>(
       `select id
        from time_entries
@@ -2889,6 +2895,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const active = await client.query<{
       id: string;
       projectId: string | null;
@@ -3027,6 +3034,7 @@ async function copyFinishedEntry(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const locked = await client.query(
       `select id from time_entries where id = $1 and workspace_id = $2 and user_id = $3 for update`,
       [id, session.workspaceId, session.userId]

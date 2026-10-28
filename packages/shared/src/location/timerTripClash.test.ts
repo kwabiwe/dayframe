@@ -28,6 +28,8 @@ describe("timerTripClash (location v4 design §7)", () => {
   it("asks about a timer left running for days (no longest lead; Codex r3 on #611)", () => {
     const longAgo = { ...block("13:00", null), startedAt: "2026-10-25T09:00:00.000Z" };
     expect(timerTripClash(longAgo, [trip("t1", "14:22", "14:50")], now)?.tripId).toBe("t1");
+    // A block that started more than 31 days before the trip is not a timer left running.
+    expect(timerTripClash({ ...longAgo, startedAt: "2026-09-26T09:00:00.000Z" }, [trip("t1", "14:22", "14:50")], now)).toBeNull();
   });
 
   it("asks about the first trip the block ran into", () => {
