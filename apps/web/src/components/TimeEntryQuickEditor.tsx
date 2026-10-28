@@ -1,12 +1,13 @@
 "use client";
 
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DayframePaletteKey, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
+import type { ClockFormat, DayframePaletteKey, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
+import { blockStyle } from "@/lib/block-style";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -40,14 +41,15 @@ import {
 import { displayTypedTime, maskTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { dateTimeLocal, formatDuration, formatSourceLabel } from "@/lib/format";
+import { dateTimeLocal, formatDuration, formatSourceLabel, formatTime } from "@/lib/format";
 import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
+import { clampSplit, defaultSplit, splitBounds, type SplitBounds } from "@/lib/time-entry-split";
 import type { OverlapPeerEntry } from "@/lib/overlap-notice";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 
 export type TimeEntryQuickEditorMutationOutcome = { ok: true } | { ok: false; error: string };
 
-type TimeEntryQuickEditorBusyAction = "delete" | "save" | "start";
+type TimeEntryQuickEditorBusyAction = "delete" | "duplicate" | "save" | "split" | "start";
 
 type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
@@ -69,6 +71,10 @@ export type TimeEntryQuickEditorProps = TimeEntryQuickEditorBaseProps & (
       onDelete?: () => Promise<TimeEntryQuickEditorMutationOutcome | void> | TimeEntryQuickEditorMutationOutcome | void;
       onSave: (plan: CalendarEntryCompactSavePlan) => Promise<TimeEntryQuickEditorMutationOutcome>;
       onStartAgain?: () => Promise<TimeEntryQuickEditorMutationOutcome>;
+      /** Split the finished block at a time: two blocks with the same details (card G). */
+      onSplit?: (atMs: number) => Promise<TimeEntryQuickEditorMutationOutcome>;
+      /** A new block with the same details (card G). */
+      onDuplicate?: () => Promise<TimeEntryQuickEditorMutationOutcome>;
     }
   | {
       mode: "create";
@@ -552,6 +558,65 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     finishDismiss(false);
   }
 
+  // Split (card G): the line's time while its panel is open, else null.
+  const [splitAtMs, setSplitAtMs] = useState<number | null>(null);
+  const bounds = entry ? splitBounds(entry) : null;
+
+  function openSplit() {
+    if (!bounds || busyRef.current) return;
+    setSplitAtMs((current) => current == null ? defaultSplit(bounds) : null);
+    // The description's suggestions would sit over the split row (it opens above the fields).
+    setSuggestionsOpen(false);
+    setError(null);
+  }
+
+  function moveSplit(atMs: number) {
+    if (bounds) setSplitAtMs(clampSplit(bounds, atMs));
+  }
+
+  function cancelSplit() {
+    setSplitAtMs(null);
+  }
+
+  async function confirmSplit() {
+    if (props.mode !== "entry" || !props.onSplit || splitAtMs == null || busyRef.current) return;
+    // A split acts on the block as saved: never with edits that would be lost (Codex r1 on #596).
+    if (hasUnsavedChangesRef.current) {
+      setError("Save or discard your changes to split.");
+      return;
+    }
+    if (!beginMutation("split")) return;
+    let outcome: TimeEntryQuickEditorMutationOutcome;
+    try {
+      outcome = await props.onSplit(splitAtMs);
+    } catch {
+      outcome = { ok: false, error: "Unable to split this block. Check your connection and try again." };
+    }
+    if (!outcome.ok) {
+      recoverMutation(outcome.error);
+      return;
+    }
+    // The block itself is still there: focus goes back to it (Codex r1 on #596).
+    finishDismiss(true);
+  }
+
+  async function duplicate() {
+    if (props.mode !== "entry" || !props.onDuplicate || busyRef.current) return;
+    if (!beginMutation("duplicate")) return;
+    let outcome: TimeEntryQuickEditorMutationOutcome;
+    try {
+      outcome = await props.onDuplicate();
+    } catch {
+      outcome = { ok: false, error: "Unable to duplicate this block. Check your connection and try again." };
+    }
+    if (!outcome.ok) {
+      recoverMutation(outcome.error);
+      return;
+    }
+    // The block itself is still there: focus goes back to it (Codex r1 on #596).
+    finishDismiss(true);
+  }
+
   async function deleteEntry() {
     if (props.mode !== "entry" || !props.onDelete || busyRef.current) return;
     if (!beginMutation("delete")) return;
@@ -604,9 +669,18 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     cancelDiscardPrompt,
     categoryButtonRef,
     commitTemporalField,
+    selectedCategory,
     confirmDiscard,
     controlsDisabled,
+    canSplit: Boolean(bounds) && !hasUnsavedChanges,
+    cancelSplit,
+    confirmSplit,
     deleteEntry,
+    duplicate,
+    moveSplit,
+    openSplit,
+    splitAtMs,
+    splitBounds: bounds,
     descriptionRef,
     descriptionInteractionRef,
     discardBackRef,
@@ -662,6 +736,13 @@ export function TimeEntryQuickEditorPanel({
   surface: "anchored" | "modal";
 }) {
   const clock = useClockFormat();
+  // Split's own button, for focus when its panel closes (card G).
+  const splitButtonRef = useRef<HTMLButtonElement>(null);
+  // The split row stays drawn while it closes (at its last time), then goes when its close ends. With Reduce
+  // Motion it has no transition: it collapses at once and stays inert until it opens again.
+  const splitOpen = controller.splitAtMs != null;
+  const [splitShownAtMs, setSplitShownAtMs] = useState<number | null>(null);
+  if (controller.splitAtMs != null && splitShownAtMs !== controller.splitAtMs) setSplitShownAtMs(controller.splitAtMs);
   const entry = props.mode === "entry" ? props.entry : null;
   const {
     busyAction,
@@ -748,7 +829,8 @@ export function TimeEntryQuickEditorPanel({
     >
       {busyAction ? (
         <span className="sr-only" role="status" aria-live="polite">
-          {busyAction === "delete" ? "Deleting block…" : busyAction === "start" ? "Starting block…" : "Saving block…"}
+          {busyAction === "delete" ? "Deleting block…" : busyAction === "start" ? "Starting block…"
+            : busyAction === "split" ? "Splitting block…" : busyAction === "duplicate" ? "Duplicating block…" : "Saving block…"}
         </span>
       ) : null}
       <div className="calendar-compact-editor-header df-ed-head">
@@ -779,6 +861,36 @@ export function TimeEntryQuickEditorPanel({
               <DayframeIcon fill="currentColor" glyph="play" size={15} strokeWidth={0} />
             </button>
           ) : null}
+          {/* Card G: Split (a line on the block's time bar) and Duplicate, for a finished block with no unsaved
+              changes, as icon actions beside Start again. */}
+          {entry?.stoppedAt && props.mode === "entry" && props.onSplit && controller.splitBounds ? (
+            <button
+              ref={splitButtonRef}
+              className="calendar-compact-icon-action"
+              type="button"
+              aria-label={`Split ${title}`}
+              aria-expanded={controller.splitAtMs != null}
+              aria-busy={busyAction === "split" || undefined}
+              data-tip={controller.canSplit ? "Split" : "Save or discard your changes to split"}
+              disabled={controlsDisabled || !controller.canSplit}
+              onClick={controller.openSplit}
+            >
+              <DayframeIcon glyph="scissors" size={16} />
+            </button>
+          ) : null}
+          {entry?.stoppedAt && props.mode === "entry" && props.onDuplicate ? (
+            <button
+              className="calendar-compact-icon-action"
+              type="button"
+              aria-label={`Duplicate ${title}`}
+              aria-busy={busyAction === "duplicate" || undefined}
+              data-tip={controller.hasUnsavedChanges ? "Save or discard your changes to duplicate" : "Duplicate"}
+              disabled={controlsDisabled || controller.hasUnsavedChanges}
+              onClick={() => void controller.duplicate()}
+            >
+              <DayframeIcon glyph="copy" size={16} />
+            </button>
+          ) : null}
           {props.mode === "entry" && props.onDelete ? (
             <button
               className="calendar-compact-icon-action is-danger"
@@ -806,6 +918,25 @@ export function TimeEntryQuickEditorPanel({
         </div>
       </div>
 
+      {/* The split row's single transition owner: rows 0fr ↔ 1fr with opacity, entering from closed
+          (@starting-style) and kept until its close has finished, so the fields below move, not jump. */}
+      {splitShownAtMs != null && controller.splitBounds ? (
+        <div className="calendar-compact-split-wrap" data-open={splitOpen} inert={!splitOpen}
+          onTransitionEnd={(event) => {
+            // The height ends last (the fade is shorter): only then is the row gone (Codex r2 on #596).
+            if (event.target === event.currentTarget && event.propertyName === "grid-template-rows" && !splitOpen) setSplitShownAtMs(null);
+          }}>
+          <div className="calendar-compact-split-body">
+            <SplitLine bounds={controller.splitBounds} atMs={controller.splitAtMs ?? splitShownAtMs} canConfirm={controller.canSplit} clock={clock}
+              color={controller.selectedCategory?.color} colorName={controller.selectedCategory?.name} disabled={controlsDisabled}
+              open={splitOpen}
+              onCancel={() => {
+                controller.cancelSplit();
+                window.requestAnimationFrame(() => splitButtonRef.current?.focus({ preventScroll: true }));
+              }} onConfirm={() => void controller.confirmSplit()} onMove={controller.moveSplit} />
+          </div>
+        </div>
+      ) : null}
       <div className="calendar-compact-editor-fields">
         <div className="calendar-compact-editor-description time-entry-quick-description">
           <label className="sr-only" htmlFor="time-entry-quick-description">Description</label>
@@ -1180,4 +1311,73 @@ function formatEyebrowDate(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return value;
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(new Date(year, month - 1, day, 12));
+}
+
+/**
+ * Card G: where to split a block. Its time bar with a line to drag (a slider in whole minutes, so arrow keys
+ * move it a minute at a time), both halves as they will be, Split and Keep as one. It appears at once in the
+ * editor (no movement of its own); focus goes to the line, and back to Split when it closes.
+ */
+/** The share of the bar a half needs to hold its label (about 26 px of 144). */
+const SPLIT_LABEL_ROOM = 0.14;
+
+function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, disabled, onCancel, onConfirm, onMove, open }: {
+  atMs: number;
+  bounds: SplitBounds;
+  /** False while the editor has unsaved changes: the split would act on the block as saved. */
+  canConfirm: boolean;
+  clock: ClockFormat;
+  /** The block's activity colour (the bar is drawn in it, as the block is). */
+  color?: string | null;
+  colorName?: string;
+  disabled: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onMove: (atMs: number) => void;
+  open: boolean;
+}) {
+  const lineRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [open]);
+  const time = (ms: number) => formatTime(new Date(ms), clock);
+  const minutes = (fromMs: number, toMs: number) => formatDuration(Math.round((toMs - fromMs) / 1000));
+  // Where the line sits: the slider's own position (its range is where a split may fall), so the line, the
+  // grips and the pointer agree.
+  const share = bounds.maxMs > bounds.minMs ? (atMs - bounds.minMs) / (bounds.maxMs - bounds.minMs) : 0.5;
+  return (
+    // Escape anywhere in the row closes only the row (not the editor) and returns to Split.
+    <div className="calendar-compact-split" role="group" aria-label="Split this block"
+      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); onCancel(); } }}>
+      {/* The block as a tall bar, earliest at the top as on the time grid, with the line across it and each
+          half's times inside it, updating as the line moves (card G; Toggl's "Split time log"). */}
+      <div className="calendar-compact-split-bar"
+        style={{ ...(color ? blockStyle(color, colorName) : {}), "--split-at": String(share) } as CSSProperties}>
+        {/* A half too short for its label shows it just past the line instead (Codex r2 on #596). */}
+        <span aria-hidden="true" className={`calendar-compact-split-half is-first${share < SPLIT_LABEL_ROOM ? " is-beside" : ""}`}>
+          {minutes(bounds.startMs, atMs)} · {time(bounds.startMs)}–{time(atMs)}
+        </span>
+        <span aria-hidden="true" className={`calendar-compact-split-half is-second${share > 1 - SPLIT_LABEL_ROOM ? " is-beside" : ""}`}>
+          {minutes(atMs, bounds.stopMs)} · {time(atMs)}–{time(bounds.stopMs)}
+        </span>
+        <span aria-hidden="true" className="calendar-compact-split-mark" />
+        <input
+          ref={lineRef}
+          aria-label="Split at"
+          aria-valuetext={`${time(atMs)}: ${minutes(bounds.startMs, atMs)} then ${minutes(atMs, bounds.stopMs)}`}
+          className="calendar-compact-split-line"
+          disabled={disabled}
+          max={bounds.maxMs}
+          min={bounds.minMs}
+          onChange={(event) => onMove(Number(event.currentTarget.value))}
+          onKeyDown={(event) => { if (event.key === "Enter" && canConfirm) onConfirm(); }}
+          step={60_000}
+          type="range"
+          value={atMs}
+        />
+      </div>
+      <div className="calendar-compact-split-actions">
+        <button className="ui-button ui-button-primary is-compact" disabled={disabled || !canConfirm} onClick={onConfirm} type="button">Split at {time(atMs)}</button>
+        <button className="ui-button ui-button-ghost is-compact" disabled={disabled} onClick={onCancel} type="button">Keep as one</button>
+      </div>
+    </div>
+  );
 }

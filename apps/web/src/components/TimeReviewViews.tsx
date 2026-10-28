@@ -19,6 +19,7 @@ import { EntriesTable } from "@/components/EntriesTable";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { duplicateTimeEntry, splitTimeEntry, type BlockMutationOutcome } from "@/lib/time-entry-split";
 import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
 import { blockStyle as activityBlockStyle } from "@/lib/block-style";
 import type { BootstrapData, CategoryRow, PlaceRow, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
@@ -1077,6 +1078,21 @@ export function CalendarReview({
     return createManualEntry(plan.input);
   }
 
+  /** Card G: a split or duplicate written through the entry endpoints, then the Calendar refreshed. */
+  async function changeCalendarBlocks(change: () => Promise<BlockMutationOutcome>) {
+    try {
+      const outcome = await change();
+      // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
+      if (outcome.ok || outcome.changed) {
+        await onSynced();
+        startTransition(() => router.refresh());
+      }
+      return outcome;
+    } catch {
+      return { ok: false, error: "Unable to change this block. Check your connection and try again." } as const;
+    }
+  }
+
   async function saveCalendarEditor(
     entry: TimeEntryRow,
     plan: CalendarEntryCompactSavePlan
@@ -2067,6 +2083,8 @@ export function CalendarReview({
           onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
           onSave={(plan) => saveCalendarEditor(selectedEntry, plan)}
           onStartAgain={() => continueCalendarEntry(selectedEntry)}
+          onSplit={(atMs) => changeCalendarBlocks(() => splitTimeEntry(clientFetch, selectedEntry, atMs))}
+          onDuplicate={() => changeCalendarBlocks(() => duplicateTimeEntry(clientFetch, selectedEntry))}
           peerEntries={entries}
           positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
