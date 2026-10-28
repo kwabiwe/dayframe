@@ -347,6 +347,11 @@ export type LocationEngineInput = {
    * replay reads them from the rows ingest kept without positions (see `broadReadingTimes` on the output).
    */
   broadReadingTimes?: readonly number[];
+  /**
+   * Times (epoch ms) of every genuine reading stored as rejected for being too broad, at any accuracy: a
+   * still silence (card J) has none. Replay reads them as it reads `broadReadingTimes`; never positions.
+   */
+  rejectedReadingTimes?: readonly number[];
 };
 
 /**

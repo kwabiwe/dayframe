@@ -1,6 +1,7 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
-import type { LocationTimeline } from "@dayframe/shared";
+import type { LocationTimeline, TimelineItemEvidenceDto } from "@dayframe/shared";
 import { CalendarListView } from "@/components/calendar/CalendarListView";
+import { LocationCorrectionSheet, type LocationCorrectionTarget } from "@/components/calendar/LocationCorrectionSheet";
 import { useEffect, useMemo, useState } from "react";
 import { LogBox, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -161,9 +162,55 @@ const QA_CHECK_QUESTIONS = new Map([
   ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
 ]);
 
+// Step 12's correction sheets: the saved places, and the trip with no block (so its times and "This wasn't a
+// trip" show), at the first leg view for `leg`.
+const QA_SHEET_PLACES = [
+  { id: "p-home", name: "Home", role: "home" },
+  { id: "p-office", name: "Work", role: "work" },
+  { id: "p-school", name: "Exampleton Primary", role: null }
+];
+// A made-up map for the sheets (public coordinates in central Paris, nobody's real places): readings around the
+// stay, and a trip's route with a silence in it.
+const qaPoint = (longitude: number, latitude: number) => ({ type: "Point" as const, coordinates: [longitude, latitude] as [number, number] });
+function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | null {
+  const trip = sheet === "trip" || sheet === "leg";
+  const samples = Array.from({ length: trip ? 14 : 9 }, (_, index) => ({
+    id: `qa-${index}`,
+    point: trip ? qaPoint(2.33 + index * 0.0016, 48.853 + index * 0.0007) : qaPoint(2.3522 + (index % 3) * 0.0002, 48.8566 + Math.floor(index / 3) * 0.00015),
+    occurredAt: iso(trip ? 8 : 16, trip ? 47 + index * 4 : 26 + index * 3),
+    accuracyMeters: 12,
+    kind: "location",
+    role: null
+  }));
+  return {
+    itemId: trip ? "qa-trip-1" : "qa-unknown", reviewItemId: null, eventId: null,
+    segment: { id: "qa", kind: trip ? "commute" : "stay", status: "finalised", startedAt: iso(trip ? 8 : 16, trip ? 47 : 26), stoppedAt: iso(trip ? 10 : 17, trip ? 39 : 0),
+      approximateArrival: false, confidence: "high", continuityStatus: "continuous", algorithmVersion: "location-v2.0", evidenceCount: samples.length, rejectedEvidenceCount: 0 },
+    display: { title: trip ? "Trip" : "Unknown place", subtitle: null, placeId: null, placeName: null, addressSummary: null },
+    map: {
+      centre: trip ? null : qaPoint(2.3524, 48.8567), stayRadiusMeters: trip ? null : 60,
+      route: trip ? { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) } : null,
+      straightLineFallback: null, acceptedSamples: samples, rejectedSamples: [], anchors: [],
+      gaps: trip ? [{ startedAt: iso(9, 20), stoppedAt: iso(9, 41), durationSeconds: 1_260, fromPoint: null, toPoint: null }] : [],
+      nearbySavedPlaces: []
+    },
+    stops: [], suggestedSplitPoints: [], evidenceExpiresAt: null, evidenceExpired: false, rawEvidenceAvailable: true, textualSummary: ""
+  } as TimelineItemEvidenceDto;
+}
+
+function qaSheetTarget(sheet: string | undefined): LocationCorrectionTarget | null {
+  const place = timeline.items.find((item) => item.id === "qa-unknown");
+  const trip = timeline.items.find((item) => item.id === "qa-trip-1");
+  if (sheet === "place" && place?.kind === "place") return { kind: "place", place, label: "Unknown place" };
+  if ((sheet === "trip" || sheet === "leg") && trip?.kind === "trip") {
+    return { kind: "trip", trip: { ...trip, blockIds: [], route: "Exampleton Primary → Office" }, legIndex: sheet === "leg" ? 2 : null };
+  }
+  return null;
+}
+
 export default function CalendarQaRoute() {
   // `?check=1` opens the List at its first "?" with its question showing, as Today's chip does.
-  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string }>();
+  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string; sheet?: string }>();
   const [cycleStep, setCycleStep] = useState(0);
   useEffect(() => {
     if (params.cycle !== "1") return;
@@ -231,6 +278,11 @@ export default function CalendarQaRoute() {
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={dense ? null : timeline} />
           </View>
+        ) : null}
+        {/* `?sheet=place|trip|leg` (step 12): a correction sheet open over the List, for Simulator screenshots. */}
+        {qaSheetTarget(params.sheet) ? (
+          <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(params.sheet)} onDismissed={() => undefined} onQueue={async () => undefined} places={QA_SHEET_PLACES}
+            presentationId={1} reduceMotion={false} rootHosted={false} target={qaSheetTarget(params.sheet)!} theme={theme} />
         ) : null}
       </View>
     </SafeAreaView>

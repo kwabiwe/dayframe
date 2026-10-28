@@ -53,6 +53,7 @@ import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
+import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
@@ -2095,6 +2096,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  // The List's place, trip and leg correction sheets (step 12).
+  const locationCorrections = useLocationCorrections({
+    clockFormat,
+    data: authState === "authenticated" ? data : null,
+    pending: correctionQueue.pending,
+    reduceMotion,
+    showNotice: (message) => showTodayNotice(message, null),
+    theme,
+    timeline: calendarTimeline
+  });
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
@@ -3677,12 +3688,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   // The editor's Nearby search takes the native search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
-                    router.push(calendarCheckRoute(
-                      shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
-                      reviewItemId
-                    ) as never);
+                    const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
+                    // A trip's question edits the trip on its own sheet (mock-up #ios-list editorTrip; Codex r1 on #602):
+                    // its times, legs and "This wasn't a trip". Anything else keeps its screen.
+                    const segmentId = typeof reviewItem?.rawPayload?.clientSegmentId === "string" ? reviewItem.rawPayload.clientSegmentId : null;
+                    const trip = reviewItem?.eventType === "commute_detected" && segmentId
+                      ? calendarTimeline?.items.find((each) => each.kind === "trip" && each.id === segmentId && !each.blockIds.length)
+                      : undefined;
+                    if (trip?.kind === "trip") {
+                      locationCorrections.openTripLeg(trip, null);
+                      return;
+                    }
+                    router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
+                  onOpenPlace={locationCorrections.openPlace}
+                  onOpenTripLeg={locationCorrections.openTripLeg}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
@@ -3691,6 +3712,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   theme={theme}
                   timeline={calendarTimeline}
                 />
+                {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
           </View>
