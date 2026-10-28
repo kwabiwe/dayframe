@@ -256,12 +256,15 @@ export async function replayLocationEvidence(
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, corrected, output.acceptedEvidence, places,
     output.broadReadingTimes);
   const seen = new Set<LocationSegment>(corrected);
-  const rebuilt = protectedReplacement.segments.filter((segment) => !seen.has(segment));
+  // A corrected trip protection only clipped is corrected already: applying the corrections again would undo
+  // their order (Codex r6 on #603).
+  const rebuilt = protectedReplacement.segments.filter((segment) => !seen.has(segment) &&
+    !(segment.kind === "commute" && segment.shapedByCorrection));
   const rebuiltCorrected = rebuilt.length
     ? new Map((await withTimelineCorrections(client, session, rebuilt, options.processingAt)).map((segment) => [segment.clientSegmentId, segment]))
     : null;
   const segments = rebuiltCorrected
-    ? protectedReplacement.segments.flatMap((segment) => seen.has(segment) ? [segment]
+    ? protectedReplacement.segments.flatMap((segment) => seen.has(segment) || (segment.kind === "commute" && segment.shapedByCorrection) ? [segment]
       : rebuiltCorrected.has(segment.clientSegmentId) ? [rebuiltCorrected.get(segment.clientSegmentId)!] : [])
     : protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
@@ -486,12 +489,14 @@ async function excludeProtectedReplacements(
   // keep an endpoint that decided history has moved: its qualified legs are
   // re-derived, and a trip with none is omitted rather than rebuilt without
   // its stops. Trips are identified by their stops, not by fallback legs.
+  // A trip a correction joined keeps its stops' ownership checks, but a moved end is only clipped, never
+  // derived again, so its stops don't stop it (Codex r6 on #603).
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
       !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
-      !(segment.stops?.length && movesEndpoint(segment))));
+      !(segment.stops?.length && !segment.shapedByCorrection && movesEndpoint(segment))));
   const kept = segments.flatMap((segment) => replaceable(segment)
-    ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
+    ? segment.kind === "commute" && (!segment.stops?.length || segment.shapedByCorrection) && movesEndpoint(segment)
       ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places, broadReadingTimes)
       : [segment]
     : segment.kind === "commute"
