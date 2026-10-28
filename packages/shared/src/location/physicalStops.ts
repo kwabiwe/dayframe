@@ -143,6 +143,11 @@ function stillThrough(motion: MotionTimeline | null, fromMs: number, toMs: numbe
     restlessMs += overlap;
     longestRestlessMs = Math.max(longestRestlessMs, restlessMs);
   }
+  // A drive (or ride, or run) Core Motion saw begin and end inside the silence is a journey of its own, even
+  // near an edge; movement carried in from before it or out past it is parking and pulling away (Codex r4 on
+  // #601).
+  if (motion.blocks.some((block) => block.onsetObserved && block.stopObserved && block.startMs > fromMs && block.endMs < toMs &&
+    ((block.byMode.automotive ?? 0) + (block.byMode.cycling ?? 0) + (block.byMode.running ?? 0)) > 0)) return false;
   const silenceMs = toMs - fromMs;
   if (stationaryMs < silenceMs * config.physicalStopStillSilenceStationaryMinimumShare ||
     walkingMs > silenceMs * config.physicalStopStillSilenceWalkingMaximumShare ||

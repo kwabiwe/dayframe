@@ -134,6 +134,12 @@ describe("a still silence inside a trip is a stop (card J)", () => {
     expect(minuteOf(meal[0].stoppedAt)).toBeGreaterThanOrEqual(162);
   });
 
+  it("keeps the meal when the car was still being parked as the silence began", () => {
+    const meal = restaurant(evening({ noVisit: true, silenceMotion: [[78.5, "automotive"], [80, "stationary"], [111, "walking"],
+      [111.2, "stationary"], [150, "walking"]] as Step[] }).stays);
+    expect(meal).toHaveLength(1);
+  });
+
   it("bridges the silence inside the stop's own readings, before and after it", () => {
     const meal = restaurant(evening({ parkedSlow: true, noVisit: true }).stays);
     expect(meal).toHaveLength(1);
@@ -162,6 +168,10 @@ describe("a still silence inside a trip is a stop (card J)", () => {
       [102, "stationary"], [113, "automotive"], [115, "stationary"], [150, "walking"]] as Step[] }],
     ["a short drive came in the middle of a silence the stop's own readings span", { parkedSlow: true, noVisit: true,
       silenceMotion: [[78.5, "stationary"], [110, "automotive"], [113, "stationary"], [150, "walking"]] as Step[] }],
+    ["a separate short drive came near the start of the silence", { noVisit: true,
+      silenceMotion: [[78.5, "stationary"], [84, "automotive"], [86, "stationary"], [150, "walking"]] as Step[] }],
+    ["a separate short drive came near the start of a silence the stop's own readings span", { parkedSlow: true, noVisit: true,
+      silenceMotion: [[78.5, "stationary"], [84, "automotive"], [86, "stationary"], [150, "walking"]] as Step[] }],
     ["there was no Visit and the phone was driving", { noVisit: true, silenceMotion: [[78.5, "automotive"], [150, "walking"]] as Step[] }],
     ["the stop's own readings span a silence the phone walked through", { parkedSlow: true, noVisit: true, silenceMotion: [[78.5, "walking"]] as Step[] }],
     ["Core Motion recorded nothing", { silenceMotion: null }],
