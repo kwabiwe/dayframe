@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 const mocks = vi.hoisted(() => ({
   fetchEvidence: vi.fn(async () => ({ segment: { kind: "stay" }, map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters: 40 } })),
   createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
-  enqueue: vi.fn(async () => []),
+  enqueue: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
   remove: vi.fn(async () => undefined),
   synchronise: vi.fn(async () => undefined)
 }));
@@ -30,10 +30,12 @@ const place: TimelinePlace = {
   role: null, matchKind: "unknown", confidence: "low", blockIds: []
 };
 const timeline = { items: [place] } as unknown as LocationTimeline;
-const account = (userId: string) => ({ places: [], user: { id: userId }, workspace: { id: "w" } }) as never;
+const account = (userId: string) => ({ categories: [{ id: "cat-errands", name: "Errands", color: "teal", isPinned: true }], places: [],
+  user: { id: userId }, workspace: { id: "w" } }) as never;
 let api: ReturnType<typeof useLocationCorrections> | null = null;
-function Probe(props: { data: ReturnType<typeof account> | null; pending?: never[]; showNotice?: (message: string) => void; timeline?: LocationTimeline | null }) {
-  api = useLocationCorrections({ clockFormat: "24h", data: props.data, pending: props.pending ?? [], reduceMotion: false,
+function Probe(props: { data: ReturnType<typeof account> | null; pending?: never[]; showNotice?: (message: string) => void; timeline?: LocationTimeline | null;
+  onLogged?: () => void }) {
+  api = useLocationCorrections({ clockFormat: "24h", data: props.data, onLogged: props.onLogged, pending: props.pending ?? [], reduceMotion: false,
     showNotice: props.showNotice ?? vi.fn(), theme: {} as never, timeline: props.timeline === undefined ? timeline : props.timeline });
   return api.sheet;
 }
@@ -131,6 +133,36 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       request: { kind: "place", subject: "place", itemId: "seg-a", placeId: "6f000000-0000-4000-8000-0000000000aa", learnedPlaceId: null },
       preview: { name: "Exampleton Bakery", role: null }
     }]);
+  });
+
+  it("holds Logs as for Undo, sends it after the hold, and reads the day again once the server has it (step 12 part 4c)", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.enqueue.mockImplementation(async (...args: unknown[]) => (args[1] as unknown[]).map((_item, index) => ({ clientCorrectionId: `log-${index}` })));
+      const onLogged = vi.fn();
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} onLogged={onLogged} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { activities: Array<{ id: string }>; onLog: (id: string) => void };
+      expect(logAs.activities.map((activity) => activity.id)).toEqual(["cat-errands"]);
+      act(() => { logAs.onLog("cat-errands"); });
+      expect(api!.heldLog?.title).toBe("Unknown place as Errands");
+      // Undo within the hold: nothing is sent.
+      act(() => { api!.undoLog(); });
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(mocks.enqueue).not.toHaveBeenCalled();
+      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+      const queued = { clientCorrectionId: "log-0", failureKind: undefined } as never;
+      await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[queued]} />); });
+      expect(onLogged).not.toHaveBeenCalled();
+      await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[]} />); });
+      expect(onLogged).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

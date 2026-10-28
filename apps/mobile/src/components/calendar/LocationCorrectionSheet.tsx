@@ -75,6 +75,7 @@ export function LocationCorrectionSheet({
   onDismissed,
   onQueue,
   onSavePlace,
+  logAs,
   places,
   presentationId,
   reduceMotion,
@@ -97,6 +98,11 @@ export function LocationCorrectionSheet({
    * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
    */
   onSavePlace?: (name: string) => Promise<void>;
+  /**
+   * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
+   * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
+   */
+  logAs?: { activities: ReadonlyArray<{ id: string; name: string }>; onLog: (categoryId: string) => void };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
@@ -139,6 +145,8 @@ export function LocationCorrectionSheet({
   const intent = useRef<Join | null>(null);
   // Kept on the phone: the next commit closes the sheet.
   const kept = useRef(false);
+  // Logs as waiting for this Done's corrections to be kept.
+  const pendingLog = useRef<(() => void) | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Kept: the sheet closes on the next render, once Done is enabled again (Codex r2 on #602).
@@ -184,8 +192,11 @@ export function LocationCorrectionSheet({
         return;
       }
       kept.current = true;
+      pendingLog.current?.();
+      pendingLog.current = null;
       setCloseKept(true);
     }, () => {
+      pendingLog.current = null;
       intent.current = null;
       setSaving(false);
       setSaveError("That change couldn't be kept on this iPhone. Try again.");
@@ -223,7 +234,13 @@ export function LocationCorrectionSheet({
     const corrections = target.kind === "place"
       ? placeCorrections(target.place, { choice, times }, places)
       : tripCorrections(target.trip, { times });
-    if (!corrections.length) return true;
+    // Logs as is held for Undo and sent after the place's own changes, which it then logs.
+    const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
+    if (!corrections.length) {
+      log?.();
+      return true;
+    }
+    pendingLog.current = log;
     keep(corrections, "close");
     return false;
   }
@@ -231,6 +248,8 @@ export function LocationCorrectionSheet({
   // "This wasn't a trip", "I wasn't here" and "I didn't leave" each ask once, in place (UIA-005: no system alert).
   const [confirming, setConfirming] = useState<Confirming | null>(null);
   const [placeName, setPlaceName] = useState("");
+  // The activity picked under Logs as; none is "Don't log", as the place is now.
+  const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
   function savePlace() {
     if (!onSavePlace || !placeName.trim() || saving) return;
     setSaving(true);
@@ -315,6 +334,30 @@ export function LocationCorrectionSheet({
         {target.kind === "place" ? (
           <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
             places={places} theme={theme} />
+        ) : null}
+        {target.kind === "place" && logAs && !stale ? (
+          <Section label="Logs as" theme={theme} hint="Fills only the time your own blocks don't cover.">
+            <View style={styles.pills}>
+              {logAs.activities.map((activity) => (
+                <Pressable key={activity.id} accessibilityRole="radio" accessibilityState={{ checked: logCategoryId === activity.id }}
+                  onPress={() => { if (!frozen()) setLogCategoryId(activity.id); }} testID={`location-correction-log-${activity.id}`}
+                  style={({ pressed }) => [styles.pill, { backgroundColor: logCategoryId === activity.id ? theme.textPrimary : theme.surfaceMuted,
+                    opacity: pressed ? 0.7 : 1 }]}>
+                  <Text {...mobileTextProps("control")} style={[styles.pillText, { color: logCategoryId === activity.id ? theme.surface : theme.textPrimary }]}>
+                    {activity.name}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable accessibilityRole="radio" accessibilityState={{ checked: logCategoryId == null }}
+                onPress={() => { if (!frozen()) setLogCategoryId(null); }} testID="location-correction-log-none"
+                style={({ pressed }) => [styles.pill, { backgroundColor: logCategoryId == null ? theme.textPrimary : theme.surfaceMuted,
+                  opacity: pressed ? 0.7 : 1 }]}>
+                <Text {...mobileTextProps("control")} style={[styles.pillText, { color: logCategoryId == null ? theme.surface : theme.textPrimary }]}>
+                  Don't log
+                </Text>
+              </Pressable>
+            </View>
+          </Section>
         ) : null}
         {trip && leg ? (
           <LegModes mode={legMode ?? leg.mode} onPick={(mode) => { if (!frozen()) setLegMode(mode); }} theme={theme} />

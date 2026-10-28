@@ -2100,6 +2100,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const locationCorrections = useLocationCorrections({
     clockFormat,
     data: authState === "authenticated" ? data : null,
+    // A place logged with Logs as: its blocks come with the next read of the day.
+    onLogged: () => { void load(); },
     pending: correctionQueue.pending,
     reduceMotion,
     showNotice: (message) => showTodayNotice(message, null),
@@ -3796,6 +3798,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             }}
             reduceMotion={reduceMotion}
             testID="calendar-check-toast"
+            theme={theme}
+          />
+        ) : null}
+        {locationCorrections.heldLog ? (
+          // Logs as from a place's correction sheet (step 12 part 4c), held for Undo as an answer is.
+          <BlocksToast
+            key={`log-place-${locationCorrections.heldLog.token}`}
+            actionAccessibilityLabel={`Undo logging ${locationCorrections.heldLog.title}`}
+            actionLabel="Undo"
+            actionTestID="location-log-undo"
+            message={`Logged ${locationCorrections.heldLog.title}`}
+            onAction={() => {
+              locationCorrections.undoLog();
+              playHaptic("undoRestore");
+            }}
+            reduceMotion={reduceMotion}
+            testID="location-log-toast"
             theme={theme}
           />
         ) : null}

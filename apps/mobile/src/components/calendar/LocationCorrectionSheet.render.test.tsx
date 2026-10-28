@@ -73,11 +73,12 @@ const trip: TimelineTrip & { route: string } = {
 const theme = new Proxy({}, { get: (_target, key) => String(key) }) as never;
 
 type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
-function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string) => Promise<void>) {
+function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string) => Promise<void>,
+  logAs?: { activities: Array<{ id: string; name: string }>; onLog: (categoryId: string) => void }) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
-    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace}
+    <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace} logAs={logAs}
       places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
       stale={stale} target={next} theme={theme} />
   );
@@ -288,6 +289,24 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     await sheet.settle();
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
     expect(onQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a place as the activity picked, after its own changes are kept, and Don't log leaves it as it is (step 12 part 4c)", async () => {
+    const onLog = vi.fn();
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
+    expect(plain.tree.root.findByProps({ testID: "location-correction-log-none" }).props.accessibilityState).toEqual({ checked: true });
+    plain.press("location-correction-sheet-action");
+    expect(onLog).not.toHaveBeenCalled();
+
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
+    sheet.press(`location-correction-place-${SAVED}`);
+    sheet.press("location-correction-log-cat-errands");
+    sheet.press("location-correction-sheet-action");
+    expect(onLog).not.toHaveBeenCalled();
+    await sheet.settle();
+    expect(sheet.onQueue).toHaveBeenCalledTimes(1);
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
   });
 });
 

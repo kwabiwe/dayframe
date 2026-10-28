@@ -10,6 +10,7 @@ import {
 import { createPlace, fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { canSayDidntLeave, canSayNotHere, type QueuedCorrection } from "../../lib/locationCorrectionDraft";
+import { REVIEW_DECK_UNDO_MS } from "../../lib/reviewDeckHold";
 import {
   enqueueTimelineCorrections,
   removeTimelineCorrections,
@@ -30,6 +31,7 @@ type Open = ({ kind: "place"; itemId: string; label: string } | { kind: "trip"; 
 export function useLocationCorrections({
   clockFormat,
   data,
+  onLogged,
   pending,
   reduceMotion,
   showNotice,
@@ -37,7 +39,9 @@ export function useLocationCorrections({
   timeline
 }: {
   clockFormat: ClockFormat;
-  data: Pick<MobileBootstrap, "places" | "user" | "workspace"> | null;
+  data: Pick<MobileBootstrap, "categories" | "places" | "user" | "workspace"> | null;
+  /** A place logged with Logs as reached the server: the day's blocks are read again. */
+  onLogged?: () => void;
   /** The queue as the List shows it (useTimelineCorrectionQueue). */
   pending: readonly PendingTimelineCorrection[];
   reduceMotion: boolean;
@@ -153,6 +157,53 @@ export function useLocationCorrections({
     }], true);
   }, [ownerKey, queue, shownCentre, shownRadius, userId, workspaceId]);
 
+  // "Logs as" (step 12 part 4c): held for Undo for the deck's 4.8 s, then queued as `log_place`; once the server
+  // has it, the day's blocks are read again so the place shows them.
+  const [heldLog, setHeldLog] = useState<{ token: number; ownerKey: string; title: string; request: QueuedCorrection["request"] } | null>(null);
+  const logTokens = useRef(0);
+  const sentLogs = useRef(new Set<string>());
+  const commitLog = useCallback((log: NonNullable<typeof heldLog>) => {
+    if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
+    const owner = { userId, workspaceId };
+    void enqueueTimelineCorrections(owner, [{ request: log.request }]).then((items) => {
+      for (const item of items) sentLogs.current.add(item.clientCorrectionId);
+      return synchroniseTimelineCorrections({ owner, force: true });
+    }).catch(() => showNotice("That place wasn't logged. Try again."));
+  }, [showNotice, userId, workspaceId]);
+  useEffect(() => {
+    if (!heldLog) return;
+    // Another account (or none): the held log is dropped, never sent for it.
+    if (heldLog.ownerKey !== ownerKey) {
+      setHeldLog(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setHeldLog((current) => current?.token === heldLog.token ? null : current);
+      commitLog(heldLog);
+    }, REVIEW_DECK_UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [commitLog, heldLog, ownerKey]);
+  // A second Logs as sends the one held now, as the deck's hold does.
+  const holdLog = (next: NonNullable<typeof heldLog>) => {
+    if (heldLog) commitLog(heldLog);
+    setHeldLog(next);
+  };
+  const undoLog = useCallback(() => setHeldLog(null), []);
+  // A Logs as the server has answered (it left the queue): read the day's blocks again.
+  const pendingIds = pending.map((item) => item.clientCorrectionId).join("|");
+  useEffect(() => {
+    const waiting = new Set(pending.map((item) => item.clientCorrectionId));
+    const answered = [...sentLogs.current].filter((id) => !waiting.has(id));
+    if (!answered.length) return;
+    for (const id of answered) sentLogs.current.delete(id);
+    onLogged?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingIds]);
+  const activities = useMemo(() => [...(data?.categories ?? [])]
+    .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
+    .slice(0, 8)
+    .map((category) => ({ id: category.id, name: category.name })), [data?.categories]);
+
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
   // Several at once are said together (Codex r2 on #602).
@@ -191,6 +242,15 @@ export function useLocationCorrections({
       evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
       onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing)}
+      logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && activities.length && !stale ? {
+        activities,
+        onLog: (categoryId) => {
+          logTokens.current += 1;
+          const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
+          holdLog({ token: logTokens.current, ownerKey: open.ownerKey, title: `${shown.label} as ${name}`,
+            request: { kind: "log_place", subject: "place", itemId: shown.place.id, categoryId } });
+        }
+      } : undefined}
       onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
         ? (name) => savePlace(open.id, open.ownerKey, shown.place, name) : undefined}
       places={places}
@@ -203,5 +263,5 @@ export function useLocationCorrections({
     />
   ) : null;
 
-  return { openPlace, openTripLeg, sheet };
+  return { heldLog, openPlace, openTripLeg, sheet, undoLog };
 }
