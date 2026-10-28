@@ -1,6 +1,6 @@
 import type pg from "pg";
 import {
-  applyTimelineCorrections,
+  applyTimelineCorrectionsWithJoins,
   mergeSameModeLegs,
   sameKnownPlace,
   TimelineCorrectionRequestSchema,
@@ -64,9 +64,13 @@ export async function activeTimelineCorrections(client: pg.PoolClient, session: 
   return result.rows.map(correctionFromRow);
 }
 
-/** Replay's segments with the person's corrections applied; unchanged when there are none. */
+/**
+ * Replay's segments with the person's corrections applied; unchanged when there are none. `joinedStayIds`, when
+ * given, is filled with the stays "I didn't leave" folded into another (id → the one that stands for it).
+ */
 export async function withTimelineCorrections(
-  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], processingAt: string
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], processingAt: string,
+  joinedStayIds?: Map<string, string>
 ): Promise<LocationSegment[]> {
   if (!segments.length) return segments;
   const from = segments.reduce((min, segment) => Math.min(min, Date.parse(segment.startedAt)), Number.POSITIVE_INFINITY);
@@ -91,7 +95,10 @@ export async function withTimelineCorrections(
   const usable = corrections.filter((correction) => correction.kind !== "place" ||
     ((!correction.target.placeId || known.has(correction.target.placeId)) &&
       (!correction.target.learnedPlaceId || known.has(correction.target.learnedPlaceId))));
-  return usable.length ? applyTimelineCorrections(segments, usable, nowMs) : segments;
+  if (!usable.length) return segments;
+  const applied = applyTimelineCorrectionsWithJoins(segments, usable, nowMs);
+  for (const [from, to] of applied.joinedStayIds) joinedStayIds?.set(from, to);
+  return applied.segments;
 }
 
 type SegmentRow = {
@@ -474,7 +481,9 @@ async function applyJoin(
       ...(travelMode && travelMode === after.metadata?.travelMode ? { travelMode } : {}),
       ...(motionSupported || after.metadata?.motionSupported ? { motionSupported: true } : {}),
       ...(motionTimed || after.metadata?.motionTimed ? { motionTimed: true } : {}),
-      setByYou: true
+      setByYou: true,
+      // Later corrections of the one trip are tied to the trip in's span, as replay ties them (Codex r1 on #603).
+      correctionSpan: correctionSpan(before, iso(before.startedAt), iso(before.stoppedAt ?? new Date()))
     };
     await client.query(
       `update commute_segments
@@ -489,25 +498,24 @@ async function applyJoin(
         after.routeDistance, after.routeSampleCount, after.maxGapSeconds ?? 0, after.continuityStatus, JSON.stringify(metadata)]);
     await supersede("stay_segments", [row.id]);
     await supersede("commute_segments", [after.id]);
-    await retireSuggestions(client, session, [row.id, after.id], "You said you weren't here.");
-    // The trip in's open suggestion offers the one trip.
-    await client.query(
-      `update review_items set suggested_stopped_at = $4
-        where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open'`,
-      [...owner, before.id, after.stoppedAt]);
+    // The trip in's suggestion described another trip (its route, title and activity): replay offers the one
+    // trip afresh, reopening it with what the one trip is (Codex r1 on #603).
+    await retireSuggestions(client, session, [row.id, after.id, before.id], "You said you weren't here.");
     return;
   }
   const { first, second } = joined;
   await client.query(
+    // Still open, closed or finalised as the second visit is; tied to the first visit's span, as replay ties it
+    // (Codex r1 on #603).
     `update stay_segments s
         set stopped_at = n.stopped_at, stop_lower_bound_at = n.stop_lower_bound_at, stop_upper_bound_at = n.stop_upper_bound_at,
-            sample_count = s.sample_count + n.sample_count,
-            metadata = s.metadata || jsonb_build_object('setByYou', true)
+            status = n.status, sample_count = s.sample_count + n.sample_count,
+            metadata = s.metadata || jsonb_build_object('setByYou', true, 'correctionSpan', $5::jsonb)
               || case when n.metadata ? 'openTrip' then jsonb_build_object('openTrip', n.metadata -> 'openTrip') else '{}'::jsonb end,
             updated_at = now()
        from stay_segments n
       where s.id = $3 and n.id = $4 and s.workspace_id = $1 and s.user_id = $2 and n.workspace_id = $1 and n.user_id = $2`,
-    [...owner, first.id, second.id]);
+    [...owner, first.id, second.id, JSON.stringify(correctionSpan(first, iso(first.startedAt), iso(first.stoppedAt ?? new Date())))]);
   await client.query(
     `update commute_segments set from_stay_segment_id = $3, updated_at = now()
       where workspace_id = $1 and user_id = $2 and from_stay_segment_id = $4 and status <> 'superseded' and id <> $5`,
@@ -515,7 +523,12 @@ async function applyJoin(
   await supersede("commute_segments", [row.id]);
   await supersede("stay_segments", [second.id]);
   await retireSuggestions(client, session, [row.id, second.id], "You said you didn't leave.");
-  // The first visit's open suggestion offers the one stay.
+  // The first visit's open suggestion offers the one stay; while the one stay is still open, replay offers it
+  // again once it ends (Codex r1 on #603).
+  if (second.stoppedAt == null) {
+    await retireSuggestions(client, session, [first.id], "You said you didn't leave.");
+    return;
+  }
   await client.query(
     `update review_items set suggested_stopped_at = $4
       where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open'`,

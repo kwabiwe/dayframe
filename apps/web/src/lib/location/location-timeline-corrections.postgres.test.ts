@@ -411,15 +411,19 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(gone.rows.map((row) => row.status)).toEqual(["superseded", "superseded"]);
     const suggestions = await db.query(`select location_segment_id as "segmentId", status, notes, suggested_stopped_at as "stoppedAt"
       from review_items where location_segment_id = any($1::uuid[]) order by suggested_started_at`, [[notHere, t1]]);
-    expect(suggestions.rows[0]).toMatchObject({ segmentId: t1, status: "open" });
-    expect(new Date(suggestions.rows[0].stoppedAt).toISOString()).toBe(at(base + 120));
+    // The trip in's suggestion described the old trip: replay offers the one trip afresh (Codex r1 on #603).
+    expect(suggestions.rows[0]).toMatchObject({ segmentId: t1, status: "ignored", notes: "You said you weren't here." });
     expect(suggestions.rows[1]).toMatchObject({ segmentId: notHere, status: "ignored", notes: "You said you weren't here." });
+    expect(joinedTrip.metadata.correctionSpan).toEqual({ startedAt: at(base + 60), stoppedAt: at(base + 80) });
 
-    // I didn't leave: the two visits to Home are one stay, and the drive after leaves it.
+    // I didn't leave: the two visits to Home are one stay, and the drive after leaves it. The one stay is as
+    // finished as its last part (Codex r1 on #603).
+    await db.query(`update stay_segments set status = 'closed' where id = $1`, [home3]);
     await correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t3" }, session);
-    const merged = (await db.query(`select stopped_at as "stoppedAt", sample_count as "samples", metadata from stay_segments where id = $1`, [home2])).rows[0];
+    const merged = (await db.query(`select stopped_at as "stoppedAt", sample_count as "samples", status, metadata from stay_segments where id = $1`, [home2])).rows[0];
     expect(new Date(merged.stoppedAt).toISOString()).toBe(at(base + 200));
-    expect(merged).toMatchObject({ samples: 6, metadata: { setByYou: true } });
+    expect(merged).toMatchObject({ samples: 6, status: "closed", metadata: { setByYou: true,
+      correctionSpan: { startedAt: at(base + 120), stoppedAt: at(base + 150) } } });
     expect((await db.query(`select status from stay_segments where id = $1`, [home3])).rows[0].status).toBe("superseded");
     expect((await db.query(`select status from commute_segments where id = $1`, [t3])).rows[0].status).toBe("superseded");
     expect((await db.query(`select from_stay_segment_id as "fromStayId" from commute_segments where id = $1`, [t4])).rows[0].fromStayId).toBe(home2);

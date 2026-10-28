@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyTimelineCorrections, TimelineCorrectionRequestSchema, type TimelineCorrection } from "../src/location/corrections";
+import {
+  applyTimelineCorrections, applyTimelineCorrectionsWithJoins, TimelineCorrectionRequestSchema, type TimelineCorrection
+} from "../src/location/corrections";
 import type { CommuteSegment, LocationSegment, StaySegment } from "../src/location/types";
 
 // Location v4 step 11: synthetic times and identities only.
@@ -209,10 +211,12 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(result.find((segment) => segment.clientSegmentId === "t4")).toMatchObject({ fromStaySegmentId: "shop" });
   });
 
-  it("keeps a trip between two different places, or unknown ones, when asked to merge it", () => {
-    expect(applyTimelineCorrections(day, [correction({ subject: "trip", kind: "merge" }, 95, 120)], NOW)).toEqual(day);
-    const unknown = [stay("p", 0, 10), linked("tt", 10, 20, "p", "q", []), stay("q", 20, 30)];
-    expect(applyTimelineCorrections(unknown, [correction({ subject: "trip", kind: "merge" }, 10, 20)], NOW)).toEqual(unknown);
+  it("keeps a merge the server accepted even when a later correction changes one visit's place (Codex r1 on #603)", () => {
+    const result = applyTimelineCorrections(day, [
+      correction({ subject: "trip", kind: "merge" }, 150, 160, 1),
+      correction({ subject: "place", kind: "place", target: { placeId: null, learnedPlaceId: LEARNED } }, 160, 200, 2)
+    ], NOW);
+    expect(result.map((segment) => segment.clientSegmentId)).toEqual(["home", "t1", "x", "t2", "shop", "t4", "home2"]);
   });
 
   it("applies later corrections to what an earlier one joined", () => {
@@ -224,4 +228,32 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(result.find((segment) => segment.clientSegmentId === "shop")).toMatchObject({ stoppedAt: at(200), learnedPlaceId: LEARNED });
     expect(result.find((segment) => segment.clientSegmentId === "t2")).toMatchObject({ startedAt: at(62) });
   });
+
+  it("ties later corrections of a joined trip to the earlier trip's span, so replay finds them (Codex r1 on #603)", () => {
+    const joined = applyTimelineCorrections(day, [correction({ subject: "place", kind: "delete" }, 80, 95, 1)], NOW);
+    expect(joined.find((segment) => segment.clientSegmentId === "t1")).toMatchObject({ correctionSpan: { startedAt: at(60), stoppedAt: at(80) } });
+    // The app sends the joined trip's own span; it finds the trip in, which stands for both.
+    const removed = applyTimelineCorrections(day, [
+      correction({ subject: "place", kind: "delete" }, 80, 95, 1),
+      correction({ subject: "trip", kind: "delete" }, 60, 80, 2)
+    ], NOW);
+    expect(removed.some((segment) => segment.clientSegmentId === "t1" || segment.clientSegmentId === "t2")).toBe(false);
+  });
+
+  it("sets a leg's mode on the trip out after it was joined (Codex r1 on #603)", () => {
+    const result = applyTimelineCorrections(day, [
+      correction({ subject: "place", kind: "delete" }, 80, 95, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "running" } }, 95, 120, 2)
+    ], NOW);
+    expect((result.find((segment) => segment.clientSegmentId === "t1") as CommuteSegment).tripLegs?.map((leg) => leg.mode))
+      .toEqual(["automotive", "running"]);
+  });
+
+  it("gives the one stay its last visit's status, and names which stay it folded (Codex r1 on #603)", () => {
+    const open = day.map((segment) => segment.clientSegmentId === "shop2" ? { ...segment, status: "open" as const } : segment);
+    const { segments, joinedStayIds } = applyTimelineCorrectionsWithJoins(open, [correction({ subject: "trip", kind: "merge" }, 150, 160)], NOW);
+    expect(segments.find((segment) => segment.clientSegmentId === "shop")).toMatchObject({ status: "open", correctionSpan: { startedAt: at(120), stoppedAt: at(150) } });
+    expect([...joinedStayIds]).toEqual([["shop2", "shop"]]);
+  });
 });
+
