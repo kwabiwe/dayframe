@@ -49,4 +49,22 @@ describe("useReviewDecisions owner lifetimes (Codex r5 on #609)", () => {
     expect(result.current.state.notice?.label).toBe("Skipped b");
     expect(result.current.state.error).toBeNull();
   });
+  it("keeps a newer answer when an earlier restore runs late in the same owner session (Codex r6 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    clientFetch.mockResolvedValue(new Response(JSON.stringify({ ok: false, error: "Refused" }), { status: 500 }));
+    const queued: Array<() => void> = [];
+    const { result } = renderHook(() => useReviewDecisions([item("a"), item("b")], async () => undefined, () => undefined,
+      (update) => { queued.push(update); }, "w1:u1"));
+    act(() => { result.current.decide(decision("a")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(queued.length).toBeGreaterThan(0);
+    // B is answered before A's restore is applied.
+    act(() => { result.current.decide(decision("b")); });
+    act(() => { queued.splice(0).forEach((update) => update()); });
+    // A is back (its restore), and B's answer and Undo are kept: the restore applied the state as it is now.
+    expect(result.current.state.hiddenIds.has("a")).toBe(false);
+    expect(result.current.state.hiddenIds.has("b")).toBe(true);
+    expect(result.current.state.notice?.label).toBe("Skipped b");
+  });
 });

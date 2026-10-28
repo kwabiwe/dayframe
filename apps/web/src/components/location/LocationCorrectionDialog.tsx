@@ -123,9 +123,12 @@ async function sendCorrection(correction: TimelineCorrectionRequest) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(correction)
   });
-  if (response.ok) return null;
-  const body = await response.json().catch(() => null) as { error?: string } | null;
-  return body?.error ?? "Couldn't save that. Try again.";
+  const body = await response.json().catch(() => null) as { error?: string; logged?: { resolvedReviewItemIds?: unknown } } | null;
+  if (response.ok) {
+    const resolved = body?.logged?.resolvedReviewItemIds;
+    return { failure: null, resolvedReviewItemIds: Array.isArray(resolved) ? resolved.filter((id): id is string => typeof id === "string") : [] };
+  }
+  return { failure: body?.error ?? "Couldn't save that. Try again.", resolvedReviewItemIds: [] };
 }
 
 export function LocationCorrectionDialog({
@@ -133,6 +136,7 @@ export function LocationCorrectionDialog({
   clock,
   onClose,
   onCorrected,
+  onResolved,
   places,
   question = null,
   target: initialTarget
@@ -147,6 +151,8 @@ export function LocationCorrectionDialog({
   clock: ClockFormat;
   onClose: () => void;
   onCorrected: () => Promise<void> | void;
+  /** Review items a saved correction resolved (Logs as closes the place's open "?"): the decisions owner settles them. */
+  onResolved?: (reviewItemIds: readonly string[]) => void;
   places: readonly CorrectionPlace[];
   target: LocationCorrectionTarget;
 }) {
@@ -178,8 +184,10 @@ export function LocationCorrectionDialog({
       correctionIds.current.set(signature, id);
     }
     // Saved, it is done: the same change made again later is a new correction with a new id.
-    return sendCorrection({ ...correction, clientCorrectionId: id }).then((failure) => {
+    return sendCorrection({ ...correction, clientCorrectionId: id }).then(({ failure, resolvedReviewItemIds }) => {
       if (!failure) correctionIds.current.delete(signature);
+      // The questions the server closed with it: settled at once, even if the dialog has gone (Codex r6 on #609).
+      if (resolvedReviewItemIds.length) onResolved?.(resolvedReviewItemIds);
       return failure;
     });
   };

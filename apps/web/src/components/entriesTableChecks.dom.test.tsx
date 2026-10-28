@@ -26,7 +26,7 @@ const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
 vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => clock.todayStartMs, useMediaQuery: () => false }));
 
 const { EntriesTable } = await import("./EntriesTable");
-const { CheckDecisionsProvider, useProjectedReviewItems } = await import("./location/ListChecks");
+const { CheckDecisionsProvider, useListChecks, useProjectedReviewItems } = await import("./location/ListChecks");
 const { askingChecks } = await import("@/lib/calendar-checks");
 const { useGridCorrection } = await import("./location/useGridCorrection");
 
@@ -852,5 +852,81 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
     expect(screen.getByTestId("grid-asks").textContent).toBe("asks");
     expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/review/"))).toEqual([]);
+  });
+  it("never lets a revival queued in one lifetime of a workspace land after A → B → A (Codex r6 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
+    const queued: Array<() => void> = [];
+    // A List whose transition runs later, when the test releases it.
+    function Probe() {
+      const checks = useListChecks({ applyTransition: (update) => { queued.push(update); }, categories: [], refresh: async () => undefined, reviewItems: [] });
+      return (
+        <>
+          <output data-testid="checks">{checks.checks.map((check) => check.id).join(",")}</output>
+          <button onClick={() => checks.answer(SLEEP, "skip")} type="button">Answer Sleep</button>
+        </>
+      );
+    }
+    const sleep = reviewItems[2];
+    const view = render(<Shell items={[sleep]}><Probe /></Shell>);
+    fireEvent.click(screen.getByRole("button", { name: "Answer Sleep" }));
+    // A refresh no longer lists it; then its save is refused: its restore is queued.
+    view.rerender(<Shell items={[]}><Probe /></Shell>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // The restore and the revival of the copy the data no longer has are both queued in the List's transition.
+    expect(queued.length).toBeGreaterThan(0);
+    // Workspace B, then back to A: a new lifetime of A, whose data doesn't list it.
+    view.rerender(<Shell items={[]} owner="w2:u1"><Probe /></Shell>);
+    view.rerender(<Shell items={[]}><Probe /></Shell>);
+    act(() => { queued.splice(0).forEach((update) => update()); });
+    expect(screen.getByTestId("checks").textContent).toBe("");
+    expect(badge()).toBe(0);
+  });
+
+  it("settles a question the Grid's Logs as resolved: the List's Undo can't bring it back (Codex r6 on #609)", async () => {
+    clientFetch.mockImplementation(async (url: string, init: RequestInit) => url === "/api/timeline/corrections"
+      ? new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e1"], resolvedReviewItemIds: [PLACE] } }), { status: 200 })
+      : new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    function GridProbe() {
+      const items = useProjectedReviewItems([]);
+      const grid = useGridCorrection({ activities: [errands], clock: "24h", owner: "w1:u1", places: [], refresh: async () => undefined, reviewItems: items,
+        timelines: new Map([[timeline.date, timeline]]), todayStartMs: clock.todayStartMs });
+      const office = timeline.items[0] as Extract<LocationTimeline["items"][number], { kind: "place" }>;
+      return (
+        <>
+          <button onClick={() => grid.open(office, timeline, grid.askingBySegment?.get("seg-office") ?? null)} type="button">Open the office</button>
+          {grid.dialog}
+        </>
+      );
+    }
+    const list = <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
+    const view = render(<Shell items={reviewItems}>{list}</Shell>);
+    fireEvent.click(officeRow()!);
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    expect(badge()).toBe(2);
+    // On the Grid, while the List holds its Not now, the office is logged as Errands.
+    view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
+    fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(dialog()).toBeNull());
+    // Back in the List: Undo brings nothing back, the badge stays, and the held Not now was never sent.
+    view.rerender(<Shell items={reviewItems}>{list}</Shell>);
+    const undo = screen.queryByRole("button", { name: "Undo" });
+    if (undo) fireEvent.click(undo);
+    expect(officeRow()).toBeNull();
+    expect(badge()).toBe(2);
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
+  });
+
+  it("moves focus to the next \"?\" when a focused row Yes pill answers (Codex r6 on #609)", async () => {
+    renderList();
+    const yes = officeRow()!.closest("tr")!.querySelector<HTMLButtonElement>(".timeline-row-yes")!;
+    yes.focus();
+    fireEvent.click(yes);
+    expect(officeRow()).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
   });
 });

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { validReviewAcknowledgement, type ClockFormat, type LocationTimeline, type ReviewMutationEnvelope, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { LocationCorrectionDialog, type CorrectionActivity, type CorrectionPlace, type CorrectionQuestion, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { checkQuestionWords } from "@/components/location/ListChecks";
+import { checkQuestionWords, useSettleResolved } from "@/components/location/ListChecks";
 import { askingChecks } from "@/lib/calendar-checks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { ReviewItemRow } from "@/lib/queries";
@@ -29,6 +29,7 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
   timelines: ReadonlyMap<string, LocationTimeline>;
   todayStartMs: number | null;
 }) {
+  const settleResolved = useSettleResolved();
   const asking = useMemo(() => todayStartMs !== null ? askingChecks(reviewItems, todayStartMs) : null, [reviewItems, todayStartMs]);
   const askingBySegment = useMemo(() => asking
     ? new Map(asking.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : [])) : null, [asking]);
@@ -77,7 +78,7 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
     const words = checkQuestionWords(review, clock);
     return { text: words.question, yesLabel: words.yesLabel, noLabel: "Not now",
       onAnswer: async (yes: boolean) => {
-        const failure = await answerReview(review, outings.get(review.id), yes, refresh);
+        const failure = await answerReview(review, outings.get(review.id), yes, refresh, settleResolved);
         if (!failure) answered.current = true;
         return failure;
       } };
@@ -86,7 +87,8 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
   const dialog = current ? (
     <LocationCorrectionDialog activities={activities} clock={clock} key={`${current.owner}:${targetId}`} onClose={() => setOpened(null)}
       // A saved correction (Logs as, Save this place, a fix) can remove the opener too: focus moves on as after an answer (Codex r3 on #609).
-      onCorrected={async () => { answered.current = true; await refresh(); }} places={places} question={question} target={current.target} />
+      onCorrected={async () => { answered.current = true; await refresh(); }} onResolved={settleResolved} places={places} question={question}
+      target={current.target} />
   ) : null;
   return { askingBySegment, dialog, open };
 }
@@ -104,7 +106,10 @@ function targetFor(item: TimelinePlace | TimelineTrip, timeline: LocationTimelin
 
 /** Saves a Grid answer at once: null when the server acknowledged it (or it was decided elsewhere), else why not. */
 async function answerReview(review: ReviewItemRow, outing: ReturnType<typeof reviewOutings> extends Map<string, infer O> ? O | undefined : never,
-  yes: boolean, refresh: () => Promise<unknown>): Promise<string | null> {
+  yes: boolean, refresh: () => Promise<unknown>, settleResolved: (reviewItemIds: readonly string[]) => void): Promise<string | null> {
+  // Every item this answer covers: once the server resolved them, the List's held or Undo-able decisions for them
+  // are settled, so its Undo can't bring them back (Codex r6 on #609).
+  const covered = [review.id, ...(outing?.members ?? []).map((member) => member.id)];
   const kind = yes ? "log" : "skip";
   const envelope: ReviewMutationEnvelope = {
     clientMutationId: crypto.randomUUID(),
@@ -121,11 +126,13 @@ async function answerReview(review: ReviewItemRow, outing: ReturnType<typeof rev
     await refresh().catch(() => undefined);
     const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
       ? body.canonicalReviewStatuses as Record<string, string> : null;
+    if (statuses) settleResolved(Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id));
     if (statuses && statuses[review.id] !== undefined && statuses[review.id] !== "open") return null;
     return "Part of this outing was decided elsewhere, so nothing was saved. Answer it again.";
   }
   // Decided elsewhere (another device or tab): nothing left to ask.
   if (response.status === 404 || (response.status === 409 && body.code === "resolution_conflict") || (response.ok && body.alreadyResolved === true)) {
+    settleResolved(covered);
     await refresh().catch(() => undefined);
     return null;
   }
@@ -133,6 +140,7 @@ async function answerReview(review: ReviewItemRow, outing: ReturnType<typeof rev
     return typeof body.message === "string" ? body.message : typeof body.error === "string" ? body.error : "Couldn't save that answer. Try again.";
   }
   if (!validReviewAcknowledgement(body, envelope, review.id)) return "Couldn't confirm that answer was saved. Try again.";
+  settleResolved(covered);
   await refresh().catch(() => undefined);
   return null;
 }

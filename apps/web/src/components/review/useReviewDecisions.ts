@@ -35,8 +35,10 @@ export function useReviewDecisions(
       if (!active) return;
       const restoring = next.restored !== null && next.restored.sequence !== restoredSequence;
       if (next.restored) restoredSequence = next.restored.sequence;
-      // The restore may run later (the List's transition): it applies only while this lifetime still is the current one.
-      if (restoring && applyRestore) applyRestore(() => { if (active) setState(next); });
+      // The restore may run later (the List's transition): it applies only while this lifetime still is the current
+      // one, and installs the controller's state as it is then — never the snapshot from when it was queued, so a
+      // newer answer made meanwhile is kept (Codex r5, r6 on #609).
+      if (restoring && applyRestore) applyRestore(() => { if (active) setState(controller.getState()); });
       else setState(next);
     });
     return { owner: forOwner, controller, activate: () => { active = true; }, retire: () => { active = false; } };
@@ -125,6 +127,8 @@ export function useReviewDecisions(
     undo: useCallback(() => controller.undo(), [controller]),
     /** Saves a held decision now and resolves once every save in flight has settled. */
     settle: useCallback(() => controller.flushAndSettle(), [controller]),
+    /** Items the server resolved another way: their held or saving decisions can't be undone or restored. */
+    settleResolved: useCallback((itemIds: Iterable<string>) => controller.settleResolved(itemIds), [controller]),
     clearError: useCallback(() => controller.clearError(), [controller])
   };
 }

@@ -66,20 +66,27 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     const over = openItemsAtConflict.current;
     if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner);
+  const { state, decide, undo, clearError, settleResolved: settleDecisions } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner);
   // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
   // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
-  const ownerNow = useRef(owner);
+  // The owner lifetime: a generation bumped on every owner change (A → B → A is three), which every deferred update
+  // captures and checks, so nothing queued in one lifetime lands in another (Codex r6 on #609).
+  const [lifetime, setLifetime] = useState({ owner, generation: 0 });
+  const generationNow = useRef(0);
   useLayoutEffect(() => {
-    ownerNow.current = owner;
-  }, [owner]);
+    generationNow.current = lifetime.generation;
+  }, [lifetime.generation]);
+  // The items the server resolved another way in this lifetime: never revived.
+  const resolvedNow = useRef(new Set<string>());
+  useEffect(() => {
+    resolvedNow.current = new Set();
+  }, [lifetime.generation]);
   // Another owner: nothing of the previous lifetime carries over.
-  const [lifetimeOwner, setLifetimeOwner] = useState(owner);
-  if (lifetimeOwner !== owner) {
-    setLifetimeOwner(owner);
+  if (lifetime.owner !== owner) {
+    setLifetime({ owner, generation: lifetime.generation + 1 });
     setClosedByServer(new Map());
     setSnapshots(new Map());
     setRevived(new Map());
@@ -110,13 +117,15 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     const snapshot = restoreSources.current.snapshots.get(restoredId);
     const back = [...(snapshot && !loaded.has(restoredId) ? [snapshot] : []),
       ...(restoreSources.current.heldOutings.get(restoredId) ?? []).filter((member) => !loaded.has(member.id) && stillOpen(member.id))];
-    // The transition may run it later: only while the owner it was for is still the current one (Codex r5 on #609).
-    const scheduledFor = owner;
+    // The transition may run it later: only in the lifetime it was for, and only its own items, never one the
+    // server resolved meanwhile (Codex r5, r6 on #609).
+    const scheduledFor = lifetime.generation;
     if (back.length) applyTransition(() => {
-      if (ownerNow.current !== scheduledFor) return;
-      setRevived((current) => new Map([...current, ...back.map((item) => [item.id, item] as const)]));
+      if (generationNow.current !== scheduledFor) return;
+      const still = back.filter((item) => !resolvedNow.current.has(item.id));
+      if (still.length) setRevived((current) => new Map([...current, ...still.map((item) => [item.id, item] as const)]));
     });
-  }, [applyTransition, owner, state.restored]);
+  }, [applyTransition, lifetime.generation, state.restored]);
   // A revived card the data lists again is the data's card from then on.
   if ([...revived.keys()].some((id) => loadedIds.has(id))) setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   // Newer data listing a card open again lifts the server's earlier "decided" for it.
@@ -181,7 +190,21 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     }
   }, [categories, decide, itemsById, outings, revived]);
 
-  return { answer, checks, clearError, itemsById, outings, projectedItems, state, undo };
+  /**
+   * A receipt that resolved these items another way (Logs as's `resolvedReviewItemIds`, a Grid answer; Codex r6 on
+   * #609): their held or saving decisions are settled, nothing revives them, and they stay away until data lists
+   * them open again.
+   */
+  const settleResolved = useCallback((itemIds: readonly string[]) => {
+    if (!itemIds.length) return;
+    for (const id of itemIds) resolvedNow.current.add(id);
+    settleDecisions(itemIds);
+    setRevived((current) => itemIds.some((id) => current.has(id)) ? new Map([...current].filter(([id]) => !itemIds.includes(id))) : current);
+    const over = openItemsAtConflict.current;
+    setClosedByServer((current) => new Map([...current, ...itemIds.map((id) => [id, over] as const)]));
+  }, [settleDecisions]);
+
+  return { answer, checks, clearError, itemsById, outings, projectedItems, settleResolved, state, undo };
 }
 
 type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
@@ -211,6 +234,12 @@ export function CheckDecisionsProvider({ categories, children, owner, refresh, r
   }, []);
   const value = useMemo(() => ({ ...decisions, register }), [decisions, register]);
   return <CheckDecisionsContext.Provider value={value}>{children}</CheckDecisionsContext.Provider>;
+}
+
+const NO_SETTLE = () => undefined;
+/** Settles review items a receipt resolved another way (the Grid's answers and corrections), when a provider owns decisions. */
+export function useSettleResolved(): (reviewItemIds: readonly string[]) => void {
+  return useContext(CheckDecisionsContext)?.settleResolved ?? NO_SETTLE;
 }
 
 /** The open review items as the List shows them, for counts outside it; the items as given without a provider. */

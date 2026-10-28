@@ -614,12 +614,12 @@ export function EntriesTable({
           ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row}
             // A covered place's "?" keeps its place: its dialog, map and Save this place (Codex r2 on #609).
             onOpen={row.place ? () => openPlaceDialog(row.place!, item.id) : row.trip ? () => openTripDialog(item.id, row.trip!) : undefined}
-            onYes={checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />
+            onYes={checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />
             : null
           : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
             nowMs={nowMs} row={row}
             onCorrect={row.kind === "place" ? () => openPlaceDialog(row.place, row.checkIds[0] ?? null) : undefined}
-            onYes={item && checkQuestionWords(item, clock).confident ? () => applyTimelineRegroup(() => listChecks.answer(item.id, "log")) : undefined} />}
+            onYes={item && checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />}
         {/* Owner final change 1 (28 Oct 2026): a row that opens a dialog shows no question under it (the dialog asks
             it); Apple Health, which has no dialog, asks here with the compact pills. */}
         {item && expanded && row.kind === "check" && !row.trip && !row.place ? (
@@ -655,7 +655,7 @@ export function EntriesTable({
     ? listChecks.itemsById.get(correctionCheckId) : undefined;
   const dialogWords = dialogCheck ? checkQuestionWords(dialogCheck, clock) : null;
   /**
-   * A dialog's "?" answered: held for Undo like an inline answer; focus then goes to the next "?" down the List,
+   * A dialog's "?" (or a row's Yes pill, Codex r6 on #609) answered: held for Undo like an inline answer; focus then goes to the next "?" down the List,
    * else the chip, else the List, as there (Codex r1 on #609: the row that opened the dialog is gone).
    */
   const answerFromDialog = (checkId: string, yes: boolean) => {
@@ -1646,7 +1646,7 @@ export function EntriesTable({
           onCorrected={async () => {
             if (correctionFocus.current) correctionFocus.current.saved = true;
             await onChanged?.();
-          }} places={places} target={correction} />
+          }} onResolved={listChecks.settleResolved} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal
