@@ -1970,7 +1970,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The open suggestions the List asks about, and the outings it folds (their trips asked with their stay).
   // Answers from a sheet waiting for its corrections (Codex r2 on #610): released into the Review outbox once the
   // server has them; their "?" stay out of the List and Grid meanwhile.
-  const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner });
+  const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
+    // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
+    onDropped: (reviewItemId) => checkAnswers.restoreAnswered([reviewItemId]) });
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
   // the same transaction, as their own "Not now" (#609), so they leave at once, until the day is read again.
   const resolvedByCorrections = useMemo(() => new Set(correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])),
@@ -2119,9 +2121,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The List's places and trips: the selected day's timeline for this account, read again after each refresh.
   // Location timeline corrections still on the phone (step 12) show over the List's timeline at once; each
   // time the queue shrinks (delivered) the timeline is read again (correctionQueue, above).
+  // A request for one "?" reads its day again too, so a read from before it never decides that its item is missing
+  // (Codex r3 on #610).
+  const [checkTimelineReads, setCheckTimelineReads] = useState(0);
   const calendarTimelineRefreshKey = useMemo(
-    () => ({ calendarData, delivered: correctionQueue.delivered }),
-    [calendarData, correctionQueue.delivered]
+    () => ({ calendarData, delivered: correctionQueue.delivered, checkTimelineReads }),
+    [calendarData, correctionQueue.delivered, checkTimelineReads]
   );
   const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
@@ -2830,7 +2835,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [changeCalendarLayout, selectCalendarDay]);
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
   // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
-  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number } | null>(null);
+  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
   const openCheckOn = useCallback((checkId: string) => {
     const check = calendarChecks.checks.find((each) => each.id === checkId);
     const startedAtMs = check?.startedAt ? Date.parse(check.startedAt) : NaN;
@@ -2838,7 +2843,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     changeCalendarLayout("list");
     selectCalendarDay(formatDateKey(new Date(startedAtMs)));
     calendarCheckRequests.current += 1;
-    setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current });
+    setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current, at: Date.now() });
+    setCheckTimelineReads((count) => count + 1);
     router.navigate("/(tabs)/calendar");
     return true;
   }, [calendarChecks, changeCalendarLayout, selectCalendarDay]);
@@ -3791,6 +3797,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onNextCheck={openNextCheck}
                   onSwipeDay={shiftSelectedCalendarDay}
                   openCheckRequest={calendarCheckTarget}
+                  timelineReadAt={calendarTimelineRequestedAt}
                   clockFormat={clockFormat}
                   dayEndMs={nativeCalendarModel.dayEndMs}
                   dayStartMs={nativeCalendarModel.dayStartMs}

@@ -296,11 +296,18 @@ export function LocationCorrectionSheet({
    * The "?" at the top answered, in one tap (owner, 28 Oct 2026; Codex r2 on #610). With no changes of its own the
    * answer is held for Undo at once. With changes, they are kept as Done keeps them (the correction outbox, shown in
    * the List at once) and the answer waits on the phone until the server has acknowledged them, so it can never
-   * reach the server first; a refused change drops it, and the "?" stays. A Logs as pick is not sent with an answer
-   * (never both): Done sends it.
+   * reach the server first; a refused change drops it, and the "?" stays. A Logs as pick is never lost (Codex r3 on
+   * #610): Yes with an activity picked is Logs as — Done's own flow, the sheet's corrections and then `log_place`
+   * with that activity, which closes the "?" on the server (#609) — and no separate answer is sent. Not now with an
+   * activity picked answers Not now and drops the pick: Not now means "don't log".
    */
   function answerFromSheet(yes: boolean) {
     if (!question || frozen() || stale) return;
+    if (yes && logCategoryId && logAs) {
+      commitRef.current?.();
+      return;
+    }
+    if (!yes && logCategoryId) setLogCategoryId(null);
     if (confirming) {
       setSaveError("Finish the change above first, then answer.");
       return;

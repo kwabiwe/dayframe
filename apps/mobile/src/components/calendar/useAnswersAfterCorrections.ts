@@ -23,8 +23,10 @@ const NONE: ReadonlySet<string> = new Set();
  * the waiting answers change, and on every new read of the day's data. A dropped answer (a refused change) leaves
  * its "?" in the List; the refusal's own notice says the change wasn't saved.
  */
-export function useAnswersAfterCorrections({ data, owner, release }: {
+export function useAnswersAfterCorrections({ data, onDropped, owner, release }: {
   data: MobileBootstrap | null;
+  /** A waiting answer dropped (its change refused): its "?" is shown again at once (Codex r3 on #610). */
+  onDropped?: (reviewItemId: string) => void;
   owner: MobileAccountOwner | null;
   /** Tests: what a release does (the Review outbox otherwise). */
   release?: AnswerAfterCorrectionsRelease;
@@ -37,6 +39,8 @@ export function useAnswersAfterCorrections({ data, owner, release }: {
   dataRef.current = data;
   const releaseRef = useRef(release);
   releaseRef.current = release;
+  const droppedRef = useRef(onDropped);
+  droppedRef.current = onDropped;
   const [dataRead, setDataRead] = useState(0);
   const lastData = useRef(data);
   useEffect(() => {
@@ -74,7 +78,8 @@ export function useAnswersAfterCorrections({ data, owner, release }: {
         return;
       }
       draining = true;
-      void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections, release: releaseRef.current ?? viaReviewOutbox })
+      void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections, release: releaseRef.current ?? viaReviewOutbox,
+        onDropped: (record) => { if (live) droppedRef.current?.(record.reviewItemId); } })
         .catch(() => undefined)
         .finally(() => {
           draining = false;

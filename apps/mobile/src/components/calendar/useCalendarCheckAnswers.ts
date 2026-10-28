@@ -391,6 +391,20 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
 
+  /**
+   * A waiting answer dropped because its sheet's change was refused (Codex r3 on #610): its "?" comes back at once
+   * (List, Grid and counts), from its remembered copy if a refresh paged it out.
+   */
+  const restoreAnswered = useCallback((itemIds: readonly string[]) => {
+    const owner = ownerRef.current;
+    setSaving((now) => now && now.owner === owner
+      ? { ...now, ids: new Set([...now.ids].filter((id) => !itemIds.includes(id))), awaiting: new Set([...now.awaiting].filter((id) => !itemIds.includes(id))) }
+      : now);
+    restore(owner, itemIds);
+    // The refs hold the latest data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const shownHeld = held && held.owner === ownerKey ? held : null;
   /** Every suggestion out of the List for now: the held answer's, and those saving or not yet handed over. */
   const hiddenIds = useMemo(() => new Set<string>([
@@ -398,5 +412,5 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
-  return { answer, data: shown, held: shownHeld, hiddenIds, undo };
+  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
 }

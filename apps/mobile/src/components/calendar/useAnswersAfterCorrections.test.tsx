@@ -37,8 +37,9 @@ const item = { id: "ri-1", status: "open", eventSource: "location_learning", eve
 const data = { user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: [item] } as unknown as MobileBootstrap;
 const flush = () => act(async () => { for (let index = 0; index < 5; index += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
 
+const dropped = vi.hoisted(() => vi.fn());
 function Probe({ owner }: { owner: typeof OWNER | null }) {
-  probe.current = useAnswersAfterCorrections({ data, owner });
+  probe.current = useAnswersAfterCorrections({ data, owner, onDropped: dropped });
   return null;
 }
 const probe: { current: ReturnType<typeof useAnswersAfterCorrections> | null } = { current: null };
@@ -68,5 +69,18 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.update(<Probe owner={{ userId: "user-b", workspaceId: "ws-b" }} />); });
     await flush();
     expect(probe.current!.waitingIds.size).toBe(0);
+  });
+
+  it("says at once which \"?\" to show again when its change is refused (Codex r3 on #610)", async () => {
+    storage.clear();
+    dropped.mockClear();
+    outbox.pending = [{ clientCorrectionId: C1, failureKind: "permanent" }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-3", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    await answers.commitAnswerAfterCorrections("m-3");
+    act(() => { create(<Probe owner={OWNER} />); });
+    await flush();
+    expect(dropped).toHaveBeenCalledWith("ri-1");
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
+    expect(review.enqueueReviewMutation).not.toHaveBeenCalledWith(expect.objectContaining({ clientMutationId: "m-3" }));
   });
 });

@@ -153,6 +153,12 @@ export function useLocationCorrections({
     // The ids are chosen here only when an answer waits for them.
     const ids = beforeEnqueue ? corrections.map((correction) => correction.request.clientCorrectionId ?? createTimelineCorrectionId()) : null;
     const waiting = beforeEnqueue && ids?.length ? await beforeEnqueue(ids) : null;
+    // The account can change while the waiting answer is kept: then nothing is queued or started for the one that
+    // left, and its waiting answer goes (Codex r3 on #610).
+    if (waiting && currentOwner.current !== sheetOwnerKey) {
+      await waiting.cancel().catch(() => undefined);
+      throw new Error("The account changed.");
+    }
     try {
       await enqueueTimelineCorrections(owner, corrections.map((correction, index) => ({
         request: ids ? { ...correction.request, clientCorrectionId: ids[index] } : correction.request,

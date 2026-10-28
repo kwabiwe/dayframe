@@ -109,7 +109,8 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
   it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
     expect(dashboard).toContain("await holdAnswerAfterCorrections(correctionOwner, { id, reviewItemId: check.id, logged: yes, waitsFor: ids });");
     expect(dashboard).toContain("checkAnswers.answer(check.id, yes, null, { afterCorrections: id })");
-    expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner });");
+    expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
+    expect(dashboard).toContain("onDropped: (reviewItemId) => checkAnswers.restoreAnswered([reviewItemId]) });");
     expect(dashboard).toContain("!answersAfterCorrections.waitingIds.has(item.id)");
   });
 

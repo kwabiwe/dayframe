@@ -384,6 +384,23 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onOpenPlace).not.toHaveBeenCalled();
   });
 
+  it("waits for the day's next read before asking a request's missing item under its row (Codex r3 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      openCheckRequest: { id: "c-missing", request: 1, at: 1_000 } };
+    // The places shown were read before the request: they may just be out of date.
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    expect(questions(tree)).toHaveLength(0);
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} timelineReadAt={1_200} />);
+    });
+    // Read again since, and still without it: it asks under its row, its only way to be answered (intended).
+    expect(questions(tree)).toHaveLength(1);
+  });
+
   it("opens a trip's \"?\" in the trip's own sheet, at no leg", () => {
     const onOpenTripLeg = vi.fn();
     const onOpenCheck = vi.fn();

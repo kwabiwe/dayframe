@@ -115,6 +115,32 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(order).toEqual(["cancel"]);
   });
 
+  it("queues nothing and starts no answer when the account changes while the waiting answer is kept (Codex r3 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    type Queue = (corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> }) => Promise<void>;
+    const onQueue = sheetOf(tree)!.props.onQueue as Queue;
+    mocks.enqueue.mockClear();
+    const start = vi.fn();
+    const cancel = vi.fn(async () => undefined);
+    let kept!: () => void;
+    let queued!: Promise<void>;
+    await act(async () => {
+      queued = onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true,
+        beforeEnqueue: () => new Promise((resolve) => { kept = () => resolve({ start, cancel }); }) });
+    });
+    // Account B signs in while A's waiting answer is being kept, then the keep finishes.
+    await act(async () => { tree.update(<Probe data={account("b")} />); });
+    await act(async () => {
+      kept();
+      await expect(queued).rejects.toThrow("The account changed.");
+    });
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("shows a sheet whose item left the List as it was, with nothing to change, until it closes", async () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });

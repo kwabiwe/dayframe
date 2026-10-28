@@ -125,6 +125,15 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 
+  it("brings a dropped waiting answer's “?” back at once (Codex r3 on #610)", async () => {
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+  });
+
   it("Undo brings the “?” back and saves nothing", async () => {
     const { result } = mount(bootstrap([suggestion("a")]));
     act(() => { result.current.answer("a", false); });

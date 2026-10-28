@@ -68,6 +68,7 @@ export function CalendarListView({
   onNextCheck,
   onSwipeDay,
   openCheckRequest = null,
+  timelineReadAt = null,
   clockFormat,
   dayEndMs,
   dayStartMs,
@@ -111,7 +112,12 @@ export function CalendarListView({
    * Open this "?" (by id) once its row is here, and scroll to it: a place's or a trip's in its sheet, Apple
    * Health's under its row. A new request each time.
    */
-  openCheckRequest?: { id: string; request: number } | null;
+  openCheckRequest?: { id: string; request: number; at?: number } | null;
+  /**
+   * When the shown day's places were read (asked for). A request made after it (`at`) for a place's or trip's "?"
+   * the read lacks waits for the next read of that day before asking under its row (Codex r3 on #610).
+   */
+  timelineReadAt?: number | null;
   /** Each suggestion's title, for its own row. */
   checkTitles?: ReadonlyMap<string, string>;
   clockFormat: ClockFormat;
@@ -189,8 +195,10 @@ export function CalendarListView({
   // Health's, and one about nothing the List can open (a legacy location suggestion without a segment), have no
   // sheet and ask under their row. A place's or a trip's is only known for what it is once the day's places are
   // read: until then its row is a placeholder (`known: false`), and a request or a tap for it waits (Codex r1 on
-  // #610). Once they are read, a place's or trip's whose item isn't in them asks under its row as the fallback:
-  // there is no sheet to open and no Review screen to send it to (step 15).
+  // #610). Intended (owner's ruling, Codex r3 on #610): a "?" whose place or trip can't be resolved — a legacy one
+  // without a segment ("none"), or one whose item the day's places lack once read — has no sheet, so it asks under
+  // its row; with Review gone (step 15) that is its only way to be answered. A request made after the last read
+  // waits for the next read of that day before falling back (`fallback`, `timelineReadAt`).
   const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
   const segmentOf = new Map(checks.map((check) => [check.id, check.segmentId] as const));
   const kindOf = (id: string) => checkKinds?.get(id) ?? (segmentOf.get(id) ? "place" : "none");
@@ -201,7 +209,9 @@ export function CalendarListView({
     const sheetless = kindOf(id) === "health" || kindOf(id) === "none";
     const known = sheetless || timeline != null;
     const inline = item.row.kind === "check" && !item.row.trip && known;
-    return [{ key: item.key, id, inline, known,
+    // A place's or trip's asked under its row only because its item isn't in the places read.
+    const fallback = inline && !sheetless;
+    return [{ key: item.key, id, inline, known, fallback,
       open: inline || !known ? undefined : sheetOpener(item.row, id, { checkQuestions, onOpenCheck, onOpenPlace, onOpenTripLeg }) }];
   });
   const inlineIds = new Set(checkRows.filter((row) => row.inline).map((row) => row.id));
@@ -265,8 +275,10 @@ export function CalendarListView({
   const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number } | null>(null);
   const tapRequests = useRef(0);
   const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
+  const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
+    || (timelineReadAt ?? 0) >= request.at;
   const requestedRow = request && request.request !== handledCheckRequest
-    ? checkRows.find((row) => row.id === request.id && row.known) : undefined;
+    ? checkRows.find((row) => row.id === request.id && row.known && readSince(row)) : undefined;
   if (request && requestedRow) {
     setHandledCheckRequest(request.request);
     if (requestedRow.inline) setOpenCheckId(request.id);

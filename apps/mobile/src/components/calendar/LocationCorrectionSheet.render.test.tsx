@@ -439,13 +439,37 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onLog).toHaveBeenCalledWith("cat-errands");
     expect(onAnswer).not.toHaveBeenCalled();
     expect(answerAfter).not.toHaveBeenCalled();
-    // Yes is the answer alone: a Logs as pick is not sent with it.
-    onLog.mockClear();
-    const yes = sheetWith({ logAs, question });
+  });
+
+  it("never loses a Logs as pick: Yes with an activity is Logs as, after the sheet's corrections; Not now drops it (Codex r3 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const onLog = vi.fn();
+    const onAnswer = vi.fn();
+    const answerAfter = vi.fn();
+    const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    // Yes with Errands picked and a place change: the change is kept, then Logs as goes (log_place, #609 closes the "?").
+    const order: string[] = [];
+    onLog.mockImplementation(() => { order.push("log"); });
+    const onQueue = vi.fn(async () => { order.push("queue"); });
+    const onDismissed = vi.fn();
+    const yes = sheetWith({ logAs, question, onQueue, onDismissed });
+    act(() => { yes.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
     act(() => { yes.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
     act(() => { yes.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
     await settle();
-    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(order).toEqual(["queue", "log"]);
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(answerAfter).not.toHaveBeenCalled();
+    expect(onDismissed).toHaveBeenCalledWith(1);
+    // Not now with Errands picked: answers Not now, logs nothing.
+    onLog.mockClear();
+    const no = sheetWith({ logAs, question });
+    act(() => { no.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { no.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    await settle();
+    expect(onAnswer).toHaveBeenCalledWith(false);
     expect(onLog).not.toHaveBeenCalled();
   });
 
