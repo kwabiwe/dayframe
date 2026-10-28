@@ -245,16 +245,25 @@ export async function replayLocationEvidence(
     : new Set<string>();
   observeLocationTiming(options, "protected_replacement_checks", "started");
   // What the person set on their timeline (location v4 step 11) wins over what the engine derived again. It is
-  // applied before decided history is protected as well as after: a place they weren't at, or a trip they didn't
+  // applied once, in order, before decided history is protected: a place they weren't at, or a trip they didn't
   // take, joined items that decided history (the one trip or stay, once logged) now stands for, so protection
-  // must see the joined day, not the engine's parts of it (Codex r3 on #603). Applying again after protection is
-  // a no-op for what already applied and covers segments protection rebuilt.
+  // must see the joined day, not the engine's parts of it (Codex r3 on #603). Only the trips protection rebuilt
+  // inside decided stays, which that pass never saw, have the corrections applied to them afterwards; applying
+  // them again to the whole day would undo the order they were made in (Codex r4 on #603).
   // Stays "I didn't leave" folded into another: the journey in progress from one leaves the one that stands for it.
   const joinedStayIds = new Map<string, string>();
   const corrected = await withTimelineCorrections(client, session, output.segmentUpserts, options.processingAt, joinedStayIds);
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, corrected, output.acceptedEvidence, places,
     output.broadReadingTimes);
-  const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt, joinedStayIds);
+  const seen = new Set<LocationSegment>(corrected);
+  const rebuilt = protectedReplacement.segments.filter((segment) => !seen.has(segment));
+  const rebuiltCorrected = rebuilt.length
+    ? new Map((await withTimelineCorrections(client, session, rebuilt, options.processingAt)).map((segment) => [segment.clientSegmentId, segment]))
+    : null;
+  const segments = rebuiltCorrected
+    ? protectedReplacement.segments.flatMap((segment) => seen.has(segment) ? [segment]
+      : rebuiltCorrected.has(segment.clientSegmentId) ? [rebuiltCorrected.get(segment.clientSegmentId)!] : [])
+    : protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
   const nextStayClientIds = segments

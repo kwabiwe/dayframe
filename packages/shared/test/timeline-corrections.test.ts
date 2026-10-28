@@ -280,5 +280,33 @@ describe("timeline corrections (location v4 step 11)", () => {
       .find((segment) => segment.clientSegmentId === "t1") as CommuteSegment;
     expect(joined).not.toHaveProperty("qualificationReason");
   });
+
+  // Codex r4 on #603: corrections keep the order they were made in.
+  it("joins a trip whose end was edited, and merges a visit whose times were edited, to the joined ends", () => {
+    const joined = applyTimelineCorrections(day, [
+      correction({ subject: "trip", kind: "times", target: { startedAt: at(60), stoppedAt: at(78) } }, 60, 80, 1),
+      correction({ subject: "place", kind: "delete" }, 80, 95, 2)
+    ], NOW).find((segment) => segment.clientSegmentId === "t1");
+    expect(joined).toMatchObject({ startedAt: at(60), stoppedAt: at(120), toStaySegmentId: "shop" });
+    const merged = applyTimelineCorrections(day, [
+      correction({ subject: "place", kind: "times", target: { startedAt: at(125), stoppedAt: at(148) } }, 120, 150, 1),
+      correction({ subject: "trip", kind: "merge" }, 150, 160, 2)
+    ], NOW).find((segment) => segment.clientSegmentId === "shop");
+    expect(merged).toMatchObject({ startedAt: at(125), stoppedAt: at(200) });
+  });
+
+  it("makes Home, a place you weren't at, Home one Home stay when you then didn't leave", () => {
+    const homeDay: LocationSegment[] = [
+      { ...stay("h1", 0, 60), placeId: SAVED, placeMatchKind: "saved" },
+      linked("ta", 60, 80, "h1", "x", []), stay("x", 80, 95), linked("tb", 95, 120, "x", "h2", []),
+      { ...stay("h2", 120, 200), placeId: SAVED, placeMatchKind: "saved" }
+    ];
+    const result = applyTimelineCorrections(homeDay, [
+      correction({ subject: "place", kind: "delete" }, 80, 95, 1),
+      correction({ subject: "trip", kind: "merge" }, 60, 80, 2)
+    ], NOW);
+    expect(result.map((segment) => segment.clientSegmentId)).toEqual(["h1"]);
+    expect(result[0]).toMatchObject({ startedAt: at(0), stoppedAt: at(200) });
+  });
 });
 
