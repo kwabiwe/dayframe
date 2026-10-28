@@ -2,6 +2,7 @@ import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import { isPermanentlyFailedQueuedEvent, permanentStatusCodes } from "./queuePermanence";
 import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CALENDAR_PROTOTYPE } from "./calendarPrototype";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { AppState } from "react-native";
 import {
@@ -603,6 +604,8 @@ type ApiJsonRead<T> =
 
 /** Hands a Review count from any Dayframe reply to the evening reminder. Never blocks or throws. */
 function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown) {
+  // Calendar prototype (item 13): the reminder counts what the badge counts (the last 7 days), noted by the Dashboard.
+  if (CALENDAR_PROTOTYPE) return;
   if (typeof count !== "number") return;
   void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
 }

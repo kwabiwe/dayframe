@@ -3,6 +3,7 @@
 // places. The phone schedules it itself from the Review count it last heard from Dayframe
 // (bootstrap, and the counts the event and location replies carry).
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CALENDAR_PROTOTYPE } from "./calendarPrototype";
 import { formatClockMinutes, type ClockFormat } from "@dayframe/shared";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
 
@@ -34,6 +35,8 @@ export const DEFAULT_REVIEW_NUDGE_STATE: ReviewNudgeState = {
 export type ReviewNudgePlan = { fireAt: Date; body: string };
 
 export function reviewNudgeBody(count: number) {
+  // Calendar prototype (item 13): one end-of-day reminder counting what the badge counts, the last 7 days.
+  if (CALENDAR_PROTOTYPE) return count === 1 ? "1 thing to check from the last 7 days." : `${count} things to check from the last 7 days.`;
   // Location v4 step 14: things to check, opening Calendar › List (every open one, so no "today").
   return count === 1 ? "1 thing to check." : `${count} things to check.`;
 }
