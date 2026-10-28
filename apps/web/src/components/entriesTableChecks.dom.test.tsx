@@ -28,6 +28,7 @@ vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => cloc
 const { EntriesTable } = await import("./EntriesTable");
 const { CheckDecisionsProvider, useProjectedReviewItems } = await import("./location/ListChecks");
 const { askingChecks } = await import("@/lib/calendar-checks");
+const { useGridCorrection } = await import("./location/useGridCorrection");
 
 /** What AppShell's badge and Today's chip count: the decisions owner's items, as the List shows them. */
 function Badge() {
@@ -815,5 +816,41 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(officeRow()).toBeNull();
     // Sleep is the next "?" down the List from the Office row.
     await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
+  });
+  it("keeps a question held in the List out of the Grid, and Undo in the List still brings it back (Codex r5 on #609)", async () => {
+    // The Grid's Places lane and dialogs read the same decisions owner.
+    function GridProbe() {
+      const items = useProjectedReviewItems([]);
+      const grid = useGridCorrection({ activities: [], clock: "24h", owner: "w1:u1", places: [], refresh: async () => undefined, reviewItems: items,
+        timelines: new Map([[timeline.date, timeline]]), todayStartMs: clock.todayStartMs });
+      const office = timeline.items[0] as Extract<LocationTimeline["items"][number], { kind: "place" }>;
+      return (
+        <>
+          <output data-testid="grid-asks">{grid.askingBySegment?.has("seg-office") ? "asks" : "quiet"}</output>
+          <button onClick={() => grid.open(office, timeline, grid.askingBySegment?.get("seg-office") ?? null)} type="button">Open the office</button>
+          {grid.dialog}
+        </>
+      );
+    }
+    const list = <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
+    const view = render(<Shell items={reviewItems}>{list}</Shell>);
+    fireEvent.click(officeRow()!);
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    expect(badge()).toBe(2);
+    // To the Grid while it is held for Undo: the office asks nothing there, and its dialog has no Yes.
+    view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
+    expect(screen.getByTestId("grid-asks").textContent).toBe("quiet");
+    fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
+    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
+    expect(within(dialog()!).queryByRole("button", { name: "Yes" })).toBeNull();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    // Back in the List, Undo brings it back, in the List, the badge and the Grid; nothing was sent.
+    view.rerender(<Shell items={reviewItems}>{list}</Shell>);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(officeRow()).toBeTruthy();
+    expect(badge()).toBe(3);
+    view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
+    expect(screen.getByTestId("grid-asks").textContent).toBe("asks");
+    expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/review/"))).toEqual([]);
   });
 });

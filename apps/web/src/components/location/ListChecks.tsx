@@ -72,6 +72,10 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  const ownerNow = useRef(owner);
+  useLayoutEffect(() => {
+    ownerNow.current = owner;
+  }, [owner]);
   // Another owner: nothing of the previous lifetime carries over.
   const [lifetimeOwner, setLifetimeOwner] = useState(owner);
   if (lifetimeOwner !== owner) {
@@ -106,8 +110,13 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     const snapshot = restoreSources.current.snapshots.get(restoredId);
     const back = [...(snapshot && !loaded.has(restoredId) ? [snapshot] : []),
       ...(restoreSources.current.heldOutings.get(restoredId) ?? []).filter((member) => !loaded.has(member.id) && stillOpen(member.id))];
-    if (back.length) applyTransition(() => setRevived((current) => new Map([...current, ...back.map((item) => [item.id, item] as const)])));
-  }, [applyTransition, state.restored]);
+    // The transition may run it later: only while the owner it was for is still the current one (Codex r5 on #609).
+    const scheduledFor = owner;
+    if (back.length) applyTransition(() => {
+      if (ownerNow.current !== scheduledFor) return;
+      setRevived((current) => new Map([...current, ...back.map((item) => [item.id, item] as const)]));
+    });
+  }, [applyTransition, owner, state.restored]);
   // A revived card the data lists again is the data's card from then on.
   if ([...revived.keys()].some((id) => loadedIds.has(id))) setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   // Newer data listing a card open again lifts the server's earlier "decided" for it.

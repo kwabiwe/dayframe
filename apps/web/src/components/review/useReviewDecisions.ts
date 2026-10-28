@@ -35,7 +35,8 @@ export function useReviewDecisions(
       if (!active) return;
       const restoring = next.restored !== null && next.restored.sequence !== restoredSequence;
       if (next.restored) restoredSequence = next.restored.sequence;
-      if (restoring && applyRestore) applyRestore(() => setState(next));
+      // The restore may run later (the List's transition): it applies only while this lifetime still is the current one.
+      if (restoring && applyRestore) applyRestore(() => { if (active) setState(next); });
       else setState(next);
     });
     return { owner: forOwner, controller, activate: () => { active = true; }, retire: () => { active = false; } };

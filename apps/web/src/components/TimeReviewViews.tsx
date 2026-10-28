@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { useGridCorrection } from "@/components/location/useGridCorrection";
+import { useProjectedReviewItems } from "@/components/location/ListChecks";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -424,10 +425,13 @@ export function TimeReviewViews({
   const gridTimelines = useLocationTimelines(gridDayKeys, gridDayKeys, data, listRefreshToken,
     `${listOwner}|grid|${toTimelineDateKey(ranges.week.start)}`, !isList);
   const todayStartMs = useLocalDayStartMs();
+  // The Grid's "?" (blocks, Places lane, dialogs) as the List shows them, from the one decisions owner: an answer
+  // held, saving or saved in the List is not answerable here too (Codex r5 on #609).
+  const gridReviewItems = useProjectedReviewItems(data.reviewItems);
   // Owner item A: a Grid item opens its dialog, its "?" asked at the top (fenced to its owner and item).
   const gridClock = useClockFormat();
   const gridCorrection = useGridCorrection({ activities: data.categories, clock: gridClock, owner: listOwner, places: correctionPlaces,
-    refresh: refreshData, reviewItems: data.reviewItems, timelines: gridTimelines, todayStartMs });
+    refresh: refreshData, reviewItems: gridReviewItems, timelines: gridTimelines, todayStartMs });
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -613,7 +617,7 @@ export function TimeReviewViews({
             onScroll={(event) => rememberScrollPosition("calendar", event)}
             hasRememberedScroll={hasRememberedCalendarScroll}
             onSynced={refreshData}
-            reviewItems={data.reviewItems}
+            reviewItems={gridReviewItems}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
             todayKeyHint={initialTodayKey}
