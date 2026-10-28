@@ -308,5 +308,13 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(result.map((segment) => segment.clientSegmentId)).toEqual(["h1"]);
     expect(result[0]).toMatchObject({ startedAt: at(0), stoppedAt: at(200) });
   });
+
+  it("marks the trips a join made or moved, so replay keeps them as corrected (Codex r5 on #603)", () => {
+    const joined = applyTimelineCorrections(day, [correction({ subject: "place", kind: "delete" }, 80, 95)], NOW);
+    expect(joined.find((segment) => segment.clientSegmentId === "t1")).toMatchObject({ shapedByCorrection: true });
+    const merged = applyTimelineCorrections(day, [correction({ subject: "trip", kind: "merge" }, 150, 160)], NOW);
+    expect(merged.find((segment) => segment.clientSegmentId === "t4")).toMatchObject({ fromStaySegmentId: "shop", shapedByCorrection: true });
+    expect(merged.find((segment) => segment.clientSegmentId === "t1")).not.toHaveProperty("shapedByCorrection");
+  });
 });
 

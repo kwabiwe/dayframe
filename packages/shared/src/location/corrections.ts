@@ -176,7 +176,8 @@ export function joinTripsAcrossPlace(before: CommuteSegment, after: CommuteSegme
     setByYou: true,
     // Later corrections of the joined trip are tied to the earlier trip's span, as the engine derives it, so
     // replay finds them again (Codex r1 on #603).
-    correctionSpan: before.correctionSpan ?? span
+    correctionSpan: before.correctionSpan ?? span,
+    shapedByCorrection: true
   };
 }
 
@@ -309,7 +310,9 @@ export function applyTimelineCorrectionsWithJoins(segments: readonly LocationSeg
         trips.set(engine, null);
         // A trip that left the later visit now leaves the one stay.
         for (const [key, next] of trips) {
-          if (next?.fromStaySegmentId === second[1].clientSegmentId) trips.set(key, { ...next, fromStaySegmentId: first[1].clientSegmentId });
+          if (next?.fromStaySegmentId === second[1].clientSegmentId) {
+            trips.set(key, { ...next, fromStaySegmentId: first[1].clientSegmentId, shapedByCorrection: true });
+          }
         }
       }
       else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {

@@ -615,11 +615,33 @@ function rebuildLegWithinDecidedStops(
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
+  // A trip a correction joined or re-pointed is the person's: derivation would give it another identity and lose
+  // it, so it keeps its own, between the decided ends, with its legs clipped to them (Codex r5 on #603).
+  if (leg.shapedByCorrection) return [withinDecidedEnds(leg, from.stoppedAt, to.startedAt)].filter((trip): trip is CommuteSegment => trip != null);
   // A rebuilt journey gets legs over its new times (location v4 step 6).
   return withTripLegs(deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt, undefined, broadReadingTimes)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
+}
+
+/** A corrected trip between the decided ends it now has, its legs clipped to them; none once nothing is left. */
+export function withinDecidedEnds(trip: CommuteSegment, fromStoppedAt: string, toStartedAt: string): CommuteSegment | null {
+  const startMs = Math.max(Date.parse(trip.startedAt), Date.parse(fromStoppedAt));
+  const stopMs = Math.min(Date.parse(trip.stoppedAt), Date.parse(toStartedAt));
+  if (!(stopMs > startMs)) return null;
+  const legs = (trip.tripLegs ?? []).flatMap((leg) => {
+    const from = Math.max(startMs, Date.parse(leg.startedAt));
+    const to = Math.min(stopMs, Date.parse(leg.stoppedAt));
+    return to > from ? [{ ...leg, startedAt: new Date(from).toISOString(), stoppedAt: new Date(to).toISOString() }] : [];
+  });
+  return {
+    ...trip,
+    startedAt: new Date(startMs).toISOString(),
+    stoppedAt: new Date(stopMs).toISOString(),
+    gapDurationSeconds: Math.round((stopMs - startMs) / 1_000),
+    ...(trip.tripLegs ? { tripLegs: legs } : {})
+  };
 }
 
 /**
