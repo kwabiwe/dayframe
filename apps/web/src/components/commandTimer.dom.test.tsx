@@ -12,6 +12,10 @@ vi.mock("@/components/AppShellRuntime", () => ({
 
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
+// jsdom has no modal dialogs: enough of one for the running block's split dialog.
+HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
+HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -165,14 +169,14 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
   it("names the running block's menu action Discard running block", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
     render(<PersistentTimerBar />);
-    expect(screen.getByRole("menuitem", { hidden: true }).textContent).toContain("Discard running block");
+    expect(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ }).textContent).toContain("Discard running block");
   });
 
   it("discards the running block at once and offers Undo, which starts it again at its own start (WUI-008)", async () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch", tagNames: ["Deep work"] });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
     expect(runtime.deleteActiveTimer).toHaveBeenCalledTimes(1);
     // The runtime now has nothing running.
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
@@ -194,7 +198,7 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
     rerender(<PersistentTimerBar />);
 
@@ -215,7 +219,7 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
     // Something else started meanwhile: no Undo, so it is never replaced by the discarded block.
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: timeEntry({ id: "other", description: "Other" }) } };
     rerender(<PersistentTimerBar />);
@@ -225,8 +229,105 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     (runtime.deleteActiveTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Offline" });
     render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
     expect(screen.queryByText(/Discarded/)).toBeNull();
+  });
+});
+
+describe("Split for the running block (owner 28 Oct 2026)", () => {
+  it("sits beside Discard and splits at the chosen minute, then offers Undo while the second part runs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
+    runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
+    render(<PersistentTimerBar />);
+    const items = screen.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent?.trim());
+    expect(items).toEqual(["Split", "Discard running block"]);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    // From its start to now: the line starts in the middle, on a minute, and moves in whole minutes.
+    const line = screen.getByRole("slider", { hidden: true, name: "Split at" }) as HTMLInputElement;
+    expect(new Date(Number(line.value)).toISOString()).toBe("2026-08-14T09:30:00.000Z");
+    expect(Number(line.min)).toBe(Date.parse("2026-08-14T09:01:00.000Z"));
+    expect(Number(line.max)).toBe(Date.parse("2026-08-14T09:59:00.000Z"));
+    fireEvent.change(line, { target: { value: String(Date.parse("2026-08-14T09:45:20.000Z")) } });
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm); });
+    expect(runtime.splitActiveTimer).toHaveBeenCalledWith(Date.parse("2026-08-14T09:45:00.000Z"));
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Split Plan launch at");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
+    expect(runtime.joinSplitTimer).toHaveBeenCalledWith({ entryId: "running-entry", newEntryId: "second-part", commandId: expect.stringMatching(/^web-join-/) });
+  });
+
+  it("keeps the dialog open with the reason when the split is refused, and offers Try again when Undo fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ description: "Plan launch" }), description: "Plan launch" });
+    (runtime.splitActiveTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "This block changed somewhere else." });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    const confirm = () => Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm()); });
+    expect(screen.getByRole("alert", { hidden: true }).textContent).toContain("changed somewhere else");
+    await act(async () => { fireEvent.click(confirm()); });
+    (runtime.joinSplitTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Offline" });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
+    expect(screen.getByRole("status").textContent).toContain("Couldn't put Plan launch back together.");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Try again" })); });
+    // Try again is the same Undo: the same command id, so one the server already did is answered as done (Codex r1 on #607).
+    const joins = (runtime.joinSplitTimer as ReturnType<typeof vi.fn>).mock.calls.map(([split]) => split.commandId);
+    expect(joins).toHaveLength(2);
+    expect(joins[0]).toMatch(/^web-join-/);
+    expect(joins[1]).toBe(joins[0]);
+  });
+
+  it("never closes while the split is on its way, Escape included (Codex r1 on #607)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ description: "Plan launch" }), description: "Plan launch" });
+    let finish: ((value: unknown) => void) | undefined;
+    (runtime.splitActiveTimer as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm); });
+    fireEvent.keyDown(screen.getByRole("slider", { hidden: true, name: "Split at" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).not.toBeNull();
+    const keep = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent === "Keep as one")!;
+    fireEvent.click(keep);
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).not.toBeNull();
+    await act(async () => { finish?.({ ok: false, error: "Offline" }); });
+  });
+
+  it("says why when the split leaves nothing running: the dialog goes and a notice stays (Codex r5 on #607)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T10:00:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ description: "Plan launch" }), description: "Plan launch" });
+    (runtime.splitActiveTimer as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      (runtime.readShellData as ReturnType<typeof vi.fn>).mockReturnValue({ ...(runtime.shellData as BootstrapData), activeEntry: null });
+      return { ok: false, error: "This block was already split and put back together." };
+    });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
+    const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Split at"))!;
+    await act(async () => { fireEvent.click(confirm); });
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("already split and put back together");
+  });
+
+  it("can't split a block under two minutes yet", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T09:01:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry() });
+    render(<PersistentTimerBar />);
+    const split = screen.getByRole("menuitem", { hidden: true, name: "Split" });
+    expect(split.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => { fireEvent.click(split); });
+    expect(screen.queryByRole("dialog", { hidden: true, name: "Split running block" })).toBeNull();
   });
 });
 
@@ -255,9 +356,12 @@ function runtimeFixture(overrides: {
     createCategory: vi.fn().mockResolvedValue({ ok: true }),
     createManualEntry: vi.fn().mockResolvedValue({ ok: true }),
     deleteActiveTimer: vi.fn().mockResolvedValue({ ok: true }),
+    joinSplitTimer: vi.fn().mockResolvedValue({ ok: true }),
+    splitActiveTimer: vi.fn().mockResolvedValue({ ok: true, entryId: "running-entry", newEntryId: "second-part", running: true }),
     isManualEntryOpen: false,
     isTimerBusy: false,
     openManualEntry: vi.fn(),
+    readShellData: vi.fn(() => data),
     setTimerDraft: vi.fn(),
     shellData: data,
     startTimer: vi.fn().mockResolvedValue({ ok: true }),

@@ -10,6 +10,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { joinSplitTimeEntries, splitRunningTimeEntry } from "@/lib/time-entry-split";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import {
   applyPendingTimerDetails,
@@ -30,6 +31,7 @@ import {
   applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerDelete,
+  applyServerTimerBlocks,
   applyOptimisticTimerStop,
   applyServerActiveEntry,
   createTimerMutationGate,
@@ -59,6 +61,8 @@ import {
 } from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
+export type ActiveSplitOutcome = { ok: true; entryId: string; newEntryId: string; running: boolean } | { ok: false; error: string };
+const UNDO_AFTER_EDIT_MESSAGE = "Save your edits to this block first: Undo would lose them.";
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 type CategoryMutationOutcome =
   | { ok: true; category: CategoryRow }
@@ -79,6 +83,13 @@ type RuntimeContext = {
   createCategory: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CategoryMutationOutcome>;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   deleteActiveTimer: () => Promise<MutationOutcome>;
+  /**
+   * Splits the running block at `atMs` (owner 28 Oct 2026, as Toggl): it ends there, and its second part
+   * keeps running with every detail. The outcome names both blocks, for Undo.
+   */
+  splitActiveTimer: (atMs: number) => Promise<ActiveSplitOutcome>;
+  /** Undo of a split: puts the two blocks back as one (running again when the second part runs). */
+  joinSplitTimer: (split: { entryId: string; newEntryId: string; commandId?: string }) => Promise<MutationOutcome>;
   data: BootstrapData | null;
   dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
@@ -206,6 +217,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // The running block's draft at the moment a Start that replaces it was asked for, by block id:
   // its pending edits, saved to its real id before the switch runs (Codex r10).
   const outgoingDraftsRef = useRef(new Map<string, { draft: TimerDraft; base: TimerDraft }>());
+  // A running block this tab split → its running second part: a Stop asked for the block while the split
+  // ran stops the part that runs now (owner 28 Oct 2026).
+  const splitSuccessorsRef = useRef(new Map<string, string>());
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -842,7 +856,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         clearTimeout(timer);
       }
       setIsStopPending(false);
-      if (dataRef.current?.activeEntry?.id !== requested.id) {
+      const nowActiveId = dataRef.current?.activeEntry?.id;
+      if (nowActiveId !== requested.id && (!nowActiveId || splitSuccessorsRef.current.get(requested.id) !== nowActiveId)) {
         return startPending
           ? { ok: false, error: "That block did not start, so there was nothing to stop." }
           : { ok: false, error: "There is no running block to stop." };
@@ -851,7 +866,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // A details save this Stop waited for and that was refused or failed: its notice is carried
     // into the Stop's own (which otherwise clears it), so the lost edit is never silent.
     const earlier = detailsOutcomeRef.current;
-    const carried = earlier.seq > outcomeSeq && earlier.entryId === requested.id && earlier.error ? earlier : null;
+    // The block stopped is the one running now: the requested one, or what a split or its Undo moved it to, whose
+    // own save's failure is this Stop's to report too (Codex r6 on #607).
+    const stoppingId = dataRef.current?.activeEntry?.id ?? requested.id;
+    const carried = earlier.seq > outcomeSeq && (earlier.entryId === requested.id || earlier.entryId === stoppingId) && earlier.error ? earlier : null;
     const snapshot = dataRef.current!;
     const activeEntry = snapshot.activeEntry!;
     const targetId = serverEntryId(activeEntry.id);
@@ -1000,6 +1018,129 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
+
+  /**
+   * Inside the gate, as a split or its Undo ends: the running block's edits not saved yet are saved now. Its
+   * autosave was turned away while the gate was held, and nothing would arm it again (Codex r4, r6 on #607).
+   */
+  const saveLeftoverEdits = useCallback(async () => {
+    const now = dataRef.current;
+    const active = now?.activeEntry;
+    if (!now || !active || !serverEntryId(active.id)) return;
+    if (timerDraftEditedFields(draftRef.current, baseFor(active)).length) await saveActiveDetails(now, draftRef.current);
+  }, [baseFor, saveActiveDetails, serverEntryId]);
+
+  /** Runs a split or its Undo (inside the gate), then saves the edits left unsaved whatever its outcome. */
+  const endingWithLeftoverEdits = useCallback(async <T,>(action: () => Promise<T>): Promise<T> => {
+    try {
+      return await action();
+    } finally {
+      await saveLeftoverEdits().catch(() => undefined);
+    }
+  }, [saveLeftoverEdits]);
+
+  const splitActiveTimer = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
+    const requested = dataRef.current?.activeEntry;
+    if (!requested) return { ok: false, error: "There is no running block to split." };
+    // As Stop and Discard: a block whose Start is still in flight waits behind it, and a rejected Start
+    // leaves nothing to split.
+    if (!serverEntryId(requested.id)) {
+      await mutationGateRef.current.whenIdle();
+      if (dataRef.current?.activeEntry?.id !== requested.id) {
+        return { ok: false, error: "That block did not start, so there was nothing to split." };
+      }
+    }
+    const result = await mutationGateRef.current.run(() => endingWithLeftoverEdits(async (): Promise<ActiveSplitOutcome> => {
+      const before = dataRef.current;
+      const entry = before?.activeEntry;
+      const targetId = entry ? serverEntryId(entry.id) : null;
+      if (!before || !entry || !targetId) return { ok: false, error: "There is no running block to split." };
+      // The split copies the block as saved: this tab's edits to it are saved first, so both parts keep them.
+      const saved = await saveActiveDetails(before, draftRef.current);
+      if (!saved.ok) return saved;
+      const current = dataRef.current?.activeEntry;
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      const draftAtSend = draftRef.current;
+      try {
+        const outcome = await splitRunningTimeEntry(clientFetch, {
+          entryId: targetId, atMs, expectedUpdatedAt: current?.id === entry.id ? versionOf(current) : undefined
+        });
+        if (!outcome.ok) {
+          setTimerError(outcome.error);
+          if (outcome.changed) await refresh({ force: true });
+          return outcome;
+        }
+        // Whether the second part runs is read from the blocks as the server has them now: one that had stopped
+        // by the time the split arrived was split as a finished block, and nothing runs (Codex r1, r2 on #607).
+        const newEntryId = outcome.newEntryId;
+        const running = newEntryId !== null && outcome.entries.some((block) => block.id === newEntryId && !block.stoppedAt);
+        if (running) {
+          splitSuccessorsRef.current.set(entry.id, newEntryId);
+          splitSuccessorsRef.current.set(targetId, newEntryId);
+          // Typed while the split was on its way: the text goes on to the running second part.
+          if (!timerDraftsEqual(draftRef.current, draftAtSend)) rollbackDraftRef.current = { draft: draftRef.current, entryId: newEntryId };
+        }
+        const shown = dataRef.current;
+        // A part the answer leaves out is gone (deleted elsewhere meanwhile): never left running on screen (Codex r3 on #607).
+        const answered = new Set(outcome.entries.map((block) => block.id));
+        const gone = [...new Set([entry.id, targetId, ...(newEntryId ? [newEntryId] : [])])].filter((id) => !answered.has(id));
+        if (shown) commitData(applyServerTimerBlocks(shown, outcome.entries, gone), "optimistic");
+        // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
+        // part, never the first part this split just ended.
+        await refresh({ force: true });
+        if (!newEntryId) return { ok: false, error: "This block was already split and put back together." };
+        return { ok: true, entryId: targetId, newEntryId, running };
+      } finally {
+        setIsTimerBusy(false);
+      }
+    }));
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
+  }, [commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId, versionOf]);
+
+  const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
+    await mutationGateRef.current.whenIdle();
+    const result = await mutationGateRef.current.run(() => endingWithLeftoverEdits(async (): Promise<MutationOutcome> => {
+      // Edits typed into the second part and not saved yet would be lost by the join (Codex r2 on #607).
+      const shownActive = dataRef.current?.activeEntry;
+      if (shownActive && serverEntryId(shownActive.id) === split.newEntryId && timerDraftEditedFields(draftRef.current, baseFor(shownActive)).length) {
+        return { ok: false, error: UNDO_AFTER_EDIT_MESSAGE };
+      }
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      try {
+        const draftAtSend = draftRef.current;
+        let carried = false;
+        const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
+        if (outcome.ok) {
+          // Typed while the Undo was on its way: the text goes on to the joined block (saved as its edit), never
+          // reset by the change of block (Codex r3 on #607).
+          const typed = draftRef.current;
+          carried = !timerDraftsEqual(typed, draftAtSend);
+          if (carried) rollbackDraftRef.current = { draft: typed, entryId: split.entryId };
+          // A Stop asked for the second part while the Undo ran stops the joined block (Codex r1 on #607).
+          splitSuccessorsRef.current.set(split.newEntryId, split.entryId);
+          // Shown joined at once, as the server has it, so a failed reload never leaves the gone part running.
+          const shown = dataRef.current;
+          if (shown) commitData(applyServerTimerBlocks(shown, outcome.entry ? [outcome.entry] : [], [split.newEntryId]), "optimistic");
+          // Saved here, inside the gate, so a Stop pressed meanwhile waits for it and stops the block with the
+          // text (its autosave may have been turned away while the gate was held) (Codex r4, r5 on #607).
+          const joined = dataRef.current;
+          if (carried && outcome.entry && joined?.activeEntry?.id === split.entryId) {
+            await saveActiveDetails(joined, draftRef.current, timerDraftForEntry(outcome.entry));
+          }
+        }
+        // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
+        if (outcome.ok || outcome.changed) await refresh({ force: true });
+        return outcome.ok ? outcome : { ok: false, error: outcome.error };
+      } finally {
+        setIsTimerBusy(false);
+      }
+    }));
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
+  }, [baseFor, commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId]);
 
   const updateActiveDetails = useCallback(async (
     draft: TimerDraft,
@@ -1314,6 +1455,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createCategory,
     createManualEntry,
     deleteActiveTimer,
+    joinSplitTimer,
+    splitActiveTimer,
     data: selectedData,
     dateLoadError,
     hydrate,
@@ -1343,6 +1486,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createCategory,
     createManualEntry,
     deleteActiveTimer,
+    joinSplitTimer,
+    splitActiveTimer,
     data,
     dateLoadError,
     hydrate,

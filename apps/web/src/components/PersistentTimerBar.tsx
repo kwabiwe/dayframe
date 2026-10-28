@@ -11,6 +11,7 @@ import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { focusQuietly } from "@/components/blocks/TooltipHost";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
@@ -22,6 +23,7 @@ import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { IconButton } from "@/components/ui/Primitives";
 import type { CalendarEntryCompactCreatePlan } from "@/lib/calendar-entry-compact-editor";
 import { TimeEntryQuickCreateModal } from "@/components/TimeEntryQuickEditor";
+import { RunningSplitDialog } from "@/components/RunningSplitDialog";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
@@ -31,6 +33,7 @@ import type { BootstrapData } from "@/lib/queries";
 import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { DISCARD_RESTORE_REFUSALS, discardedBlockRestoreBlocker, quickActionTimerDraft } from "@/lib/timer-runtime";
+import { newBlockCommandId, runningSplitBounds } from "@/lib/time-entry-split";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
@@ -42,8 +45,11 @@ const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 
 type TimerNotice = {
-  /** An Undo for the notice (a discarded running block, WUI-008); shown only while nothing runs. */
-  action?: { label: string; onAction: () => void };
+  /**
+   * An Undo for the notice: a discarded running block's (WUI-008), shown only while nothing runs, or a split
+   * running block's, shown while its second part runs (`whileRunning`).
+   */
+  action?: { label: string; onAction: () => void; whileRunning?: boolean };
   detail?: string | null;
   exiting: boolean;
   label: string;
@@ -71,6 +77,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     createCategory,
     createManualEntry,
     deleteActiveTimer,
+    joinSplitTimer,
+    splitActiveTimer,
     isManualEntryOpen,
     isStopPending,
     isTimerBusy,
@@ -97,6 +105,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -514,6 +523,57 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
   }
 
+  /**
+   * Split for the running block (owner 28 Oct 2026, as Toggl): it ends at the chosen minute and its second
+   * part keeps running with the same activity, description, tags and place. The toast offers Undo for its
+   * five seconds, which puts the two back as one running block. Resolves with an error for the dialog.
+   */
+  async function splitRunningBlock(atMs: number): Promise<string | null> {
+    if (!active) return "There is no running block to split.";
+    const name = timeEntryTitle({
+      ...active,
+      description: timerDraft.description.trim() || active.description,
+      categoryName: timerDraft.categoryId ? selectedCategory?.name ?? active.categoryName : active.categoryName
+    });
+    const swatch = selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined;
+    const outcome = await splitActiveTimer(atMs);
+    if (!outcome.ok) {
+      // Nothing runs any more (the block went meanwhile): the dialog goes with it, so the reason is a notice.
+      if (!readShellData()?.activeEntry) {
+        setSplitDialogOpen(false);
+        announce(outcome.error);
+      }
+      return outcome.error;
+    }
+    setSplitDialogOpen(false);
+    // Back to "…" without its tip or ring, so at phone width the tip never covers Stop (owner, 28 Oct 2026).
+    window.requestAnimationFrame(() => focusQuietly(timerActionsTriggerRef.current));
+    // One command id for this Undo, Try again included: a repeat of one that was done is answered as done.
+    const split = { entryId: outcome.entryId, newEntryId: outcome.newEntryId, commandId: newBlockCommandId("join") };
+    const token = ++noticeSequence.current;
+    const undo = async () => {
+      setNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));
+      const joined = await joinSplitTimer(split);
+      if (joined.ok) return;
+      setNotice({
+        action: { label: "Try again", onAction: () => void undo(), whileRunning: true },
+        detail: joined.error,
+        exiting: false,
+        label: `Couldn't put ${name} back together.`,
+        swatch,
+        token: ++noticeSequence.current
+      });
+    };
+    setNotice({
+      action: { label: "Undo", onAction: () => void undo(), whileRunning: true },
+      exiting: false,
+      label: `Split ${name} at ${formatTime(new Date(atMs), clock)}`,
+      swatch,
+      token
+    });
+    return null;
+  }
+
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
     const suggestionDraft = {
       categoryId: suggestion.categoryId ?? "",
@@ -888,13 +948,29 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 inert={!timerActionsOpen}
                 role="menu"
               >
+                {/* Split beside Discard (owner 28 Oct 2026): the running block's split dialog. A block under two
+                    minutes has nowhere to split yet. */}
+                <button
+                  aria-disabled={!runningSplitBounds(active, Date.now()) || undefined}
+                  onClick={() => {
+                    if (!runningSplitBounds(active, Date.now())) return;
+                    setTimerActionsOpen(false);
+                    setSplitDialogOpen(true);
+                  }}
+                  ref={timerActionsFirstItemRef}
+                  role="menuitem"
+                  title={runningSplitBounds(active, Date.now()) ? undefined : "Split needs a block of two minutes or more"}
+                  type="button"
+                >
+                  <DayframeIcon glyph="scissors" size={16}/>
+                  Split
+                </button>
                 <button
                   className="is-danger"
                   onClick={() => {
                     setTimerActionsOpen(false);
                     void discardRunningBlock();
                   }}
-                  ref={timerActionsFirstItemRef}
                   role="menuitem"
                   type="button"
                 >
@@ -967,13 +1043,24 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
       {notice ? (
         <BlocksToast
-          actionLabel={notice.action && !active ? notice.action.label : undefined}
+          actionLabel={notice.action && Boolean(active) === Boolean(notice.action.whileRunning) ? notice.action.label : undefined}
           detail={notice.detail}
           exiting={notice.exiting}
           key={notice.token}
           message={notice.label}
-          onAction={notice.action && !active ? notice.action.onAction : undefined}
+          onAction={notice.action && Boolean(active) === Boolean(notice.action.whileRunning) ? notice.action.onAction : undefined}
           swatchStyle={notice.swatch}
+        />
+      ) : null}
+
+      {splitDialogOpen && active ? (
+        <RunningSplitDialog
+          clock={clock}
+          color={selectedCategory?.color ?? active.categoryColor}
+          colorName={selectedCategory?.name ?? active.categoryName}
+          entry={active}
+          onClose={() => setSplitDialogOpen(false)}
+          onSplit={splitRunningBlock}
         />
       ) : null}
 
