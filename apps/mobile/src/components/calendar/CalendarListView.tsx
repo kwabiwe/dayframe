@@ -353,7 +353,7 @@ export function CalendarListView({
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
               style={divider}>
-              <LocationRow answering={Boolean(onAnswerCheck)} checkGlyphs={checkGlyphs} checkTitles={checkTitles} onOpenPlace={onOpenPlace}
+              <LocationRow answering={Boolean(onAnswerCheck)} checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles} onOpenPlace={onOpenPlace}
                 onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
                 openCheckId={shownOpenCheckId} prototype={prototype} row={item.row} theme={theme} time={time} />
               {(() => {
@@ -530,8 +530,8 @@ function PrototypeMark({ asking, glyph, quiet = false, theme }: { asking: boolea
 }
 
 /** Calendar prototype: the whole row opens its question (or, with none, its place); one target, one signal. */
-function PrototypeLocationRow({ checkGlyphs, checkTitles, onOpenPlace, onToggleCheck, openCheckId, row, theme, time }: {
-  checkGlyphs?: ReadonlyMap<string, DayframeGlyph>; checkTitles?: ReadonlyMap<string, string>; onOpenPlace?: (place: TimelinePlace, label: string) => void;
+function PrototypeLocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenPlace, onToggleCheck, openCheckId, row, theme, time }: {
+  checkGlyphs?: ReadonlyMap<string, DayframeGlyph>; checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>; checkTitles?: ReadonlyMap<string, string>; onOpenPlace?: (place: TimelinePlace, label: string) => void;
   onToggleCheck?: (reviewItemId: string) => void; openCheckId: string | null; row: LocationListRow; theme: MobileTheme; time: (ms: number) => string;
 }) {
   if (row.kind === "check") {
@@ -555,11 +555,13 @@ function PrototypeLocationRow({ checkGlyphs, checkTitles, onOpenPlace, onToggleC
   }
   if (row.kind !== "place") return null;
   const { place } = row;
-  const label = placeLabel(row);
+  const checkId = row.checkIds[0];
+  // Q7 (28 Oct): an unnamed place that asks "Visited Boots?" (its name, or Apple's guess nearby) reads "Boots?".
+  const guess = !place.name && checkId ? /^Visited (.+)\?$/.exec(checkQuestions?.get(checkId)?.question ?? "")?.[1] : undefined;
+  const label = guess ? `${guess}?` : placeLabel(row);
   const open = place.stoppedAt == null;
   const span = open ? `since ${time(row.fromMs)}` : `${time(row.fromMs)}–${time(row.spanEndMs)}`;
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
-  const checkId = row.checkIds[0];
   const asking = Boolean(checkId && onToggleCheck);
   const opens = asking ? () => onToggleCheck!(checkId) : !place.blockIds.length && onOpenPlace ? () => onOpenPlace(place, label) : undefined;
   const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
@@ -581,7 +583,8 @@ function PrototypeLocationRow({ checkGlyphs, checkTitles, onOpenPlace, onToggleC
   );
 }
 
-function LocationRow({ answering, checkGlyphs, checkTitles, onOpenPlace, onToggleCheck, openCheckId, prototype, row, theme, time }: {
+function LocationRow({ answering, checkGlyphs, checkQuestions, checkTitles, onOpenPlace, onToggleCheck, openCheckId, prototype, row, theme, time }: {
+  checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   /** The "?" opens its question here (step 14 part 3b); otherwise it opens the suggestion. */
   answering: boolean; checkGlyphs?: ReadonlyMap<string, DayframeGlyph>; checkTitles?: ReadonlyMap<string, string>;
   onOpenPlace?: (place: TimelinePlace, label: string) => void;
@@ -589,7 +592,7 @@ function LocationRow({ answering, checkGlyphs, checkTitles, onOpenPlace, onToggl
   openCheckId: string | null; prototype: boolean; row: LocationListRow; theme: MobileTheme; time: (ms: number) => string;
 }) {
   if (prototype && row.kind !== "open_trip") {
-    return <PrototypeLocationRow checkGlyphs={checkGlyphs} checkTitles={checkTitles} onOpenPlace={onOpenPlace} onToggleCheck={onToggleCheck}
+    return <PrototypeLocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles} onOpenPlace={onOpenPlace} onToggleCheck={onToggleCheck}
       openCheckId={openCheckId} row={row} theme={theme} time={time} />;
   }
   const hint = (id: string) => answering ? (openCheckId === id ? "Hides the question" : "Shows the question") : "Opens it to answer";

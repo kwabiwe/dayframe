@@ -1,12 +1,15 @@
 "use client";
 
-import { CalendarPrototypePill, NotRealYet, useCalendarPrototype } from "@/components/CalendarPrototype";
+import { CalendarPrototypePill, useCalendarPrototype, useLocalDayStartMs } from "@/components/CalendarPrototype";
+import { askingChecks } from "@/lib/calendar-prototype-checks";
+import { CalendarLegStrip, CalendarPlacesLane, placesLaneWidth } from "@/components/location/CalendarPlacesLane";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { tripsByBlockId, type LocationTimeline } from "@dayframe/shared";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -415,6 +418,15 @@ export function TimeReviewViews({
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
     data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);
+  // Calendar prototype (steps 16–17): the Grid's days' places and trips, for trip leg strips and the Places lane.
+  const gridDayKeys = !calendarPrototype || isList ? NO_DAY_KEYS
+    : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));
+  const gridTimelines = useLocationTimelines(gridDayKeys, gridDayKeys, data, listRefreshToken,
+    `${listOwner}|grid|${toTimelineDateKey(ranges.week.start)}`, calendarPrototype && !isList);
+  const prototypeTodayStartMs = useLocalDayStartMs();
+  const gridAsking = useMemo(() => calendarPrototype && prototypeTodayStartMs !== null
+    ? new Map(askingChecks(data.reviewItems, prototypeTodayStartMs).flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []))
+    : null, [calendarPrototype, data.reviewItems, prototypeTodayStartMs]);
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -578,9 +590,6 @@ export function TimeReviewViews({
           />
           <CalendarPrototypePill />
         </div>
-        {calendarPrototype && !isList ? (
-          <NotRealYet>the trip leg strip (step 16) and the Places lane (step 17) come in the next prototype round</NotRealYet>
-        ) : null}
       </section>
       {dateLoadError || isDateLoading ? (
         <p
@@ -611,6 +620,7 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+            prototypePlaces={calendarPrototype ? { timelines: gridTimelines, asking: gridAsking ?? new Map() } : undefined}
           />
         ) : null}
         {state.view === "list" ? (
@@ -708,7 +718,8 @@ export function CalendarReview({
   tags,
   todayKeyHint = null,
   undoToastVisible = false,
-  visibleDays
+  visibleDays,
+  prototypePlaces
 }: {
   calendarHoursMode: CalendarHoursMode;
   capturedNow: Date;
@@ -729,8 +740,13 @@ export function CalendarReview({
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
+  /** Calendar prototype (steps 16–17): each shown day's places and trips, and the "?" still asking by segment. */
+  prototypePlaces?: { timelines: ReadonlyMap<string, LocationTimeline>; asking: ReadonlyMap<string, string> };
 }) {
   const prototype = useCalendarPrototype();
+  // Step 16: every shown day's trips by the blocks made from them, for the leg strip.
+  const prototypeTrips = useMemo(() => new Map([...(prototypePlaces?.timelines.values() ?? [])].flatMap((timeline) => [...tripsByBlockId(timeline)])),
+    [prototypePlaces]);
   const clock = useClockFormat();
   const router = useRouter();
   const {
@@ -1638,7 +1654,10 @@ export function CalendarReview({
             const dayBrackets = calendarBrackets.byDay.get(dayKey) ?? [];
             // Day view's rail holds the pattern's name written level; Week view's keeps the bare bracket.
             const dayView = visibleDays.length === 1;
-            const railPx = dayBrackets.length ? (dayView ? calendarBracketDayRailPx : calendarBracketRailPx) : 0;
+            // Step 17 (prototype): a Places lane on the left of a day with any place besides Home, about a fifth of it.
+            const dayPlaces = prototypePlaces?.timelines.get(dayKey) ?? null;
+            const lanePx = dayPlaces ? placesLaneWidth(dayPlaces, dayBodyWidth) : 0;
+            const railPx = lanePx + (dayBrackets.length ? (dayView ? calendarBracketDayRailPx : calendarBracketRailPx) : 0);
             // The drag ghost and the draft slot start where a full-width block does, right of any
             // bracket rail (CSS keeps its 8 px inset on a day without one).
             const draftInsets = railPx ? { left: calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 }, railPx).left } : {};
@@ -1940,6 +1959,8 @@ export function CalendarReview({
                     startedAt: activeDraft?.startedAt ?? entry.startedAt,
                     stoppedAt: activeDraft?.stoppedAt ?? entry.stoppedAt
                   };
+                  // Step 16 (prototype): a trip block from 44 px tall shows its legs down its left edge.
+                  const legTrip = prototypePlaces && blockPositionStyle.height >= 44 ? prototypeTrips.get(entry.id) ?? null : null;
                   const hasInlineActionSlot = Boolean(
                     entry.stoppedAt && density.canShowInlineAction
                   );
@@ -1963,6 +1984,7 @@ export function CalendarReview({
                         label.compact ? "is-dense-compact" : "",
                         label.detail ? "has-detail-room" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
+                        legTrip ? "has-leg-strip" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
@@ -2060,6 +2082,10 @@ export function CalendarReview({
                           onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                         />
                       ) : null}
+                      {legTrip ? (
+                        <CalendarLegStrip fromMs={Date.parse(displayEntry.startedAt)} legs={legTrip.legs}
+                          toMs={displayEntry.stoppedAt ? Date.parse(displayEntry.stoppedAt) : capturedNow.getTime()} />
+                      ) : null}
                     </article>
                   );
                 });
@@ -2070,6 +2096,14 @@ export function CalendarReview({
                 blocks.forEach((block, index) => byEntry.set(block.entry.id, blockElements[index]));
                 return [...suggestionBlocks, ...dayEntries.map((entry) => byEntry.get(entry.id) ?? null)];
               })()}
+              {dayPlaces && lanePx ? (
+                <CalendarPlacesLane asking={prototypePlaces?.asking ?? new Map()} clock={clock} dateKey={dayKey}
+                  geometry={(startedAt, stoppedAt) => {
+                    const box = calendarBlockStyle({ startedAt, stoppedAt }, null, day, rowHeight, calendarHeight, calendarHours, capturedNow);
+                    return box ? { top: box.top, height: box.height } : null;
+                  }}
+                  timeline={dayPlaces} widthPx={lanePx} />
+              ) : null}
             </div>
             );
           })}

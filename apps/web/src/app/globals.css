@@ -14973,3 +14973,99 @@ button.timeline-location-hit:focus-visible {
     height: auto;
   }
 }
+
+/* Calendar prototype, step 16: a trip block's legs down its left edge, one segment per leg in proportion to its
+   time; an Unsure leg is hatched. The title moves right to make room. */
+.calendar-time-block.has-leg-strip .calendar-entry-primary {
+  padding-left: 24px;
+}
+
+.calendar-leg-strip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 5px;
+  z-index: 2;
+  width: 16px;
+  pointer-events: none;
+}
+
+.calendar-leg-segment {
+  position: absolute;
+  left: 0;
+  display: grid;
+  width: 16px;
+  min-height: 2px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--block, var(--text-secondary)) 34%, var(--surface));
+  box-shadow: 0 0 0 1px var(--surface);
+  color: var(--text-primary);
+}
+
+.calendar-leg-segment.is-unsure {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 45%, transparent) 0 3px, transparent 3px 6px),
+    color-mix(in oklab, var(--warning) 14%, var(--surface));
+  color: var(--warning-text);
+}
+
+/* Calendar prototype, step 17: the Places lane on the left of a day column (about a fifth of it). */
+.calendar-places-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.calendar-places-item {
+  position: absolute;
+  right: 3px;
+  left: 0;
+  display: grid;
+  min-height: 3px;
+  place-items: start center;
+  padding-top: 3px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--text-secondary) 12%, var(--surface));
+  color: var(--text-secondary);
+  pointer-events: auto;
+}
+
+.calendar-places-item.is-trip {
+  right: 40%;
+  left: 40%;
+  padding-top: 0;
+  background: color-mix(in oklab, var(--text-secondary) 30%, var(--surface));
+}
+
+.calendar-places-item.is-asking {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 32%, transparent) 0 3px, transparent 3px 7px),
+    color-mix(in oklab, var(--warning) 10%, var(--surface));
+  color: var(--warning-text);
+}
+
+.calendar-places-item.is-trip.is-asking {
+  right: 25%;
+  left: 25%;
+}
+
+.calendar-places-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.calendar-places-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}

@@ -193,7 +193,9 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
  * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
  * journey in progress. A place not in a block can be corrected (location v4 step 13).
  */
-export function LocationListRowView({ check, clock, nowMs, onCorrect, prototype = false, row }: {
+export function LocationListRowView({ check, clock, guess = null, nowMs, onCorrect, prototype = false, row }: {
+  /** Calendar prototype (Q7, 28 Oct): the question's best guess, shown on the row as "Boots?". */
+  guess?: string | null;
   /** The row's "?" (location v4 step 14): whether its question is open, and the toggle. */
   check?: { expanded: boolean; onToggle: () => void };
   clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void;
@@ -229,6 +231,8 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, prototype 
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
   if (prototype) {
     const asking = Boolean(check && row.checkIds.length);
+    // Q7: an unnamed place that asks "Visited Boots?" reads "Boots?" on its row.
+    const shownLabel = asking && guess && !place.name ? `${guess}?` : label;
     const opens = asking ? check!.onToggle : onCorrect && !place.blockIds.length ? () => onCorrect(place, label) : undefined;
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
       : DAYFRAME_APP_ICONS.places;
@@ -240,10 +244,10 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, prototype 
         <td className="px-3 py-3" colSpan={2}>
           <PrototypeRowButton asking={asking} checkKey={asking ? row.key : undefined} expanded={check?.expanded}
             hint={asking ? (check!.expanded ? "Hides the question" : "Shows the question") : opens ? "Opens it to change the place or its times" : undefined}
-            label={`${label}, ${span}${asking ? ". Needs a look" : ""}${place.setByYou ? ". You set this" : ""}`} onPress={opens}>
+            label={`${shownLabel}, ${span}${asking ? ". Needs a look" : ""}${place.setByYou ? ". You set this" : ""}`} onPress={opens}>
             <PrototypeMark asking={asking} glyph={glyph} quiet={row.faint} />
             <span className="timeline-task-details">
-              <span className="timeline-task-primary-line">{row.faint ? <span>{label}</span> : <b>{label}</b>}</span>
+              <span className="timeline-task-primary-line">{row.faint ? <span>{shownLabel}</span> : <b>{shownLabel}</b>}</span>
               {secondary ? <span className="timeline-location-secondary">{secondary}</span> : null}
             </span>
             <span className="tabular timeline-location-span">{span}</span>

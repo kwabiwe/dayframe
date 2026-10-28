@@ -50,7 +50,7 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
-import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, visitedGuess, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
 import { useCalendarPrototype, useLocalDayStartMs, useMediaQuery } from "@/components/CalendarPrototype";
 import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-prototype";
 import { PlacesColumn } from "@/components/location/PlacesColumn";
@@ -607,7 +607,8 @@ export function EntriesTable({
       <Fragment key={row.key}>
         {row.kind === "check"
           ? item && check ? <CheckRowView check={check} clock={clock} item={item} prototype={prototype} row={row} /> : null
-          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} prototype={prototype} row={row} />}
+          : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
+            nowMs={nowMs} onCorrect={correctPlace} prototype={prototype} row={row} />}
         {item && expanded ? (
           <CheckQuestionRow clock={clock} item={item}
             editor={editingCheck === item.id ? (
