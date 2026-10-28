@@ -20,14 +20,14 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
-import { clearCheckProjection, projectReviewItems, useCheckProjection } from "@/lib/check-projection-store";
+import { CheckDecisionsProvider, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { beforeSessionChange } from "@/lib/session-change";
 import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
-import type { BootstrapData } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, ReviewItemRow } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import { markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
@@ -66,8 +66,30 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AppShellRuntimeProvider>
-      <AppShellContent>{children}</AppShellContent>
+      <CheckDecisionsHost>
+        <AppShellContent>{children}</AppShellContent>
+      </CheckDecisionsHost>
     </AppShellRuntimeProvider>
+  );
+}
+
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
+const NO_CATEGORIES: readonly CategoryRow[] = [];
+
+/**
+ * The "?" decisions' one owner (Codex r4 on #609), per workspace/user lifetime: Calendar › List answers through it,
+ * and the sidebar badge and Today's chip count from it, so an answer held, saving or saved shows the same everywhere,
+ * and survives leaving the List. Another workspace or person starts it afresh.
+ */
+function CheckDecisionsHost({ children }: { children: ReactNode }) {
+  const { data, refresh } = useAppShellRuntime();
+  const owner = data ? `${data.workspace.id}:${data.user.id}` : "";
+  const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
+  return (
+    <CheckDecisionsProvider categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
+      reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
+      {children}
+    </CheckDecisionsProvider>
   );
 }
 
@@ -99,19 +121,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
   // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
   const todayStartMs = useLocalDayStartMs();
-  // As the List shows them: its held answers away, its revived ones back (Codex r2 on #609).
-  const projection = useCheckProjection();
-  // Another workspace or person: the List's pending answers were the previous owner's (Codex r3 on #609).
-  const projectionOwner = data ? `${data.workspace.id}:${data.user.id}` : null;
-  const seenProjectionOwner = useRef(projectionOwner);
-  useEffect(() => {
-    if (projectionOwner === seenProjectionOwner.current) return;
-    const previous = seenProjectionOwner.current;
-    seenProjectionOwner.current = projectionOwner;
-    if (previous !== null) clearCheckProjection();
-  }, [projectionOwner]);
-  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectReviewItems(data.reviewItems, projection), todayStartMs) : null,
-    [data, projection, todayStartMs]);
+  // As the List shows them, from the one decisions owner: held, saving and saved answers away, revived ones back.
+  const projectedItems = useProjectedReviewItems(data?.reviewItems ?? NO_REVIEW_ITEMS);
+  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectedItems, todayStartMs) : null,
+    [data, projectedItems, todayStartMs]);
   const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
   const calendarHref = asking?.length ? oldestCheckHref(asking) : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);

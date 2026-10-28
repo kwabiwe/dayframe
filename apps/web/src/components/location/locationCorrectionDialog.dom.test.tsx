@@ -410,4 +410,35 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       target={{ kind: "place", place: place({ stoppedAt: at(10, 30) }), label: "Unknown place" }} />);
     expect(evidenceFetch).toHaveBeenCalledTimes(2);
   });
+  it("moves the open leg's baseline to a refreshed mode, keeping a mode the person already picked (Codex r4 on #609)", async () => {
+    const trip = (mode: TripLeg["mode"]) => ({ kind: "trip" as const, id: "trip-1", status: "finalised" as const, startedAt: at(8, 12),
+      stoppedAt: at(8, 40), fromId: "seg-home", toId: "seg-cafe", legs: [{ ...leg, mode, confidence: "sure" as const }], blockIds: [] }) as never;
+    const dialog = (mode: TripLeg["mode"], onClose = vi.fn()) => (
+      <LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+        target={{ kind: "trip", trip: trip(mode), route: "Home → Corner café" }} />);
+    const pressed = () => screen.getAllByRole("button", { pressed: true }).map((button) => button.textContent);
+    const view = render(dialog("underground"));
+    fireEvent.click(screen.getByRole("button", { name: /^Underground/ }));
+    expect(pressed()).toEqual(["Underground"]);
+    // Refreshed as Train: Train is chosen and is what nothing-changed means.
+    view.rerender(dialog("train"));
+    expect(pressed()).toEqual(["Train"]);
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-secondary");
+    // Underground is now a change from the new baseline, and is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Underground" }));
+    const onClose = vi.fn();
+    view.rerender(dialog("train", onClose));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(sent()).toEqual([{ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: leg.startedAt, legStoppedAt: leg.stoppedAt, mode: "underground" }]);
+    cleanup();
+    // A pick made before the refresh stays the person's: Bus, compared with the refreshed Train.
+    clientFetch.mockClear();
+    const second = render(dialog("underground"));
+    fireEvent.click(screen.getByRole("button", { name: /^Underground/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Bus" }));
+    second.rerender(dialog("train"));
+    expect(pressed()).toEqual(["Bus"]);
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
+  });
 });

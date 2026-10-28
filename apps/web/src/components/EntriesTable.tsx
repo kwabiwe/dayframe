@@ -346,6 +346,16 @@ export function EntriesTable({
   });
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
+  // Where focus goes if a saved correction (Logs as, Save this place, a fix) removes the row that opened its
+  // dialog: the next "?" down the List from that row, else the chip, else the List (Codex r4 on #609).
+  const correctionFocus = useRef<{ nextKey: string | null; saved: boolean } | null>(null);
+  const openCorrection = (next: LocationCorrectionTarget) => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const following = opener ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")]
+      .find((element) => element !== opener && Boolean(opener.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) : undefined;
+    correctionFocus.current = { nextKey: following?.dataset.checkKey ?? null, saved: false };
+    setCorrection(next);
+  };
   // The "?" the open dialog asks at its top, if it was opened from one (owner item A).
   const [correctionCheckId, setCorrectionCheckId] = useState<string | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
@@ -353,10 +363,10 @@ export function EntriesTable({
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips });
+    openCorrection({ kind: "place", place, label, joinsTrips });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
-    setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
+    openCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
   const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
   // Owner concern 4 (28 Oct 2026): only "?" from today and the 6 days before ask; an older one's place stays a
@@ -589,7 +599,7 @@ export function EntriesTable({
   };
   const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
     setCorrectionCheckId(checkId);
-    setCorrection({ kind: "trip", trip, route: trip.route });
+    openCorrection({ kind: "trip", trip, route: trip.route });
   };
   /** A location row, its "?" and, while open, an Apple Health question (no dialog) under it. */
   const renderLocationRow = (row: LocationListRow) => {
@@ -729,6 +739,22 @@ export function EntriesTable({
     linkedOpen.current = { id: linked.id, dialog: true };
     openCheckRow(row);
   });
+  useEffect(() => {
+    const pending = correctionFocus.current;
+    if (correction || !pending) return;
+    if (!pending.saved) {
+      correctionFocus.current = null;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      correctionFocus.current = null;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const next = pending.nextKey ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === pending.nextKey) : null;
+      (next ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [correction]);
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -1602,7 +1628,7 @@ export function EntriesTable({
         return (
           <PlacesColumn askingBySegment={askingBySegment} blocks={entries} clock={clock} nowMs={nowMs}
             onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
-            onCorrectTrip={(trip, route) => setCorrection({ kind: "trip", trip, route })}
+            onCorrectTrip={(trip, route) => openCorrection({ kind: "trip", trip, route })}
             onHide={() => setPlacesColumn(false)}
             onOpenCheck={(checkId) => {
               const row = checkRows.find((other) => checkOf(other)?.id === checkId);
@@ -1617,7 +1643,10 @@ export function EntriesTable({
           // Held for Undo like an inline answer; focus then moves on. "Logs as" is log_place, which closes the "?" itself.
           question={dialogCheck && dialogWords ? { text: dialogWords.question, yesLabel: dialogWords.yesLabel, noLabel: "Not now",
             onAnswer: (yes: boolean) => answerFromDialog(dialogCheck.id, yes) } : null}
-          onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
+          onCorrected={async () => {
+            if (correctionFocus.current) correctionFocus.current.saved = true;
+            await onChanged?.();
+          }} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal

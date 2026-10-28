@@ -26,8 +26,34 @@ const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
 vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => clock.todayStartMs, useMediaQuery: () => false }));
 
 const { EntriesTable } = await import("./EntriesTable");
-const { projectReviewItems, useCheckProjection } = await import("@/lib/check-projection-store");
+const { CheckDecisionsProvider, useProjectedReviewItems } = await import("./location/ListChecks");
 const { askingChecks } = await import("@/lib/calendar-checks");
+
+/** What AppShell's badge and Today's chip count: the decisions owner's items, as the List shows them. */
+function Badge() {
+  const items = useProjectedReviewItems([]);
+  return <output data-testid="badge">{askingChecks(items, clock.todayStartMs).length}</output>;
+}
+/** The AppShell's decisions owner for one workspace and user, with the badge beside whatever it shows. */
+function Shell({ children, items, owner = "w1:u1", refresh = async () => undefined }: {
+  children: React.ReactNode; items: readonly ReviewItemRow[]; owner?: string; refresh?: () => Promise<unknown>;
+}) {
+  return (
+    <CheckDecisionsProvider categories={[]} owner={owner} refresh={refresh} reviewItems={items}>
+      <Badge />
+      {children}
+    </CheckDecisionsProvider>
+  );
+}
+const badge = () => Number(screen.getByTestId("badge").textContent);
+/** Saves wait until the test answers them, with an acknowledgement unless told otherwise. */
+function holdSaves(reply?: Response) {
+  const held: Array<() => void> = [];
+  clientFetch.mockImplementation((url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+    held.push(() => resolve(reply ?? new Response(JSON.stringify(acknowledge(url, init)), { status: 200 })));
+  }));
+  return { answer: () => held.splice(0).forEach((resolve) => resolve()) };
+}
 
 // Location v4 step 14: a synthetic day, made-up names and ids.
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 11, hour, minute)).toISOString();
@@ -662,14 +688,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
 
   it("shares its held answers with the badge and Today, so their counts agree through answer, Undo and failure (Codex r2 on #609)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    // What AppShell's badge and Today count: the bootstrap's items as the List projects them.
-    function Badge() {
-      const projection = useCheckProjection();
-      return <output data-testid="badge">{askingChecks(projectReviewItems(reviewItems, projection), clock.todayStartMs).length}</output>;
-    }
     clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
-    render(<><Badge /><EntriesTable {...baseProps()} reviewItems={reviewItems} /></>);
-    const badge = () => Number(screen.getByTestId("badge").textContent);
+    render(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
     expect(badge()).toBe(3);
     fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
@@ -688,46 +708,112 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(chip(3)).toBeTruthy();
     expect(badge()).toBe(3);
   });
+
   it("counts an outing's open trip in the badge too when the server says its stay is decided (Codex r3 on #609)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const [stay, walk] = outingPair();
-    function Badge() {
-      const projection = useCheckProjection();
-      return <output data-testid="badge">{askingChecks(projectReviewItems([stay, walk], projection), clock.todayStartMs).length}</output>;
-    }
     clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
       canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
-    render(<><Badge /><EntriesTable {...baseProps()} reviewItems={[stay, walk]} /></>);
+    render(<Shell items={[stay, walk]}><EntriesTable {...baseProps()} reviewItems={[stay, walk]} /></Shell>);
     fireEvent.click(askingRow("Unknown place")!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(chip(1)).toBeTruthy();
-    expect(screen.getByTestId("badge").textContent).toBe("1");
+    expect(badge()).toBe(1);
   });
 
-  it("keeps a sent answer out of the badge after leaving the List, until it settles (Codex r3 on #609)", async () => {
-    let answerSave: (response: Response) => void = () => undefined;
-    clientFetch.mockImplementation((url: string, init: RequestInit) => new Promise<Response>((resolve) => {
-      answerSave = () => resolve(new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
-    }));
-    function Badge() {
-      const projection = useCheckProjection();
-      return <output data-testid="badge">{askingChecks(projectReviewItems(reviewItems, projection), clock.todayStartMs).length}</output>;
-    }
-    const onChanged = vi.fn(async () => undefined);
-    const view = render(<><Badge /><EntriesTable {...baseProps()} onChanged={onChanged} reviewItems={reviewItems} /></>);
-    const badge = () => screen.getByTestId("badge").textContent;
+  it("keeps an answer still saving away when the List is left and opened again, and its Undo works there (Codex r4 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const save = holdSaves();
+    const list = () => <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
+    const view = render(<Shell items={reviewItems}>{list()}</Shell>);
     fireEvent.click(sleepRow()!);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
-    expect(badge()).toBe("2");
-    // Leaving sends it at once; while it is unanswered the badge keeps it away.
-    view.rerender(<><Badge /></>);
+    // Left while held for Undo, and opened again: still away, and its Undo is there.
+    view.rerender(<Shell items={reviewItems}>{null}</Shell>);
+    expect(badge()).toBe(2);
+    view.rerender(<Shell items={reviewItems}>{list()}</Shell>);
+    expect(sleepRow()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(sleepRow()).toBeTruthy();
+    expect(badge()).toBe(3);
+    // Answered again, sent, and the List left and opened again while it is saving: never answerable twice.
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
-    expect(badge()).toBe("2");
-    // Saved, and the data refreshed: then the List's projection is gone (the refreshed data no longer lists it).
-    await act(async () => { answerSave(new Response()); });
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    await waitFor(() => expect(badge()).toBe("3"));
+    view.rerender(<Shell items={reviewItems}>{null}</Shell>);
+    view.rerender(<Shell items={reviewItems}>{list()}</Shell>);
+    expect(sleepRow()).toBeNull();
+    expect(chip(2)).toBeTruthy();
+    expect(badge()).toBe(2);
+    await act(async () => { save.answer(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(sleepRow()).toBeNull();
+    expect(badge()).toBe(2);
+  });
+
+  it("keeps a saved answer away when the refresh after it fails, until the data no longer lists it (Codex r4 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const refresh = vi.fn(async () => { throw new Error("offline"); });
+    const view = render(<Shell items={reviewItems} refresh={refresh}>{null}</Shell>);
+    view.rerender(<Shell items={reviewItems} refresh={refresh}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    view.rerender(<Shell items={reviewItems} refresh={refresh}>{null}</Shell>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalled();
+    // Saved, the refresh failed, the data still lists it open: it stays away.
+    expect(badge()).toBe(2);
+    view.rerender(<Shell items={reviewItems} refresh={refresh}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
+    expect(sleepRow()).toBeNull();
+    // Data that no longer lists it: nothing left to hide, and the count is the data's.
+    const withoutSleep = reviewItems.filter((item) => item.id !== SLEEP);
+    view.rerender(<Shell items={withoutSleep} refresh={refresh}><EntriesTable {...baseProps()} reviewItems={withoutSleep} /></Shell>);
+    expect(badge()).toBe(2);
+  });
+
+  it("drops a previous workspace's late refusal: nothing comes back in the new one (Codex r4 on #609)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const save = holdSaves(new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
+    const view = render(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
+    fireEvent.click(sleepRow()!);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    // The workspace changes while it is saving: the new one has nothing to check.
+    view.rerender(<Shell items={[]} owner="w2:u1"><EntriesTable {...baseProps()} reviewItems={[]} /></Shell>);
+    expect(badge()).toBe(0);
+    // The old save is refused late: it would restore the old workspace's "?", and must not.
+    await act(async () => { save.answer(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(badge()).toBe(0);
+    expect(sleepRow()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("moves focus to the next \"?\" when a saved Logs as removes the row that opened it (Codex r4 on #609)", async () => {
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e1"], resolvedReviewItemIds: [PLACE] } }),
+      { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    let items = reviewItems;
+    let view: ReturnType<typeof render> | null = null;
+    const list = () => <EntriesTable {...baseProps()} categories={[errands]} onChanged={async () => {
+      items = items.filter((item) => item.id !== PLACE);
+      view!.rerender(list());
+    }} reviewItems={items} />;
+    view = render(list());
+    const office = officeRow()!;
+    office.focus();
+    fireEvent.click(office);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(officeRow()).toBeNull();
+    // Sleep is the next "?" down the List from the Office row.
+    await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
   });
 });

@@ -236,6 +236,18 @@ export function LocationCorrectionDialog({
     setEnd(target.place.stoppedAt ? timeValue(target.place.stoppedAt) : "");
     setSaved((current) => ({ ...current, picked: original, startedAt: target.place.startedAt, stoppedAt: target.place.stoppedAt }));
   }
+  // The open leg as the newest data has it: a refresh that changed its mode moves the baseline to that mode, and
+  // the choice with it unless the person already picked another here (theirs stays, compared with the new
+  // baseline; Codex r4 on #609).
+  const legMode = target.kind === "leg" ? target.leg.mode : null;
+  const [seenLegMode, setSeenLegMode] = useState(legMode);
+  if (legMode !== seenLegMode && !busy) {
+    setSeenLegMode(legMode);
+    if (legMode && seenLegMode) {
+      if (mode === saved.mode) setMode(legMode);
+      setSaved((current) => ({ ...current, mode: legMode }));
+    }
+  }
 
   function corrections(): TimelineCorrectionRequest[] | string {
     // Only what changed is sent: an untouched leg, place or time is left as it is.

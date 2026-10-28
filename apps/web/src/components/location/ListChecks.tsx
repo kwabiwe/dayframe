@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
-import { clearCheckProjection, publishCheckProjection } from "@/lib/check-projection-store";
 import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
@@ -35,18 +34,23 @@ function segmentOf(item: ReviewItemRow) {
   return typeof id === "string" && id ? id : null;
 }
 
-export function useListChecks({
-  applyTransition,
-  categories,
-  refresh,
-  reviewItems
-}: {
-  /** The List's transition, which owns every change a "?" makes, restores included. */
+type CheckDecisionsInput = {
+  /** The List's transition, which owns every change a "?" makes, restores included. Stable. */
   applyTransition: (update: () => void) => void;
   categories: readonly CategoryRow[];
+  /** Whose decisions (workspace and user): another owner starts afresh, and the previous one's late results are dropped. */
+  owner: string;
   refresh: () => Promise<unknown>;
   reviewItems: readonly ReviewItemRow[];
-}) {
+};
+
+/**
+ * The "?" decisions (Codex r4 on #609): what is held for Undo, saving, revived or decided by the server, and the
+ * "?" that therefore still show. Owned once per workspace/user lifetime at AppShell level (CheckDecisionsProvider),
+ * so the List, the sidebar badge and Today's chip read one state that outlives the List: an answer still saving
+ * stays away when the List is left and opened again, and a saved one until the data no longer lists it open.
+ */
+function useCheckDecisionsState({ applyTransition, categories, owner, refresh, reviewItems }: CheckDecisionsInput) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
   // As the deck (Codex r1/r2 on #568): a refused outing's canonical statuses, so only its open cards
   // return; and cards the server says are decided stay away until newer data lists them open.
@@ -62,12 +66,24 @@ export function useListChecks({
     const over = openItemsAtConflict.current;
     if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
-  const { state, decide, undo, clearError, settle } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition);
+  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner);
   // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
   // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  // Another owner: nothing of the previous lifetime carries over.
+  const [lifetimeOwner, setLifetimeOwner] = useState(owner);
+  if (lifetimeOwner !== owner) {
+    setLifetimeOwner(owner);
+    setClosedByServer(new Map());
+    setSnapshots(new Map());
+    setRevived(new Map());
+    setHeldOutings(new Map());
+  }
+  useEffect(() => {
+    outingConflictStatuses.current = new Map();
+  }, [owner]);
   // Kept current for the restore effect below.
   const restoreSources = useRef({ snapshots, heldOutings });
   useLayoutEffect(() => {
@@ -117,34 +133,15 @@ export function useListChecks({
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
 
-  // Shared with the badge and Today's chip, so they count what the List shows through answer, Undo and failure:
-  // the same held outing members as `memberIds` above, with its exception for a stay the server says is decided
-  // (its open trips then stand alone, and count; Codex r3 on #609).
-  const [projectionToken] = useState(() => ({}));
-  useEffect(() => {
-    const hiddenIds = new Set([...state.hiddenIds, ...closedByServer.keys(),
+  // What the badge and Today's chip count: the open items as the List shows them — held, saving, saved (until the
+  // data no longer lists them) and server-decided ones away, with the same held outing members as `memberIds` and
+  // its exception for a stay the server says is decided; revived ones back.
+  const projectedItems = useMemo(() => {
+    const hidden = new Set([...state.hiddenIds, ...closedByServer.keys(),
       ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
         .flatMap(([, members]) => members.map((member) => member.id))]);
-    publishCheckProjection({ hiddenIds, revived: [...revived.values()].filter((item) => !loadedIds.has(item.id)) }, projectionToken);
-  }, [closedByServer, heldOutings, loadedIds, projectionToken, revived, state.hiddenIds]);
-  // Leaving the List sends a held answer at once: its "?" stay away from the badge until every save has settled
-  // and the data is refreshed, never counted again before the server answered (Codex r3 on #609). An owner change
-  // clears it (AppShell), and a List opened meanwhile owns the projection from then on.
-  const settleRef = useRef({ settle, refresh });
-  useLayoutEffect(() => {
-    settleRef.current = { settle, refresh };
-  });
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      const { settle: settleNow, refresh: refreshNow } = settleRef.current;
-      void settleNow().then(() => refreshNow()).catch(() => undefined).finally(() => {
-        if (!mounted.current) clearCheckProjection(projectionToken);
-      });
-    };
-  }, [projectionToken]);
+    return items.filter((item) => !hidden.has(item.id));
+  }, [closedByServer, heldOutings, items, state.hiddenIds]);
 
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);
@@ -175,7 +172,55 @@ export function useListChecks({
     }
   }, [categories, decide, itemsById, outings, revived]);
 
-  return { answer, checks, clearError, itemsById, outings, state, undo };
+  return { answer, checks, clearError, itemsById, outings, projectedItems, state, undo };
+}
+
+type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
+type SharedCheckDecisions = CheckDecisions & {
+  /** The List, while it is shown, lends its transition and its refresh (which also reloads its weeks). */
+  register: (applyTransition: (update: () => void) => void, refresh: () => Promise<unknown>) => () => void;
+};
+const CheckDecisionsContext = createContext<SharedCheckDecisions | null>(null);
+
+/** The one owner of "?" decisions for the signed-in workspace and user, above the List, the badge and Today. */
+export function CheckDecisionsProvider({ categories, children, owner, refresh, reviewItems }: {
+  categories: readonly CategoryRow[]; children: ReactNode; owner: string; refresh: () => Promise<unknown>; reviewItems: readonly ReviewItemRow[];
+}) {
+  const lent = useRef<{ transition: ((update: () => void) => void) | null; refresh: (() => Promise<unknown>) | null }>({ transition: null, refresh: null });
+  const shellRefresh = useRef(refresh);
+  useLayoutEffect(() => {
+    shellRefresh.current = refresh;
+  });
+  const applyTransition = useCallback((update: () => void) => (lent.current.transition ?? ((run: () => void) => run()))(update), []);
+  const refreshAll = useCallback(() => (lent.current.refresh ?? shellRefresh.current)(), []);
+  const decisions = useCheckDecisionsState({ applyTransition, categories, owner, refresh: refreshAll, reviewItems });
+  const register = useCallback((transition: (update: () => void) => void, listRefresh: () => Promise<unknown>) => {
+    lent.current = { transition, refresh: listRefresh };
+    return () => {
+      if (lent.current.transition === transition) lent.current = { transition: null, refresh: null };
+    };
+  }, []);
+  const value = useMemo(() => ({ ...decisions, register }), [decisions, register]);
+  return <CheckDecisionsContext.Provider value={value}>{children}</CheckDecisionsContext.Provider>;
+}
+
+/** The open review items as the List shows them, for counts outside it; the items as given without a provider. */
+export function useProjectedReviewItems(reviewItems: readonly ReviewItemRow[]) {
+  return useContext(CheckDecisionsContext)?.projectedItems ?? reviewItems;
+}
+
+const NO_ITEMS: readonly ReviewItemRow[] = [];
+
+/**
+ * Calendar › List's "?" decisions: the AppShell provider's, with the List lending its transition and refresh while
+ * shown; without a provider (a List on its own), its own.
+ */
+export function useListChecks({ applyTransition, categories, refresh, reviewItems }: Omit<CheckDecisionsInput, "owner">) {
+  const shared = useContext(CheckDecisionsContext);
+  const local = useCheckDecisionsState({ applyTransition, categories, owner: "local", refresh, reviewItems: shared ? NO_ITEMS : reviewItems });
+  const register = shared?.register;
+  useLayoutEffect(() => register?.(applyTransition, refresh), [applyTransition, refresh, register]);
+  return shared ?? local;
 }
 
 /** "3 to check" at the top of the day's List: each press moves to the next "?" and opens its question. */
