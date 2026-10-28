@@ -11,6 +11,7 @@ import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { focusQuietly } from "@/components/blocks/TooltipHost";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
@@ -538,7 +539,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     const outcome = await splitActiveTimer(atMs);
     if (!outcome.ok) return outcome.error;
     setSplitDialogOpen(false);
-    window.requestAnimationFrame(() => timerActionsTriggerRef.current?.focus({ preventScroll: true }));
+    // Back to "…" without its tip or ring, so at phone width the tip never covers Stop (owner, 28 Oct 2026).
+    window.requestAnimationFrame(() => focusQuietly(timerActionsTriggerRef.current));
     // One command id for this Undo, Try again included: a repeat of one that was done is answered as done.
     const split = { entryId: outcome.entryId, newEntryId: outcome.newEntryId, commandId: newBlockCommandId("join") };
     const token = ++noticeSequence.current;
