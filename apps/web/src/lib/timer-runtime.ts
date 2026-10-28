@@ -582,6 +582,19 @@ export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string)
   return replaceEntryCollections({ ...data, activeEntry: null }, entry);
 }
 
+/**
+ * A split of the running block the server accepted (owner 28 Oct 2026): it ends at `splitAt`, and its second
+ * part, `newEntryId`, runs from there with the same details, until the day's next load confirms it.
+ */
+export function applyOptimisticTimerSplit(data: BootstrapData, splitAt: string, newEntryId: string) {
+  const active = data.activeEntry;
+  if (!active) return data;
+  const durationSeconds = Math.max(0, Math.floor((Date.parse(splitAt) - Date.parse(active.startedAt)) / 1000));
+  const first = { ...active, stoppedAt: splitAt, durationSeconds };
+  const second = { ...active, id: newEntryId, startedAt: splitAt, stoppedAt: null, updatedAt: splitAt, durationSeconds: 0 };
+  return replaceEntryCollections(replaceEntryCollections({ ...data, activeEntry: second }, first), second);
+}
+
 export function applyOptimisticTimerDelete(data: BootstrapData) {
   if (!data.activeEntry) return data;
   const activeId = data.activeEntry.id;

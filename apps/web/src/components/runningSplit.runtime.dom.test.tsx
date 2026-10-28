@@ -1,0 +1,155 @@
+// @vitest-environment jsdom
+
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+
+// Split for the running block (owner 28 Oct 2026) through the real runtime: synthetic ids and times only.
+const mocks = vi.hoisted(() => ({ clientFetch: vi.fn() }));
+
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams("date=2026-08-17") }));
+vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.clientFetch }));
+
+const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
+const { PersistentTimerBar } = await import("./PersistentTimerBar");
+
+const FIRST = "80000000-0000-4000-8000-000000000001";
+const SECOND = "80000000-0000-4000-8000-000000000002";
+const SPLIT_AT = Date.parse("2026-08-17T04:30:00.000Z");
+
+afterEach(() => cleanup());
+
+describe("AppShellRuntime split of the running block", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("splits once, moves the running timer to the second part, and a Stop pressed meanwhile stops that part", async () => {
+    const running = entry({ id: FIRST });
+    let serverData = bootstrap(running);
+    const requests: Array<{ url: string; body?: Record<string, unknown>; commandId?: string }> = [];
+    let releaseSplit: (() => void) | undefined;
+    const splitPending = new Promise<void>((resolve) => { releaseSplit = resolve; });
+    mocks.clientFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+      const commandId = (options?.headers as Record<string, string> | undefined)?.["X-Dayframe-Client-Command-Id"];
+      requests.push({ url, ...(body ? { body } : {}), ...(commandId ? { commandId } : {}) });
+      if (url === "/api/time-entries" && body?.mode === "split") {
+        await splitPending;
+        const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+        serverData = bootstrap(second, [second, { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }]);
+        return response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: true }, 201);
+      }
+      if (url === "/api/time-entries" && body?.mode === "join") {
+        serverData = bootstrap(running);
+        return response({ ok: true, id: FIRST, replayed: false, running: true });
+      }
+      if (url === "/api/events") {
+        serverData = bootstrap(null, [{ ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }, entry({ id: SECOND, stoppedAt: "2026-08-17T05:00:00.000Z" })]);
+        return response({ eventId: "stop", stopOutcome: "stopped", timeEntryId: SECOND }, 201);
+      }
+      if (url.startsWith("/api/bootstrap")) return response(serverData);
+      if (url === "/api/timer-state") {
+        return response({ activeEntryId: serverData.activeEntry?.id ?? null, updatedAt: serverData.activeEntry?.updatedAt ?? null, serverNow: "2026-08-17T05:00:03.000Z" });
+      }
+      return response({}, 404);
+    });
+
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(running)} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    await waitFor(() => expect(requests.some((request) => request.body?.mode === "split")).toBe(true));
+    // Stop pressed while the split is on its way waits for it.
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    expect(requests.some((request) => request.url === "/api/events")).toBe(false);
+    await act(async () => { releaseSplit?.(); await splitPending; });
+
+    await waitFor(() => expect(requests.some((request) => request.url === "/api/events")).toBe(true));
+    const split = requests.find((request) => request.body?.mode === "split")!;
+    expect(split.body).toEqual({ mode: "split", entryId: FIRST, splitAt: "2026-08-17T04:30:00.000Z", expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(split.commandId).toMatch(/^web-split-/);
+    expect(requests.find((request) => request.url === "/api/events")!.body).toEqual(expect.objectContaining({
+      type: "timer_stop",
+      rawPayload: { origin: "web_timer", stopScope: "entry", targetEntryId: SECOND }
+    }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
+  });
+
+  it("Undo puts it back as one running block", async () => {
+    const running = entry({ id: FIRST });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let serverData = bootstrap(second, [second, { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }]);
+    const bodies: Array<Record<string, unknown>> = [];
+    mocks.clientFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+      if (body) bodies.push(body);
+      if (url === "/api/time-entries" && body?.mode === "join") {
+        serverData = bootstrap(running);
+        return response({ ok: true, id: FIRST, replayed: false, running: true });
+      }
+      if (url.startsWith("/api/bootstrap")) return response(serverData);
+      if (url === "/api/timer-state") return response({ activeEntryId: serverData.activeEntry?.id ?? null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+      return response({}, 404);
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={serverData} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    expect(bodies).toEqual([{ mode: "join", entryId: FIRST, splitEntryId: SECOND }]);
+  });
+});
+
+function Harness({ initial }: { initial: BootstrapData }) {
+  const { data, hydrate, joinSplitTimer, splitActiveTimer } = useAppShellRuntime();
+  return <>
+    <button onClick={() => hydrate(initial)}>Hydrate</button>
+    <button onClick={() => void splitActiveTimer(SPLIT_AT)}>Split</button>
+    <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND })}>Undo split</button>
+    <output data-testid="active">{data?.activeEntry ? `${data.activeEntry.id}@${data.activeEntry.startedAt}` : "idle"}</output>
+  </>;
+}
+
+function response(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function bootstrap(activeEntry: TimeEntryRow | null, entries = activeEntry ? [activeEntry] : []): BootstrapData {
+  return {
+    activeEntry,
+    categories: [{ id: "focus", name: "Focus", color: "mint", isPinned: true }],
+    categoryUsage: [],
+    tags: [],
+    taskSuggestions: [],
+    entries,
+    historyEntries: entries,
+    dayEntries: entries,
+    weekEntries: entries,
+    dateRange: {
+      selectedDate: "2026-08-17",
+      dayStart: "2026-08-17T00:00:00.000Z",
+      dayEnd: "2026-08-18T00:00:00.000Z",
+      weekStart: "2026-08-17T00:00:00.000Z",
+      weekEnd: "2026-08-24T00:00:00.000Z"
+    },
+    workspace: { id: "workspace", name: "Dayframe" }
+  } as unknown as BootstrapData;
+}
+
+function entry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
+  return {
+    id: FIRST, categoryId: null, categoryName: null, categoryColor: null, projectId: null, projectName: null, projectColor: null,
+    clientName: null, placeId: null, placeName: null, source: "manual_app", confidence: "high", reviewStatus: "confirmed",
+    description: "A", startedAt: "2026-08-17T04:00:00.000Z", stoppedAt: null, updatedAt: "2026-08-17T05:00:00.000Z",
+    durationSeconds: 3600, tagNames: [], tags: [], ...overrides
+  } as TimeEntryRow;
+}

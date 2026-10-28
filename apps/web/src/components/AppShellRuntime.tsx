@@ -10,6 +10,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { joinSplitTimeEntries, splitRunningTimeEntry } from "@/lib/time-entry-split";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import {
   applyPendingTimerDetails,
@@ -30,6 +31,7 @@ import {
   applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerDelete,
+  applyOptimisticTimerSplit,
   applyOptimisticTimerStop,
   applyServerActiveEntry,
   createTimerMutationGate,
@@ -59,6 +61,7 @@ import {
 } from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
+export type ActiveSplitOutcome = { ok: true; entryId: string; newEntryId: string } | { ok: false; error: string };
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 type CategoryMutationOutcome =
   | { ok: true; category: CategoryRow }
@@ -79,6 +82,13 @@ type RuntimeContext = {
   createCategory: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CategoryMutationOutcome>;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   deleteActiveTimer: () => Promise<MutationOutcome>;
+  /**
+   * Splits the running block at `atMs` (owner 28 Oct 2026, as Toggl): it ends there, and its second part
+   * keeps running with every detail. The outcome names both blocks, for Undo.
+   */
+  splitActiveTimer: (atMs: number) => Promise<ActiveSplitOutcome>;
+  /** Undo of a split: puts the two blocks back as one (running again when the second part runs). */
+  joinSplitTimer: (split: { entryId: string; newEntryId: string }) => Promise<MutationOutcome>;
   data: BootstrapData | null;
   dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
@@ -206,6 +216,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // The running block's draft at the moment a Start that replaces it was asked for, by block id:
   // its pending edits, saved to its real id before the switch runs (Codex r10).
   const outgoingDraftsRef = useRef(new Map<string, { draft: TimerDraft; base: TimerDraft }>());
+  // A running block this tab split → its running second part: a Stop asked for the block while the split
+  // ran stops the part that runs now (owner 28 Oct 2026).
+  const splitSuccessorsRef = useRef(new Map<string, string>());
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -842,7 +855,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         clearTimeout(timer);
       }
       setIsStopPending(false);
-      if (dataRef.current?.activeEntry?.id !== requested.id) {
+      const nowActiveId = dataRef.current?.activeEntry?.id;
+      if (nowActiveId !== requested.id && (!nowActiveId || splitSuccessorsRef.current.get(requested.id) !== nowActiveId)) {
         return startPending
           ? { ok: false, error: "That block did not start, so there was nothing to stop." }
           : { ok: false, error: "There is no running block to stop." };
@@ -1000,6 +1014,73 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
+
+  const splitActiveTimer = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
+    const requested = dataRef.current?.activeEntry;
+    if (!requested) return { ok: false, error: "There is no running block to split." };
+    // As Stop and Discard: a block whose Start is still in flight waits behind it, and a rejected Start
+    // leaves nothing to split.
+    if (!serverEntryId(requested.id)) {
+      await mutationGateRef.current.whenIdle();
+      if (dataRef.current?.activeEntry?.id !== requested.id) {
+        return { ok: false, error: "That block did not start, so there was nothing to split." };
+      }
+    }
+    const result = await mutationGateRef.current.run(async (): Promise<ActiveSplitOutcome> => {
+      const before = dataRef.current;
+      const entry = before?.activeEntry;
+      const targetId = entry ? serverEntryId(entry.id) : null;
+      if (!before || !entry || !targetId) return { ok: false, error: "There is no running block to split." };
+      // The split copies the block as saved: this tab's edits to it are saved first, so both parts keep them.
+      const saved = await saveActiveDetails(before, draftRef.current);
+      if (!saved.ok) return saved;
+      const current = dataRef.current?.activeEntry;
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      try {
+        const outcome = await splitRunningTimeEntry(clientFetch, {
+          entryId: targetId, atMs, expectedUpdatedAt: current?.id === entry.id ? versionOf(current) : undefined
+        });
+        if (!outcome.ok) {
+          setTimerError(outcome.error);
+          if (outcome.changed) await refresh({ force: true });
+          return outcome;
+        }
+        splitSuccessorsRef.current.set(entry.id, outcome.newEntryId);
+        splitSuccessorsRef.current.set(targetId, outcome.newEntryId);
+        const shown = dataRef.current;
+        if (shown?.activeEntry && serverEntryId(shown.activeEntry.id) === targetId) {
+          commitData(applyOptimisticTimerSplit(shown, new Date(atMs).toISOString(), outcome.newEntryId), "optimistic");
+        }
+        // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
+        // part, never the first part this split just ended.
+        await refresh({ force: true });
+        return { ok: true, entryId: targetId, newEntryId: outcome.newEntryId };
+      } finally {
+        setIsTimerBusy(false);
+      }
+    });
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
+  }, [commitData, refresh, saveActiveDetails, serverEntryId, versionOf]);
+
+  const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string }): Promise<MutationOutcome> => {
+    await mutationGateRef.current.whenIdle();
+    const result = await mutationGateRef.current.run(async (): Promise<MutationOutcome> => {
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      try {
+        const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId });
+        // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
+        if (outcome.ok || outcome.changed) await refresh({ force: true });
+        return outcome.ok ? outcome : { ok: false, error: outcome.error };
+      } finally {
+        setIsTimerBusy(false);
+      }
+    });
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
+  }, [refresh]);
 
   const updateActiveDetails = useCallback(async (
     draft: TimerDraft,
@@ -1314,6 +1395,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createCategory,
     createManualEntry,
     deleteActiveTimer,
+    joinSplitTimer,
+    splitActiveTimer,
     data: selectedData,
     dateLoadError,
     hydrate,
@@ -1343,6 +1426,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createCategory,
     createManualEntry,
     deleteActiveTimer,
+    joinSplitTimer,
+    splitActiveTimer,
     data,
     dateLoadError,
     hydrate,

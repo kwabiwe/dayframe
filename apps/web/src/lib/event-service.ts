@@ -2986,13 +2986,78 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
  * original at `splitAt`, recorded as an end the person set. `expectedUpdatedAt` refuses (409) a block
  * written elsewhere since the editor read it. A `clientCommandId` makes a retry safe: the new block's
  * event keeps it, and a repeat is answered with the block it already made.
+ *
+ * A running block splits the same way (Toggl's split of a running entry, owner 28 Oct 2026): it ends at
+ * `splitAt` and the new block, with every detail, starts there and keeps running, so the running timer
+ * moves to it in the same transaction, under the user's timer lock as every Start and Stop.
  */
 export async function splitFinishedEntry(
   id: string,
-  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string },
+  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string; source?: "manual_app" | "mobile_app"; now?: Date },
   session: RequestSession = getDevSession()
 ) {
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
+}
+
+/**
+ * Undo of a split (owner 28 Oct 2026): the block `splitEntryId` that a split of `id` made goes, and `id`
+ * takes its end again: running again when it was running, so the running timer moves back in the same
+ * transaction. A repeat (the reply was lost) is answered as done, through the edit recorded with the
+ * client command id.
+ */
+export async function joinSplitEntries(
+  id: string,
+  input: { splitEntryId: string; clientCommandId?: string },
+  session: RequestSession = getDevSession()
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await lockUserTimerState(client, session);
+    const locked = await client.query<{ id: string }>(
+      `select id from time_entries where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3 order by id for update`,
+      [[id, input.splitEntryId], session.workspaceId, session.userId]
+    );
+    const found = new Set(locked.rows.map((row) => row.id));
+    if (!found.has(id)) throw new TimeEntryNotFoundError();
+    if (!found.has(input.splitEntryId)) {
+      if (input.clientCommandId && await timeEntryCommandRecorded(client, id, input.clientCommandId, session)) {
+        await client.query("commit");
+        return { id, replayed: true as const };
+      }
+      throw new TimeEntryNotFoundError();
+    }
+    const pair = await client.query<{ firstStoppedAt: Date | null; startedAt: Date; stoppedAt: Date | null; splitFrom: string | null }>(
+      `select first.stopped_at as "firstStoppedAt", second.started_at as "startedAt", second.stopped_at as "stoppedAt",
+              e.raw_payload->>'splitFrom' as "splitFrom"
+       from time_entries first
+       join time_entries second on second.id = $2 and second.workspace_id = first.workspace_id and second.user_id = first.user_id
+       left join activity_events e on e.id = second.created_from_event_id and e.workspace_id = second.workspace_id
+       where first.id = $1 and first.workspace_id = $3 and first.user_id = $4`,
+      [id, input.splitEntryId, session.workspaceId, session.userId]
+    );
+    const row = pair.rows[0];
+    if (!row || row.splitFrom !== id || !row.firstStoppedAt || row.firstStoppedAt.getTime() !== row.startedAt.getTime()) {
+      throw new TimeEntryValidationError("These blocks are no longer one split block, so they can't be put back together.");
+    }
+    await client.query(
+      `delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3`,
+      [input.splitEntryId, session.workspaceId, session.userId]
+    );
+    await client.query(
+      `update time_entries set stopped_at = $4, user_edited_at = now(), updated_at = now()
+       where id = $1 and workspace_id = $2 and user_id = $3`,
+      [id, session.workspaceId, session.userId, row.stoppedAt]
+    );
+    await recordTimeEntryEdits(client, [id], session, row.stoppedAt ? [id] : [], input.clientCommandId);
+    await client.query("commit");
+    return { id, replayed: false as const, running: row.stoppedAt === null };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function duplicateFinishedEntry(
@@ -3005,13 +3070,18 @@ export async function duplicateFinishedEntry(
 
 async function copyFinishedEntry(
   id: string,
-  input: { kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string; now?: Date },
+  input: {
+    kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string;
+    source?: "manual_app" | "mobile_app"; now?: Date;
+  },
   session: RequestSession
 ) {
   const clientEventId = input.clientCommandId ? `time_entry_${input.kind}:${input.clientCommandId}` : null;
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // A split may move the running timer: serialised with every Start and Stop, taken before the row lock.
+    await lockUserTimerState(client, session);
     const locked = await client.query(
       `select id from time_entries where id = $1 and workspace_id = $2 and user_id = $3 for update`,
       [id, session.workspaceId, session.userId]
@@ -3051,18 +3121,20 @@ async function copyFinishedEntry(
     const row = stored.rows[0];
     if (!row) throw new TimeEntryNotFoundError();
     if (input.expectedUpdatedAt && versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
-    if (!row.stoppedAt) {
-      throw new TimeEntryValidationError(input.kind === "split" ? "Stop this block before splitting it." : "Stop this block before duplicating it.");
-    }
+    if (!row.stoppedAt && input.kind === "duplicate") throw new TimeEntryValidationError("Stop this block before duplicating it.");
+    const running = !row.stoppedAt;
     const startMs = row.startedAt.getTime();
-    const stopMs = row.stoppedAt.getTime();
-    let window: { startedAt: string; stoppedAt: string };
+    // A running block's end is now: a split of it lands between its start and now.
+    const stopMs = row.stoppedAt?.getTime() ?? (input.now ?? new Date()).getTime();
+    let window: { startedAt: string; stoppedAt: string | null };
     if (input.kind === "split") {
       const atMs = Date.parse(input.splitAt ?? "");
       if (!Number.isFinite(atMs) || atMs <= startMs || atMs >= stopMs) {
         throw new TimeEntryValidationError("Choose a split time inside the block.");
       }
-      window = { startedAt: new Date(atMs).toISOString(), stoppedAt: row.stoppedAt.toISOString() };
+      window = { startedAt: new Date(atMs).toISOString(), stoppedAt: row.stoppedAt?.toISOString() ?? null };
+    } else if (!row.stoppedAt) {
+      throw new TimeEntryValidationError("Stop this block before duplicating it.");
     } else {
       const endMs = stopMs + (stopMs - startMs);
       if (endMs > (input.now ?? new Date()).getTime()) throw new TimeEntryValidationError("No room after this block yet: the copy would end in the future.");
@@ -3073,18 +3145,26 @@ async function copyFinishedEntry(
           workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload,
           suggested_project_id, suggested_category_id, suggested_place_id, review_status, client_event_id
        )
-       values ($1, $2, 'manual_app', 'timer_start', $3, 'high', $4::jsonb, $5, $6, $7, 'confirmed', $8)
+       values ($1, $2, $9, $10, $3, 'high', $4::jsonb, $5, $6, $7, 'confirmed', $8)
        returning id`,
       [
         session.workspaceId,
         session.userId,
         window.startedAt,
-        // No `origin` key: a manual block, as createManualEntry's.
-        JSON.stringify({ description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id }),
+        JSON.stringify(running
+          // The running part is a block the timer runs (server-1), as a Switch's.
+          ? {
+              origin: input.source === "mobile_app" ? "mobile_timer_split" : "web_timer_split",
+              description: row.description, tagNames: row.tagNames, splitFrom: id, [SERVER_TIMER_START_KEY]: true
+            }
+          // No `origin` key: a manual block, as createManualEntry's.
+          : { description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id }),
         row.projectId,
         row.categoryId,
         row.placeId,
-        clientEventId
+        clientEventId,
+        running ? input.source ?? "manual_app" : "manual_app",
+        running ? "timer_switch" : "timer_start"
       ]
     );
     if (input.kind === "split") {
@@ -3101,7 +3181,7 @@ async function copyFinishedEntry(
           workspace_id, user_id, project_id, category_id, place_id, place_label, source, confidence, review_status,
           description, started_at, stopped_at, created_from_event_id
        )
-       values ($1, $2, $3, $4, $5, $6, 'manual_app', 'high', 'confirmed', $7, $8, $9, $10)
+       values ($1, $2, $3, $4, $5, $6, $11, 'high', 'confirmed', $7, $8, $9, $10)
        returning id`,
       [
         session.workspaceId,
@@ -3113,13 +3193,14 @@ async function copyFinishedEntry(
         row.description,
         window.startedAt,
         window.stoppedAt,
-        event.rows[0].id
+        event.rows[0].id,
+        running ? input.source ?? "manual_app" : "manual_app"
       ]
     );
     const newEntryId = inserted.rows[0].id;
     await syncTimeEntryTags(client, newEntryId, row.tagNames, session);
     await client.query("commit");
-    return { id, newEntryId, replayed: false as const };
+    return { id, newEntryId, replayed: false as const, running };
   } catch (error) {
     await client.query("rollback");
     throw error;
