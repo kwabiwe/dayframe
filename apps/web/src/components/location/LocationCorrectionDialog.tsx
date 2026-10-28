@@ -157,6 +157,17 @@ export function LocationCorrectionDialog({
   const [logAs, setLogAs] = useState<string | null>(null);
   const [newPlaceName, setNewPlaceName] = useState("");
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
+  // Calendar prototype (owner item N): saved places nearest the visit first, as far as the map knows; places further
+  // than 2 km (or not near at all) wait behind "More places".
+  const [morePlaces, setMorePlaces] = useState(false);
+  // Only with a visit centre: without one the map can't say what's near, so every place shows.
+  const distances = prototype && evidence && evidence !== "unavailable" && evidence.map.centre
+    ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : null;
+  const currentPlaceId = initialTarget.kind === "place" ? initialTarget.place.placeId : null;
+  const isNear = (id: string) => (distances?.get(id) ?? Infinity) <= 2_000 || id === currentPlaceId;
+  const sortedPlaces = distances ? [...places].sort((a, b) => (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity)) : places;
+  const shownPlaces = distances && !morePlaces ? sortedPlaces.filter((option) => isNear(option.id)) : sortedPlaces;
+  const hiddenPlaces = distances && !morePlaces ? sortedPlaces.filter((option) => !isNear(option.id)) : [];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
@@ -329,10 +340,13 @@ export function LocationCorrectionDialog({
     </div>
   ) : null;
 
+  const pendingNow = corrections();
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim());
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>
-      <Button disabled={busy} onClick={() => void apply()} variant="primary">Done</Button>
+      {/* Calendar prototype (owner item O): Done looks secondary until something has changed. */}
+      <Button disabled={busy} onClick={() => void apply()} variant={prototype && !changed ? undefined : "primary"}>Done</Button>
     </>
   );
 
@@ -421,7 +435,8 @@ export function LocationCorrectionDialog({
           {[
             ...(place.learnedPlaceId && !place.placeId
               ? [{ key: original, glyph: DAYFRAME_APP_ICONS.places, name: place.name ?? "Learned place", note: "Learned place" }] : []),
-            ...places.map((option) => ({ key: `saved:${option.id}`, name: option.name, note: "Saved place",
+            ...shownPlaces.map((option) => ({ key: `saved:${option.id}`, name: option.name,
+              note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
               glyph: option.role === "home" ? DAYFRAME_APP_ICONS.placeHome : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places })),
             { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: "Keeps it as an unknown place until you name it" }
           ].map((option) => (
@@ -434,6 +449,11 @@ export function LocationCorrectionDialog({
             </label>
           ))}
         </div>
+        {hiddenPlaces.length ? (
+          <button className="location-correction-back" disabled={busy} onClick={() => setMorePlaces(true)} type="button">
+            More places ({hiddenPlaces.length})
+          </button>
+        ) : null}
         <p className="location-correction-hint">Nearby suggestions come from Apple Maps, so they show on your iPhone. The web shows places you saved.</p>
         {open ? null : (
           <>
@@ -491,4 +511,9 @@ export function LocationCorrectionDialog({
       </div>
     </ModalDialog>
   );
+}
+
+/** "120 m", "1.4 km". */
+function formatMetres(metres: number) {
+  return metres < 1_000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1_000).toFixed(1)} km`;
 }
