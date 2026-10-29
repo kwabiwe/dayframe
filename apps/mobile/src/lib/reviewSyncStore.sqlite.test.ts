@@ -1627,6 +1627,37 @@ describe("a block that ran into a trip in the Review outbox", () => {
     expect(store.mobileReviewItemFromPresentation({ ...openPresentation(data, clash.id, HASH).lookup.reviewItems[0] }).proposalHash).toBe(HASH);
   });
 
+  it("keeps an acknowledged End it shown through a failed bootstrap and a presentation handover that deletes its record (Codex r4 on #618)", async () => {
+    const { createAcknowledgedEndLedger, clashEndsFor, projectTimerTripClashEnds } = await import("./timerTripClashBlocks");
+    const { data, clash, block } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(156),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: block.id,
+      endedAt: clash.rawPayload.tripStartedAt, stoppedRunningTimer: true, clientMutationId: syntheticId(156), reviewItemId: clash.id,
+      expectedProposalHash: HASH }) });
+    await store.synchroniseReviewMutations();
+    // The Dashboard's ledger, fed by the outbox's reads.
+    const ledger = createAcknowledgedEndLedger();
+    ledger.observe(await store.readPendingTimerTripClashEnds(owner(data)), 1_000);
+    // The stale data still has the block running (the bootstrap after the acknowledgement failed: nothing applied).
+    const running = { ...block, stoppedAt: null };
+    const stale = { ...data, activeEntry: running, historyEntries: [running, ...data.historyEntries!.slice(1)] };
+    const shown = async () => projectTimerTripClashEnds(stale, clashEndsFor([], new Set(),
+      ledger.live(await store.readPendingTimerTripClashEnds(owner(data)))))!;
+    expect((await shown()).activeEntry).toBeNull();
+    // A presentation read hands the acknowledged answer over: its outbox record is deleted.
+    await store.cacheReviewPresentation({ owner: { ...owner(data), backendId: "dayframe-staging" }, response: terminalPresentation(data, [clash.id], block.id) });
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([]);
+    expect(count("review_mutation_outbox")).toBe(0);
+    // Still shown ended: only an accepted bootstrap retires it.
+    const after = await shown();
+    expect(after.activeEntry).toBeNull();
+    expect(after.historyEntries!.find((entry) => entry.id === block.id)?.stoppedAt).toBe(clash.rawPayload.tripStartedAt);
+    expect(ledger.applied(2_000, stale)).toBe(true);
+    expect((await shown()).activeEntry).toEqual(running);
+  });
+
   it("refuses End it for a proposal the iPhone no longer has", async () => {
     const { data, clash } = clashBootstrap();
     await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((item) => item.id === clash.id ? { ...item, proposalHash: "b".repeat(64) } : item) });

@@ -136,6 +136,8 @@ describe("an acknowledged End it stays shown until applied server data confirms 
     const edited = { ...canonical, entries: [...canonical.entries, { ...running, id: "other", stoppedAt: at(8) }] } as MobileBootstrap;
     expect(shown(edited)!.activeEntry).toBeNull();
     expect(bootstrapBlocksById(shown(edited)).get("block-1")?.stoppedAt).toBe(at(10, 42));
+    // Its outbox record gone (a presentation handover): the ledger still holds it (Codex r4 on #618).
+    expect(ledger.live([]).map((held) => held.clientMutationId)).toEqual(["m-1"]);
     // Applied data read before the acknowledgement was seen, still showing it running: not confirmation.
     expect(ledger.applied(500, canonical)).toBe(false);
     expect(shown(canonical)!.activeEntry).toBeNull();

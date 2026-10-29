@@ -197,8 +197,9 @@ function endShownIn(data: MobileBootstrap, end: Pick<AcknowledgedEnd, "timeEntry
 }
 
 /**
- * Acknowledged End it answers still shown on this iPhone (Codex r3 on #618), for one account: an acknowledged end
- * keeps showing until server data that confirms it is applied — a bootstrap whose read started after the
+ * Acknowledged End it answers still shown on this iPhone (Codex r3 and r4 on #618), for one account. The ledger keeps
+ * each acknowledged end itself, apart from the outbox record (which a presentation handover may delete), and it keeps
+ * showing until server data that confirms it is applied — a bootstrap whose read started after the
  * acknowledgement was seen, or one that already shows the block ended (`endShownIn`). Never on a mere change of the
  * data the Dashboard holds (a local edit, a failed refresh).
  */
@@ -210,9 +211,16 @@ export function createAcknowledgedEndLedger() {
     observe(ends: readonly AcknowledgedEnd[], nowMs: number) {
       for (const end of ends) if (end.acknowledged && !seen.has(end.clientMutationId)) seen.set(end.clientMutationId, { ...end, seenAt: nowMs });
     },
-    /** The ends to show: waiting ones, and acknowledged ones not yet confirmed by applied server data. */
-    live<T extends AcknowledgedEnd>(ends: readonly T[]) {
-      return ends.filter((end) => !end.acknowledged || !retired.has(end.clientMutationId));
+    /**
+     * The ends to show: the outbox's waiting ones, and every acknowledged one this ledger holds and applied server data
+     * has not confirmed yet — whether or not the outbox still has its record (a presentation handover deletes it;
+     * Codex r4 on #618).
+     */
+    live(ends: readonly AcknowledgedEnd[]): AcknowledgedEnd[] {
+      const held = [...seen.values()].filter((end) => !retired.has(end.clientMutationId))
+        .map(({ clientMutationId, timeEntryId, tripStartedAt }) => ({ clientMutationId, timeEntryId, tripStartedAt, acknowledged: true }));
+      const heldIds = new Set(held.map((end) => end.clientMutationId));
+      return [...ends.filter((end) => !end.acknowledged && !heldIds.has(end.clientMutationId)), ...held];
     },
     /** Applied server data (a bootstrap read that started at `startedAtMs`): whether it confirmed any end. */
     applied(startedAtMs: number, data: MobileBootstrap) {
