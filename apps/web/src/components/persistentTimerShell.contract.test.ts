@@ -76,8 +76,10 @@ describe("persistent block shell contract", () => {
   it("draws quick start as quiet pills with the activity's colour tile, and the clock in the system font (UI review B, A)", () => {
     expect(styles).toMatch(/\.df-quick-button\.df-block \{[^}]*background: var\(--surface-muted\);[^}]*color: var\(--text-primary\);/s);
     expect(styles).toMatch(/\.df-quick-button svg\[data-glyph\] \{[^}]*background: var\(--block\);[^}]*color: var\(--on-block\);/s);
-    expect(styles).toMatch(/\.df-quick-button kbd \{[^}]*display: none;/s);
-    expect(styles).toMatch(/\.df-quick:is\(:hover, :focus-within\) \.df-quick-button kbd \{[^}]*display: grid;/s);
+    // The number keeps its space and fades in, so nothing moves (Codex r1 on #629).
+    expect(styles).toMatch(/\.df-quick-button kbd \{[^}]*display: grid;[^}]*opacity: 0;[^}]*color: var\(--text-secondary\);/s);
+    expect(styles).toMatch(/\.df-quick:is\(:hover, :focus-within\) \.df-quick-button kbd \{[^}]*opacity: 1;/s);
+    expect(styles).toMatch(/\.df-quick-button\.df-block\.is-recording \{[^}]*box-shadow: inset 0 0 0 1\.5px var\(--text-primary\);/s);
     expect(styles).toMatch(/\.df-cmd-clock \{[^}]*font-family: -apple-system[^}]*font-size: 22px;[^}]*font-weight: var\(--fw-strong\);/s);
     expect(timer).toContain('onToday ? "is-today" : ""');
   });
@@ -86,7 +88,9 @@ describe("persistent block shell contract", () => {
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd \{[^}]*"activity description action secondary"[^}]*"time time time time";/);
     // UI review (owner 29 Oct 2026): a running block is one row on phones; quick start shows on Today
     // only, as 36 px pills with a 44 px hit area.
-    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-wrap\.is-running \.df-cmd \{[^}]*"activity description time action secondary";/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-wrap \.df-cmd \{[^}]*"activity description time action secondary";/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-idle \.df-cmd-clock\.is-idle \{[^}]*display: none;/);
+    expect(styles).toMatch(/@media \(any-pointer: coarse\) \{\s*\.df-quick \{\s*gap: 8px;/);
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-wrap:not\(\.is-today\) \.df-quick \{[^}]*display: none;/);
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button \{[^}]*min-height: 36px;/);
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button::before \{[^}]*inset: -4px 0;/);

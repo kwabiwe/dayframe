@@ -64,7 +64,7 @@ describe("web tag editor interaction contract", () => {
     expect(source).toContain("suggestionsPanelRef");
     expect(source).toContain("pickerPanelRef");
     expect(source).toContain("time-entry-quick-editor-nested-surface");
-    expect(source).toContain("pickerTriggerRef.current?.focus()");
+    expect(source).toContain("pickerReturnRef.current?.focus()");
   });
 
   it("separates the accessible hit target from the compact visible tag fill", () => {

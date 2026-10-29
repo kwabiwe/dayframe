@@ -8062,6 +8062,8 @@ button.df-cmd-clock:hover {
 }
 
 .df-cmd-icon.ui-icon-button {
+  min-width: var(--web-control-height);
+  min-height: var(--web-control-height);
   width: var(--web-control-height);
   height: var(--web-control-height);
   border-radius: 50%;
@@ -8128,12 +8130,19 @@ button.df-cmd-clock:hover {
   transform: scale(0.95);
 }
 
-.df-quick-button.is-recording {
-  box-shadow: inset 0 0 0 1.5px var(--block);
+/* Recording: the activity's tint behind a ring in the text colour, visible on every activity
+   colour in both themes (Codex r1 on #629). */
+.df-quick-button.df-block.is-recording {
+  background: color-mix(in oklab, var(--block) 22%, var(--surface-muted));
+  box-shadow: inset 0 0 0 1.5px var(--text-primary);
 }
 
+/* The number's space is kept, so revealing it moves nothing (Codex r1 on #629); secondary text meets
+   4.5:1 on surfaceMuted in both themes. */
 .df-quick-button kbd {
-  display: none;
+  display: grid;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
   min-width: 16px;
   height: 16px;
   place-items: center;
@@ -8141,7 +8150,7 @@ button.df-cmd-clock:hover {
   border-radius: 5px;
   padding: 0 4px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-family: inherit;
   font-size: 11px;
   font-weight: var(--fw-medium);
@@ -8170,7 +8179,31 @@ button.df-cmd-clock:hover {
 }
 
 .df-quick:is(:hover, :focus-within) .df-quick-button kbd {
-  display: grid;
+  opacity: 1;
+}
+
+/* The Tags button sits inside the bar's field at the bar's control size. */
+.df-cmd-field .inline-tag-picker-trigger {
+  width: var(--web-control-height);
+  height: var(--web-control-height);
+  flex-basis: var(--web-control-height);
+}
+
+/* Touch screens at any width: 36 px quick-start pills, rows 8 apart, each with a 44 px hit area. */
+@media (any-pointer: coarse) {
+  .df-quick {
+    gap: 8px;
+  }
+
+  .df-quick-button {
+    min-height: 36px;
+  }
+
+  .df-quick-button::before {
+    position: absolute;
+    inset: -4px 0;
+    content: "";
+  }
 }
 
 @media (max-width: 860px) {
@@ -8272,14 +8305,20 @@ button.df-cmd-clock:hover {
     display: none;
   }
 
-  /* A running block is one row: activity, description, time, Stop, more (W5). */
-  .df-cmd-wrap.is-running .df-cmd {
+  /* One row, idle and running, so Start and Stop never change the band's height (W5; Codex r1 on
+     #629): activity, description, time, Play/Stop, more. Idle, the time slot holds only the "From"
+     pill; the idle 0:00:00 is a label with nothing to do. */
+  .df-cmd-wrap .df-cmd {
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     grid-template-areas: "activity description time action secondary";
   }
 
-  .df-cmd-wrap.is-running .df-cmd-time {
+  .df-cmd-wrap .df-cmd-time {
     justify-self: end;
+  }
+
+  .df-cmd-idle .df-cmd-clock.is-idle {
+    display: none;
   }
 
   .df-cmd-wrap.is-running .df-cmd-clock {
@@ -8302,16 +8341,16 @@ button.df-cmd-clock:hover {
     content: "";
   }
 
-  .df-cmd-wrap.is-running .df-cmd-secondary {
+  .df-cmd-wrap .df-cmd-secondary {
     justify-self: auto;
   }
 
   /* No room for the Tags button in the one row: typing # opens the same Tags list. */
-  .df-cmd-wrap.is-running .df-cmd-field .inline-tag-picker-trigger {
+  .df-cmd-wrap .df-cmd-field .inline-tag-picker-trigger {
     display: none;
   }
 
-  .df-cmd-wrap.is-running .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
+  .df-cmd-wrap .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
     min-width: 0;
     padding-right: 6px;
     font-size: 14px;
@@ -8320,15 +8359,17 @@ button.df-cmd-clock:hover {
 }
 
 @media (min-width: 561px) and (max-width: 860px) {
+  /* The time sits at the row's right end on narrow screens (UI review, 29 Oct 2026; Codex r1 on #629). */
   .df-cmd-time .swiss-start-time-popover {
-    right: auto;
-    left: 0;
+    right: 0;
+    left: auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .df-odometer-strip,
-  .df-quick-button {
+  .df-quick-button,
+  .df-quick-button kbd {
     transition: none;
   }
 
