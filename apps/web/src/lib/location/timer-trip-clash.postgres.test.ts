@@ -395,6 +395,33 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
       .toMatchObject({ status: "accepted", alreadyResolved: true, entryId: id });
   });
 
+  it("the presentation sends a clash's question and the hash End it checks, only to its owner and clients that ask (#621)", async () => {
+    const { getReviewPresentation } = await import("../review-presentation-service");
+    const { resolveIdempotentReviewMutation } = await import("../review-mutation-service");
+    const id = await block(800, 900, { description: "Deep work" });
+    await reconcile({ entryIds: [id] });
+    const item = await question(id);
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 200 };
+    type Shown = { kind: string; reviewItemId?: string; proposalHash?: string | null; timerTripClash?: unknown };
+    const find = (records: unknown[]) => (records as Shown[]).find((record) => record.kind === "review" && record.reviewItemId === item.id);
+    const asked = find((await getReviewPresentation(session, request, {}, { timerTripClash: true })).records);
+    expect(asked).toMatchObject({
+      timerTripClash: { timeEntryId: id, tripId: "trip-home", tripStartedAt: at(862), overlapSeconds: 28 * 60 },
+      interval: { start: at(800), end: at(862) }
+    });
+    // Without the feature: the same record, without the field.
+    const older = find((await getReviewPresentation(session, request, {}, {})).records);
+    expect(older).toBeTruthy();
+    expect(older).not.toHaveProperty("timerTripClash");
+    expect(older?.proposalHash).toBe(asked?.proposalHash);
+    // Another owner never sees it.
+    expect(find((await getReviewPresentation(otherSession, request, {}, { timerTripClash: true })).records)).toBeUndefined();
+    // End it with the record's hash: the proposal the bootstrap and the answer check.
+    const accept = { ...envelope("accept"), mutation: { action: "accept" as const, expectedProposalHash: asked!.proposalHash! } };
+    await expect(resolveIdempotentReviewMutation(item.id, accept, session)).resolves.toMatchObject({ ok: true, status: "accepted", entryId: id });
+    await db().query(`delete from time_entries where id = $1`, [id]);
+  });
+
   it("a timer left running for days still asks about the first trip it ran into (Codex r3 on #611)", async () => {
     await db().query(`delete from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
     const id = await block(-3 * 24 * 60, null, { description: "Forgotten" });
