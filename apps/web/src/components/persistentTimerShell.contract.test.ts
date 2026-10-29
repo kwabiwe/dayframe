@@ -77,11 +77,14 @@ describe("persistent block shell contract", () => {
     expect(styles).toMatch(/\.df-quick-button\.df-block \{[^}]*background: var\(--surface-muted\);[^}]*color: var\(--text-primary\);/s);
     expect(styles).toMatch(/\.df-quick-button svg\[data-glyph\] \{[^}]*background: var\(--block\);[^}]*color: var\(--on-block\);/s);
     // The number keeps its space and fades in, so nothing moves (Codex r1 on #629).
-    expect(styles).toMatch(/\.df-quick-button kbd \{[^}]*display: grid;[^}]*opacity: 0;[^}]*color: var\(--text-secondary\);/s);
+    expect(styles).toMatch(/\.df-quick-button kbd \{[^}]*display: grid;[^}]*opacity: 0;[^}]*color: var\(--text-primary\);/s);
     expect(styles).toMatch(/\.df-quick:is\(:hover, :focus-within\) \.df-quick-button kbd \{[^}]*opacity: 1;/s);
     expect(styles).toMatch(/\.df-quick-button\.df-block\.is-recording \{[^}]*box-shadow: inset 0 0 0 1\.5px var\(--text-primary\);/s);
     expect(styles).toMatch(/\.df-cmd-clock \{[^}]*font-family: -apple-system[^}]*font-size: 22px;[^}]*font-weight: var\(--fw-strong\);/s);
     expect(timer).toContain('onToday ? "is-today" : ""');
+    // The phone row keeps the description typeable (Codex r2 on #629).
+    expect(styles).toMatch(/\.df-cmd-wrap \.df-cmd \{[^}]*grid-template-columns: auto minmax\(56px, 1fr\) minmax\(0, auto\) auto auto;/);
+    expect(styles).toMatch(/\.df-cmd-wrap:has\(\.inline-tag-description-input:focus\) \.df-cmd-idle \{[^}]*display: none;/);
   });
 
   it("keeps compact overlays and the block row usable at phone widths", () => {

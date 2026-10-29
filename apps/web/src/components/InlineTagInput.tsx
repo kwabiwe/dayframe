@@ -114,7 +114,9 @@ export function InlineTagInput({
   const pickerReturnRef = useMemo<RefObject<HTMLElement | null>>(() => ({
     get current() {
       const trigger = pickerTriggerRef.current;
-      const shown = trigger && (typeof trigger.checkVisibility === "function" ? trigger.checkVisibility() : true);
+      const shown = trigger && (typeof trigger.checkVisibility === "function"
+        ? trigger.checkVisibility()
+        : window.getComputedStyle(trigger).display !== "none");
       return shown ? trigger : localInputRef.current;
     }
   }), []);

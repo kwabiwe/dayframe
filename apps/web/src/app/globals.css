@@ -7866,10 +7866,11 @@ dialog.ui-dialog.df-range-custom {
   border-color: transparent;
   border-radius: 10px;
   background: transparent;
+  box-sizing: border-box;
 }
 
 .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
-  min-height: var(--web-control-height);
+  min-height: calc(var(--web-control-height) - 2px);
   padding: 0 40px 0 6px;
   font-size: 15px;
   font-weight: var(--fw-regular);
@@ -8150,7 +8151,7 @@ button.df-cmd-clock:hover {
   border-radius: 5px;
   padding: 0 4px;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
   font-weight: var(--fw-medium);
@@ -8185,7 +8186,7 @@ button.df-cmd-clock:hover {
 /* The Tags button sits inside the bar's field at the bar's control size. */
 .df-cmd-field .inline-tag-picker-trigger {
   width: var(--web-control-height);
-  height: var(--web-control-height);
+  height: calc(var(--web-control-height) - 2px);
   flex-basis: var(--web-control-height);
 }
 
@@ -8309,8 +8310,9 @@ button.df-cmd-clock:hover {
      #629): activity, description, time, Play/Stop, more. Idle, the time slot holds only the "From"
      pill; the idle 0:00:00 is a label with nothing to do. */
   .df-cmd-wrap .df-cmd {
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(56px, 1fr) minmax(0, auto) auto auto;
     grid-template-areas: "activity description time action secondary";
+    gap: 6px;
   }
 
   .df-cmd-wrap .df-cmd-time {
@@ -8318,6 +8320,36 @@ button.df-cmd-clock:hover {
   }
 
   .df-cmd-idle .df-cmd-clock.is-idle {
+    display: none;
+  }
+
+  /* The description keeps room to type: its track never goes under 56 px, the "From" pill shows
+     only its arrow and time and may shorten, and it steps aside while the description has focus
+     (Codex r2 on #629). */
+  .df-cmd-wrap .df-cmd-time,
+  .df-cmd-idle {
+    min-width: 0;
+  }
+
+  .df-cmd-wrap .df-cmd-from {
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--web-control-height);
+    overflow: hidden;
+  }
+
+  .df-cmd-from > span {
+    overflow: hidden;
+    font-size: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .df-cmd-from > span > .tabular {
+    font-size: 13px;
+  }
+
+  .df-cmd-wrap:has(.inline-tag-description-input:focus) .df-cmd-idle {
     display: none;
   }
 
