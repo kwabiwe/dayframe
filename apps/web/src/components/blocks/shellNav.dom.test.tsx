@@ -37,21 +37,25 @@ describe("Blocks sidebar navigation", () => {
   it("badges Calendar with the things to check, and says so (location v4 step 14)", () => {
     setReducedMotion(false);
     render(<ShellSidebarNav activeId="today" checkCount={3} />);
-    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check in the last 7 days. Opens the oldest." });
+    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check in the last 7 days" });
     expect(calendar.querySelector(".df-nav-count")?.textContent).toBe("3");
-    // With no oldest question to open, the badge keeps Calendar's own link.
     expect(calendar.getAttribute("href")).toBe("/timeline");
   });
 
-  it("opens the oldest question from the badge, in the sidebar and the tab bar (owner, 28 Oct 2026)", () => {
+  it("opens Calendar on today with the badge showing: no oldest day, no date= (owner bug, 29 Oct 2026)", () => {
     setReducedMotion(false);
-    const href = "/timeline?view=list&scope=day&date=2026-10-24&check=r1";
-    render(<ShellSidebarNav activeId="today" calendarHref={href} checkCount={2} />);
-    const calendar = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." });
-    expect(calendar.getAttribute("href")).toBe(href);
+    render(<ShellSidebarNav activeId="today" checkCount={2} />);
+    const sidebar = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days" }).getAttribute("href");
     cleanup();
-    render(<ShellTabBar activeId="today" calendarHref={href} checkCount={2} />);
-    expect(screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." }).getAttribute("href")).toBe(href);
+    render(<ShellTabBar activeId="calendar" checkCount={2} />);
+    const tab = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days" }).getAttribute("href");
+    // A bare /timeline: the page opens today (timelineStateFromSearchParams) and nothing of an earlier visit carries over.
+    for (const href of [sidebar, tab]) {
+      expect(href).toBe("/timeline");
+      expect(href).not.toMatch(/date=|check=/);
+    }
+    // The badge is a count inside the tab's one link, never a link of its own.
+    expect(document.querySelectorAll(".df-tabbar a .df-tab-count")).toHaveLength(1);
   });
 
   it("places the thumb without travel first, then springs it, and fades it out on Settings", () => {
@@ -86,6 +90,11 @@ describe("Blocks phone tab bar", () => {
 
 describe("Blocks shell contract", () => {
   const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
+
+  it("never sends the Calendar nav to the oldest question (owner bug, 29 Oct 2026)", () => {
+    expect(shell).not.toContain("oldestCheckHref");
+    expect(shell).not.toContain("calendarHref");
+  });
   const styles = readFileSync(`${process.cwd()}/src/app/globals.css`, "utf8");
 
   it("keeps workspace switching, Settings and Log out one tap from the profile on every width", () => {

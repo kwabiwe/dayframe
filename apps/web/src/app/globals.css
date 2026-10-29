@@ -6077,8 +6077,13 @@ dialog.ui-dialog.df-range-custom {
   }
 }
 
+/* One height for the map's frame and its loading placeholder (glitch fix 3), so the sheet never jumps. */
+:root {
+  --location-evidence-frame-height: 18rem;
+}
+
 .location-evidence-frame {
-  min-height: 18rem;
+  min-height: var(--location-evidence-frame-height);
   border-radius: 16px;
   background: var(--surface-inset);
 }
@@ -6090,7 +6095,7 @@ dialog.ui-dialog.df-range-custom {
 
 .location-evidence-map {
   width: 100%;
-  min-height: 18rem;
+  min-height: var(--location-evidence-frame-height);
 }
 
 .location-evidence-empty {
@@ -6108,7 +6113,7 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .location-evidence-empty {
-  min-height: 18rem;
+  min-height: var(--location-evidence-frame-height);
 }
 
 .location-evidence-empty span {
@@ -6149,10 +6154,9 @@ dialog.ui-dialog.df-range-custom {
   line-height: 1.35;
 }
 
-.location-evidence-provider-state.is-error {
-  /* Opaque: the map's tiles under it can be white (Codex r2 on #425). */
-  background: var(--danger-soft);
-  color: var(--danger-text);
+.location-evidence-provider-state.is-degraded {
+  /* A soft note, not an error: opaque, as the map's tiles under it can be white (Codex r2 on #425). */
+  background: var(--surface-raised);
 }
 
 .location-evidence-caption,
@@ -14647,15 +14651,21 @@ button.timeline-location-hit:focus-visible {
 }
 
 /* Location v4 step 15 on the web: the correction dialog opens with the map, then the choices. */
+/* The frame's height is held throughout: the placeholder, the map's chunk loading, then the map (Codex r1 on #626). */
 .location-correction-map {
   overflow: hidden;
-  min-height: 180px;
+  min-height: var(--location-evidence-frame-height);
   margin: 0 0 4px;
   border-radius: 14px;
   background: var(--surface-muted);
 }
 
+/* Exactly the map frame's size and surface (glitch fix 3): the map replaces it without the sheet moving. */
 .location-correction-map.is-loading {
+  box-sizing: border-box;
+  height: var(--location-evidence-frame-height);
+  border-radius: 16px;
+  background: var(--surface-inset);
   display: grid;
   place-items: center;
   color: var(--text-secondary);

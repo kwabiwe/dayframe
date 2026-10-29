@@ -19,7 +19,8 @@ import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
-import { askingChecks, clashBlocksFrom, oldestCheckHref } from "@/lib/calendar-checks";
+import { askingChecks, clashBlocksFrom } from "@/lib/calendar-checks";
+import { calendarNavigationGeneration } from "@/lib/calendar-today-request";
 import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useClashesBeyondCap } from "@/components/location/useClashesBeyondCap";
 import { withClashItems } from "@/lib/clash-presentation";
@@ -150,14 +151,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const activeSection = activeShellSection(pathname);
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
   // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
-  // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
+  // days. The badge is a count only: Calendar opens on today (owner, 29 Oct 2026). Before hydration (no local day yet)
+  // the server's count stands in.
   const todayStartMs = useLocalDayStartMs();
   // As the List shows them, from the one decisions owner: held, saving and saved answers away, revived ones back.
   const projectedItems = useProjectedReviewItems(data?.reviewItems ?? NO_REVIEW_ITEMS);
   const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectedItems, todayStartMs) : null,
     [data, projectedItems, todayStartMs]);
   const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
-  const calendarHref = asking?.length ? oldestCheckHref(asking) : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -238,7 +239,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
     if (pathname !== "/timeline" || timelineState.view === "list") return;
     const nextState = shiftTimelineState(timelineState, direction);
     const originSearch = searchParams.toString();
+    // A Calendar nav tap while this loads wins (Codex r4 on #625): the URL stays on today, and the data goes back to it.
+    const generation = calendarNavigationGeneration();
     const outcome = await loadDate(nextState.date);
+    if (generation !== calendarNavigationGeneration()) {
+      if (outcome.ok) void refresh();
+      return;
+    }
     if (outcome.ok && window.location.search.slice(1) === originSearch) {
       window.history.pushState(
         null,
@@ -246,7 +253,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         timelineHref(searchParams.toString(), nextState)
       );
     }
-  }, [loadDate, pathname, searchParams, timelineState]);
+  }, [loadDate, pathname, refresh, searchParams, timelineState]);
 
   useEffect(() => {
     const openShortcuts = () => setOverlay("help");
@@ -330,7 +337,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -401,7 +408,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

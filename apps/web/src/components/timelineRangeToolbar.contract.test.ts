@@ -15,6 +15,36 @@ const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
 describe("Calendar range and toolbar contract", () => {
+  it("puts every date load that moves the Calendar behind the nav tap's generation (Codex r3 and r4 on #625)", () => {
+    // The two places that load a period before moving the URL: the view's navigate (strip, picker, ‹ ›, Today, midnight)
+    // and the shell's Alt+← / Alt+→.
+    for (const file of [timeline, shell]) {
+      expect(file.match(/await loadDate\(/g)).toHaveLength(1);
+      expect(file).toMatch(/const generation = calendarNavigationGeneration\(\);\s*const outcome = await loadDate\(/);
+      expect(file).toContain("if (generation !== calendarNavigationGeneration()) {");
+    }
+  });
+
+  it("names the List's top day in the header, not only the URL's date (owner bug, 29 Oct 2026)", () => {
+    expect(timeline).toContain("onVisibleDay: reportListTopDay");
+    expect(timeline).toContain('formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey)');
+    expect(timeline).toContain("selectedDay: headerRanges.day.start");
+    expect(timeline).toContain("value={headerDayKey}");
+    // Reported whether or not the places column shows, and after a positioning that fires no scroll event.
+    expect(entries).toContain("onVisibleDay?.(topDayStartMs)");
+    expect(entries).not.toContain("if (columnShown) trackColumnDay();");
+    // Cheap per scroll (Codex r1 on #625): cached heading offsets, binary-searched; re-measured only on layout changes,
+    // and only while the List is shown.
+    expect(entries).toContain("const offsets = (remeasure ? null : headingOffsetsRef.current) ?? measureHeadingOffsets(root);");
+    expect(entries).toContain("if (!root || !tracksTopDay) return;");
+    expect(entries).toContain("new MutationObserver(");
+    expect(entries).toContain("new ResizeObserver(() => schedule())");
+    expect(entries).not.toMatch(/headings\.filter\(\(heading\) => heading\.getBoundingClientRect\(\)/);
+    // A deliberate choice of the URL's day positions the List again; the strip is the header day's week.
+    expect(timeline).toContain("focusRequest: `${state.date}#${listFocusToken}`");
+    expect(timeline).toContain("weekDays: headerRanges.weekDays");
+  });
+
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
     expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
@@ -56,7 +86,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");
-    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, todayKey)");
+    expect(timeline).toContain('formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey)');
   });
 
   it("gives all views the same clipped period data", () => {
@@ -69,7 +99,8 @@ describe("Calendar range and toolbar contract", () => {
     // week total still opens its report.
     expect(timeline).not.toContain('className="timeline-range-totals"');
     expect(timeline).not.toContain("dayLoggedSeconds");
-    expect(timeline).toContain("weekLoggedSeconds: weekAnalysis.totalLoggedSeconds");
+    expect(timeline).toContain("weekLoggedSeconds: headWeekSeconds");
+    expect(timeline).toContain(": weekAnalysis.totalLoggedSeconds;");
     expect(timeline).toContain("weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
