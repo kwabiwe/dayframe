@@ -680,4 +680,11 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onLogAfter).not.toHaveBeenCalled();
     expect(onLog).not.toHaveBeenCalled();
   });
+
+  it("offers no guess for an outing's stay, which can't keep one (Codex r2 on #620)", () => {
+    const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+    const tree = sheetWith({ question: { ...ask, guess: venue, outing: true } });
+    expect(JSON.stringify(tree.root.findByProps({ testID: "location-correction-question" }).props.children)).not.toContain("Visited");
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-edit")).toHaveLength(0);
+  });
 });

@@ -208,6 +208,11 @@ jobs:
         env:
           DAYFRAME_VENUE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/venue-place-ids.postgres.test.ts
+      - name: One-time place with an activity logs free time only (Codex r2 on #620)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_VENUE_FREE_TIME_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/location-venue-free-time.postgres.test.ts
       - name: Open trip, Travelling since (location v4 step 5)
         if: ${{ !cancelled() }}
         env:

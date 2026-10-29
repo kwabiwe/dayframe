@@ -406,6 +406,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
+    // An outing has no way to keep a guessed venue (`confirm_outing` takes no name or Place ID), so Yes to a guess is
+    // refused for one rather than saved without it (Codex r2 on #620); neither the Calendar nor the sheet guesses one.
+    if (logged && venue && members.length) return false;
     // The whole answer set as tapped (Codex r9 on #610): an outing's membership and every member's proposal. An
     // answer after corrections is the "?" alone, so only its own proposal counts there.
     if (options.expected && (!options.afterCorrections || options.outing) && (members.length !== options.expected.members.size
@@ -525,6 +528,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // refresh brings meanwhile (Codex r8 and r9 on #610).
     const expected = answerSetOf(listed);
     if (registering.current.has(itemId)) return false;
+    // Yes to a guessed venue on an outing: refused, never saved without its venue (Codex r2 on #620).
+    if (logged && venue && expected.members.size) return false;
     // Not answerable here now (no complete window, a waiting or rejected change of its own, already answered): refused
     // at once, never taken and dropped later (Codex r16 on #610).
     if (!canAnswer(itemId)) return false;

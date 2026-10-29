@@ -27,6 +27,8 @@ import {
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { reviewProposalHash } from "../review-proposal-hash";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+// log_place's own free-time rule, shared (a function used at call time, so the modules' cycle is harmless).
+import { freeSpans } from "./location-timeline-corrections";
 
 type LockedReview = {
   id: string;
@@ -471,7 +473,13 @@ async function resolveClosedLocationReview(
       await locationEditMatchesExisting(client, item, action.edit, session)
     ) ||
     (
-      action.action === "record_poi_once" &&
+      action.action === "record_poi_once" && Boolean(action.edit?.categoryId) &&
+      item.status === "accepted" &&
+      await pickedVenueMatches(client, item, action.applePlaceId, session) &&
+      await venueFreeTimeMatches(client, item, action.edit!, action.name.trim(), session)
+    ) ||
+    (
+      action.action === "record_poi_once" && !action.edit?.categoryId &&
       item.status === "accepted" &&
       await pickedVenueMatches(client, item, action.applePlaceId, session) &&
       await locationEditMatchesExisting(
@@ -599,6 +607,9 @@ async function performAction(
         throw new ReviewResolutionError("invalid_action", "Only a visit can use a one-time place.", { status: 422 });
       }
       await rememberPickedVenue(client, item, action.applePlaceId, session);
+      // With an activity (the iPhone's "Visited {name}?" Yes with Logs as, Codex r2 on #620): only the time the
+      // person's own blocks don't cover, as Logs as (`log_place`) logs it.
+      if (action.edit?.categoryId) return recordVenueFreeTime(client, item, action.edit, action.name.trim(), session);
       return confirmReview(
         client,
         item,
@@ -751,6 +762,84 @@ async function confirmReview(
   );
   await auditCorrection(client, session, action, item.segmentId, { entryId });
   return { ok: true, action, status: "accepted", entryId };
+}
+
+/**
+ * "Visited {name}?" Yes with an activity (Codex r2 on #620; orchestrator option a, 29 Oct 2026): a one-time place
+ * (`record_poi_once`) that logs only the time the person's own blocks don't cover, as `log_place` does (its
+ * `freeSpans`), in the caller's one transaction under the owner lock (`resolveLocationReviewAction`: owner lock,
+ * then the review row, then the segment, then the blocks, as `log_place` takes them). Each free span is one block
+ * with the activity and the venue's name as its one-time place label (never a saved place); none when the stay is
+ * fully covered. The name is kept on the stay's event either way (`recordedPlaceLabel`), its Apple Place ID on the
+ * stay (`rememberPickedVenue`, already done), and the event's last write is confirmed and logged by you, so replay
+ * never asks again. A retry finds the review accepted and is acknowledged by `venueFreeTimeMatches`: no second
+ * block.
+ */
+async function recordVenueFreeTime(
+  client: pg.PoolClient,
+  item: LockedReview,
+  edit: ReviewEntryEdit,
+  name: string,
+  session: RequestSession
+) {
+  const window = editedWindow(item, edit);
+  const categoryId = await confirmedLocationCategoryId(client, session, entryKind(item), item.suggestedCategoryId, edit);
+  await validateReferences(client, session, categoryId, null, item.suggestedPlaceId);
+  const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null);
+  // The person's own blocks, running ones to now, decide what is free (as log_place reads them).
+  const taken = await client.query<{ startedAt: Date; stoppedAt: Date }>(
+    `select started_at as "startedAt", coalesce(stopped_at, now()) as "stoppedAt" from time_entries
+      where workspace_id = $1 and user_id = $2 and started_at < $4 and coalesce(stopped_at, now()) > $3`,
+    [session.workspaceId, session.userId, window.startedAt, window.stoppedAt]);
+  const free = freeSpans(Date.parse(window.startedAt), Date.parse(window.stoppedAt),
+    taken.rows.map((entry) => ({ fromMs: new Date(entry.startedAt).getTime(), toMs: new Date(entry.stoppedAt).getTime() })));
+  const entryIds: string[] = [];
+  for (const span of free) {
+    const entry = await client.query<{ id: string }>(
+      `insert into time_entries (
+         workspace_id, user_id, category_id, place_id, place_label, source, confidence, review_status,
+         description, started_at, stopped_at, created_from_event_id
+       ) values ($1, $2, $3, null, $4, 'location_learning', $5, 'confirmed', $6, $7, $8, $9)
+       returning id`,
+      [session.workspaceId, session.userId, categoryId, name, item.confidence, description,
+        new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), item.eventId]);
+    entryIds.push(entry.rows[0].id);
+  }
+  await resolveReviewAndEvent(client, item, session, "accepted");
+  await client.query(
+    `update stay_segments set status = 'finalised', continuity_status = 'manual', updated_at = now()
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [item.segmentId, session.workspaceId, session.userId]);
+  // The stay's own event (location-segment:{id}), last: confirmed, logged by you, with the name recorded.
+  await client.query(
+    `update activity_events set review_status = 'confirmed',
+       raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object('semanticDisposition', 'logged_by_you',
+         'recordedPlaceLabel', $4::text, 'recordedCategoryId', $5::text)
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [item.eventId, session.workspaceId, session.userId, name, categoryId]);
+  await auditCorrection(client, session, "record_poi_once", item.segmentId, { entryIds });
+  return { ok: true, action: "record_poi_once", status: "accepted", entryId: entryIds[0] ?? null, entryIds };
+}
+
+/** Whether an accepted stay was recorded at this venue with this activity (a retry of `recordVenueFreeTime`). */
+async function venueFreeTimeMatches(
+  client: pg.PoolClient,
+  item: LockedReview,
+  edit: ReviewEntryEdit,
+  name: string,
+  session: RequestSession
+) {
+  const categoryId = await confirmedLocationCategoryId(client, session, entryKind(item), item.suggestedCategoryId, edit);
+  const event = await client.query<{ label: string | null; category: string | null }>(
+    `select raw_payload ->> 'recordedPlaceLabel' as label, raw_payload ->> 'recordedCategoryId' as category
+       from activity_events where id = $1 and workspace_id = $2 and user_id = $3`,
+    [item.eventId, session.workspaceId, session.userId]);
+  if (event.rows[0]?.label !== name || event.rows[0]?.category !== categoryId) return false;
+  const entries = await client.query<{ categoryId: string | null; placeLabel: string | null }>(
+    `select category_id as "categoryId", place_label as "placeLabel" from time_entries
+      where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`,
+    [session.workspaceId, session.userId, item.eventId]);
+  return entries.rows.every((entry) => entry.categoryId === categoryId && entry.placeLabel === name);
 }
 
 /** What a confirmed Review becomes: a stay, a journey, or time away from a place. */

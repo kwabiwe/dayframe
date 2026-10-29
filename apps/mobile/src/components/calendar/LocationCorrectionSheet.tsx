@@ -128,6 +128,11 @@ export function LocationCorrectionSheet({
      */
     guess?: ReviewAnswerVenue | null;
     /**
+     * The stay is an outing's (with trips there and back): its answer can't keep a venue (`confirm_outing`), so no
+     * guess is offered for it, as the Calendar's own guess skips outings (Codex r2 on #620).
+     */
+    outing?: boolean;
+    /**
      * Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays.
      * `venue`: Yes to a guess, recorded there once (`record_poi_once`); `logAsCategoryId`: the activity picked under
      * Logs as with it, recorded as that activity (Codex r1 on #620).
@@ -442,7 +447,7 @@ export function LocationCorrectionSheet({
     && Date.parse(evidence.segment.startedAt) === Date.parse(target.place.startedAt)
     && Date.parse(evidence.segment.stoppedAt ?? "") === Date.parse(target.place.stoppedAt ?? "") ? nearbyGuess.venue : null;
   // The near guess the "?" asks about (PRD D23): only for a place whose "?" can be answered here, until Edit.
-  const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null
+  const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null && !question.outing
     ? question.guess ?? nearbyGuessNow : null;
   // "Save this place", asked under Nearby after a pick or in place in the corrections.
   const saveForm = (

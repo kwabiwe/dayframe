@@ -107,6 +107,30 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)).toBeNull();
   });
 
+  it("reads the map again once a refresh moves the item's times, so the sheet ranks the stay as it is now (Codex r2 on #620)", async () => {
+    const evidenceFor = (minutes: number) => ({ segment: { kind: "stay", startedAt: iso(0), stoppedAt: iso(minutes) },
+      map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters: 40 } });
+    mocks.fetchEvidence.mockImplementationOnce(async () => evidenceFor(25)).mockImplementationOnce(async () => evidenceFor(90));
+    const short = { ...place, stoppedAt: iso(25) };
+    const long = { ...place, stoppedAt: iso(90) };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} timeline={{ items: [short] } as unknown as LocationTimeline} />); });
+    act(() => { api!.openPlace(short, "Unknown place"); });
+    await settle();
+    expect(mocks.fetchEvidence).toHaveBeenCalledTimes(1);
+    expect(sheetOf(tree)?.props.evidence.segment.stoppedAt).toBe(iso(25));
+    // Replay makes the stay 90 minutes: once the new times hold, its map is read again and handed to the sheet.
+    await act(async () => { tree.update(<Probe data={account("a")} timeline={{ items: [long] } as unknown as LocationTimeline} />); });
+    await settle();
+    expect(mocks.fetchEvidence).toHaveBeenCalledTimes(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)); });
+    await settle();
+    expect(mocks.fetchEvidence).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchEvidence.mock.calls[1]).toMatchObject([{ id: "seg-a", kind: "place", startedAt: iso(0) }, { owner: { userId: "a", workspaceId: "w" } }]);
+    expect(sheetOf(tree)?.props.evidence.segment.stoppedAt).toBe(iso(90));
+    expect(sheetOf(tree)?.props.target.place.stoppedAt).toBe(iso(90));
+  });
+
   it("keeps a sheet's corrections only for the account it opened for", async () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });
