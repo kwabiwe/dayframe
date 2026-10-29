@@ -166,6 +166,15 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard).toContain('ready: authState === "authenticated" && data !== null,');
     expect(dashboard).toContain("openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),");
     expect(dashboard).toContain("openDay: openListDay,");
+    // Completed loads only (Codex r6 on #615): server bootstraps counted where they land, never a local publication.
+    expect(dashboard).toContain("const checkLinkLoads = useCompletedLoadCount(bootstrapCompletions, calendarTimelineRequestedAt);");
+    expect(dashboard.match(/setBootstrapCompletions\(\(count\) => count \+ 1\);/g)).toHaveLength(2);
+    const publish = dashboard.slice(dashboard.indexOf("function publishDashboardData("), dashboard.indexOf("const [rowPop, setRowPop]"));
+    expect(publish).not.toContain("setBootstrapCompletions");
+    for (const landed of ["loadedBootstrap.current = bootstrap;\n      publishDashboardData(bootstrap);\n      // A server bootstrap landed",
+      "loadedBootstrap.current = next;\n    publishDashboardData(next);\n    // A server bootstrap landed"]) {
+      expect(dashboard).toContain(landed);
+    }
     // The fallback clears every selection first, the same day included (Codex r3 on #615).
     const listDay = dashboard.slice(dashboard.indexOf("const openListDay = useCallback("), dashboard.indexOf("}, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);"));
     for (const step of ["setCalendarCheckTarget(null);", "setCalendarCheckScroll(0);", "setCalendarSelectionClear((count) => count + 1);", "closeCorrectionSheet();"]) {

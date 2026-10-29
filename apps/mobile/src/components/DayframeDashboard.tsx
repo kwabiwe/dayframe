@@ -553,6 +553,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
    * their canonical synchronous view, and a publication that shows a flown block running again cancels its
    * flight before React renders it.
    */
+  // Server bootstraps that completed (a load, a recovered refresh), counted apart from every local publication.
+  const [bootstrapCompletions, setBootstrapCompletions] = useState(0);
   function publishDashboardData(next: MobileBootstrap | null) {
     dropCancelledStopFlight(stopFlightLedger.published(latestData.current?.activeEntry?.id, next?.activeEntry?.id));
     latestData.current = next;
@@ -733,6 +735,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     refreshQueued.current = false;
     loadedBootstrap.current = next;
     publishDashboardData(next);
+    // A server bootstrap landed (a recovered refresh): a completed load (Codex r6 on #615).
+    setBootstrapCompletions((count) => count + 1);
     void readOwnedPendingTimerStops(next).then((stops) => {
       const visible = latestData.current;
       if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
@@ -1087,6 +1091,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
+      // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
+      setBootstrapCompletions((count) => count + 1);
       setPendingTimerStops([...ownedPendingStops]);
       void pruneTimerIdCorrelationsAfterLoad(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -2943,9 +2949,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
   const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
     [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
-  // Completed loads only (a bootstrap landing, the shown day's places landing; Codex r5 on #615): a named "?" an old
-  // link waits for is tried again on each, and a day switch's empty first render is none.
-  const checkLinkLoads = useCompletedLoadCount(data, calendarTimelineRequestedAt);
+  // Completed loads only (a server bootstrap landing, the shown day's places landing; Codex r5 and r6 on #615): a named
+  // "?" an old link waits for is tried again on each; a day switch's empty first render, a timer update or any other
+  // local publication is none.
+  const checkLinkLoads = useCompletedLoadCount(bootstrapCompletions, calendarTimelineRequestedAt);
   const openCheckLink = useCheckLinks({
     ready: authState === "authenticated" && data !== null,
     owner: checkLinkOwner,

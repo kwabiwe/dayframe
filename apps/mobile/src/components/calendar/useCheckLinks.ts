@@ -128,17 +128,15 @@ export function useCheckLinks(input: {
 }
 
 /**
- * Completed Calendar data loads, counted for a named "?" waiting on its day (Codex r5 on #615): a bootstrap that
- * lands (`bootstrap`'s identity) and a places response for the day shown (`timelineRequestedAt`, null while a day is
+ * Completed Calendar data loads, counted for a named "?" waiting on its day (Codex r5 and r6 on #615): server
+ * bootstraps that landed (`bootstrapCompletions`, bumped only where a bootstrap fetch resolves, never by a timer update
+ * or another local publication) and a places response for the day shown (`timelineRequestedAt`, null while a day is
  * still loading). The null a day switch shows first is no load.
  */
-export function useCompletedLoadCount(bootstrap: unknown, timelineRequestedAt: number | null) {
-  const [count, setCount] = useState(0);
+export function useCompletedLoadCount(bootstrapCompletions: number, timelineRequestedAt: number | null) {
+  const [timelineLoads, setTimelineLoads] = useState(0);
   useEffect(() => {
-    if (bootstrap) setCount((current) => current + 1);
-  }, [bootstrap]);
-  useEffect(() => {
-    if (timelineRequestedAt != null) setCount((current) => current + 1);
+    if (timelineRequestedAt != null) setTimelineLoads((current) => current + 1);
   }, [timelineRequestedAt]);
-  return count;
+  return bootstrapCompletions + timelineLoads;
 }
