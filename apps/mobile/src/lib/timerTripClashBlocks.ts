@@ -29,11 +29,12 @@ function clashEntryOf(entry: MobileTimeEntry, data: MobileBootstrap): TimerTripC
 
 /**
  * Whether a "?" still asks where it is answered (location v4 design §7). Anything that is not a block that ran into a
- * trip: true. A clash asks only when it can be put on its block (its payload names it; a record recovered past the
- * bootstrap's cap carries none, so it is never counted without a surface to answer it, Codex r1 on #618), and only
- * while that block, as this iPhone has it now (queued edits, Stop and End it applied), still runs into the trip. A
- * block not loaded here keeps asking (the server's question stands); one deleted on this iPhone (`deletedIds`: held
- * for Undo or queued) stops at once.
+ * trip: true. A clash asks only when it can be put on its block (its payload names it: the bootstrap's, or a
+ * presentation record's `timerTripClash` past the bootstrap's cap, #621; one with none or a malformed one is never
+ * counted without a surface to answer it, Codex r1 on #618), and only
+ * while that block is loaded here (the Calendar can open it) and, as this iPhone has it now (queued edits, Stop and End
+ * it applied), still runs into the trip. A block not loaded does not ask or count until it arrives (Codex r1 on #622);
+ * one deleted on this iPhone (`deletedIds`: held for Undo or queued) stops at once.
  */
 export function clashStillAsksHere(item: MobileReviewItem, data: MobileBootstrap | null | undefined, now: number,
   blocks: ReadonlyMap<string, MobileTimeEntry> = bootstrapBlocksById(data), deletedIds: ReadonlySet<string> = new Set()) {
@@ -41,8 +42,10 @@ export function clashStillAsksHere(item: MobileReviewItem, data: MobileBootstrap
   const question = timerTripClashQuestion(item);
   if (!question || !data) return false;
   if (deletedIds.has(question.timeEntryId)) return timerTripClashAsksOnBlock(question, null, now);
+  // Only on a block the Calendar can open (Codex r1 on #622): one not loaded here has no row or Grid block to ask on,
+  // so it neither asks nor counts until it arrives, whatever the item's source (the bootstrap, or a presentation read).
   const entry = blocks.get(question.timeEntryId);
-  return timerTripClashAsksOnBlock(question, entry ? clashEntryOf(entry, data) : undefined, now);
+  return entry ? timerTripClashAsksOnBlock(question, clashEntryOf(entry, data), now) : false;
 }
 
 /** The blocks deleted on this iPhone and not yet gone from the server: held for Undo, or a queued delete. */

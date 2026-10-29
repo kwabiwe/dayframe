@@ -1658,6 +1658,41 @@ describe("a block that ran into a trip in the Review outbox", () => {
     expect((await shown()).activeEntry).toEqual(running);
   });
 
+  it("puts a clash read past the bootstrap's cap on its block, counts it, and answers it with the record's proposal (#621)", async () => {
+    const { clashChecksByBlock, clashStillAsksHere } = await import("./timerTripClashBlocks");
+    const { scopedOpenReviewItems } = await import("./calendarScopedReview");
+    const { reviewAnswerMutation } = await import("./reviewAnswer");
+    const { data, clash, block } = clashBootstrap();
+    // The bootstrap's 100 left it out: only the presentation read (with the timer-trip-clash feature) has it.
+    const capped = { ...data, reviewItems: data.reviewItems.filter((item) => item.id !== clash.id) };
+    await store.processReviewBootstrap(capped);
+    const response = openPresentation(data, clash.id, HASH);
+    const record = { ...response.lookup.reviewItems[0], timerTripClash: clash.rawPayload };
+    const presented = { ...response, records: [record], lookup: { ...response.lookup, reviewItems: [record] } };
+    const owned = { ...owner(data), backendId: "dayframe-staging" };
+    await store.cacheReviewPresentation({ owner: owned, response: presented });
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owned, response: presented }))!;
+    const [recovered] = scopedOpenReviewItems(snapshot);
+    expect(recovered).toMatchObject({ id: clash.id, proposalHash: HASH, rawPayload: clash.rawPayload,
+      suggestedStartedAt: clash.suggestedStartedAt, suggestedStoppedAt: clash.suggestedStoppedAt });
+    // On its block, and counted while the block (loaded) still runs into the trip.
+    expect(clashChecksByBlock([recovered])).toEqual(new Map([[block.id, clash.id]]));
+    const shown = { ...capped, reviewItems: [...capped.reviewItems, recovered] };
+    expect(clashStillAsksHere(recovered, shown, Date.parse(clash.rawPayload.tripStoppedAt) + 3_600_000)).toBe(true);
+    // End it: accept with the record's proposal hash, queued against the cached copy.
+    expect(reviewAnswerMutation(recovered, true)).toEqual({ action: "accept", expectedProposalHash: HASH });
+    await store.enqueueReviewMutation({ bootstrap: shown, item: recovered, clientMutationId: syntheticId(157), mutation: reviewAnswerMutation(recovered, true) });
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+
+  it("never counts a clash whose record carries no field (an older server, or no feature header)", async () => {
+    const { clashStillAsksHere } = await import("./timerTripClashBlocks");
+    const { data, clash } = clashBootstrap();
+    const item = store.mobileReviewItemFromPresentation(openPresentation(data, clash.id, HASH).lookup.reviewItems[0]);
+    expect(item.rawPayload).toBeNull();
+    expect(clashStillAsksHere(item, data, Date.now())).toBe(false);
+  });
+
   it("refuses End it for a proposal the iPhone no longer has", async () => {
     const { data, clash } = clashBootstrap();
     await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((item) => item.id === clash.id ? { ...item, proposalHash: "b".repeat(64) } : item) });
