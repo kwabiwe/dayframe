@@ -666,9 +666,51 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       { clientEventId: "location-segment:o-out", reviewStatus: "confirmed", disposition: "logged_by_you" },
       { clientEventId: "location-segment:o-stay", reviewStatus: "confirmed", disposition: "logged_by_you" }
     ]);
+    // A trip whose own activity is archived (even mid-request) logs as Getting around, never with no activity (Codex r1 on #612).
+    expect(blocks.rows.every((row) => row.categoryName)).toBe(true);
     // A retry gets every block it made back, the trips' too.
     const retried = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId, clientCorrectionId: id }, session);
     expect([...retried.logged!.entryIds].sort()).toEqual([...logged.logged!.entryIds].sort());
+  });
+  it("ensures Getting around before any row is locked whenever an outing's trips are logged, so an archive mid-request never leaves a trip without an activity (Codex r1 on #612)", async () => {
+    const db = database!;
+    const base = 10_000;
+    await db.query(`delete from categories where workspace_id = $1 and starter_key = 'travel'`, [workspaceId]);
+    const categoryId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Cafe', 'teal') returning id`, [workspaceId])).rows[0].id;
+    const errandsId = (await db.query<{ id: string }>(`select id from categories where workspace_id = $1 and starter_key = 'errands'`,
+      [workspaceId])).rows[0].id;
+    const stay = async (clientSegmentId: string, start: number, stop: number) => (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, algorithm_version, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, $3, 'device-1', 'location-v2.0', 'closed', $4, $5, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+         '{"placeMatchKind":"unknown"}'::jsonb) returning id`,
+      [workspaceId, userId, clientSegmentId, at(base + start), at(base + stop)])).rows[0].id;
+    const fromRow = await stay("p-home", -30, 0);
+    const stayRow = await stay("p-cafe", 10, 40);
+    const tripRow = (await db.query<{ id: string }>(
+      `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
+         from_stay_segment_id, to_stay_segment_id, confidence, metadata)
+       values ($1, $2, 'device-1', 'p-in', 'location-v2.0', 'finalised', $3, $4, $5, $6, 'medium', '{}'::jsonb) returning id`,
+      [workspaceId, userId, at(base), at(base + 10), fromRow, stayRow])).rows[0].id;
+    for (const [clientSegmentId, segmentId, role, eventType, start, stop, suggested] of [
+      ["p-cafe", stayRow, "stay", "unknown_stay", 10, 40, null], ["p-in", tripRow, "in", "commute_detected", 0, 10, errandsId]
+    ] as const) {
+      const event = (await db.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+         values ($1, $2, $3, 'location_learning', $4, $5, 'medium', $6::jsonb, 'needs_review') returning id`,
+        [workspaceId, userId, `location-segment:${clientSegmentId}`, eventType, at(base + start),
+          JSON.stringify({ clientSegmentId, outingKey: "outing-2", outingRole: role })])).rows[0].id;
+      await db.query(
+        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at,
+           suggested_stopped_at, suggested_category_id)
+         values ($1, $2, $3, $4, $5, 'Outing', 'open', $6, $7, $8)`,
+        [workspaceId, userId, event, segmentId, eventType, at(base + start), at(base + stop), suggested]);
+    }
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "p-cafe", categoryId }, session);
+    // Every trip here had its own activity, yet the fallback is there, made before the rows were locked.
+    const travel = await db.query(`select 1 from categories where workspace_id = $1 and starter_key = 'travel' and is_archived = false`, [workspaceId]);
+    expect(travel.rowCount).toBe(1);
   });
 });
 

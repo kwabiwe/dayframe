@@ -639,19 +639,19 @@ async function logPlace(
       where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = $3 and ri.status = 'open'
       order by ri.id`,
     [session.workspaceId, session.userId, row.id]);
-  // A trip with no activity of its own (none suggested, or archived since) logs as Getting around, made like a
-  // Move's if missing: before any Review, event or block row is locked, as every producer orders its locks.
+  // A trip with no activity of its own (none suggested, or archived since, even while this runs: archiving takes
+  // no owner lock) logs as Getting around, made like a Move's if missing. It is ensured whenever an outing's trips
+  // will be logged, before any Review, event or block row is locked, as every producer orders its locks (Codex r1
+  // on #612).
   const keys = [...new Set(asked.rows.flatMap((question) => question.outingKey ? [question.outingKey] : []))];
-  const needsTravel = keys.length ? Boolean((await client.query(
+  const hasTrips = keys.length ? Boolean((await client.query(
     `select 1 from review_items ri
        join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
        join commute_segments cs on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
-       left join categories c on c.id = ri.suggested_category_id and c.workspace_id = ri.workspace_id and c.is_archived = false
       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ae.raw_payload ->> 'outingKey' = any($3::text[])
-        and c.id is null
       limit 1`,
     [session.workspaceId, session.userId, keys])).rowCount) : false;
-  const travelCategoryId = needsTravel ? await ensureTravelCategoryId(client, session) : null;
+  const travelCategoryId = hasTrips ? await ensureTravelCategoryId(client, session) : null;
   const resolvedReviewItemIds: string[] = [];
   const outingTrips: OutingTrip[] = [];
   for (const question of asked.rows) {
@@ -714,7 +714,11 @@ async function logPlace(
     [session.workspaceId, session.userId, `location-segment:${request.itemId}`.slice(0, 160), eventType, iso(row.startedAt),
       JSON.stringify({ clientSegmentId: request.itemId, startedAt: iso(row.startedAt), stoppedAt: iso(row.stoppedAt),
         semanticDisposition: "logged_by_you" })]);
-  for (const trip of outingTrips) entryIds.push(...await logOutingTrip(client, session, trip, travelCategoryId));
+  if (outingTrips.length && !travelCategoryId) {
+    // Review emission takes the owner lock this holds, so an outing can't gain a trip since it was read; fail safe.
+    throw new TimelineCorrectionError("This place's day changed. Try again.", 409);
+  }
+  for (const trip of outingTrips) entryIds.push(...await logOutingTrip(client, session, trip, travelCategoryId!));
   return { ok: true as const, logged: { entryIds, resolvedReviewItemIds } };
 }
 
@@ -726,7 +730,7 @@ type OutingTrip = { reviewItemId: string; categoryId: string | null; clientSegme
  * logs it again; then blocks for the time the person's own blocks don't cover (the place's new ones included),
  * with the trip's own move activity; then its question closed as accepted.
  */
-async function logOutingTrip(client: pg.PoolClient, session: RequestSession, trip: OutingTrip, travelCategoryId: string | null) {
+async function logOutingTrip(client: pg.PoolClient, session: RequestSession, trip: OutingTrip, travelCategoryId: string) {
   const owner = [session.workspaceId, session.userId];
   const own = trip.categoryId ? await client.query(
     `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [trip.categoryId, session.workspaceId]) : null;
