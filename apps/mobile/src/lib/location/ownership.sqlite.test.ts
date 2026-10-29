@@ -1358,5 +1358,33 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a failed geofence registration after a relaunch still leaves a consenting owner's capture running (Codex r23 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    let failed = false;
+    storage.getItem.mockImplementation(async (k: string) => {
+      if (k.startsWith("dayframe.location.learning.enabled") && !failed) {
+        failed = true;
+        throw new Error("registration failed");
+      }
+      return read(k);
+    });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      await expect(geofence.startGeofences([place], A)).rejects.toThrow("registration failed");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

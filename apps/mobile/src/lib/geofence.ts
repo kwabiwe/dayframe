@@ -582,11 +582,15 @@ export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0
   guardWakeAdmission();
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
-    const capture = await refreshCaptureCatalogue(places, owner, await captured);
-    const started = await startGeofencesUnsafe(places, capture);
-    // Registration sets no learning options of its own: a consenting capture gets normal capture back here.
-    await reconcileLearningOptionsAfterAdmission(capture);
-    return started;
+    let capture: LocationCaptureSnapshot | null = null;
+    try {
+      capture = await refreshCaptureCatalogue(places, owner, await captured);
+      return await startGeofencesUnsafe(places, capture);
+    } finally {
+      // Registration sets no learning options of its own: whether it succeeded or failed, a consenting capture gets
+      // normal capture back here (Codex r22–r23 on #619); the registration's own error still reaches the caller.
+      await reconcileLearningOptionsAfterAdmission(capture);
+    }
   });
 }
 export function startLocationLearning(places: Parameters<typeof startLocationLearningUnsafe>[0] = []) {
@@ -2252,8 +2256,13 @@ registerLocationAdmissionGuard(guardWakeAdmission);
  * for a capture still current and consenting, normal capture is put in place, as an admitted wake does, which also
  * ends the admission guard (Codex r22 on #619). Never throws.
  */
-export async function reconcileLearningOptionsAfterAdmission(capture: LocationCaptureSnapshot) {
+export async function reconcileLearningOptionsAfterAdmission(capture: LocationCaptureSnapshot | null) {
   try {
+    if (!capture) {
+      // No owner was read: only options this process never set are put back (or guarded).
+      await protectInheritedAccuracyOptions();
+      return;
+    }
     if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return;
     await maybeEndAccuracyBurst(capture);
   } catch {

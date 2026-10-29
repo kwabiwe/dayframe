@@ -251,24 +251,31 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
   const revision = locationCaptureRevision();
   await readActiveMobileAccount();
   await withLocationCaptureLifecycle(async () => {
-    if (!await bindOwnerUnsafe(owner, revision)) return;
-    const capture = await captureLocationOwnership();
-    if (!capture.context || !ownerIsCurrent(owner, revision)) return;
-    const geofence = await import("../geofence");
     const rolloutMode = bootstrap.locationRolloutMode ?? "v2_shadow";
-    await configureLocationAccount({ ...capture.context,
-      savedPlaces: bootstrap.places.flatMap(place => place.latitude == null || place.longitude == null ? [] : [{
-        id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
-        radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
-      }]),
-      acceptedLearnedPlaces: (bootstrap.learnedPlaces ?? []).flatMap(place => place.status !== "accepted" ? [] : [{
-        id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
-        radiusMeters: place.radiusMeters, priority: 0, accepted: true as const
-      }])
-    }, rolloutMode, Boolean(capture.binding?.enabled && await geofence.getLocationLearningEnabled()), revision);
-    if (!ownerIsCurrent(owner, revision)) return;
-    // A consenting capture gets normal capture back here (and the admission guard ends), refresh or not (card K).
-    await geofence.reconcileLearningOptionsAfterAdmission(capture);
+    let admitted: LocationCaptureSnapshot | null = null;
+    try {
+      if (!await bindOwnerUnsafe(owner, revision)) return;
+      const capture = await captureLocationOwnership();
+      admitted = capture;
+      if (!capture.context || !ownerIsCurrent(owner, revision)) return;
+      const geofence = await import("../geofence");
+      await configureLocationAccount({ ...capture.context,
+        savedPlaces: bootstrap.places.flatMap(place => place.latitude == null || place.longitude == null ? [] : [{
+          id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
+          radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
+        }]),
+        acceptedLearnedPlaces: (bootstrap.learnedPlaces ?? []).flatMap(place => place.status !== "accepted" ? [] : [{
+          id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+          radiusMeters: place.radiusMeters, priority: 0, accepted: true as const
+        }])
+      }, rolloutMode, Boolean(capture.binding?.enabled && await geofence.getLocationLearningEnabled()), revision);
+      if (!ownerIsCurrent(owner, revision)) return;
+    } finally {
+      // However the account setup ended (a failure too), a consenting capture gets normal capture back here and the
+      // admission guard ends; without one, inherited options are put back or guarded (card K, Codex r22–r23 on #619).
+      const settled = admitted;
+      await import("../geofence").then((geofence) => geofence.reconcileLearningOptionsAfterAdmission(settled)).catch(() => undefined);
+    }
     if (rolloutMode === "v1") {
       await stopNativeLocationIntelligence();
       await clearNativeLocationSignals();
