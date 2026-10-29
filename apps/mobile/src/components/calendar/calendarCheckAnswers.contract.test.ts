@@ -164,7 +164,8 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     // Behaviour in useCheckLinks.test.tsx; here only that the Dashboard hands it the one check request, held until
     // signed in with the bootstrap in, and today's chip opener, which keeps today selected (Codex r1 on #615).
     expect(dashboard).toContain('ready: authState === "authenticated" && data !== null,');
-    expect(dashboard).toContain("openCheck: openCheckOn,");
+    expect(dashboard).toContain("openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),");
+    expect(dashboard).toContain("openDay: openListDay,");
     expect(dashboard).toContain("openTodayFirst: openTodayChecks,");
     expect(dashboard).toContain("if (first && openCheckOn(first.id, today)) return;");
   });
@@ -172,8 +173,14 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
   it("reprocesses Apple Health's \"?\" when Calendar › List is in front, whether or not capture is on (Codex r1 on #615)", () => {
     expect(dashboard).toContain('const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";');
     const effect = dashboard.slice(dashboard.indexOf("if (!calendarListInFront || !scopedOwnerKey) return;"), dashboard.indexOf("}, [calendarListInFront, scopedOwnerKey"));
-    expect(effect).toContain("reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey })");
+    expect(effect).toContain("reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey,");
     expect(effect).not.toContain("isHealthKitAutomaticSyncEnabled");
+    // Foreground only (Codex r2 on #615): aborted on leaving the front, checked before every batch, reload deferred.
+    expect(effect).toContain("isInFront: inFront, signal: controller.signal })");
+    expect(effect).toContain('const inFront = () => calendarListInFrontRef.current && AppState.currentState === "active";');
+    expect(effect).toContain("else healthReloadOnFront.current = true;");
+    expect(dashboard).toContain("return () => controller.abort();\n  }, [calendarListInFront, scopedOwnerKey, transitionToSignedOut]);");
+    expect(dashboard).toContain("if (!appIsForeground || !healthReloadOnFront.current) return;");
   });
 
   it("opens Today's hatched blocks in Calendar › List, never a pushed Review page", () => {

@@ -82,7 +82,8 @@ vi.mock("./api", () => ({
     }
     return { acceptedCount: events.length };
   },
-  reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems
+  reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems,
+  AuthRequiredError: class AuthRequiredError extends Error {}
 }));
 
 vi.mock("@kingstinct/react-native-healthkit", () => ({
@@ -855,6 +856,43 @@ describe("HealthKit mapping", () => {
     });
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ partial: true, hasMore: true });
+  });
+
+  it("sends no second batch once Calendar › List leaves the front after the first (Codex r2 on #615)", async () => {
+    const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+    resetCalendarHealthReprocessForTests();
+    let inFront = true;
+    const controller = new AbortController();
+    apiMocks.reprocessHealthReviewItems.mockImplementationOnce(async () => {
+      // The app leaves the front while the first batch is on the wire.
+      inFront = false;
+      controller.abort();
+      return {
+        ok: true, checkedCount: 25, confirmedCount: 25, ignoredCount: 0, leftInReviewCount: 0, skippedCount: 0, failedCount: 0,
+        updatedCategoryCount: 25, remainingReviewCount: 88, batchSize: 25, partial: true, hasMore: true, nextCursor: "next", errorSummary: []
+      };
+    });
+    const outcome = await reprocessHealthOnCalendarFront({
+      ownerKey: "calendar-front", isCurrentOwner: () => true, isInFront: () => inFront, signal: controller.signal
+    });
+    expect(outcome).toBe("interrupted");
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
+    expect(apiMocks.reprocessHealthReviewItems.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
+
+    // And by the foreground check before each batch alone, before any abort reaches it.
+    resetCalendarHealthReprocessForTests();
+    apiMocks.reprocessHealthReviewItems.mockClear();
+    let front = true;
+    apiMocks.reprocessHealthReviewItems.mockImplementationOnce(async () => {
+      front = false;
+      return {
+        ok: true, checkedCount: 25, confirmedCount: 25, ignoredCount: 0, leftInReviewCount: 0, skippedCount: 0, failedCount: 0,
+        updatedCategoryCount: 25, remainingReviewCount: 88, batchSize: 25, partial: true, hasMore: true, nextCursor: "next", errorSummary: []
+      };
+    });
+    await expect(reprocessHealthOnCalendarFront({ ownerKey: "calendar-front", isCurrentOwner: () => true, isInFront: () => front }))
+      .resolves.toBe("interrupted");
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
   });
 
   it("keeps background Health review reprocess failures non-fatal", async () => {

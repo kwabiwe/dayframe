@@ -21,7 +21,7 @@ function deferred<T>() {
 
 function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed?: string[]; lookup?: (owner: CheckLinkOwner, id: string) => Promise<string | null> } = {}) {
   const calls = {
-    openCheck: vi.fn((id: string) => props.listed.includes(id)),
+    openCheck: vi.fn((id: string, _dayKey?: string) => props.listed.includes(id)),
     openDay: vi.fn(),
     openTodayFirst: vi.fn(),
     lookupStart: vi.fn((owner: CheckLinkOwner, id: string) => props.lookup(owner, id))
@@ -132,5 +132,27 @@ describe("old Review links in Calendar › List (step 15; Codex r1 on #615)", ()
     expect(calls.openCheck).toHaveBeenLastCalledWith(OTHER);
     await act(async () => { slow.resolve("2026-10-20T09:00:00.000Z"); await slow.promise; });
     expect(calls.openDay).not.toHaveBeenCalled();
+  });
+
+  it("keeps the named \"?\" through the read: one that arrived meanwhile opens by its id on its day, never the day's first (Codex r2 on #615)", async () => {
+    const read = deferred<string | null>();
+    const { calls, link, update } = mount({ lookup: () => read.promise });
+    link(ID);
+    expect(calls.openCheck).toHaveBeenLastCalledWith(ID);
+    // The bootstrap brings it while the read is out.
+    update({ listed: [ID] });
+    await act(async () => { read.resolve("2026-10-27T08:00:00.000Z"); await read.promise; });
+    expect(calls.openCheck).toHaveBeenLastCalledWith(ID, "2026-10-27");
+    expect(calls.openDay).not.toHaveBeenCalled();
+  });
+
+  it("opens the day with nothing selected when the named item no longer asks (Codex r2 on #615)", async () => {
+    const { calls, link } = mount({ listed: [OTHER], lookup: async () => "2026-10-27T08:00:00.000Z" });
+    link(ID);
+    await act(async () => { await Promise.resolve(); });
+    expect(calls.openCheck).toHaveBeenLastCalledWith(ID, "2026-10-27");
+    expect(calls.openCheck).not.toHaveBeenCalledWith(OTHER, expect.anything());
+    expect(calls.openDay).toHaveBeenCalledWith("2026-10-27");
+    expect(calls.openTodayFirst).not.toHaveBeenCalled();
   });
 });

@@ -2864,6 +2864,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
+  // Calendar › List on a day with nothing selected: an old link's item that no longer asks (Codex r2 on #615).
+  const openListDay = useCallback((dayKey: string) => {
+    changeCalendarLayout("list");
+    selectCalendarDay(dayKey);
+    router.navigate("/(tabs)/calendar");
+  }, [changeCalendarLayout, selectCalendarDay]);
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
   // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
   const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
@@ -2899,15 +2905,34 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Apple Health's "?" brought up to date when Calendar › List is in front (step 15; Codex r1 on #615): the deck's
   // forced reprocess on open, bounded per account (`calendarHealthReprocess.ts`), whether or not Health capture is on.
   const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";
+  // Foreground only (Codex r2 on #615): leaving the front aborts it before its next batch, and a reload it calls for
+  // waits until Dayframe is back in front.
   const healthReprocessOwnerRef = useRef(scopedOwnerKey);
   healthReprocessOwnerRef.current = scopedOwnerKey;
+  const calendarListInFrontRef = useRef(calendarListInFront);
+  calendarListInFrontRef.current = calendarListInFront;
+  const healthReloadOnFront = useRef(false);
   useEffect(() => {
     if (!calendarListInFront || !scopedOwnerKey) return;
     const ownerKey = scopedOwnerKey;
-    void reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey })
-      .then((outcome) => { if (outcome === "changed") void loadRef.current({ silent: true }); })
+    const controller = new AbortController();
+    const inFront = () => calendarListInFrontRef.current && AppState.currentState === "active";
+    void reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey,
+      isInFront: inFront, signal: controller.signal })
+      .then((outcome) => {
+        if (outcome !== "changed" && outcome !== "interrupted") return;
+        if (healthReprocessOwnerRef.current !== ownerKey) return;
+        if (outcome === "changed" && AppState.currentState === "active") void loadRef.current({ silent: true });
+        else healthReloadOnFront.current = true;
+      })
       .catch((error) => { if (error instanceof AuthRequiredError) transitionToSignedOut(); });
+    return () => controller.abort();
   }, [calendarListInFront, scopedOwnerKey, transitionToSignedOut]);
+  useEffect(() => {
+    if (!appIsForeground || !healthReloadOnFront.current) return;
+    healthReloadOnFront.current = false;
+    void loadRef.current({ silent: true });
+  }, [appIsForeground]);
   // Old Review links and Today's ribbon (step 15, `reviewLinks.ts`): held until signed in with the bootstrap in, then
   // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
   const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
@@ -2916,8 +2941,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ready: authState === "authenticated" && data !== null,
     owner: checkLinkOwner,
     todayKey,
-    openCheck: openCheckOn,
-    openDay: openChecksOn,
+    // Only a "?" that still asks opens by its id; anything else opens its day with nothing selected (Codex r2 on #615).
+    openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),
+    openDay: openListDay,
     openTodayFirst: openTodayChecks,
     lookupStart: (owner, reviewItemId) => owner.backendId
       ? lookupReviewItemStart({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC")
