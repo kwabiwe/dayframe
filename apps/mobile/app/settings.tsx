@@ -2601,7 +2601,6 @@ export default function SettingsScreen() {
                         key={category.id}
                         style={styles.settingsActivityRow}
                       >
-                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                         <Pressable
                           accessibilityHint="Edits this activity"
                           accessibilityLabel={`${category.name}, ${week}`}
@@ -2636,6 +2635,7 @@ export default function SettingsScreen() {
                             size={18}
                           />
                         </Pressable>
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -2651,7 +2651,6 @@ export default function SettingsScreen() {
                         style={styles.settingsActivityRow}
                         testID={`activities-archived-${category.id}`}
                       >
-                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                         <View style={styles.settingsActivityOpen}>
                           <View style={[styles.settingsActivityBlock, styles.settingsActivityBlockArchived, { backgroundColor: colors.fill }]}>
                             <ActivityIcon color={colors.text} icon={category.icon} name={category.name} size={18} />
@@ -2667,6 +2666,7 @@ export default function SettingsScreen() {
                           onPress={() => void restoreArchivedActivity(category)}
                           theme={theme}
                         />
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -3444,7 +3444,6 @@ function HealthTypeSheet({
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
                   style={styles.healthNameRow}>
-                  <InsetDivider color={theme.border} edge="top" />
                   <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
                   <TextInput
                     accessibilityLabel={`${label} name`}
@@ -3466,6 +3465,7 @@ function HealthTypeSheet({
                     }}
                     value={nameDraft}
                   />
+                  <InsetDivider color={theme.border} edge="top" />
                 </Reanimated.View>
               ) : null}
             </SettingsBlockGroup>

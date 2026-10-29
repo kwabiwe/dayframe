@@ -10,9 +10,12 @@ import { StyleSheet, type ViewStyle } from "react-native";
  *
  * - Between rows (`edge` omitted): a hairline in the flow, with `marginStart` / `marginEnd`.
  * - On a row's own edge (`edge: "top" | "bottom"`): an absolute hairline inside the row, placed with
- *   `start` / `end`, so the row's layout is unchanged from the full-width border it replaces.
- * - `paddedBy`: the list's container already pads it (a card's or sheet's content padding), so the
- *   line may run to the content edge. Name the padding; only then may an inset be 0.
+ *   `start` / `end`, so the row's layout is unchanged from the full-width border it replaces. It is the
+ *   row's last child, so it draws above any opaque surface in the row (Today's swipe surface).
+ *   Absolute insets count from the row's own edge, not inside its padding.
+ * - `paddedBy`: an ancestor container already pads the list (a card's or sheet's content padding), so
+ *   the line may run to the content edge. Name that container's style as `path:styleKey` (relative to
+ *   apps/mobile); the contract test checks it has horizontal padding. Only then may an inset be 0.
  *
  * Draw it with `<InsetDivider>` (src/components/InsetDivider.tsx), or with `insetDividerStyle` in a
  * themed StyleSheet. `src/components/dividers.contract.test.ts` fails on a hairline drawn any other way.
@@ -32,7 +35,7 @@ export type InsetDividerGeometry = {
   edge?: "top" | "bottom";
   /** Trailing inset in points (default 16, or 0 with `paddedBy`). */
   end?: number;
-  /** Which container padding insets the line when it may reach the content edge. */
+  /** `path:styleKey` of the ancestor container style whose horizontal padding insets the line. */
   paddedBy?: string;
   /** Leading inset in points (default 16, or 0 with `paddedBy`). */
   start?: number;

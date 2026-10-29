@@ -102,7 +102,6 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
             layout={localLayoutTransition(reduceMotion)}
           >
             <View style={styles.placesRow} testID={`places-trip-${index}`}>
-              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               <View accessible accessibilityLabel={`Trip ${trip.label}, waits in Review`} style={styles.placesRowMain}>
                 <View style={styles.placesBlock}>
                   <DayframeIcon color={theme.textSecondary} glyph="route" size={18} />
@@ -120,6 +119,7 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
                   theme={theme}
                 />
               </View>
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
             </View>
           </Reanimated.View>
         ))}

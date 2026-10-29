@@ -53,6 +53,51 @@ function hairlines(text: string) {
   });
 }
 
+/** A StyleSheet entry's horizontal padding in points (a literal or a same-file numeric constant), else 0. */
+function horizontalPadding(source: string, key: string) {
+  const body = source.match(new RegExp(String.raw`(?:^|[\s{,])${key}: \{([^{}]*)\}`, "m"))?.[1] ?? "";
+  const value = (name: string) => {
+    const raw = body.match(new RegExp(String.raw`(?:^|[\s{,])${name}:\s*([\w.]+)`))?.[1];
+    if (!raw) return 0;
+    if (/^\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
+    return Number(source.match(new RegExp(String.raw`const ${raw} = (\d+(?:\.\d+)?)\b`))?.[1] ?? 0);
+  };
+  return value("paddingHorizontal") || value("padding") || Math.min(value("paddingStart"), value("paddingEnd"));
+}
+
+/** The first JSX element after `from` and before the enclosing element closes, if any (a light scanner). */
+function laterSibling(text: string, from: number): string | null {
+  const tag = /<(\/?)([A-Za-z][\w.]*)?/y;
+  let depth = 0;
+  for (let index = from; index < text.length; index += 1) {
+    if (text[index] !== "<") continue;
+    tag.lastIndex = index;
+    const match = tag.exec(text);
+    if (!match || (!match[2] && text[index + 1] !== "/" && text[index + 1] !== ">")) continue;
+    // Read to the tag's own ">", skipping braces and strings in its attributes.
+    let end = tag.lastIndex;
+    let braces = 0;
+    let quote: string | null = null;
+    for (; end < text.length; end += 1) {
+      const char = text[end];
+      if (quote) { if (char === quote) quote = null; continue; }
+      if (char === "\"" || char === "'" || char === "`") quote = char;
+      else if (char === "{") braces += 1;
+      else if (char === "}") braces -= 1;
+      else if (char === ">" && braces === 0) break;
+    }
+    if (match[1]) {
+      if (depth === 0) return null;
+      depth -= 1;
+    } else {
+      if (depth === 0) return `<${match[2] ?? ""}>`;
+      if (text[end - 1] !== "/") depth += 1;
+    }
+    index = end;
+  }
+  return null;
+}
+
 describe("iPhone row dividers are inset on both sides", () => {
   it("draws every hairline with the shared inset mechanism, unless the file is a listed frame", () => {
     const offenders = appSources
@@ -82,6 +127,52 @@ describe("iPhone row dividers are inset on both sides", () => {
     }
   });
 
+  it("names, for every padded line, a real container style with horizontal padding (Codex r1 on #616)", () => {
+    const claims = appSources.flatMap(({ path, text }) => [...text.matchAll(/paddedBy="([^"]*)"/g)].map((match) => ({ path, claim: match[1] })));
+    expect(claims.length).toBeGreaterThan(0);
+    for (const { path, claim } of claims) {
+      const [file, key] = claim.split(":");
+      expect(claim, `${path}: paddedBy names "path:styleKey"`).toMatch(/^[\w/.-]+\.tsx?:\w+$/);
+      const source = read(file);
+      expect(horizontalPadding(source, key), `${path}: ${claim} has horizontal padding`).toBeGreaterThan(0);
+    }
+  });
+
+  it("draws every edge line as its row's last child, above any opaque surface in the row (Codex r1 on #616)", () => {
+    const edgeStyleKeys = [...read("src/lib/mobileTheme.ts").matchAll(/(\w+): insetDividerStyle\(\{[^}]*\bedge:/g)].map((match) => match[1]);
+    expect(edgeStyleKeys.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const { path, text } of appSources) {
+      // An edge InsetDivider, a variable holding one ({divider}), or a View drawn with an edge theme style.
+      const variables = [...text.matchAll(/const (\w+) = [^;\n]*<InsetDivider\b[^;\n]*\bedge=/g)].map((match) => match[1]);
+      const ends = [
+        ...[...text.matchAll(/<InsetDivider\b[^>]*\bedge="[^"]*"[^>]*\/>/g)].map((match) => match.index! + match[0].length),
+        ...variables.flatMap((name) => [...text.matchAll(new RegExp(String.raw`\{${name}\}`, "g"))].map((match) => match.index! + match[0].length)),
+        ...edgeStyleKeys.flatMap((key) => [...text.matchAll(new RegExp(String.raw`<View\b[^>]*styles\.${key}\b[^>]*\/>`, "g"))].map((match) => match.index! + match[0].length))
+      ];
+      for (const end of ends) {
+        // A `const divider = …` definition is checked where `{divider}` is placed.
+        if (/^\s*const \w+ = /.test(text.slice(text.lastIndexOf("\n", end - 1) + 1, end))) continue;
+        checked += 1;
+        const sibling = laterSibling(text, end);
+        if (sibling) offenders.push(`${path}:${text.slice(0, end).split("\n").length} is followed by ${sibling}`);
+      }
+    }
+    expect(checked).toBeGreaterThan(30);
+    expect(offenders).toEqual([]);
+  });
+
+  it("draws Today's line above the swipe surface, so it shows at rest and stays put through a swipe", () => {
+    const rows = read("src/components/today/TodayBlockRows.tsx");
+    const surface = rows.indexOf("testID={`today-block-surface-");
+    const line = rows.indexOf("<InsetDivider", surface);
+    expect(surface).toBeGreaterThan(0);
+    expect(line).toBeGreaterThan(surface);
+    // Outside the sliding surface: after the gesture's own close, so the pan never moves it.
+    expect(rows.lastIndexOf("</GestureDetector>", line)).toBeGreaterThan(surface);
+  });
+
   it("insets on both sides by default, logically (start / end), so a right-to-left layout keeps its gaps", async () => {
     const { DIVIDER_INSET, insetDividerStyle } = await import("../lib/insetDivider");
     expect(DIVIDER_INSET).toBe(16);
@@ -97,7 +188,8 @@ describe("iPhone row dividers are inset on both sides", () => {
   it("insets Today's and Calendar › List rows past the block (60 points), as the web's rows", () => {
     const calendar = read("src/components/calendar/CalendarListView.tsx");
     expect(calendar).toMatch(/<InsetDivider color=\{theme\.border\} edge="top" end=\{14\} start=\{DIVIDER_INSET_PAST_BLOCK\} \/>/);
-    expect(read("src/components/today/TodayBlockRows.tsx")).toMatch(/<InsetDivider color=\{theme\.border\} edge="top" start=\{DIVIDER_INSET_PAST_BLOCK\} \/>/);
+    expect(read("src/components/today/TodayBlockRows.tsx"))
+      .toMatch(/<InsetDivider color=\{theme\.border\} edge="top" start=\{child \? DIVIDER_INSET_PAST_BLOCK \+ 16 : DIVIDER_INSET_PAST_BLOCK\} \/>/);
     expect(read("src/components/today/TodaySwitchSheet.tsx")).toMatch(/start=\{DIVIDER_INSET_PAST_BLOCK\}/);
     expect(read(MECHANISM)).toMatch(/export const DIVIDER_INSET_PAST_BLOCK = 60;/);
   });

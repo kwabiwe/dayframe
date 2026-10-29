@@ -200,7 +200,6 @@ function Option({
       onPress={onPress}
       style={s.option}
     >
-      {divider ? <InsetDivider color={theme.border} edge="top" paddedBy="the sheet's content padding" start={46} /> : null}
       <View style={[s.optionBlock, { backgroundColor: option.color }]}>
         {option.isUncategorized || option.isUnavailable ? null : (
           <ActivityIcon color={onBlockColor(option.color, theme.textPrimary)} icon={option.icon} name={option.name} size={16} />
@@ -225,6 +224,7 @@ function Option({
       >
         {checked ? <CalendarGlyph kind="tick" color={theme.background} /> : null}
       </View>
+      {divider ? <InsetDivider color={theme.border} edge="top" paddedBy="src/components/reports/ReportSheets.tsx:optionCard" start={46} /> : null}
     </Pressable>
   );
 }

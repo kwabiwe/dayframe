@@ -697,13 +697,13 @@ function PlaceView({ choice, correctableItem, distances, onChoose, place, places
               style={({ pressed }) => [styles.option, { opacity: pressed ? 0.7 : 1 }]}
               testID={`location-correction-place-${option.key}`}>
               {/* Past the 18-point icon (14 + 18 + 12) and the group's 14 of padding. */}
-              {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={44} /> : null}
               <DayframeIcon color={theme.textSecondary} glyph={option.glyph} size={18} />
               <View style={styles.optionText}>
                 <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.optionTitle, { color: theme.textPrimary }]}>{option.title}</Text>
                 <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: theme.textSecondary }]}>{option.detail}</Text>
               </View>
               {checked ? <DayframeIcon color={theme.textPrimary} glyph="check" size={16} /> : <View style={styles.tickSpace} />}
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={44} /> : null}
             </Pressable>
           );
         })}

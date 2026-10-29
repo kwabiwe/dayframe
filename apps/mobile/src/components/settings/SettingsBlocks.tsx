@@ -142,7 +142,6 @@ export function SettingsBlockRow({
     // control stays separate (UIA-085, Apple Health types).
     return (
       <View style={blockStyles.row} testID={testID}>
-        {dividerLine}
         <Pressable
           accessibilityHint={accessibilityHint}
           accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
@@ -158,6 +157,7 @@ export function SettingsBlockRow({
           <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
         </Pressable>
         {control}
+        {dividerLine}
       </View>
     );
   }
@@ -179,12 +179,12 @@ export function SettingsBlockRow({
         ]}
         testID={testID}
       >
-        {dividerLine}
         {text}
         <View onLayout={(event) => recordMobileLayout(diagnostic, "settings.chevron", event)} style={blockStyles.rowValue}>
           {value ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ color: theme.textMuted }}>{value}</Text> : null}
           {danger ? null : <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />}
         </View>
+        {dividerLine}
       </Pressable>
     );
   }
@@ -197,7 +197,6 @@ export function SettingsBlockRow({
       style={blockStyles.row}
       testID={testID}
     >
-      {dividerLine}
       {text}
       {value && !control ? (
         <View style={blockStyles.rowValue}>
@@ -205,6 +204,7 @@ export function SettingsBlockRow({
         </View>
       ) : null}
       {control}
+      {dividerLine}
     </View>
   );
 }
@@ -230,12 +230,12 @@ export function SettingsIssueRow({
     <View
       style={blockStyles.issue}
     >
-      {divider ? <InsetDivider color={theme.border} edge="top" /> : null}
       <View style={blockStyles.rowText}>
         <Text {...mobileTextProps("itemTitle")} style={[blockStyles.rowTitle, { color: theme.textPrimary }]}>{title}</Text>
         <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{detail}</Text>
       </View>
       <View style={blockStyles.issueActions}>{children}</View>
+      {divider ? <InsetDivider color={theme.border} edge="top" /> : null}
     </View>
   );
 }

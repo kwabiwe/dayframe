@@ -228,7 +228,6 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 ]}
                 testID={`reports-activity-${segment.key}`}
               >
-                {index ? <InsetDivider color={theme.border} edge="top" /> : null}
                 <View style={[styles.swatch, { backgroundColor: segment.color }]} />
                 <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.rowName, { color: theme.textPrimary }]}>
                   {segment.name}
@@ -248,6 +247,7 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 >
                   {percent}
                 </Text>
+                {index ? <InsetDivider color={theme.border} edge="top" /> : null}
               </Pressable>
             );
           })}

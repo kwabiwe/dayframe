@@ -73,12 +73,12 @@ export function SheetNearbySearch({ centre, onPick, theme }: {
         <Pressable accessibilityHint="Names this visit; you can then save it as a place" accessibilityLabel={[row.title, row.detail].filter(Boolean).join(", ")}
           accessibilityRole="button" key={row.key} onPress={() => onPick(row.title)}
           style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
-          <InsetDivider color={theme.border} edge="top" paddedBy="the correction sheet's content padding (trailing)" start={30} />
           <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
           <View style={styles.text}>
             <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>{row.title}</Text>
             {row.detail ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.detail, { color: theme.textSecondary }]}>{row.detail}</Text> : null}
           </View>
+          <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={30} />
         </Pressable>
       ))}
     </View>

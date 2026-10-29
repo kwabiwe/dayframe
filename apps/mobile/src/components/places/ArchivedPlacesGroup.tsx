@@ -49,7 +49,6 @@ export function ArchivedPlacesGroup({
             layout={localLayoutTransition(reduceMotion)}
           >
             <View style={styles.placesRow} testID={`places-archived-${row.id}`}>
-              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               <View accessible accessibilityLabel={row.accessibilityLabel} style={styles.placesRowMain}>
                 <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
                   <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
@@ -68,6 +67,7 @@ export function ArchivedPlacesGroup({
                   theme={theme}
                 />
               </View>
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
             </View>
           </Reanimated.View>
         ))}

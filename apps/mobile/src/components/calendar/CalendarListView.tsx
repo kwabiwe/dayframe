@@ -440,7 +440,6 @@ export function CalendarListView({
             const open = openLegs.has(item.entry.entryId);
             return (
               <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)}>
-              {divider}
                 <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => onOpenEntry(item.entry)}
                   onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} time={time} />
                 {trip && open ? (
@@ -448,6 +447,7 @@ export function CalendarListView({
                     <LegRows legs={trip.legs} onOpenLeg={onOpenTripLeg ? (index) => onOpenTripLeg(trip, index) : undefined} theme={theme} time={time} />
                   </Animated.View>
                 ) : null}
+              {divider}
               </Animated.View>
             );
           }
@@ -456,7 +456,6 @@ export function CalendarListView({
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
              >
-              {divider}
               <LocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles}
                 onOpenCheck={onOpenCheck ? (id) => { lastOpenedCheckId.current = id; onOpenCheck(id); } : undefined}
                 onOpenPlace={onOpenPlace ? (place, label) => { lastOpenedCheckId.current = checkIdOf(item.row) ?? lastOpenedCheckId.current; onOpenPlace(place, label); } : undefined}
@@ -476,6 +475,7 @@ export function CalendarListView({
                   </Animated.View>
                 ) : null;
               })()}
+              {divider}
             </Animated.View>
           );
         })}

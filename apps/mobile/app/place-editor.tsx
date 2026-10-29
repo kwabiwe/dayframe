@@ -542,7 +542,6 @@ export default function PlaceEditorScreen() {
       {/* The shared sheet head (UIA-006) on the pushed route: eyebrow and title, the coral Save. A
           pushed page has no sheet to swipe, so a circular close control leads; it stays put. */}
       <View style={editorStyles.head}>
-        <InsetDivider color={theme.border} edge="bottom" />
         <BlocksSheetHead
           action={{
             accessibilityHint: validation.ok ? undefined : validation.message,
@@ -569,6 +568,7 @@ export default function PlaceEditorScreen() {
           theme={theme}
           title={title}
         />
+        <InsetDivider color={theme.border} edge="bottom" />
       </View>
 
       <ScrollView
@@ -680,7 +680,6 @@ export default function PlaceEditorScreen() {
                             pressed ? { backgroundColor: theme.surfaceMuted } : null
                           ]}
                         >
-                          <InsetDivider color={theme.border} edge="top" start={46} />
                           <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.places} size={18} />
                           <View style={editorStyles.resultText}>
                             <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
@@ -690,6 +689,7 @@ export default function PlaceEditorScreen() {
                               <Text {...mobileTextProps("metadata")} numberOfLines={2} style={{ color: theme.textMuted }}>{suggestion.subtitle}</Text>
                             ) : null}
                           </View>
+                          <InsetDivider color={theme.border} edge="top" start={46} />
                         </Pressable>
                       ))}
                     </ScrollView>
@@ -703,7 +703,6 @@ export default function PlaceEditorScreen() {
                     layout={localLayoutTransition(reduceMotion)}
                     style={editorStyles.resultRow}
                   >
-                    <InsetDivider color={theme.border} edge="top" start={46} />
                     <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={18} />
                     <View style={editorStyles.resultText}>
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>{selectedResult.title}</Text>
@@ -714,6 +713,7 @@ export default function PlaceEditorScreen() {
                       ) : null}
                     </View>
                     <SettingsPillButton accessibilityLabel="Change selected place" label="Change" onPress={clearSearch} theme={theme} />
+                    <InsetDivider color={theme.border} edge="top" start={46} />
                   </Reanimated.View>
                 ) : null}
 
@@ -731,7 +731,6 @@ export default function PlaceEditorScreen() {
                   ]}
                   testID="place-editor-current-location"
                 >
-                  <InsetDivider color={theme.border} edge="top" start={46} />
                   <TargetGlyph color={theme.textPrimary} />
                   <View style={editorStyles.resultText}>
                     <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
@@ -741,6 +740,7 @@ export default function PlaceEditorScreen() {
                       <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{formatLocationAccuracy(locationAccuracy)}</Text>
                     ) : null}
                   </View>
+                  <InsetDivider color={theme.border} edge="top" start={46} />
                 </Pressable>
               </SettingsBlockGroup>
               {!provider ? (
@@ -946,7 +946,6 @@ export default function PlaceEditorScreen() {
                       </Reanimated.View>
                     ) : null}
                     <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.fieldRow}>
-                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Block name</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -961,6 +960,7 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-description"
                         value={defaultActivityDescription}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </Reanimated.View>
                   </Reanimated.View>
                 ) : null}
@@ -987,7 +987,6 @@ export default function PlaceEditorScreen() {
                     exiting={localPresenceExiting(reduceMotion)}
                   >
                     <View style={editorStyles.fieldRow}>
-                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Latitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -1000,9 +999,9 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-latitude"
                         value={latitudeText}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </View>
                     <View style={editorStyles.fieldRow}>
-                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Longitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -1015,6 +1014,7 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-longitude"
                         value={longitudeText}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </View>
                   </Reanimated.View>
                 ) : null}

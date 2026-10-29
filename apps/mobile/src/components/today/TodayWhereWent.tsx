@@ -91,7 +91,6 @@ function WhereWentButton({ model, onOpen, theme }: { model: TodayWhereWentModel;
       style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
       testID="today-where-went"
     >
-      <InsetDivider color={theme.border} edge="top" paddedBy="the Today ribbon card's padding" />
       <View style={styles.head}>
         <Text {...mobileTextProps("sectionHeading")} style={[styles.heading, { color: theme.textPrimary }]}>
           Where today went
@@ -124,6 +123,7 @@ function WhereWentButton({ model, onOpen, theme }: { model: TodayWhereWentModel;
       </View>
       {duration.probe}
       {name.probe}
+      <InsetDivider color={theme.border} edge="top" paddedBy="src/components/today/TodayRibbon.tsx:card" />
     </Pressable>
   );
 }

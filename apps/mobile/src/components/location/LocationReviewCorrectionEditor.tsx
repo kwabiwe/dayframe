@@ -947,7 +947,7 @@ export function LocationReviewCorrectionEditor({
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
                   >
-                    {index > 0 ? <InsetDivider color={theme.border} paddedBy="the Stops field's padding" style={{ marginBottom: 6 }} /> : null}
+                    {index > 0 ? <InsetDivider color={theme.border} paddedBy="src/lib/mobileTheme.ts:settingsScrollContent" style={{ marginBottom: 6 }} /> : null}
                     <Text
                       {...mobileTextProps("body")}
                       accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}
@@ -1514,7 +1514,6 @@ export function LocationReviewCorrectionEditor({
                       layout={localLayoutTransition(reduceMotion)}
                       style={editorStyles.inlineRow}
                     >
-                      <InsetDivider color={theme.border} edge="top" />
                       <TextInput
                         ref={pinNameInputRef}
                         accessibilityLabel="New saved place name"
@@ -1538,6 +1537,7 @@ export function LocationReviewCorrectionEditor({
                         onPress={useManualMapPin}
                         theme={theme}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </Reanimated.View>
                   ) : null}
                 </>
@@ -1775,7 +1775,6 @@ function ResultRow({
       ]}
       testID={testID}
     >
-      {divider ? <InsetDivider color={theme.border} edge="top" end={12} start={glyph ? 42 : 12} /> : null}
       {glyph ? (
         <View style={resultRowStyles.glyph}>
           <DayframeIcon color={theme.textPrimary} glyph={glyph} size={20} />
@@ -1790,6 +1789,7 @@ function ResultRow({
           <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[resultRowStyles.detail, { color: theme.textSecondary }]}>{inside}</Text>
         ) : null}
       </View>
+      {divider ? <InsetDivider color={theme.border} edge="top" end={12} start={glyph ? 42 : 12} /> : null}
     </Pressable>
   );
 }

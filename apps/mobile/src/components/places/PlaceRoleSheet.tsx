@@ -218,7 +218,6 @@ export function PlaceRoleSheet({
                         ]}
                         testID={`place-role-choice-${place.id}`}
                       >
-                        {index > 0 ? <InsetDivider color={theme.border} edge="top" /> : null}
                         <View style={sheetStyles.choiceText}>
                           <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[sheetStyles.choiceName, { color: theme.textPrimary }]}>{name}</Text>
                           {secondary ? (
@@ -234,6 +233,7 @@ export function PlaceRoleSheet({
                         >
                           {selected ? <DayframeIcon color={theme.surface} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
                         </View>
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" /> : null}
                       </Pressable>
                     );
                   })}

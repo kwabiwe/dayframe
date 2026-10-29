@@ -100,7 +100,6 @@ export function TodaySwitchSheet({
                   ]}
                   testID={`today-switch-${entry.id}`}
                 >
-                  {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={DIVIDER_INSET_PAST_BLOCK} /> : null}
                   <ActivityBlockMark
                     categoryColor={entry.categoryColor ?? entry.categoryId ?? null}
                     categoryIcon={activityIconFor(entry.categoryId)}
@@ -124,6 +123,7 @@ export function TodaySwitchSheet({
                   <View style={styles.play}>
                     <PrimaryTimerGlyph color={theme.textSecondary} mode="play" />
                   </View>
+                  {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={DIVIDER_INSET_PAST_BLOCK} /> : null}
                 </Pressable>
               );
               })}

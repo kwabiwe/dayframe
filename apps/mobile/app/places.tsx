@@ -780,7 +780,6 @@ export default function PlacesScreen() {
         // The All places (or only) row keeps the plain id that tests and links use.
         testID={sectionKey === "all" || sectionKey === "results" ? `places-row-${rolePlace.id}` : `places-row-${sectionKey}-${rolePlace.id}`}
       >
-        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
         <View style={styles.placesRowMain}>
           <View style={styles.placesBlock}>
             <DayframeIcon
@@ -795,6 +794,7 @@ export default function PlacesScreen() {
           </View>
         </View>
         <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
       </Pressable>
     );
   }
@@ -814,7 +814,6 @@ export default function PlacesScreen() {
           style={styles.placesRow}
           testID={`places-restored-${row.id}`}
         >
-          {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
           <View style={styles.placesRowMain}>
             <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
               <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
@@ -824,6 +823,7 @@ export default function PlacesScreen() {
               <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
             </View>
           </View>
+          {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
         </View>
       </Reanimated.View>
     );
@@ -900,7 +900,6 @@ export default function PlacesScreen() {
           <ReflowBlockGroup foot="Trips are named after these." reduceMotion={reduceMotion} theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
               <View key={slot.role} style={styles.placesRow} testID={`places-role-${slot.role}`}>
-                {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                 <View style={styles.placesRowMain}>
                   <View style={styles.placesBlock}>
                     <DayframeIcon color={theme.textPrimary} glyph={slot.role === "home" ? DAYFRAME_APP_ICONS.placeHome : DAYFRAME_APP_ICONS.placeWork} size={18} />
@@ -922,6 +921,7 @@ export default function PlacesScreen() {
                     <SettingsPillButton accessibilityLabel={`Set ${slot.label}`} label="Set" onPress={() => openRole(slot.role, "choose")} theme={theme} />
                   )}
                 </View>
+                {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               </View>
             ))}
           </ReflowBlockGroup>
@@ -1012,7 +1012,6 @@ export default function PlacesScreen() {
                     layout={localLayoutTransition(reduceMotion)}
                   >
                     <View style={styles.placesRow}>
-                      {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       <Pressable
                         accessibilityHint="Shows details, Ignore and Forget"
                         accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
@@ -1038,6 +1037,7 @@ export default function PlacesScreen() {
                           theme={theme}
                         />
                       </View>
+                      {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                     </View>
                   </Reanimated.View>
                 ))}

@@ -99,7 +99,7 @@ describe("TodayWhereWent", () => {
     const dividers = button.findAllByType(InsetDivider as never);
     expect(dividers).toHaveLength(1);
     expect(dividers[0].props).toMatchObject({ color: "#2A3345", edge: "top" });
-    expect(dividers[0].props.paddedBy).toMatch(/ribbon card/);
+    expect(dividers[0].props.paddedBy).toBe("src/components/today/TodayRibbon.tsx:card");
     expect(flat(button.props.style({ pressed: false })).borderTopWidth).toBeUndefined();
     expect(flat(button.props.style({ pressed: false })).backgroundColor).toBeUndefined();
     // Nothing inside is a separate accessibility element.
