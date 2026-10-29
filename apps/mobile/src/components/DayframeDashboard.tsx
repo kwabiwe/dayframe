@@ -220,6 +220,7 @@ import {
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
   type TimeEntryCommandHoldLease,
+  subscribeDeliveredTimeEntryDeletes,
   subscribeTimeEntryOutbox,
   synchroniseTimeEntryCommands
 } from "@/lib/timeEntryOutbox";
@@ -259,7 +260,7 @@ import {
 } from "@/lib/nativeCalendarPresentation";
 import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
-import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones } from "@/lib/timerTripClashBlocks";
+import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
@@ -511,8 +512,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
-  // A successful bootstrap read was applied (when it started, and for whom): delete tombstones it settles retire.
-  const authoritativeLoadRef = useRef<(startedAtMs: number, owner: { userId: string; workspaceId: string }) => void>(() => undefined);
+  // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
+  // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
+  const appliedServerDataListeners = useRef(new Set<(startedAtMs: number, server: MobileBootstrap) => void>());
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
@@ -1069,7 +1071,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
       void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
-      authoritativeLoadRef.current(readStartedAt, { userId: serverBootstrap.user.id, workspaceId: serverBootstrap.workspace.id });
       publishTodayBootstrapForSettings(serverBootstrap, settingsSeedGeneration);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);
@@ -1083,7 +1084,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         currentRevision: () => dashboardMutationRevision.current,
         guard: refreshGuard,
         reconcile: reconcileDashboardDeletionState,
-        timerMutationsInFlight: () => timerMutationCount.current
+        timerMutationsInFlight: () => timerMutationCount.current,
+        // Only once the guard accepted it, just before it is published: a discarded read settles nothing.
+        onApplied: () => {
+          const applied = serverBootstrap;
+          for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);
+        }
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
@@ -2001,37 +2007,44 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // shows its block ended at the trip's start in the Calendar until the server's data does; Undo or a refused answer
   // puts it back. Acknowledged ones count only against the data they were acknowledged over: the next read is the
   // server's own.
-  const [pendingClashEnds, setPendingClashEnds] = useState<{ owner: string; ends: readonly PendingTimerTripClashEnd[] } | null>(null);
+  const [pendingClashEnds, setPendingClashEnds] = useState<{ owner: string; ends: readonly PendingTimerTripClashEnd[]; version: number } | null>(null);
+  // Acknowledged ends stay shown until applied server data confirms them (Codex r3 on #618), for this account.
+  const clashEndLedger = useRef({ owner: null as string | null, ledger: createAcknowledgedEndLedger() });
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
     let sequence = 0;
+    if (clashEndLedger.current.owner !== scopedOwnerKey) clashEndLedger.current = { owner: scopedOwnerKey, ledger: createAcknowledgedEndLedger() };
+    const own = clashEndLedger.current;
     const read = () => {
       const mine = ++sequence;
       readPendingTimerTripClashEnds(scopedOwner).then((ends) => {
-        if (current && mine === sequence) setPendingClashEnds({ owner: scopedOwnerKey, ends });
+        if (!current || mine !== sequence || clashEndLedger.current !== own) return;
+        own.ledger.observe(ends, Date.now());
+        setPendingClashEnds((now) => ({ owner: scopedOwnerKey, ends, version: (now?.version ?? 0) + 1 }));
       }).catch(() => undefined);
     };
     read();
     const unsubscribe = subscribeReviewSync(read);
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || clashEndLedger.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.ledger.applied(startedAtMs, server)) setPendingClashEnds((now) => now && { ...now, version: now.version + 1 });
+    };
+    appliedServerDataListeners.current.add(applied);
     return () => {
       current = false;
       unsubscribe();
+      appliedServerDataListeners.current.delete(applied);
     };
     // scopedOwner is keyed by scopedOwnerKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedOwnerKey]);
-  const acknowledgedClashOver = useRef(new Map<string, MobileBootstrap | null>());
   const clashEnds = useMemo(() => {
     const ends = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? pendingClashEnds.ends : [];
-    const seen = acknowledgedClashOver.current;
-    const live = ends.filter((end) => {
-      if (!end.acknowledged) return true;
-      if (!seen.has(end.clientMutationId)) seen.set(end.clientMutationId, data);
-      return seen.get(end.clientMutationId) === data;
-    });
+    // `version` changes when the ledger retires one (it is read here, not stored).
+    const live = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? clashEndLedger.current.ledger.live(ends) : [];
     return clashEndsFor(checkAnswers.data?.reviewItems ?? [], checkAnswers.answeredYesIds, live);
-  }, [checkAnswers.answeredYesIds, checkAnswers.data, data, pendingClashEnds, scopedOwnerKey]);
+  }, [checkAnswers.answeredYesIds, checkAnswers.data, pendingClashEnds, scopedOwnerKey]);
   // An acknowledged End it (the server ended the block, and stopped it if it was running): the day is read again, once.
   const reloadedForClash = useRef(new Set<string>());
   useEffect(() => {
@@ -2064,20 +2077,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const mine = ++sequence;
       readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then((commands) => {
         if (!current || mine !== sequence || deleteTombstones.current !== own) return;
-        own.tombstones.observe(commands, Date.now());
+        own.tombstones.observe(commands);
         setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
       }).catch(() => undefined);
     };
     read();
     const unsubscribe = subscribeTimeEntryOutbox(read);
-    authoritativeLoadRef.current = (startedAtMs, owner) => {
-      if (!current || deleteTombstones.current !== own || owner.userId !== scopedOwner.userId || owner.workspaceId !== scopedOwner.workspaceId) return;
-      if (own.tombstones.authoritative(startedAtMs)) setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    // Only an acknowledged delivery holds a tombstone past its command; Undo or Discard removes it with the command.
+    const unsubscribeDelivered = subscribeDeliveredTimeEntryDeletes((command) => {
+      if (!current || deleteTombstones.current !== own || command.userId !== scopedOwner.userId || command.workspaceId !== scopedOwner.workspaceId) return;
+      own.tombstones.delivered(command, Date.now());
+      setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    });
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || deleteTombstones.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.tombstones.applied(startedAtMs)) setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
     };
+    appliedServerDataListeners.current.add(applied);
     return () => {
       current = false;
       unsubscribe();
-      authoritativeLoadRef.current = () => undefined;
+      unsubscribeDelivered();
+      appliedServerDataListeners.current.delete(applied);
     };
     // scopedOwner is keyed by scopedOwnerKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps

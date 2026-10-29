@@ -142,32 +142,38 @@ export function runningForStart<T extends { id: string }>(canonical: T | null | 
 
 type DeleteCommand = { operation: string; targetEntryId?: string; optimisticEntryId?: string; failureKind?: string };
 
+const commandBlockIds = (command: DeleteCommand) => [command.targetEntryId, command.optimisticEntryId].filter((id): id is string => Boolean(id));
+
 /**
- * What this iPhone knows it deleted (Codex r2 on #618): blocks with a queued delete, and blocks whose delete left the
- * outbox (acknowledged) but no authoritative read has reconciled yet. A delivered delete's block stays known deleted
- * until a bootstrap read that started after the delete left the outbox is applied — not a failed refresh, and not a
- * read already in flight — so its question never comes back as "not loaded" meanwhile. A delete the server refused
- * for good (a permanent issue) is no tombstone: its block is restored. One per account (the Dashboard resets it on
- * an account switch).
+ * What this iPhone knows it deleted (Codex r2 and r3 on #618), for one account (the Dashboard makes a new one on an
+ * account switch): blocks with a queued delete, and blocks whose delete the server acknowledged (`delivered`) until
+ * server data read after that is applied. A delete cancelled before delivery (Undo, Discard) is no tombstone at
+ * all: it leaves with its command. A delete the server refused for good is none either: its block is restored.
  */
 export function createDeleteTombstones() {
   let queued = new Set<string>();
   const delivered = new Map<string, number>();
   return {
-    /** The outbox's commands as read now. */
-    observe(commands: readonly DeleteCommand[], nowMs: number) {
-      const next = locallyDeletedBlockIds([], commands);
-      const refused = new Set(commands.flatMap((command) => command.operation === "delete" && command.failureKind === "permanent"
-        ? [command.targetEntryId, command.optimisticEntryId].filter((id): id is string => Boolean(id)) : []));
-      for (const id of queued) if (!next.has(id) && !refused.has(id)) delivered.set(id, nowMs);
-      for (const id of [...next, ...refused]) delivered.delete(id);
-      queued = next;
+    /** The outbox's commands as read now: a delete gone from them without `delivered` was cancelled. */
+    observe(commands: readonly DeleteCommand[]) {
+      queued = locallyDeletedBlockIds([], commands);
+      for (const command of commands) {
+        if (command.operation === "delete" && command.failureKind === "permanent") for (const id of commandBlockIds(command)) delivered.delete(id);
+      }
     },
-    /** A successful bootstrap read that started at `startedAtMs` was applied: deletes delivered before it are settled. */
-    authoritative(startedAtMs: number) {
+    /** The server acknowledged this delete (the outbox says so before it removes the command). */
+    delivered(command: DeleteCommand, nowMs: number) {
+      for (const id of commandBlockIds(command)) delivered.set(id, nowMs);
+    },
+    /**
+     * A server bootstrap read that started at `startedAtMs` was applied (accepted by the refresh guard and published):
+     * the deletes delivered before that read started are now the server's to show. A read discarded by the guard, or
+     * one that failed, is never reported.
+     */
+    applied(startedAtMs: number) {
       let changed = false;
-      for (const [id, leftAt] of delivered) {
-        if (startedAtMs >= leftAt) {
+      for (const [id, deliveredAt] of delivered) {
+        if (startedAtMs >= deliveredAt) {
           delivered.delete(id);
           changed = true;
         }
@@ -176,10 +182,47 @@ export function createDeleteTombstones() {
     },
     ids(): ReadonlySet<string> {
       return new Set([...queued, ...delivered.keys()]);
+    }
+  };
+}
+
+type AcknowledgedEnd = { clientMutationId: string; timeEntryId: string; tripStartedAt: string; acknowledged: boolean };
+
+/** Whether applied server data shows End it's end: the block no longer running, and ended by the trip's start. */
+function endShownIn(data: MobileBootstrap, end: Pick<AcknowledgedEnd, "timeEntryId" | "tripStartedAt">) {
+  if (data.activeEntry?.id === end.timeEntryId) return false;
+  const entry = bootstrapBlocksById(data).get(end.timeEntryId);
+  if (!entry) return true;
+  return entry.stoppedAt != null && Date.parse(entry.stoppedAt) <= Date.parse(end.tripStartedAt) + 1_000;
+}
+
+/**
+ * Acknowledged End it answers still shown on this iPhone (Codex r3 on #618), for one account: an acknowledged end
+ * keeps showing until server data that confirms it is applied — a bootstrap whose read started after the
+ * acknowledgement was seen, or one that already shows the block ended (`endShownIn`). Never on a mere change of the
+ * data the Dashboard holds (a local edit, a failed refresh).
+ */
+export function createAcknowledgedEndLedger() {
+  const seen = new Map<string, AcknowledgedEnd & { seenAt: number }>();
+  const retired = new Set<string>();
+  return {
+    /** The outbox's End it answers as read now. */
+    observe(ends: readonly AcknowledgedEnd[], nowMs: number) {
+      for (const end of ends) if (end.acknowledged && !seen.has(end.clientMutationId)) seen.set(end.clientMutationId, { ...end, seenAt: nowMs });
     },
-    reset() {
-      queued = new Set();
-      delivered.clear();
+    /** The ends to show: waiting ones, and acknowledged ones not yet confirmed by applied server data. */
+    live<T extends AcknowledgedEnd>(ends: readonly T[]) {
+      return ends.filter((end) => !end.acknowledged || !retired.has(end.clientMutationId));
+    },
+    /** Applied server data (a bootstrap read that started at `startedAtMs`): whether it confirmed any end. */
+    applied(startedAtMs: number, data: MobileBootstrap) {
+      let changed = false;
+      for (const [id, end] of seen) {
+        if (retired.has(id) || !(startedAtMs >= end.seenAt || endShownIn(data, end))) continue;
+        retired.add(id);
+        changed = true;
+      }
+      return changed;
     }
   };
 }

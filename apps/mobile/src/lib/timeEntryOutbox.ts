@@ -555,6 +555,7 @@ export function __resetTimeEntryOutboxForTests() {
   mutationTail = Promise.resolve();
   syncInFlightByOwner.clear();
   listeners.clear();
+  deliveredDeleteListeners.clear();
   heldCommands.clear();
   dispatchedCommandIds.clear();
 }
@@ -1101,9 +1102,28 @@ function removeDeliveredCommand(clientCommandId: string) {
     const current = await readAllCommands();
     const next = current.filter((command) => command.clientCommandId !== clientCommandId);
     if (next.length === current.length) return false;
+    // A delete the server acknowledged (not one undone or discarded): said before the outbox's own change, so a
+    // listener never sees its block as neither queued nor delivered (Codex r3 on #618).
+    const delivered = current.find((command) => command.clientCommandId === clientCommandId);
+    if (delivered?.operation === "delete") {
+      for (const listener of deliveredDeleteListeners) listener(delivered);
+    }
     await writeAllCommands(next);
     return true;
   });
+}
+
+const deliveredDeleteListeners = new Set<(command: PendingTimeEntryCommand) => void>();
+
+/**
+ * Told when the server acknowledged a delete and it left the outbox. Never for one removed by Undo or Discard: a
+ * listener can tell a delivered delete from a cancelled one.
+ */
+export function subscribeDeliveredTimeEntryDeletes(listener: (command: PendingTimeEntryCommand) => void) {
+  deliveredDeleteListeners.add(listener);
+  return () => {
+    deliveredDeleteListeners.delete(listener);
+  };
 }
 
 function retainCommandFailure(

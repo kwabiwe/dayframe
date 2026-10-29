@@ -231,8 +231,14 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard).toContain("pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current");
     // Deleted here is not "not loaded": tombstones from the delete hold, the queued deletes, and delivered ones until a
     // read that started after their delivery is applied (Codex r2 on #618).
-    expect(dashboard).toContain("own.tombstones.observe(commands, Date.now());");
-    expect(dashboard).toContain("authoritativeLoadRef.current(readStartedAt, { userId: serverBootstrap.user.id, workspaceId: serverBootstrap.workspace.id });");
+    expect(dashboard).toContain("own.tombstones.observe(commands);");
+    // Only an acknowledged delivery holds a tombstone; Undo removes it with its command (Codex r3 on #618).
+    expect(dashboard).toContain("own.tombstones.delivered(command, Date.now());");
+    // Tombstones and acknowledged ends settle only on server data the refresh guard accepted (Codex r3 on #618).
+    expect(dashboard).toContain("for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);");
+    expect(dashboard).toContain("if (own.tombstones.applied(startedAtMs)) setQueuedDeletes(");
+    expect(dashboard).toContain("if (own.ledger.applied(startedAtMs, server)) setPendingClashEnds(");
+    expect(dashboard).not.toContain("seen.get(end.clientMutationId) === data");
   });
 
   it("counts a block that ran into a trip as one \"?\", asked on its block, never a row or a dashed block of its own", () => {
