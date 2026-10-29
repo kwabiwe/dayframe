@@ -953,6 +953,26 @@ textarea.ui-control {
   --divider-inset-start: 18px;
 }
 
+/* Settings › Automatic tracking: "Log trips automatically" reads as one more row of the card, with the
+   rows' text start and inset divider, not a filled box (UI review W15, owner 29 Oct 2026). */
+.settings-group .df-set-trips {
+  position: relative;
+  min-height: 56px;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 18px 8px 48px;
+}
+
+.settings-group .df-set-trips::before {
+  --divider-inset: 18px;
+  --divider-inset-start: 52px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  border-top: 1px solid var(--line);
+  content: "";
+}
+
 .settings-group .ui-settings-row > svg {
   align-self: start;
   margin-top: 3px;
@@ -1523,6 +1543,17 @@ textarea.ui-control {
 
   .settings-group .ui-settings-row + .ui-settings-row::before,
   .settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
+    --divider-inset: 16px;
+    --divider-inset-start: 16px;
+  }
+
+  /* The trips row keeps its siblings' phone text start (16 px padding, the 18 px icon and its 12 px
+     gap) and their divider insets (Codex r1–r2 on #631). */
+  .settings-group .df-set-trips {
+    padding: 14px 16px 14px 46px;
+  }
+
+  .settings-group .df-set-trips::before {
     --divider-inset: 16px;
     --divider-inset-start: 16px;
   }
@@ -14934,7 +14965,8 @@ button.timeline-location-hit:focus-visible {
   .df-erow-group + .df-erow::before,
   .df-erow-group + .df-erow-group > .df-erow::before,
   .location-correction-option + .location-correction-option::before,
-  .location-correction-leg + .location-correction-leg::before {
+  .location-correction-leg + .location-correction-leg::before,
+  .settings-group .df-set-trips::before {
     height: 0;
     border-top: 1px solid CanvasText;
     background: none;

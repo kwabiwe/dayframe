@@ -34,7 +34,9 @@ describe("web Settings contracts", () => {
     const order = ['label: "Midnight"', 'label: "Daylight"', 'label: "System"'].map((label) => themeSource.indexOf(label));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(themeSource).toContain('label="Appearance"');
+    // The card is Appearance; its row is Theme (UI review W15, owner 29 Oct 2026: no "Appearance › Appearance").
+    expect(themeSource).toContain('label="Theme"');
+    expect(themeSource).toContain('ariaLabel="Theme"');
     expect(themeSource).toContain('value: "system"');
     expect(themeSource).toContain('value: "light"');
     expect(themeSource).toContain('value: "dark"');
