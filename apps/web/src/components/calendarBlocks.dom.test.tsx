@@ -2,7 +2,7 @@
 
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 vi.mock("next/navigation", () => ({
@@ -25,9 +25,20 @@ vi.mock("@/components/AppShellRuntime", () => ({
   useRuntimePageData: (value: unknown) => value
 }));
 
+// The viewer's today, which anchors the 7 days a "?" asks (owner, 28 Oct 2026): the shown day, 2 Aug, unless a test moves it.
+const clock = vi.hoisted(() => ({ todayStartMs: 0 }));
+vi.mock("@/components/useCalendarClock", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/components/useCalendarClock")>(),
+  useLocalDayStartMs: () => clock.todayStartMs
+}));
+
 const { CalendarReview } = await import("./TimeReviewViews");
 
 const local = (hour: number, minute = 0) => new Date(2026, 7, 2, hour, minute).toISOString();
+
+beforeEach(() => {
+  clock.todayStartMs = new Date(2026, 7, 2).getTime();
+});
 
 afterEach(() => {
   cleanup();
@@ -222,7 +233,7 @@ describe("Calendar in Blocks", () => {
     expect(document.querySelector(".calendar-moment")!.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("shows a now line on today and open suggestions as Review links in their own lane", () => {
+  it("shows a now line on today and open suggestions as links to their check in the List, in their own lane", () => {
     renderCalendar([], [
       review({ id: "r1", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) }),
       review({ id: "r2", title: "No window", suggestedStartedAt: local(7), suggestedStoppedAt: null })
@@ -230,8 +241,31 @@ describe("Calendar in Blocks", () => {
     expect(document.querySelector(".calendar-now-line")).not.toBeNull();
     const links = document.querySelectorAll<HTMLAnchorElement>(".calendar-review-block");
     expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/review#review-r1");
-    expect(links[0].getAttribute("aria-label")).toBe("Gym visit, needs review, 07:00 to 08:00. Open Review.");
+    // Owner, 28 Oct 2026: a suggestion opens its "?" in Calendar › List (never Review), with no "?" mark of its own.
+    const day = new Date(local(7));
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    expect(links[0].getAttribute("href")).toBe(`/timeline?view=list&scope=day&date=${key}&check=r1`);
+    expect(links[0].classList.contains("is-v4")).toBe(true);
+    expect(links[0].getAttribute("aria-label")).toBe("Gym visit, needs a look, 07:00 to 08:00.");
+    expect(links[0].textContent).not.toContain("?");
+  });
+
+  it("draws only the \"?\" that still ask, an outing once on its stay (Codex r1 on #609)", () => {
+    // Today is 9 Aug: the 2nd is 7 days before, so its "?" no longer ask and isn't drawn (nor counted on the badge).
+    clock.todayStartMs = new Date(2026, 7, 9).getTime();
+    renderCalendar([], [review({ id: "old", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) })]);
+    expect(document.querySelectorAll(".calendar-review-block")).toHaveLength(0);
+    cleanup();
+    // Within the 7 days, an outing's trips are folded onto its stay: one block, the stay's.
+    clock.todayStartMs = new Date(2026, 7, 8).getTime();
+    renderCalendar([], [
+      review({ id: "stay", title: "Unknown place", eventType: "unknown_stay", suggestedStartedAt: local(9), suggestedStoppedAt: local(10),
+        rawPayload: { clientSegmentId: "seg-stay", outingKey: "o1", outingRole: "stay" } }),
+      review({ id: "there", title: "Walk", eventType: "commute_detected", suggestedStartedAt: local(8, 40), suggestedStoppedAt: local(9),
+        rawPayload: { clientSegmentId: "seg-in", outingKey: "o1", outingRole: "in" } })
+    ]);
+    const links = [...document.querySelectorAll<HTMLAnchorElement>(".calendar-review-block")];
+    expect(links.map((link) => link.getAttribute("href")?.split("check=")[1])).toEqual(["stay"]);
   });
 
   it("lets a press an open editor takes only dismiss it, never also open Review", async () => {

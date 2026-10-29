@@ -51,7 +51,10 @@ function renderList(locationTimeline: LocationTimeline | null) {
 }
 
 describe("Calendar › List location rows (location v4 step 10)", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+  });
 
   it("adds the journey in progress and an unlogged unknown place in time order, newest first, beside the blocks", async () => {
     renderList(timeline);
@@ -76,19 +79,32 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     expect(screen.getByRole("list", { name: "Legs" }).textContent).toContain("no GPS underground, guessed from the gap");
   });
 
-  it("shows Home and logged places as faint rows only with Show Home and every place", async () => {
-    renderList(timeline);
-    const toggle = await screen.findByRole("button", { name: "Show Home and every place" });
+  it("shows Home and other quiet places only with All places, a quiet filter at the top, remembered on this device (owner item H)", async () => {
+    const first = renderList(timeline);
+    const toggle = await screen.findByRole("button", { name: "All places" });
+    expect(toggle.closest(".timeline-places-filter")).not.toBeNull();
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByRole("button", { name: /^Home, / })).toBeNull();
     fireEvent.click(toggle);
-    expect(screen.getByText(/Home · /)).toBeTruthy();
+    expect(screen.getByRole("button", { name: `Home, ${formatTime(at(0), "24h")}–${formatTime(at(8), "24h")}` })).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.textContent).toBe("Fewer places");
+    expect(window.localStorage.getItem("dayframe.calendar.showAllPlaces")).toBe("1");
+    // Opened again on this device, the List keeps every place.
+    first.unmount();
+    renderList(timeline);
+    expect((await screen.findByRole("button", { name: "Fewer places" })).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^Home, / })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Fewer places" }));
+    expect(window.localStorage.getItem("dayframe.calendar.showAllPlaces")).toBe("0");
+    expect(screen.queryByRole("button", { name: /^Home, / })).toBeNull();
   });
 
   it("is the List as before without a timeline", async () => {
     renderList(null);
     await screen.findByText("Planning");
     expect(screen.queryByText(/Travelling since/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Show Home and every place" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "All places" })).toBeNull();
   });
   it("keeps the legs of grouped trips, and places a row among an expanded group's occurrences in time order (Codex r1 on #565)", async () => {
     const day: LocationTimeline = { ...timeline, openTrip: null, items: [
@@ -113,7 +129,7 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     expect(shop).toBeLessThan(at08);
   });
 
-  it("says a place you logged in full is logged, and shows a place clipped to the day from midnight (Codex r1 on #565)", async () => {
+  it("never shows a place your blocks cover, even with All places, and shows a place clipped to the day from midnight (Codex r1 on #565)", async () => {
     const day: LocationTimeline = { ...timeline, openTrip: null, items: [
       { kind: "place", id: "overnight", status: "finalised", startedAt: new Date(Date.parse(at(0)) - 3_600_000).toISOString(), stoppedAt: at(1),
         placeId: "p-friend", learnedPlaceId: null, name: "Friend's", role: null, matchKind: "saved", confidence: "high", blockIds: [] },
@@ -124,11 +140,14 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
         entries={[entry("planning", "Planning", at(11), at(11, 30))]}
         onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Show Home and every place" }));
-    expect(screen.getByText(/Office · /).closest("tr")?.textContent).toMatch(/logged$/);
-    expect(screen.getByText(/Office · /).closest("tr")?.textContent).not.toContain("not logged");
-    // From the day's start, in the viewer's zone, not from the evening before.
-    expect(screen.getByText(/Friend's · /).textContent).toBe(`Friend's · ${formatTime(at(0), "24h")}–${formatTime(at(1), "24h")}`);
+    fireEvent.click(await screen.findByRole("button", { name: "All places" }));
+    // Planning covers the Office visit: the block's place line stands for it (owner, 28 Oct 2026, concern 2).
+    expect(screen.queryByText("Office")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Office, / })).toBeNull();
+    // From the day's start, in the viewer's zone, not from the evening before; start over end.
+    const friends = screen.getByRole("button", { name: `Friend's, ${formatTime(at(0), "24h")}–${formatTime(at(1), "24h")}` });
+    expect([...friends.querySelectorAll(".timeline-location-span.is-stacked > span")].map((time) => time.textContent))
+      .toEqual([formatTime(at(0), "24h"), formatTime(at(1), "24h")]);
   });
 
   it("keeps the legs row while it closes, then removes it (Codex r1 on #565)", async () => {
@@ -164,9 +183,14 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
   it("opens a correction for a place not in a block and for a leg (location v4 step 13)", async () => {
     HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
     HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
+    // The dialog reads the place's map when it opens.
+    clientFetch.mockReset().mockResolvedValue({ ok: false, json: async () => ({}) });
     renderList(timeline);
-    fireEvent.click(await screen.findByRole("button", { name: "Correct Unknown place" }));
+    // The whole row is the button that opens it (owner item A); there is no separate Correct button.
+    expect(screen.queryByRole("button", { name: /^Correct / })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /^Unknown place, / }));
     expect(screen.getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    expect(clientFetch.mock.calls.some(([url]) => String(url).startsWith("/api/timeline/items/cafe/evidence?kind=place"))).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Show the legs of Getting around" }));
     fireEvent.click(screen.getByRole("button", { name: /Change how you travelled: Underground or train\?/ }));

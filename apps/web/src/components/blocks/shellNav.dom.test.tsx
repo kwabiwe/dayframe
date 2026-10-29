@@ -25,48 +25,61 @@ afterEach(() => {
 });
 
 describe("Blocks sidebar navigation", () => {
-  it("marks the current section and announces the Review count", () => {
+  it("marks the current section and has no Review section (location v4 step 15)", () => {
     setReducedMotion(false);
-    render(<ShellSidebarNav activeId="review" reviewCount={5} />);
+    render(<ShellSidebarNav activeId="reports" />);
     const current = document.querySelector("[aria-current='page']");
-    expect(current?.getAttribute("href")).toBe("/review");
-    expect(screen.getByRole("link", { name: "Review, 5 to review" })).not.toBeNull();
+    expect(current?.getAttribute("href")).toBe("/reports");
+    expect(screen.queryByRole("link", { name: /Review/ })).toBeNull();
     expect(screen.getByRole("link", { name: "Library" }).getAttribute("href")).toBe("/categories");
   });
 
   it("badges Calendar with the things to check, and says so (location v4 step 14)", () => {
     setReducedMotion(false);
-    render(<ShellSidebarNav activeId="today" checkCount={3} reviewCount={0} />);
-    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check" });
+    render(<ShellSidebarNav activeId="today" checkCount={3} />);
+    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check in the last 7 days. Opens the oldest." });
     expect(calendar.querySelector(".df-nav-count")?.textContent).toBe("3");
+    // With no oldest question to open, the badge keeps Calendar's own link.
+    expect(calendar.getAttribute("href")).toBe("/timeline");
+  });
+
+  it("opens the oldest question from the badge, in the sidebar and the tab bar (owner, 28 Oct 2026)", () => {
+    setReducedMotion(false);
+    const href = "/timeline?view=list&scope=day&date=2026-10-24&check=r1";
+    render(<ShellSidebarNav activeId="today" calendarHref={href} checkCount={2} />);
+    const calendar = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." });
+    expect(calendar.getAttribute("href")).toBe(href);
+    cleanup();
+    render(<ShellTabBar activeId="today" calendarHref={href} checkCount={2} />);
+    expect(screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days. Opens the oldest." }).getAttribute("href")).toBe(href);
   });
 
   it("places the thumb without travel first, then springs it, and fades it out on Settings", () => {
     setReducedMotion(false);
-    const { rerender } = render(<ShellSidebarNav activeId="today" reviewCount={0} />);
+    const { rerender } = render(<ShellSidebarNav activeId="today" />);
     expect(thumb().style.transition).toBe("none");
     expect(thumb().style.opacity).toBe("1");
 
-    rerender(<ShellSidebarNav activeId="reports" reviewCount={0} />);
+    rerender(<ShellSidebarNav activeId="reports" />);
     expect(thumb().style.transition).toMatch(/^transform \d+ms /);
 
-    rerender(<ShellSidebarNav activeId={null} reviewCount={0} />);
+    rerender(<ShellSidebarNav activeId={null} />);
     expect(thumb().style.opacity).toBe("0");
   });
 
   it("moves the thumb without travel under Reduce Motion", () => {
     setReducedMotion(true);
-    const { rerender } = render(<ShellSidebarNav activeId="today" reviewCount={0} />);
-    rerender(<ShellSidebarNav activeId="calendar" reviewCount={0} />);
+    const { rerender } = render(<ShellSidebarNav activeId="today" />);
+    rerender(<ShellSidebarNav activeId="calendar" />);
     expect(thumb().style.transition).not.toContain("transform");
   });
 });
 
 describe("Blocks phone tab bar", () => {
-  it("offers the same five sections with the current one marked", () => {
-    render(<ShellTabBar activeId="calendar" reviewCount={0} />);
+  it("offers the same four sections with the current one marked", () => {
+    render(<ShellTabBar activeId="calendar" />);
     const links = Array.from(document.querySelectorAll(".df-tabbar a"));
-    expect(links.map((link) => link.textContent)).toEqual(["Today", "Calendar", "Review", "Reports", "Library"]);
+    expect(links.map((link) => link.textContent)).toEqual(["Today", "Calendar", "Reports", "Library"]);
     expect(document.querySelector(".df-tabbar [aria-current='page']")?.getAttribute("href")).toBe("/timeline");
   });
 });
@@ -108,8 +121,8 @@ describe("G sequence guard", () => {
 describe("Settings thumb fade", () => {
   it("fades the thumb out even when it was last placed without travel", () => {
     setReducedMotion(false);
-    const { rerender } = render(<ShellSidebarNav activeId="today" reviewCount={0} />);
-    rerender(<ShellSidebarNav activeId={null} reviewCount={0} />);
+    const { rerender } = render(<ShellSidebarNav activeId="today" />);
+    rerender(<ShellSidebarNav activeId={null} />);
     expect(thumb().style.transition).toBe("opacity 140ms ease-out");
     expect(thumb().style.opacity).toBe("0");
   });

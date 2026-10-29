@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
-import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
+import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
+import { asksAsCheck } from "@/lib/calendar-checks";
 import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
@@ -34,18 +35,28 @@ function segmentOf(item: ReviewItemRow) {
   return typeof id === "string" && id ? id : null;
 }
 
-export function useListChecks({
-  applyTransition,
-  categories,
-  refresh,
-  reviewItems
-}: {
-  /** The List's transition, which owns every change a "?" makes, restores included. */
+/** The workspace of an owner key ("workspace:user"). */
+function workspaceOf(owner: string) {
+  return owner.split(":")[0];
+}
+
+type CheckDecisionsInput = {
+  /** The List's transition, which owns every change a "?" makes, restores included. Stable. */
   applyTransition: (update: () => void) => void;
   categories: readonly CategoryRow[];
+  /** Whose decisions (workspace and user): another owner starts afresh, and the previous one's late results are dropped. */
+  owner: string;
   refresh: () => Promise<unknown>;
   reviewItems: readonly ReviewItemRow[];
-}) {
+};
+
+/**
+ * The "?" decisions (Codex r4 on #609): what is held for Undo, saving, revived or decided by the server, and the
+ * "?" that therefore still show. Owned once per workspace/user lifetime at AppShell level (CheckDecisionsProvider),
+ * so the List, the sidebar badge and Today's chip read one state that outlives the List: an answer still saving
+ * stays away when the List is left and opened again, and a saved one until the data no longer lists it open.
+ */
+function useCheckDecisionsState({ applyTransition, categories, owner, refresh, reviewItems }: CheckDecisionsInput) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
   // As the deck (Codex r1/r2 on #568): a refused outing's canonical statuses, so only its open cards
   // return; and cards the server says are decided stay away until newer data lists them open.
@@ -61,12 +72,35 @@ export function useListChecks({
     const over = openItemsAtConflict.current;
     if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition);
+  const { state, decide, undo, clearError, settleResolved: settleDecisions } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner);
   // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
   // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  // The owner lifetime: a generation bumped on every owner change (A → B → A is three), which every deferred update
+  // captures and checks, so nothing queued in one lifetime lands in another (Codex r6 on #609).
+  const [lifetime, setLifetime] = useState({ owner, generation: 0 });
+  const generationNow = useRef(0);
+  useLayoutEffect(() => {
+    generationNow.current = lifetime.generation;
+  }, [lifetime.generation]);
+  // The items the server resolved another way in this lifetime: never revived.
+  const resolvedNow = useRef(new Set<string>());
+  useEffect(() => {
+    resolvedNow.current = new Set();
+  }, [lifetime.generation]);
+  // Another owner: nothing of the previous lifetime carries over.
+  if (lifetime.owner !== owner) {
+    setLifetime({ owner, generation: lifetime.generation + 1 });
+    setClosedByServer(new Map());
+    setSnapshots(new Map());
+    setRevived(new Map());
+    setHeldOutings(new Map());
+  }
+  useEffect(() => {
+    outingConflictStatuses.current = new Map();
+  }, [owner]);
   // Kept current for the restore effect below.
   const restoreSources = useRef({ snapshots, heldOutings });
   useLayoutEffect(() => {
@@ -89,8 +123,15 @@ export function useListChecks({
     const snapshot = restoreSources.current.snapshots.get(restoredId);
     const back = [...(snapshot && !loaded.has(restoredId) ? [snapshot] : []),
       ...(restoreSources.current.heldOutings.get(restoredId) ?? []).filter((member) => !loaded.has(member.id) && stillOpen(member.id))];
-    if (back.length) applyTransition(() => setRevived((current) => new Map([...current, ...back.map((item) => [item.id, item] as const)])));
-  }, [applyTransition, state.restored]);
+    // The transition may run it later: only in the lifetime it was for, and only its own items, never one the
+    // server resolved meanwhile (Codex r5, r6 on #609).
+    const scheduledFor = lifetime.generation;
+    if (back.length) applyTransition(() => {
+      if (generationNow.current !== scheduledFor) return;
+      const still = back.filter((item) => !resolvedNow.current.has(item.id));
+      if (still.length) setRevived((current) => new Map([...current, ...still.map((item) => [item.id, item] as const)]));
+    });
+  }, [applyTransition, lifetime.generation, state.restored]);
   // A revived card the data lists again is the data's card from then on.
   if ([...revived.keys()].some((id) => loadedIds.has(id))) setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   // Newer data listing a card open again lifts the server's earlier "decided" for it.
@@ -111,10 +152,21 @@ export function useListChecks({
       .flatMap(([, members]) => members.map((member) => member.id))
   ]), [closedByServer, heldOutings, outings, state.hiddenIds]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  // A timer that ran into a trip is never an ordinary "?" row: it asks on its block with its own UI later (step 15).
   const checks = useMemo<ListCheck[]>(() => items
-    .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
+    .filter((item) => asksAsCheck(item) && !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
+
+  // What the badge and Today's chip count: the open items as the List shows them — held, saving, saved (until the
+  // data no longer lists them) and server-decided ones away, with the same held outing members as `memberIds` and
+  // its exception for a stay the server says is decided; revived ones back.
+  const projectedItems = useMemo(() => {
+    const hidden = new Set([...state.hiddenIds, ...closedByServer.keys(),
+      ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
+        .flatMap(([, members]) => members.map((member) => member.id))]);
+    return items.filter((item) => !hidden.has(item.id));
+  }, [closedByServer, heldOutings, items, state.hiddenIds]);
 
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);
@@ -145,15 +197,95 @@ export function useListChecks({
     }
   }, [categories, decide, itemsById, outings, revived]);
 
-  return { answer, checks, clearError, itemsById, outings, state, undo };
+  /**
+   * A receipt that resolved these items another way (Logs as's `resolvedReviewItemIds`, a Grid answer; Codex r6 on
+   * #609): their held or saving decisions are settled, nothing revives them, and they stay away until data lists
+   * them open again.
+   */
+  // A receipt can land lifetimes later (A → B → A; Codex r7 on #609). Each request holds the settle of the lifetime it
+  // started in, which applies its ids through the current controller — a resolved review id is a server fact — but
+  // only while the workspace is still the one the request was made in; otherwise the receipt is dropped.
+  const settleNow = useRef(settleDecisions);
+  const ownerNow = useRef(owner);
+  useLayoutEffect(() => {
+    settleNow.current = settleDecisions;
+    ownerNow.current = owner;
+  });
+  const settleResolved = useCallback((itemIds: readonly string[]) => {
+    if (!itemIds.length) return;
+    if (workspaceOf(ownerNow.current) !== workspaceOf(owner)) return;
+    for (const id of itemIds) resolvedNow.current.add(id);
+    settleNow.current(itemIds);
+    setRevived((current) => itemIds.some((id) => current.has(id)) ? new Map([...current].filter(([id]) => !itemIds.includes(id))) : current);
+    const over = openItemsAtConflict.current;
+    setClosedByServer((current) => new Map([...current, ...itemIds.map((id) => [id, over] as const)]));
+  }, [owner]);
+
+  return { answer, checks, clearError, itemsById, outings, projectedItems, settleResolved, state, undo };
+}
+
+type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
+type SharedCheckDecisions = CheckDecisions & {
+  /** The List, while it is shown, lends its transition and its refresh (which also reloads its weeks). */
+  register: (applyTransition: (update: () => void) => void, refresh: () => Promise<unknown>) => () => void;
+};
+const CheckDecisionsContext = createContext<SharedCheckDecisions | null>(null);
+
+/** The one owner of "?" decisions for the signed-in workspace and user, above the List, the badge and Today. */
+export function CheckDecisionsProvider({ categories, children, owner, refresh, reviewItems }: {
+  categories: readonly CategoryRow[]; children: ReactNode; owner: string; refresh: () => Promise<unknown>; reviewItems: readonly ReviewItemRow[];
+}) {
+  const lent = useRef<{ transition: ((update: () => void) => void) | null; refresh: (() => Promise<unknown>) | null }>({ transition: null, refresh: null });
+  const shellRefresh = useRef(refresh);
+  useLayoutEffect(() => {
+    shellRefresh.current = refresh;
+  });
+  const applyTransition = useCallback((update: () => void) => (lent.current.transition ?? ((run: () => void) => run()))(update), []);
+  const refreshAll = useCallback(() => (lent.current.refresh ?? shellRefresh.current)(), []);
+  const decisions = useCheckDecisionsState({ applyTransition, categories, owner, refresh: refreshAll, reviewItems });
+  const register = useCallback((transition: (update: () => void) => void, listRefresh: () => Promise<unknown>) => {
+    lent.current = { transition, refresh: listRefresh };
+    return () => {
+      if (lent.current.transition === transition) lent.current = { transition: null, refresh: null };
+    };
+  }, []);
+  const value = useMemo(() => ({ ...decisions, register }), [decisions, register]);
+  return <CheckDecisionsContext.Provider value={value}>{children}</CheckDecisionsContext.Provider>;
+}
+
+const NO_SETTLE = () => undefined;
+/** Settles review items a receipt resolved another way (the Grid's answers and corrections), when a provider owns decisions. */
+export function useSettleResolved(): (reviewItemIds: readonly string[]) => void {
+  return useContext(CheckDecisionsContext)?.settleResolved ?? NO_SETTLE;
+}
+
+/** The open review items as the List shows them, for counts outside it; the items as given without a provider. */
+export function useProjectedReviewItems(reviewItems: readonly ReviewItemRow[]) {
+  return useContext(CheckDecisionsContext)?.projectedItems ?? reviewItems;
+}
+
+const NO_ITEMS: readonly ReviewItemRow[] = [];
+
+/**
+ * Calendar › List's "?" decisions: the AppShell provider's, with the List lending its transition and refresh while
+ * shown; without a provider (a List on its own), its own.
+ */
+export function useListChecks({ applyTransition, categories, refresh, reviewItems }: Omit<CheckDecisionsInput, "owner">) {
+  const shared = useContext(CheckDecisionsContext);
+  const local = useCheckDecisionsState({ applyTransition, categories, owner: "local", refresh, reviewItems: shared ? NO_ITEMS : reviewItems });
+  const register = shared?.register;
+  useLayoutEffect(() => register?.(applyTransition, refresh), [applyTransition, refresh, register]);
+  return shared ?? local;
 }
 
 /** "3 to check" at the top of the day's List: each press moves to the next "?" and opens its question. */
 export function ChecksChip({ count, onNext }: { count: number; onNext: () => void }) {
   if (!count) return null;
   return (
-    <div className="timeline-checks-bar">
-      <button className="timeline-checks-chip" data-tip="Go to the next one" onClick={onNext} type="button">
+    <div className="timeline-checks-bar is-sticky">
+      {/* Every "?" from the last 7 days, oldest first, across days (owner, 28 Oct 2026, concern 4). */}
+      <button aria-label={`${count} to check, oldest first`} className="timeline-checks-chip"
+        data-tip="Go to the next one, oldest first" onClick={onNext} type="button">
         <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
         {count} to check
       </button>
@@ -162,38 +294,24 @@ export function ChecksChip({ count, onNext }: { count: number; onNext: () => voi
 }
 
 /**
- * A suggestion's question under its row, with the deck's answers. A trip asks by its title, "Getting
- * around, 14:44–16:31?", with Yes, Edit (its editor, opened under the question) and Not now (card A); a
- * place asks "Visited {guess}?" (or "Where were you?") with its times, and the same answers (card B).
+ * A suggestion's question under its row, with the deck's answers in compact pills. Since the owner's approval
+ * (28 Oct 2026) only a "?" with no dialog asks here (Apple Health, or a trip the day's places don't have);
+ * places and trips ask at the top of their dialog.
  */
 export function CheckQuestionRow({
   clock,
-  editor,
   item,
-  onAnswer,
-  onEdit
+  onAnswer
 }: {
   clock: ClockFormat;
-  /** The trip's or place's editor while it is open, under the question. */
-  editor?: ReactNode;
   item: ReviewItemRow;
   onAnswer: (kind: ReviewDecisionKind) => void;
-  /** Open (or close) the trip's or place's editor. */
-  onEdit?: () => void;
 }) {
   const span = reviewWindow(item);
   const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
   const picture = reviewPicture(item);
   // Every Move is a trip here, a round trip from a place too (Codex r1 on #590).
   const trip = item.eventType === "commute_detected";
-  const editRef = useRef<HTMLButtonElement>(null);
-  const editing = Boolean(editor);
-  const wasEditing = useRef(editing);
-  // Closing the editor gives focus back to Edit (Codex r1 on #590).
-  useEffect(() => {
-    if (wasEditing.current && !editing) editRef.current?.focus();
-    wasEditing.current = editing;
-  }, [editing]);
   // A place asks "Visited {guess}?" (or "Where were you?") with its times under it (card B); anything
   // else asks by its title with its times.
   const place = !trip && picture === "place";
@@ -213,7 +331,8 @@ export function CheckQuestionRow({
       <td colSpan={4}>
         <div className="timeline-check-question" role="group" aria-label={question}>
           <b>{question}</b>
-          <small>{detail}</small>
+          {/* The row already shows the times (owner item I), so a place's question doesn't repeat them. */}
+          {visited ? null : <small>{detail}</small>}
           <div className="timeline-check-answers">
             {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
                 stays for Play/Stop and live recording. An outing's trips there and back are logged with it. */}
@@ -222,50 +341,79 @@ export function CheckQuestionRow({
                 {(trip || visited) && !legacyUnnamed ? "Yes" : `Log ${reviewDefaultName(item)}`}
               </button>
             ) : null}
-            {(trip || visited) && onEdit ? (
-              <button aria-expanded={editing} className="ui-button ui-button-secondary is-compact" onClick={onEdit} ref={editRef} type="button">Edit</button>
-            ) : null}
             <button className="ui-button ui-button-ghost is-compact" onClick={() => onAnswer("skip")} type="button">Not now</button>
           </div>
-          {editor}
         </div>
       </td>
     </tr>
   );
 }
 
+/**
+ * Owner items A and B (28 Oct 2026): a "?"'s words for its dialog and its row's Yes pill — what it asks, and the
+ * one-tap answer when there is a confident one (a trip, or a place with a guess).
+ */
+export function checkQuestionWords(item: ReviewItemRow, clock: ClockFormat) {
+  const span = reviewWindow(item);
+  const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
+  const picture = reviewPicture(item);
+  const trip = item.eventType === "commute_detected";
+  const visited = !trip && picture === "place" ? placeQuestion(reviewTitle(item)) : null;
+  const question = visited ? visited.question : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
+  const yesLabel = !span ? null : trip || visited?.guess ? "Yes" : visited ? null : `Log ${reviewDefaultName(item)}`;
+  return { question, yesLabel, confident: Boolean(span && (trip || visited?.guess)) };
+}
+
 /** A "?" with no place row: a trip not yet in a block, Apple Health, or another suggestion, at its time. */
-export function CheckRowView({ check, clock, item, row }: {
+export function CheckRowView({ check, clock, item, onOpen, onYes, row }: {
   check: { expanded: boolean; onToggle: () => void };
+  /** A trip's row opens its dialog (owner item A); anything else (Apple Health) opens its question under it. */
+  onOpen?: () => void;
+  /** The one-tap Yes on the row (owner item B). */
+  onYes?: () => void;
   clock: ClockFormat;
   item: ReviewItemRow;
   row: Extract<LocationListRow, { kind: "check" }>;
 }) {
   const span = reviewWindow(item);
   const title = reviewTitle(item);
+  // Owner concern 1 (28 Oct 2026): its own icon (a trip's route, Apple Health's heart, a place's pin) with the
+  // amber dot; the whole row opens its question.
+  const picture = reviewPicture(item);
+  const glyph = picture === "commute" ? DAYFRAME_APP_ICONS.openTrip : picture === "sleep" || picture === "workout"
+    ? DAYFRAME_APP_ICONS.sourceHealth : DAYFRAME_APP_ICONS.places;
+  const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : "";
   return (
-    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={row.key} data-suggestion-id={item.id}>
-      <td className="px-3 py-3">
-        <div className="timeline-task-cell is-single">
-          <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>
+    <tr className="timeline-list-row timeline-location-row align-middle is-v4" data-location-row={row.key} data-suggestion-id={item.id}>
+      <td className="px-3 py-3" colSpan={2}>
+        <LocationRowButton asking checkKey={row.key} expanded={onOpen ? undefined : check.expanded}
+          hint={onOpen ? row.trip ? "Opens the trip" : "Opens the place" : check.expanded ? "Hides the question" : "Shows the question"}
+          label={`${title}${when ? `, ${when}` : ""}. Needs a look`} onPress={onOpen ?? check.onToggle}>
+          <LocationMark asking glyph={glyph} />
           <span className="timeline-task-details">
             <span className="timeline-task-primary-line"><b>{title}</b></span>
             {row.trip?.legs.length ? <TripModesLine legs={row.trip.legs} route={row.trip.route} />
-              : <span className="timeline-location-secondary">{reviewSourceLabel(reviewPicture(item))}</span>}
+              : <span className="timeline-location-secondary">{reviewSourceLabel(picture)}</span>}
           </span>
-        </div>
-      </td>
-      <td className="tabular px-3 py-3">
-        <div className="timeline-list-time-content">
-          {span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null}
-        </div>
+          {span ? <StackedTimes clock={clock} fromMs={span.startMs} toMs={span.stopMs} /> : null}
+        </LocationRowButton>
       </td>
       <td className="tabular px-3 py-3 timeline-list-duration">
         <div className="timeline-list-duration-content">{span ? formatDuration(Math.round((span.stopMs - span.startMs) / 1000)) : null}</div>
       </td>
       <td className="px-3 py-3">
-        <div className="timeline-list-actions"><CheckToggle checkKey={row.key} expanded={check.expanded} label={title} onToggle={check.onToggle} /></div>
+        {onYes ? <button className="ui-button timeline-check-log is-compact timeline-row-yes" onClick={onYes} type="button">Yes</button> : null}
       </td>
     </tr>
+  );
+}
+
+/** Start over end, as a block's row shows its times (owner item D). */
+export function StackedTimes({ clock, fromMs, toMs }: { clock: ClockFormat; fromMs: number; toMs: number | null }) {
+  return (
+    <span className="tabular timeline-location-span is-stacked">
+      <span>{formatTime(new Date(fromMs), clock)}</span>
+      <span>{toMs == null ? "now" : formatTime(new Date(toMs), clock)}</span>
+    </span>
   );
 }

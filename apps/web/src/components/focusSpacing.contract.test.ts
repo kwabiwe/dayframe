@@ -39,7 +39,6 @@ describe("web focus and control contracts", () => {
     expect(styles.match(/--focus:\s*#64718a;/g)).toHaveLength(2);
     expect(styles).toContain("--web-focus-border: var(--focus);");
     expect(styles).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus\);[\s\S]*outline-offset: 2px;/);
-    expect(styles).toContain(".focus-ring:not(input, select, textarea):focus-visible");
     expect(styles).toMatch(/button:focus:not\(:focus-visible\),[\s\S]*outline: 0;[\s\S]*box-shadow: none;/s);
 
     const focusBlocks = styles.match(/[^{}]*(?:focus-visible|focus-within)[^{}]*\{[^}]*\}/g) ?? [];

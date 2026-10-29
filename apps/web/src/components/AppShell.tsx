@@ -18,13 +18,16 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { CheckDecisionsProvider, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { beforeSessionChange } from "@/lib/session-change";
 import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
-import type { BootstrapData } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, ReviewItemRow } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import { markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
@@ -46,7 +49,7 @@ type Overlay = "search" | "profile" | "help" | null;
 const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
-  ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
+  ["G then T, C, P, L, S", "Go to Today, Calendar, Reports, Library, Settings"],
   ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
@@ -63,8 +66,30 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AppShellRuntimeProvider>
-      <AppShellContent>{children}</AppShellContent>
+      <CheckDecisionsHost>
+        <AppShellContent>{children}</AppShellContent>
+      </CheckDecisionsHost>
     </AppShellRuntimeProvider>
+  );
+}
+
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
+const NO_CATEGORIES: readonly CategoryRow[] = [];
+
+/**
+ * The "?" decisions' one owner (Codex r4 on #609), per workspace/user lifetime: Calendar › List answers through it,
+ * and the sidebar badge and Today's chip count from it, so an answer held, saving or saved shows the same everywhere,
+ * and survives leaving the List. Another workspace or person starts it afresh.
+ */
+function CheckDecisionsHost({ children }: { children: ReactNode }) {
+  const { data, refresh } = useAppShellRuntime();
+  const owner = data ? `${data.workspace.id}:${data.user.id}` : "";
+  const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
+  return (
+    <CheckDecisionsProvider categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
+      reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
+      {children}
+    </CheckDecisionsProvider>
   );
 }
 
@@ -90,10 +115,16 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const goToTimer = useRef<number | undefined>(undefined);
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
-  // Review cards: an outing counts once (PRD D19, PR 12c).
-  const reviewCount = data?.stats.reviewCardCount ?? 0;
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
-  const checkCount = data?.stats.checkCount ?? 0;
+  // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
+  // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
+  const todayStartMs = useLocalDayStartMs();
+  // As the List shows them, from the one decisions owner: held, saving and saved answers away, revived ones back.
+  const projectedItems = useProjectedReviewItems(data?.reviewItems ?? NO_REVIEW_ITEMS);
+  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectedItems, todayStartMs) : null,
+    [data, projectedItems, todayStartMs]);
+  const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
+  const calendarHref = asking?.length ? oldestCheckHref(asking) : undefined;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -266,7 +297,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -337,7 +368,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

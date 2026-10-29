@@ -567,15 +567,13 @@ export function DataPrivacySettings() {
   );
 }
 
-/** Settings › Help: Review, keyboard shortcuts, and what to try when something looks wrong. */
-export function HelpSettings({ authMode, reviewCount }: { authMode: SettingsAuthMode; reviewCount: number }) {
+/**
+ * Settings › Help: keyboard shortcuts, and what to try when something looks wrong. Things to check are answered in
+ * Calendar › List (location v4 step 15), so Help no longer links to a Review page.
+ */
+export function HelpSettings({ authMode }: { authMode: SettingsAuthMode }) {
   return (
     <>
-      <SettingsRow
-        label="Review"
-        detail={reviewCount === 0 ? "Nothing waiting." : `${reviewCount} ${reviewCount === 1 ? "moment" : "moments"} waiting.`}
-        action={<Link className="df-rbtn df-rbtn--sm" href="/review">Open Review</Link>}
-      />
       <SettingsRow
         className="df-shortcuts-row"
         label="Keyboard shortcuts"
