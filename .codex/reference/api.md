@@ -51,6 +51,11 @@ for time away from a saved place, so cached and backlog items keep their
 round-trip labels and never fall back to the Commute category. The `move-route`
 feature adds `routeLabel` (a Move's second line, "Home → Gym", PRD D19) to
 Location Review records for Moves, so cards beyond the bootstrap's page keep it.
+The `timer-trip-clash` feature adds `timerTripClash: { timeEntryId, tripId,
+tripStartedAt, tripStoppedAt, overlapSeconds }` to a timer-trip clash's Review
+record ("a block ran into your trip", #611), read from its event's payload, so a
+client paging every record counts clashes past the bootstrap's 100 Review items
+(the List's dot). A clash with an incomplete payload carries no field.
 
 A Review edit may carry `descriptionTyped: true` (PRD D19): current iPhone and web editors start a
 Move's name empty and send it with any name the person typed. A Move description without it that
