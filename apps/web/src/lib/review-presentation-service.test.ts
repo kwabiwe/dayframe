@@ -160,14 +160,19 @@ describe("getReviewPresentation", () => {
       clashPayload: { timeEntryId: entryId, tripId: "trip-synthetic-1", tripStartedAt: "2026-10-29T08:00:00.000Z",
         tripStoppedAt: "2026-10-29T08:30:00.000Z", overlapSeconds: 720.4, extra: "never sent" } };
     const broken = { ...clash, id: "90000000-0000-4000-8000-000000000002", clashPayload: { timeEntryId: entryId } };
+    // No overlap, or a time the record's schema refuses: no question, and the page still loads (Codex r1 on #621).
+    const noOverlap = { ...clash, id: "90000000-0000-4000-8000-000000000003",
+      clashPayload: { ...clash.clashPayload, overlapSeconds: undefined } };
+    const badTime = { ...clash, id: "90000000-0000-4000-8000-000000000004",
+      clashPayload: { ...clash.clashPayload, tripStartedAt: "2026-10-29 08:00:00Z" } };
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
-      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 2, todayCount: 2, openReviewItemIds: [reviewId, broken.id] }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 4, todayCount: 4, openReviewItemIds: [reviewId, broken.id, noOverlap.id, badTime.id] }] };
       if (sql.includes("from time_entries te")) return { rows: [] };
       if (sql.includes("from review_items ri")) {
         // Only a clash item's payload is read.
         expect(sql).toContain("when ri.type = 'location_timer_trip_clash' or ae.event_type = 'timer_trip_clash'");
-        return { rows: [clash, broken] };
+        return { rows: [clash, broken, noOverlap, badTime] };
       }
       return { rows: [] };
     });
@@ -178,6 +183,8 @@ describe("getReviewPresentation", () => {
     expect(byId.get(reviewId)).toMatchObject({ timerTripClash: { timeEntryId: entryId, tripId: "trip-synthetic-1",
       tripStartedAt: "2026-10-29T08:00:00.000Z", tripStoppedAt: "2026-10-29T08:30:00.000Z", overlapSeconds: 720 } });
     expect(byId.get(broken.id)).not.toHaveProperty("timerTripClash");
+    expect(byId.get(noOverlap.id)).not.toHaveProperty("timerTripClash");
+    expect(byId.get(badTime.id)).not.toHaveProperty("timerTripClash");
     expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
     const older = await getReviewPresentation(session, request, {}, { venue: true });
     expect(older.records.some((record) => "timerTripClash" in (record as object))).toBe(false);

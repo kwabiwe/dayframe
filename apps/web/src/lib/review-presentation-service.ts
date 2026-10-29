@@ -7,6 +7,7 @@ import {
   TIMER_TRIP_CLASH_REVIEW_TYPE,
   timerTripClashQuestion,
   ReviewPresentationResponseSchema,
+  ReviewTimerTripClashPresentationSchema,
   type CompletedTodayEntryPresentation,
   type LegacyReviewEntryPresentation,
   type ReviewPresentationRecord,
@@ -22,7 +23,6 @@ import { foldedOutingMemberSql, OUTING_STAYS_SQL, outingStaysFromRows } from "./
 import { placeDisplayNameSql } from "./place-display";
 
 const COLLECTION_LIMIT = 5_000;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SQL_COLLECTION_LIMIT = COLLECTION_LIMIT + 1;
 
 type ReviewRow = {
@@ -661,12 +661,18 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 
 /**
  * A timer-trip clash's question (#611): the block it asks on and the trip it ran into, for clients that list every
- * clash past the bootstrap's 100 Review items (the List's dot). Only a complete payload within the record's bounds.
+ * clash past the bootstrap's 100 Review items (the List's dot). Only a complete payload (its overlap a number) that
+ * fits the record's own schema; anything else carries no question, so one bad payload never fails a page (Codex r1
+ * on #621).
  */
 function clashFor(row: ReviewRow) {
   const clash = timerTripClashQuestion({ type: row.type, eventType: row.eventType, rawPayload: row.clashPayload ?? null });
-  if (!clash || !UUID_PATTERN.test(clash.timeEntryId) || clash.tripId.length > 200) return {};
-  return { timerTripClash: { ...clash, overlapSeconds: Math.min(Math.round(clash.overlapSeconds), REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS) } };
+  const overlap = row.clashPayload?.overlapSeconds;
+  if (!clash || typeof overlap !== "number" || !Number.isFinite(overlap)) return {};
+  const parsed = ReviewTimerTripClashPresentationSchema.safeParse({
+    ...clash, overlapSeconds: Math.min(Math.round(clash.overlapSeconds), REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS)
+  });
+  return parsed.success ? { timerTripClash: parsed.data } : {};
 }
 
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */

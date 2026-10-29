@@ -44,6 +44,17 @@ export const REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS = 5_000;
 // deliberately bounded even when a caller supplies absolute instants.
 export const REVIEW_PRESENTATION_MAX_WINDOW_MS = 61 * 24 * 60 * 60 * 1_000;
 
+/** A timer-trip clash's question on its Review record (the timer-trip-clash feature). */
+export const ReviewTimerTripClashPresentationSchema = z
+  .object({
+    timeEntryId: uuid,
+    tripId: z.string().min(1).max(200),
+    tripStartedAt: instant,
+    tripStoppedAt: instant,
+    overlapSeconds: z.number().int().nonnegative().max(REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS)
+  })
+  .strict();
+
 const pageCursor = z
   .string()
   .min(1)
@@ -210,13 +221,7 @@ export const ReviewProposalPresentationSchema = z
     /** An Apple Place ID for an unsaved stay (only for clients sending the venue feature). */
     venuePlaceId: z.string().min(1).max(200).optional(),
     /** The block a timer-trip clash asks on and the trip it ran into (only for clients sending the timer-trip-clash feature). */
-    timerTripClash: z.object({
-      timeEntryId: uuid,
-      tripId: z.string().min(1).max(200),
-      tripStartedAt: instant,
-      tripStoppedAt: instant,
-      overlapSeconds: z.number().int().nonnegative().max(REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS)
-    }).strict().optional(),
+    timerTripClash: ReviewTimerTripClashPresentationSchema.optional(),
     outing: z.object({
       key: z.string().min(1).max(200),
       role: z.enum(["stay", "in", "out"]),
