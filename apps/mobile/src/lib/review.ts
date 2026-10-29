@@ -1,3 +1,4 @@
+import { TIMER_TRIP_CLASH_EVENT_TYPE, TIMER_TRIP_CLASH_REVIEW_TYPE } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 export const REVIEW_COPY = {
@@ -22,36 +23,6 @@ export function scheduleLocationEvidenceLoadingFeedback(onShow: () => void) {
 
 type MobileCategory = MobileBootstrap["categories"][number];
 
-// "skip_older" / "skip_all" are the deck's "Review all" bulk skips (step 5f).
-export type ReviewMenuAction = "edit" | "dismiss" | "skip_older" | "skip_all";
-
-export type PendingReviewMenuAction = {
-  action: ReviewMenuAction;
-  itemId: string;
-  token: number;
-};
-
-export type ReviewMenuState = {
-  openItemId: string | null;
-  closingItemId: string | null;
-  pendingAction: PendingReviewMenuAction | null;
-};
-
-export type ReviewMenuEvent =
-  | { type: "toggle"; itemId: string; disabled: boolean }
-  | { type: "close" }
-  | { type: "begin_action"; action: ReviewMenuAction; itemId: string; token: number }
-  | { type: "menu_closed"; itemId: string }
-  | { type: "finish_action"; itemId: string; token: number }
-  | { type: "reconcile"; openItemIds: string[] }
-  | { type: "reset" };
-
-export const CLOSED_REVIEW_MENU_STATE: ReviewMenuState = {
-  openItemId: null,
-  closingItemId: null,
-  pendingAction: null
-};
-
 export type OptimisticReviewRemoval = {
   index: number;
   item: MobileReviewItem;
@@ -65,6 +36,18 @@ export function isReviewNeededEntry(entry: Pick<MobileTimeEntry, "reviewStatus">
 
 export function isOpenReviewItem(item: Pick<MobileReviewItem, "status">) {
   return item.status === "open";
+}
+
+/**
+ * Whether a Review item is one of the ordinary "?" (Calendar › List rows, Grid blocks, Today's ribbon, the badge,
+ * the chips and the evening reminder). A timer that ran into a trip (`location_timer_trip_clash`) asks on its block
+ * with its own End it / Keep it, which comes later (location v4 design §7), so until then no iPhone surface shows or
+ * counts it as an ordinary question (step 15; the web does the same since #613).
+ */
+export function asksAsCheck(item: { type?: string | null; eventType?: string | null }) {
+  // By its Review type, or its event's (the type is optional in an older bootstrap, and Review presentation
+  // records carry only the event's).
+  return item.type !== TIMER_TRIP_CLASH_REVIEW_TYPE && item.eventType !== TIMER_TRIP_CLASH_EVENT_TYPE;
 }
 
 export function isOneOffLocationReviewItem(
@@ -274,80 +257,6 @@ export function reviewActionOrder(item: MobileReviewItem) {
   ];
 }
 
-export function reduceReviewMenuState(
-  state: ReviewMenuState,
-  event: ReviewMenuEvent
-): ReviewMenuState {
-  switch (event.type) {
-    case "toggle":
-      if (event.disabled || state.pendingAction || state.closingItemId) return state;
-      if (state.openItemId === event.itemId) {
-        return { ...state, openItemId: null, closingItemId: event.itemId };
-      }
-      if (state.openItemId) return state;
-      return { ...state, openItemId: event.itemId };
-    case "close":
-      return state.openItemId == null
-        ? state
-        : { ...state, openItemId: null, closingItemId: state.openItemId };
-    case "begin_action":
-      if (!canRunReviewMenuAction(state, event.itemId)) return state;
-      return {
-        openItemId: null,
-        closingItemId: event.itemId,
-        pendingAction: {
-          action: event.action,
-          itemId: event.itemId,
-          token: event.token
-        }
-      };
-    case "menu_closed":
-      return state.closingItemId === event.itemId
-        ? { ...state, closingItemId: null }
-        : state;
-    case "finish_action":
-      return (
-        state.pendingAction?.itemId === event.itemId &&
-        state.pendingAction.token === event.token
-      )
-        ? { ...state, pendingAction: null }
-        : state;
-    case "reconcile": {
-      const openItemIds = new Set(event.openItemIds);
-      const openItemRemoved = Boolean(
-        state.openItemId && !openItemIds.has(state.openItemId)
-      );
-      const pendingItemRemoved = Boolean(
-        state.pendingAction && !openItemIds.has(state.pendingAction.itemId)
-      );
-      if (!openItemRemoved && !pendingItemRemoved) return state;
-      return {
-        ...state,
-        openItemId: openItemRemoved ? null : state.openItemId,
-        closingItemId: openItemRemoved
-          ? state.closingItemId ?? state.openItemId
-          : state.closingItemId,
-        pendingAction: pendingItemRemoved ? null : state.pendingAction
-      };
-    }
-    case "reset":
-      if (!state.openItemId && !state.pendingAction) return state;
-      return {
-        openItemId: null,
-        closingItemId: state.closingItemId ?? state.openItemId,
-        pendingAction: null
-      };
-  }
-}
-
-export function canRunReviewMenuAction(state: ReviewMenuState, itemId: string) {
-  return (
-    state.openItemId === itemId &&
-    state.closingItemId == null &&
-    state.pendingAction == null
-  );
-}
-
 export function isCurrentReviewEditPresentation(
   currentPresentationId: number | null,
   presentationId: number
@@ -510,7 +419,7 @@ export function locationReviewReasonCopy(
     case "auto_log_logged_before":
       return "Not logged automatically · this visit was logged once before";
     case "auto_log_offered_before":
-      return "Not logged automatically · it was offered in Review before";
+      return "Not logged automatically · it was asked in Calendar before";
     case "auto_log_off":
       return "Log automatically is off for this place";
     // Moves that log themselves (PRD D19): why this trip came here instead.

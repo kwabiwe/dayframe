@@ -108,6 +108,7 @@ const {
   normaliseLocationReviewRequestError,
   readQueue,
   readTimerEntryIdCorrelations,
+  HealthReprocessCancelledError,
   reprocessHealthReviewItems,
   retryFailedQueuedEvents,
   removeQueuedEvent,
@@ -367,27 +368,6 @@ describe("mobile API client", () => {
       owner: { userId: "user-b", workspaceId: "workspace-a" }
     })).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("reports a venue suggestion only under the evidence's own account and while the app is active (Codex r1 on #522)", async () => {
-    const { reportVenueSuggestion } = await import("./api");
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
-    vi.stubGlobal("fetch", fetchMock);
-    await setSessionToken("account-a-token", TIMER_STOP_OWNER);
-    const reviewId = "40000000-0000-4000-8000-000000000001";
-    // Another account's session is active: nothing is sent.
-    await expect(reportVenueSuggestion(reviewId, "ISYNTHETIC", { userId: "user-b", workspaceId: "workspace-a" })).resolves.toBe(false);
-    // The app is in the background: nothing is sent.
-    appState.currentState = "background";
-    await expect(reportVenueSuggestion(reviewId, "ISYNTHETIC", TIMER_STOP_OWNER)).resolves.toBe(false);
-    appState.currentState = "active";
-    expect(fetchMock).not.toHaveBeenCalled();
-    // The evidence's own account, in the foreground: the Place ID only.
-    await expect(reportVenueSuggestion(reviewId, "ISYNTHETIC", TIMER_STOP_OWNER)).resolves.toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith(`https://dayframe.test/api/review/${reviewId}/venue`, expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ placeId: "ISYNTHETIC" })
-    }));
   });
 
   it("asks for a reset email and says sign-in failures in plain words (UIA-317, UIA-320)", async () => {
@@ -3428,6 +3408,29 @@ describe("mobile API client", () => {
         })
       })
     );
+  });
+
+  it("stops a Health reprocess batch its callers no longer want after the session read, and cancels it in flight (Codex r5 on #615)", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("Aborted"), { name: "AbortError" })), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const preferences = { sleep: true, walking: true, running: true, cycling: true, strength_training: false, swimming: false, other: false };
+    // Aborted while the session is read: never sent.
+    const during = new AbortController();
+    const first = reprocessHealthReviewItems(preferences, { signal: during.signal });
+    during.abort();
+    await expect(first).rejects.toBeInstanceOf(HealthReprocessCancelledError);
+    // The callers' predicate turned false by the time the session is read: never sent.
+    await expect(reprocessHealthReviewItems(preferences, { beforeSend: () => false })).rejects.toBeInstanceOf(HealthReprocessCancelledError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Sent, then aborted in flight: the request's own signal is the caller's.
+    const inFlight = new AbortController();
+    const third = reprocessHealthReviewItems(preferences, { signal: inFlight.signal, beforeSend: () => true });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    inFlight.abort();
+    await expect(third).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("can force a Health review reprocess batch from mobile", async () => {

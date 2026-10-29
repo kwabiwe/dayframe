@@ -64,7 +64,7 @@ const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
-import { calendarCheckOutings, calendarCheckRoute, settledCheckBase, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { calendarCheckOutings, settledCheckBase, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
 import { earlierDayReviewCounts } from "../../lib/earlierThisWeek";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
@@ -724,15 +724,6 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
-
-  it("opens a place's evidence on its details screen and anything else on the deck, focused on it (Codex r10 on #582)", () => {
-    const place = suggestion("a");
-    expect(calendarCheckRoute(place, "a")).toEqual({ pathname: "/review/[id]", params: { id: "a" } });
-    const sleep = suggestion("s", { eventSource: "health_sleep", eventType: "health_sleep_import", rawPayload: null });
-    expect(calendarCheckRoute(sleep, "s")).toEqual({ pathname: "/review", params: { focusReviewId: "s" } });
-    // Not loaded here (paged out): the deck finds it.
-    expect(calendarCheckRoute(undefined, "x")).toEqual({ pathname: "/review", params: { focusReviewId: "x" } });
-  });
 });
 
 describe("the settled \"?\" the Calendar and Today's Earlier this week chips count (Codex r1 on #617)", () => {
@@ -758,5 +749,13 @@ describe("the settled \"?\" the Calendar and Today's Earlier this week chips cou
     const base = settledCheckBase(items, { ...none, decided: new Set(["a"]), answering: new Set(["b"]), waitingIds: new Set(["c"]),
       waitingSegments: new Set(["segment-d"]) });
     expect(base.open.map((item) => item.id)).toEqual(["e"]);
+  });
+
+  it("never counts a timer-into-trip clash, on the Calendar or a chip, until its block UI ships (#615)", () => {
+    const clash = suggestion("clash", { type: "location_timer_trip_clash", suggestedStartedAt: "2026-10-17T12:00:00.000Z",
+      suggestedStoppedAt: "2026-10-17T13:00:00.000Z" } as Partial<MobileReviewItem>);
+    const base = settledCheckBase([clash, ...outing()], none);
+    expect(base.open.map((item) => item.id)).not.toContain("clash");
+    expect(chip(base)).toBe(1);
   });
 });

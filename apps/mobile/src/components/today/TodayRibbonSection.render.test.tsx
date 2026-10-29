@@ -51,7 +51,7 @@ function activity(key: string, from: number, to: number, extra: Record<string, u
 }
 
 describe("TodayRibbonSection", () => {
-  it("hatches only Review time still awaiting a decision and opens its exact Review route", () => {
+  it("hatches only suggested time still awaiting a decision and opens its exact \"?\" in Calendar › List (step 15)", () => {
     mocks.context = {
       isSummaryAvailable: true,
       presentation: {
@@ -65,18 +65,21 @@ describe("TodayRibbonSection", () => {
       },
     };
     const onOpenEntry = vi.fn();
+    const onOpenCheck = vi.fn();
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<TodayRibbonSection entries={[]} nowMs={nowMs} onOpenEntry={onOpenEntry} theme={theme} />);
+      tree = create(<TodayRibbonSection entries={[]} nowMs={nowMs} onOpenCheck={onOpenCheck} onOpenEntry={onOpenEntry} theme={theme} />);
     });
     act(() => tree.root.findByProps({ testID: "today-ribbon-track" }).props.onLayout({ nativeEvent: { layout: { width: 240, height: 62, x: 0, y: 0 } } }));
     expect(tree.root.findAllByType("Pattern" as never)).toHaveLength(2);
     act(() => mocks.tap.handlers.onEnd({ x: 95 }, true));
-    expect(mocks.push).toHaveBeenLastCalledWith({ pathname: "/review", params: { focusReviewId: REVIEW_ID } });
+    expect(onOpenCheck).toHaveBeenLastCalledWith(REVIEW_ID);
     act(() => mocks.tap.handlers.onEnd({ x: 125 }, true));
-    expect(mocks.push).toHaveBeenLastCalledWith({ pathname: "/review/[id]", params: { from: "today", id: LOCATION_ID } });
+    expect(onOpenCheck).toHaveBeenLastCalledWith(LOCATION_ID);
     act(() => mocks.tap.handlers.onEnd({ x: 145 }, true));
-    expect(mocks.push).toHaveBeenCalledTimes(2);
+    expect(onOpenCheck).toHaveBeenCalledTimes(2);
+    // Nothing is pushed: there is no Review screen.
+    expect(mocks.push).not.toHaveBeenCalled();
     expect(onOpenEntry).not.toHaveBeenCalled();
   });
 
@@ -84,7 +87,7 @@ describe("TodayRibbonSection", () => {
     mocks.context = { isSummaryAvailable: false, presentation: null };
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<TodayRibbonSection entries={[]} nowMs={nowMs} onOpenEntry={vi.fn()} theme={theme} />);
+      tree = create(<TodayRibbonSection entries={[]} nowMs={nowMs} onOpenCheck={vi.fn()} onOpenEntry={vi.fn()} theme={theme} />);
     });
     act(() => tree.root.findByProps({ testID: "today-ribbon-track" }).props.onLayout({ nativeEvent: { layout: { width: 240, height: 62, x: 0, y: 0 } } }));
     expect(tree.root.findAllByType("Pattern" as never)).toHaveLength(0);

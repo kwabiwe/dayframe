@@ -54,19 +54,19 @@ describe("reviewAnswerMutation (the deck's and the List's one rule, step 14 part
 describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
   it("asks whether you visited the place, with its times, and Yes / Edit / Not now (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, categoryName: "Reading" }, "24h")).toEqual({
-      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
   });
 
   it("keeps Log it for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
     expect(reviewAnswerQuestion(item({ eventType: "unknown_stay", eventSource: "geofence_specific", title: "Unknown place" }), "24h")).toEqual({
-      question: "Where were you?", detail: "10:00–11:30", logLabel: "Log it", skipLabel: "Not now", more: false, opens: false
+      question: "Where were you?", detail: "10:00–11:30", logLabel: "Log it", skipLabel: "Not now"
     });
   });
 
   it("asks where you were when it cannot name the place: Edit names it, there is no Yes (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, title: "Unknown place" }, "24h")).toEqual({
-      question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now"
     });
   });
 
@@ -74,8 +74,7 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     const venue = { name: "Exampleton Bakery", street: "12 Example Street", applePlaceId: "I1234567890ABCDEF" };
     const unnamed = { ...locationV2, title: "Unknown place" };
     expect(reviewAnswerQuestion(unnamed, "24h", { venue })).toEqual({
-      question: "Visited Exampleton Bakery?", detail: "12 Example Street · 10:00–11:30", logLabel: "Yes", skipLabel: "Not now",
-      more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Bakery?", detail: "12 Example Street · 10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
     expect(reviewAnswerMutation(unnamed, true, { venue })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" });
     expect(reviewAnswerMutation(unnamed, true, { venue: { ...venue, applePlaceId: null } })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery" });
@@ -86,7 +85,7 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
 
   it("asks Apple Health in its own words", () => {
     expect(reviewAnswerQuestion(item({ eventType: "health_sleep_import", title: "Sleep" }), "24h")).toMatchObject({
-      question: "Log your sleep, 10:00–11:30?", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false
+      question: "Log your sleep, 10:00–11:30?", logLabel: "Log as Sleep", skipLabel: "Not sleep"
     });
     expect(reviewAnswerQuestion(item({ eventType: "health_workout_import", categoryName: "Running" }), "12h")).toMatchObject({
       question: "Log the workout, 10:00 AM–11:30 AM?", logLabel: "Log as Running", skipLabel: "Not a workout"
@@ -97,30 +96,29 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     // Card A: "Getting around, 14:44–16:31?" with Yes / Edit, and Not now.
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Getting around",
       categoryName: "Getting around" }), "24h"))
-      .toEqual({ question: "Getting around, 10:00–11:30?", detail: "As Getting around.", logLabel: "Yes", skipLabel: "Not now",
-        more: true, moreLabel: "Edit", opens: false });
+      .toEqual({ question: "Getting around, 10:00–11:30?", detail: "As Getting around.", logLabel: "Yes", skipLabel: "Not now" });
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Commute" }), "24h").question)
       .toBe("Commute, 10:00–11:30?");
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: undefined }), "24h").question)
       .toBe("Getting around, 10:00–11:30?");
     // An outing asks about its place alone; its trips there and back are decided with it (card B).
     expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toEqual({
-      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
   });
 
-  it("asks without times when the suggestion has none, and offers its own screen instead of answers", () => {
-    // Without a whole window the outbox refuses every answer (Codex r3 on #582): it opens instead.
+  it("asks without times when the suggestion has none, and offers no answers", () => {
+    // Without a whole window the outbox refuses every answer (Codex r3 on #582): it only says why.
     expect(reviewAnswerQuestion(item({ suggestedStartedAt: null, suggestedStoppedAt: null }), "24h")).toEqual({
-      question: "Log Exampleton Library?", detail: "It has no complete time yet, so it can't be answered here.",
-      logLabel: null, skipLabel: null, more: false, opens: true
+      question: "Log Exampleton Library?", detail: "It has no complete time yet, so it can't be answered.",
+      logLabel: null, skipLabel: null
     });
   });
 
-  it("opens, never answers, a suggestion with a waiting or rejected change of its own (Codex r10 on #582)", () => {
+  it("never answers a suggestion with a waiting or rejected change of its own, and says why (Codex r10 on #582)", () => {
     expect(reviewAnswerQuestion(locationV2, "24h", { pendingChange: true })).toMatchObject({
-      detail: "A change to it is waiting or wasn't accepted, so it can't be answered here.",
-      logLabel: null, skipLabel: null, more: false, opens: true
+      detail: "A change to it is waiting or wasn't accepted, so it can't be answered yet.",
+      logLabel: null, skipLabel: null
     });
   });
 });

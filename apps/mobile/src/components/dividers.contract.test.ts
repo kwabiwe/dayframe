@@ -34,7 +34,6 @@ const MECHANISM = "src/lib/insetDivider.ts";
 /** Full-width lines that are frames or structure rather than row dividers, with the reason. */
 const EXEMPT: Record<string, string> = {
   "src/components/reports/ReportActivityChart.tsx": "the activity chart's tick lines are chart grid structure, not row dividers",
-  "src/components/review/ReviewDeckSegments.tsx": "the labelled “Older than 7 days” split flexes beside its label inside the deck's padding",
   "src/components/DayframeDashboard.tsx": "the history list's ItemSeparatorComponent is a 14-point gap with no line"
 };
 
@@ -198,7 +197,6 @@ describe("iPhone row dividers are inset on both sides", () => {
     for (const path of [
       "src/components/calendar/LocationCorrectionSheet.tsx",
       "src/components/calendar/SheetNearbySearch.tsx",
-      "src/components/location/LocationReviewCorrectionEditor.tsx",
       "src/components/settings/SettingsBlocks.tsx",
       "src/components/places/PlaceRoleSheet.tsx",
       "app/places.tsx",

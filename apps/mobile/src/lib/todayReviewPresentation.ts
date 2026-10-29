@@ -6,6 +6,7 @@ import type {
 import { reviewCardsRemovedByOutings } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
+import { asksAsCheck } from "./review";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
 
@@ -68,22 +69,6 @@ export type TodayReviewPresentation = {
   donutSegments: readonly TodayDonutSegment[];
   daySections: readonly TodayActivitySection[];
 };
-
-/**
- * The Today nudge's split (owner decision 14 Oct 2026): how many open moments overlap today (the
- * server's `todayCount`, less local decisions) and how many are from earlier days. Only when both
- * counts are exact; otherwise null and the nudge says no split. `segment` is the Review segment the
- * nudge opens: Today when it has moments, otherwise Earlier.
- */
-export function todayReviewNudgeSplit(
-  global: { value: number | null; exact: boolean } | null | undefined,
-  today: { value: number | null; exact: boolean } | null | undefined
-): { today: number; earlier: number; segment: "today" | "earlier" } | null {
-  if (!global?.exact || !today?.exact || global.value === null || today.value === null) return null;
-  const todayCount = Math.min(today.value, global.value);
-  const earlier = Math.max(0, global.value - todayCount);
-  return { today: todayCount, earlier, segment: todayCount > 0 ? "today" : "earlier" };
-}
 
 export type TodayReviewProjectionInput = {
   ownerKey: string;
@@ -386,15 +371,20 @@ function reviewCandidates(
   effects: readonly ReviewPresentationStoreEffect[]
 ) {
   const candidates = new Map<string, ReviewCandidate>();
+  // A timer that ran into a trip is no ordinary hatched block on Today (step 15): its own UI comes later. Left out
+  // from every source — the presentation's records and the outbox's own copies (a restored or refused decision) —
+  // and by id, so a copy can never bring back one the presentation left out (Codex r1 on #615).
+  const clashIds = new Set(response.records.filter((record) => record.kind === "review" && !asksAsCheck(record))
+    .map((record) => (record as { reviewItemId: string }).reviewItemId));
   for (const record of response.records) {
-    if (record.kind !== "review" || record.status !== "open") continue;
+    if (record.kind !== "review" || record.status !== "open" || !asksAsCheck(record)) continue;
     candidates.set(record.reviewItemId, {
       record,
       canonicalEntryIds: uniqueIds([...record.canonicalEntryIds, ...(links.get(record.reviewItemId) ?? [])])
     });
   }
   for (const effect of effects) {
-    if (candidates.has(effect.reviewItemId) || !effect.source) continue;
+    if (candidates.has(effect.reviewItemId) || !effect.source || clashIds.has(effect.reviewItemId) || !asksAsCheck(effect.source)) continue;
     candidates.set(effect.reviewItemId, {
       record: {
         kind: "review",

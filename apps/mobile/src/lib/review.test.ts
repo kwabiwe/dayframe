@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  asksAsCheck,
   LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS,
   REVIEW_COPY,
-  CLOSED_REVIEW_MENU_STATE,
   buildReviewItemDraftEntry,
-  canRunReviewMenuAction,
   countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
@@ -15,7 +14,6 @@ import {
   isReviewNeededEntry,
   locationReviewReasonCopy,
   removeReviewItemOptimistically,
-  reduceReviewMenuState,
   restoreReviewItemOptimistically,
   reviewActionOrder,
   reviewConfidencePresentation,
@@ -253,7 +251,7 @@ describe("mobile review helpers", () => {
     expect(reason("auto_log_uncertain")).toBe("Not logged automatically · location was less certain than usual");
     expect(reason("auto_log_overlap")).toBe("Not logged automatically · it overlaps a block");
     expect(reason("auto_log_logged_before")).toBe("Not logged automatically · this visit was logged once before");
-    expect(reason("auto_log_offered_before")).toBe("Not logged automatically · it was offered in Review before");
+    expect(reason("auto_log_offered_before")).toBe("Not logged automatically · it was asked in Calendar before");
     expect(reason("auto_log_off")).toBe("Log automatically is off for this place");
     // Moves that log themselves (PRD D19).
     expect(reason("travel_mode_unknown", "commute_detected")).toBe("Not logged automatically · how you travelled isn’t clear");
@@ -319,127 +317,6 @@ describe("mobile review helpers", () => {
 
     expect(reviewActionOrder(commute)).toEqual(["view_evidence", "confirm", "overflow"]);
     expect(reviewActionOrder(reviewItem())).toEqual(["confirm", "overflow"]);
-  });
-
-  it("keeps one menu active, blocks disabled and duplicate actions, and closes stale state", () => {
-    const firstOpen = reduceReviewMenuState(CLOSED_REVIEW_MENU_STATE, {
-      type: "toggle",
-      itemId: "review-1",
-      disabled: false
-    });
-    expect(firstOpen.openItemId).toBe("review-1");
-    expect(
-      reduceReviewMenuState(firstOpen, {
-        type: "toggle",
-        itemId: "review-2",
-        disabled: false
-      })
-    ).toBe(firstOpen);
-    expect(
-      reduceReviewMenuState(firstOpen, {
-        type: "toggle",
-        itemId: "review-2",
-        disabled: true
-      })
-    ).toBe(firstOpen);
-
-    const resolving = reduceReviewMenuState(firstOpen, {
-      type: "begin_action",
-      action: "edit",
-      itemId: "review-1",
-      token: 1
-    });
-    expect(resolving).toEqual({
-      openItemId: null,
-      closingItemId: "review-1",
-      pendingAction: {
-        action: "edit",
-        itemId: "review-1",
-        token: 1
-      }
-    });
-    expect(canRunReviewMenuAction(resolving, "review-1")).toBe(false);
-    expect(
-      reduceReviewMenuState(resolving, {
-        type: "begin_action",
-        action: "dismiss",
-        itemId: "review-1",
-        token: 2
-      })
-    ).toBe(resolving);
-    expect(
-      reduceReviewMenuState(resolving, {
-        type: "toggle",
-        itemId: "review-2",
-        disabled: false
-      })
-    ).toBe(resolving);
-
-    const modalClosed = reduceReviewMenuState(resolving, {
-      type: "menu_closed",
-      itemId: "review-1"
-    });
-    expect(modalClosed.closingItemId).toBeNull();
-    expect(modalClosed.pendingAction).toEqual(resolving.pendingAction);
-    expect(
-      reduceReviewMenuState(modalClosed, {
-        type: "finish_action",
-        itemId: "review-1",
-        token: 2
-      })
-    ).toBe(modalClosed);
-    expect(
-      reduceReviewMenuState(modalClosed, {
-        type: "finish_action",
-        itemId: "review-1",
-        token: 1
-      }).pendingAction
-    ).toBeNull();
-    expect(
-      reduceReviewMenuState(resolving, {
-        type: "reconcile",
-        openItemIds: ["review-2"]
-      }).pendingAction
-    ).toBeNull();
-    expect(
-      reduceReviewMenuState(resolving, { type: "reset" })
-    ).toEqual({
-      openItemId: null,
-      closingItemId: "review-1",
-      pendingAction: null
-    });
-  });
-
-  it("closes before replacement and keeps a closing modal owned until completion", () => {
-    const firstOpen = reduceReviewMenuState(CLOSED_REVIEW_MENU_STATE, {
-      type: "toggle",
-      itemId: "review-1",
-      disabled: false
-    });
-    const closing = reduceReviewMenuState(firstOpen, { type: "close" });
-    expect(closing).toEqual({
-      openItemId: null,
-      closingItemId: "review-1",
-      pendingAction: null
-    });
-    expect(
-      reduceReviewMenuState(closing, {
-        type: "toggle",
-        itemId: "review-2",
-        disabled: false
-      })
-    ).toBe(closing);
-    const closed = reduceReviewMenuState(closing, {
-      type: "menu_closed",
-      itemId: "review-1"
-    });
-    expect(
-      reduceReviewMenuState(closed, {
-        type: "toggle",
-        itemId: "review-2",
-        disabled: false
-      }).openItemId
-    ).toBe("review-2");
   });
 
   it("removes, tombstones and restores Review items at their captured position", () => {
@@ -714,3 +591,12 @@ function bootstrap(reviewItems: MobileReviewItem[]): MobileBootstrap {
     reviewItems
   };
 }
+
+describe("asksAsCheck (location v4 step 15)", () => {
+  it("leaves a timer that ran into a trip out of the ordinary \"?\", by its Review type or its event's", () => {
+    expect(asksAsCheck({ type: "location_timer_trip_clash" })).toBe(false);
+    expect(asksAsCheck({ type: undefined, eventType: "timer_trip_clash" })).toBe(false);
+    expect(asksAsCheck({ type: "activity_suggestion", eventType: "unknown_stay" })).toBe(true);
+    expect(asksAsCheck({ eventType: null })).toBe(true);
+  });
+});

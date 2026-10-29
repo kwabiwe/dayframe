@@ -23,7 +23,7 @@ HealthKit is an input signal, not a separate user-facing product model. Sleep st
 4. Web API accepts events and stores `activity_events`.
 5. Event processing in `apps/web/src/lib/event-service.ts` creates entries or `review_items`.
 6. Review queries in `apps/web/src/lib/queries.ts` return open review items only.
-7. Mobile Review screen in `apps/mobile/app/review.tsx` shows open items and calls Confirm/Dismiss endpoints.
+7. Mobile Calendar › List (`apps/mobile/src/components/calendar/CalendarListView.tsx`, answers through `useCalendarCheckAnswers.ts` and the Review outbox) asks an Apple Health "?" under its row and sends Confirm/Dismiss; there is no Review screen since location v4 step 15.
 8. Reprocess endpoint `apps/web/src/app/api/review/reprocess-health/route.ts` retries Health review decisions after preferences or code changes.
 
 Do not patch one step without checking the adjacent step on either side.
@@ -172,7 +172,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
 - Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.
 - Incomplete old Health review items show misleading multi-day durations because the mobile UI treats missing stop times as "now".
-- Large historical Health backlogs should not be drained entirely from the mobile Review screen. Use bounded batches for interactive reprocess, and use a reviewed server/database cleanup for old rows that can be proven ignored or already covered.
+- Large historical Health backlogs should not be drained entirely from the iPhone. Use bounded batches for interactive reprocess, and use a reviewed server/database cleanup for old rows that can be proven ignored or already covered.
 
 ## Minimal Investigation Checklist
 

@@ -2105,41 +2105,6 @@ export async function fetchTimelineItemEvidence(
   return body;
 }
 
-/**
- * Tell the server which Apple venue the ranker was confident about for an open card's unsaved stay
- * (location v3 PR 8, design §6.3): its Place ID only. Best effort and foreground only, while
- * Location evidence is on screen; any failure (offline, a decided card) is dropped quietly, since
- * the suggestion is recomputed the next time the stay is opened. Sent only under the session of
- * `owner`, the account the evidence was read for, and only while the app is active, both checked
- * again right before the request starts (Codex r1 on #522).
- */
-export async function reportVenueSuggestion(reviewItemId: string, placeId: string, owner: MobileAccountOwner): Promise<boolean> {
-  try {
-    if (AppState.currentState !== "active") return false;
-    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
-    if (session.status !== "authenticated") return false;
-    if (AppState.currentState !== "active" || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return false;
-    const { response } = await mobileJsonRequest<null>(
-      `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(reviewItemId)}/venue`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.snapshot.token}` },
-        body: JSON.stringify({ placeId })
-      },
-      {
-        timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
-        timeoutMessage: "Saving the suggested place took too long.",
-        isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
-        handleAuthentication: false,
-        validate: () => null
-      }
-    );
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 export function normaliseLocationReviewRequestError(
   error: unknown,
   kind: "evidence" | "action"
@@ -2184,12 +2149,28 @@ export function dismissReviewItem(id: string) {
   return resolveReviewItem(id, "ignore_once");
 }
 
+/** A Health reprocess batch its callers no longer want, stopped before it was sent or while in flight (Codex r5 on #615). */
+export class HealthReprocessCancelledError extends Error {
+  constructor() {
+    super("Health processing was stopped.");
+    this.name = "HealthReprocessCancelledError";
+  }
+}
+
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number } = {}
+  options: {
+    limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number;
+    /**
+     * Read synchronously after the session read, immediately before the request is sent: false stops it there
+     * (every caller's abort and foreground predicate; Codex r5 on #615). `signal` cancels it in flight.
+     */
+    beforeSend?: () => boolean;
+  } = {}
 ): Promise<HealthReviewReprocessResult> {
   const session = await readAuthenticatedSessionSnapshot();
   if(session.status!=="authenticated") throw new AuthRequiredError();
+  if(options.signal?.aborted || (options.beforeSend && !options.beforeSend())) throw new HealthReprocessCancelledError();
   const {response,body} = await mobileJsonRequest<Record<string,unknown> | null>(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.snapshot.token}`},signal:options.signal,
     body:JSON.stringify({preferences,limit:options.limit,force:options.force,mappings:options.mappings,cursor:options.cursor})

@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 const pickerSource = source("./DateSheet.tsx");
 const shellSource = source("./sheets/BottomSheetShell.tsx");
 const calendarSource = source("./calendar/DatePickerCalendar.tsx");
-const reviewSource = source("../../app/review.tsx");
 const placesSource = source("../../app/places.tsx");
 
 describe("local motion ownership contracts", () => {
@@ -25,16 +24,10 @@ describe("local motion ownership contracts", () => {
     expect(pickerSource).not.toContain("LayoutAnimation.configureNext");
   });
 
-  it("gives Review and Places one local presence/layout owner around mutations", () => {
-    expect(reviewSource).toContain("enqueueReviewMutation");
+  it("gives Places one local presence/layout owner around mutations", () => {
     expect(placesSource).toContain("applyAfterSuccessfulMutation");
     expect(placesSource).toContain("localLayoutTransition(reduceMotion)");
     expect(placesSource).toContain("localPresenceExiting(reduceMotion)");
-    // The Review deck (Blocks step 5a): each card owns its depth spring and its presence.
-    const deckSource = source("./review/ReviewDeck.tsx");
-    expect(reviewSource).toContain("<ReviewDeckStack");
-    expect(deckSource).toContain("localPresenceExiting(reduceMotion)");
-    expect(deckSource).toContain("withSpring(depth, { ...BLOCKS_SPRING.land");
   });
 });
 

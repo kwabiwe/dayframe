@@ -5,7 +5,7 @@ import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { currentMobileAccountEpoch, type MobileAccountOwner } from "../../lib/mobileAccount";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
-import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
+import { asksAsCheck, hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation, type ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
@@ -64,7 +64,8 @@ export function settledCheckBase(reviewItems: readonly MobileReviewItem[], hidde
   decided: ReadonlySet<string>; answering: ReadonlySet<string>; resolved: ReadonlySet<string>;
   waitingIds: ReadonlySet<string>; waitingSegments: ReadonlySet<string>; syncStateIds: ReadonlySet<string>;
 }) {
-  const open = reviewItems.filter((item) => isOpenReviewItem(item) && !hidden.decided.has(item.id)
+  // A timer-into-trip clash item is no ordinary "?" until its block UI ships (#615; asksAsCheck).
+  const open = reviewItems.filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !hidden.decided.has(item.id)
     && !hidden.answering.has(item.id) && !hidden.resolved.has(item.id)
     // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
     // abandoned record never hides it (Codex r11 on #610).
@@ -76,17 +77,6 @@ export function settledCheckBase(reviewItems: readonly MobileReviewItem[], hidde
 /** Whether a "?" can be answered in the List: a complete window and no waiting or rejected change of its own. */
 export function calendarCheckAnswerable(item: MobileReviewItem, syncStateIds: ReadonlySet<string>) {
   return hasSuggestedTimeWindow(item) && !syncStateIds.has(item.id);
-}
-
-/**
- * Where a "?" opens on its own screen (Codex r10 on #582): a place's Location evidence on its details
- * screen; anything else (Apple Health, a trip without evidence) on the Review deck, focused on it, as
- * Today opens it.
- */
-export function calendarCheckRoute(item: MobileReviewItem | undefined, reviewItemId: string) {
-  return item && hasV2LocationEvidence(item)
-    ? { pathname: "/review/[id]" as const, params: { id: reviewItemId } }
-    : { pathname: "/review" as const, params: { focusReviewId: reviewItemId } };
 }
 
 /**

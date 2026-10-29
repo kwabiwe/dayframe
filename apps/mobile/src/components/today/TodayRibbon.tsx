@@ -134,7 +134,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   const loggedCount = model.blocks.filter((block) => block.kind === "entry").length;
   const pendingCount = model.blocks.length - loggedCount;
   const summary = model.blocks.length
-    ? `${loggedCount} ${loggedCount === 1 ? "block" : "blocks"}${pendingCount ? `, ${pendingCount} waiting for review` : ""}. Swipe up or down to step through them.`
+    ? `${loggedCount} ${loggedCount === 1 ? "block" : "blocks"}${pendingCount ? `, ${pendingCount} to check` : ""}. Swipe up or down to step through them.`
     : "Nothing framed yet today.";
   const ordered = useMemo(() => [...model.blocks].sort((a, b) => a.startMs - b.startMs), [model.blocks]);
 
@@ -304,13 +304,14 @@ export const TodayRibbon = memo(function TodayRibbon({
 });
 
 /**
- * The ribbon on Today: today's logged entries plus the Review time still waiting in the cached
- * presentation (hatched). Tapping a logged block edits it; a hatched block opens its exact Review
- * item. Rebuilt on the per-minute clock.
+ * The ribbon on Today: today's logged entries plus the suggested time still waiting in the cached
+ * presentation (hatched). Tapping a logged block edits it; a hatched block opens its exact "?" in Calendar › List
+ * (step 15). Rebuilt on the per-minute clock.
  */
 export function TodayRibbonSection({
   entries,
   nowMs,
+  onOpenCheck,
   onOpenEntry,
   onOpenWhereWent,
   reduceMotion,
@@ -320,6 +321,8 @@ export function TodayRibbonSection({
 }: {
   entries: readonly MobileTimeEntry[];
   nowMs: number;
+  /** Opens a suggestion's "?" in Calendar › List by its id, or today's List (null). Keep it stable (memoised ribbon). */
+  onOpenCheck: (reviewItemId: string | null) => void;
   onOpenEntry: (entry: MobileTimeEntry) => void;
   /** Opens Reports on Today; with it, the card ends with "Where today went". */
   onOpenWhereWent?: () => void;
@@ -340,14 +343,19 @@ export function TodayRibbonSection({
       onOpenEntry(block.entry);
       return;
     }
+    // Step 15: a hatched block opens its "?" in Calendar › List; anything it can't name opens today's List.
     const target = todayReviewNavigationTarget(block.activity);
-    if (!target) {
-      router.push("/review");
+    if (!target || target.kind === "today_checks") {
+      onOpenCheck(null);
       return;
     }
     if (target.kind === "canonical_entry") return;
+    if (target.kind === "check") {
+      onOpenCheck(target.reviewItemId);
+      return;
+    }
     router.push({ pathname: target.pathname, params: target.params } as never);
-  }, [onOpenEntry]);
+  }, [onOpenCheck, onOpenEntry]);
   return (
     <TodayRibbon
       model={model}

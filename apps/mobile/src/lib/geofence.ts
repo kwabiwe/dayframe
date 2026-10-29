@@ -528,7 +528,7 @@ export async function setLocationLearningEnabled(
       isLocationCaptureSnapshotCurrent(capture);
   });
   if (!started || !isLocationCaptureSnapshotCurrent(capture)) return "Location account changed.";
-  return "Commute and regular-place learning is on. Suggestions stay in Review.";
+  return "Commute and regular-place learning is on. Suggestions are asked in Calendar.";
 }
 
 export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0], owner?: MobileAccountOwner) {
@@ -867,7 +867,7 @@ async function startLocationLearningUnsafe(
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
     locationLearningActive: true,
-    lastStatus: "Location Intelligence V2 is collecting ordered evidence. Suggestions stay in Review.",
+    lastStatus: "Location Intelligence V2 is collecting ordered evidence. Suggestions are asked in Calendar.",
     lastMonitorRefreshAt: new Date().toISOString()
   });
   return true;

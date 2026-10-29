@@ -70,6 +70,7 @@ export function CalendarListView({
   onNextCheck,
   onSwipeDay,
   openCheckRequest = null,
+  clearSelectionRequest = 0,
   timelineReadAt = null,
   onRequestFreshRead,
   clockFormat,
@@ -117,6 +118,11 @@ export function CalendarListView({
    */
   openCheckRequest?: { id: string; request: number; at?: number } | null;
   /**
+   * A new number closes the open question and drops any waiting request or scroll, the same day included (an old
+   * link's item that no longer asks opens its day with nothing selected; Codex r3 on #615).
+   */
+  clearSelectionRequest?: number;
+  /**
    * When the shown day's places were read (asked for). A request made after it (`at`) for a place's or trip's "?"
    * the read lacks waits for the next read of that day before asking under its row (Codex r3 on #610).
    */
@@ -134,8 +140,8 @@ export function CalendarListView({
   loggedLabel: string;
   nowMs: number;
   /**
-   * Opens a suggestion: a trip's in its sheet (the caller routes it), anything else on its own screen ("More…",
-   * a place's when there is no `onOpenPlace`, or the whole answer when the List has no `onAnswerCheck`).
+   * The caller's own opener for a "?" (step 15: there is no Review screen): a place's when there is no
+   * `onOpenPlace`, a trip's when there is no `onOpenTripLeg`, or the whole answer when the List has no `onAnswerCheck`.
    */
   onOpenCheck?: (reviewItemId: string) => void;
   /** Answers a "?" in place: "Log it" (true) or "Skip" (false), with the deck's effects and Undo. */
@@ -277,9 +283,26 @@ export function CalendarListView({
   const [handledCheckRequest, setHandledCheckRequest] = useState(0);
   // A tap on a "?" not known yet waits the same way, as a request of the List's own (negative numbers).
   // It stands until the caller makes a new request after it.
-  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number } | null>(null);
+  // `clear`: the clear generation it was made in; a later clear makes it stale.
+  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number; clear: number } | null>(null);
   const tapRequests = useRef(0);
-  const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
+  // A clear (Codex r3 and r4 on #615) takes effect in the render it arrives in: every tap request made before it, and
+  // the caller's request it arrived with or any earlier one, are ignored from then on, whatever else changed in that
+  // render (the day's places arriving, say), so nothing waiting can reopen a question or a sheet.
+  const [clearedFor, setClearedFor] = useState(clearSelectionRequest);
+  const [ignoredUpTo, setIgnoredUpTo] = useState<number | null>(null);
+  const clearing = clearedFor !== clearSelectionRequest;
+  const ignoreUpTo = clearing ? Math.max(ignoredUpTo ?? -Infinity, openCheckRequest?.request ?? -Infinity) : ignoredUpTo;
+  if (clearing) {
+    setClearedFor(clearSelectionRequest);
+    setIgnoredUpTo(Number.isFinite(ignoreUpTo) ? ignoreUpTo : null);
+    setOpenCheckId(null);
+    setTapRequest(null);
+    pendingScroll.current = null;
+  }
+  const liveTap = tapRequest && tapRequest.clear === clearSelectionRequest ? tapRequest : null;
+  const liveCheckRequest = openCheckRequest && (ignoreUpTo == null || openCheckRequest.request > ignoreUpTo) ? openCheckRequest : null;
+  const request = liveTap && liveTap.after === (openCheckRequest?.request ?? 0) ? liveTap : liveCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
     || (timelineReadAt ?? 0) >= request.at;
   const requestedRow = request && request.request !== handledCheckRequest
@@ -303,7 +326,7 @@ export function CalendarListView({
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
   // Only once every "?" here is known, so the first is the real first and opens the right way (Codex r1 on #610).
   const firstCheckRow = checkRows.every((row) => row.known) ? checkRows[0] : undefined;
-  if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
+  if (!clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
     && (firstCheckRow.inline ? onAnswerCheck : firstCheckRow.open)) {
     setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckRow.id });
     if (firstCheckRow.inline) setOpenCheckId(firstCheckRow.id);
@@ -334,7 +357,7 @@ export function CalendarListView({
       // Timestamped, with a fresh read asked for: a response already in flight from before the tap that lacks its
       // item never opens it under its row (Codex r5 on #610).
       tapRequests.current -= 1;
-      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at: Date.now() });
+      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at: Date.now(), clear: clearSelectionRequest });
       onRequestFreshRead?.();
       return;
     }
@@ -348,7 +371,7 @@ export function CalendarListView({
       const at = Date.now();
       if (timelineReadAt == null || timelineReadAt < at) {
         tapRequests.current -= 1;
-        setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at });
+        setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at, clear: clearSelectionRequest });
         onRequestFreshRead?.();
         return;
       }
@@ -469,9 +492,7 @@ export function CalendarListView({
                 const question = id && id === shownOpenCheckId ? checkQuestions?.get(id) : undefined;
                 return id && question ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
-                    <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)}
-                      onMore={question.more && onOpenCheck ? () => onOpenCheck(id) : undefined}
-                      onOpen={question.opens && onOpenCheck ? () => onOpenCheck(id) : undefined} question={question} theme={theme} />
+                    <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)} question={question} theme={theme} />
                   </Animated.View>
                 ) : null;
               })()}
@@ -795,16 +816,15 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
 /**
  * Apple Health's "?" question under its row (mock-up #ios-list; owner, 28 Oct 2026: only a row with no sheet
  * shows one): what it asks, why, and one-tap answers in the compact inline pills (32 points tall, each a
- * 44-point target) — "Log it" first, then the skip, then "More…" for its own screen. A suggestion without a
- * complete time cannot be answered here: it says so and offers "Open it" instead. Card D item 9 (owner, 25 Oct
- * 2026): one style with the web — the standard inset surface, "Log it" a neutral dark pill (textPrimary fill,
- * background text), the others surfaceMuted; coral stays for Play/Stop and live recording.
+ * 44-point target) — the answer first, then the skip. Step 15: there is no Review screen any more, so it has no
+ * "More…", "Edit" or "Open it"; a suggestion it can't answer (no complete time, or a change of its own waiting)
+ * says why and offers nothing. Card D item 9 (owner, 25 Oct 2026): one style with the web — the standard inset
+ * surface, the answer a neutral dark pill (textPrimary fill, background text), the skip surfaceMuted; coral stays
+ * for Play/Stop and live recording.
  */
-function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
-  onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
+function CheckQuestion({ onAnswer, question, theme }: {
+  onAnswer: (logged: boolean) => void; question: ReviewAnswerQuestion; theme: MobileTheme;
 }) {
-  // A trip-style question (card A): Yes, Edit (its own screen), Not now.
-  const edit = question.moreLabel === "Edit";
   return (
     <View style={[styles.question, { backgroundColor: theme.surfaceInset }]} testID="calendar-list-question">
       <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
@@ -812,41 +832,22 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
       {question.detail && !/\d:\d\d/.test(question.detail) ? (
         <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text>
       ) : null}
-      <View style={[compactPillStyles.answers, styles.answersGap]}>
-        {question.logLabel ? (
-          <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.background }]}>{question.logLabel}</Text>
-          </Pressable>
-        ) : null}
-        {edit && onMore ? (
-          <Pressable accessibilityHint="Opens it on its own screen to edit it" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
-            testID="calendar-list-answer-edit"
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.moreLabel}</Text>
-          </Pressable>
-        ) : null}
-        {question.skipLabel ? (
-          <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
-          </Pressable>
-        ) : null}
-        {question.opens && onOpen ? (
-          <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onOpen}
-            testID="calendar-list-answer-open"
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Open it</Text>
-          </Pressable>
-        ) : null}
-        {!edit && onMore ? (
-          <Pressable accessibilityHint="Opens it on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
-            testID="calendar-list-answer-more"
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textSecondary }]}>More…</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      {question.logLabel || question.skipLabel ? (
+        <View style={[compactPillStyles.answers, styles.answersGap]}>
+          {question.logLabel ? (
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
+              style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
+              <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.background }]}>{question.logLabel}</Text>
+            </Pressable>
+          ) : null}
+          {question.skipLabel ? (
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
+              style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+              <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
