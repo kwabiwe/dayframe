@@ -71,7 +71,7 @@ describe("type and radius tokens (WUI-036, WUI-037)", () => {
   });
 
   it("keeps screen titles at 30 px at every width, the status pages' too", () => {
-    for (const selector of [".df-page-head h1", ".df-review-head h1", ".df-status-card h1"]) {
+    for (const selector of [".df-page-head h1", ".df-status-card h1"]) {
       const blocks = [...styles.matchAll(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`, "g"))];
       const sizes = blocks.flatMap(([, body]) => [...body.matchAll(/font-size:\s*([^;]+);/g)].map((match) => match[1].trim()));
       expect(sizes, selector).toEqual(["var(--type-screen)"]);

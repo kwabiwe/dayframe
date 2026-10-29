@@ -1,9 +1,8 @@
-import { formatClockTime, formatDuration as formatSharedDuration, type ClockFormat } from "@dayframe/shared";
-import { groupOutings, outingTravelWords, type CardOuting, type ReviewMutation, type ReviewMutationEdit } from "@dayframe/shared";
+import { groupOutings, type CardOuting, type ReviewMutation, type ReviewMutationEdit } from "@dayframe/shared";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 
-// Web Review (Blocks parity step 13): the queue, the card and the Log it / Skip decision, built on
-// the same Review mutation contract as the iPhone deck (apps/mobile/src/lib/reviewDeck.ts,
+// Review helpers for the List's and Grid's "?" (location v4 steps 14–15; the web Review deck is gone): the picture,
+// title, window and Log it / Skip decision, built on the same Review mutation contract as the iPhone deck (apps/mobile/src/lib/reviewDeck.ts,
 // reviewLogAs.ts and review.ts carry the iPhone versions of these helpers).
 
 export type ReviewPicture = "place" | "commute" | "workout" | "sleep" | "suggestion";
@@ -44,23 +43,6 @@ export function reviewSourceLabel(picture: ReviewPicture) {
   return "Suggestion";
 }
 
-export function reviewConfidence(confidence: string) {
-  switch (confidence) {
-    case "high":
-      return { label: "High", score: 5 };
-    case "medium_high":
-      return { label: "Medium high", score: 4 };
-    case "medium":
-      return { label: "Medium", score: 3 };
-    case "low":
-      return { label: "Low", score: 2 };
-    case "hint":
-      return { label: "Hint", score: 1 };
-    default:
-      return { label: "Unknown", score: 0 };
-  }
-}
-
 /** The card's heading: what the moment is, never an address. */
 export function reviewTitle(item: Pick<ReviewItemRow, "title" | "eventSource" | "eventType" | "rawPayload" | "placeName">) {
   const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
@@ -70,90 +52,9 @@ export function reviewTitle(item: Pick<ReviewItemRow, "title" | "eventSource" | 
   return item.title?.trim() || (visit && item.placeName) || "Suggestion";
 }
 
-/** A Move's second line ("Home → Gym", "Round trip from Home"), from the server; null for anything else. */
-export function reviewRoute(item: Pick<ReviewItemRow, "eventType" | "rawPayload">) {
-  const route = item.eventType === "commute_detected" ? item.rawPayload?.routeLabel : null;
-  return typeof route === "string" && route.trim() ? route.trim() : null;
-}
-
 /** The name "Log as" starts from: the suggestion's own title. */
 export function reviewDefaultName(item: Pick<ReviewItemRow, "title" | "eventSource" | "eventType" | "rawPayload" | "placeName">) {
   return item.title?.trim() || reviewTitle(item);
-}
-
-/** Why Dayframe asked instead of logging it (the card's reason line). */
-export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventType" | "rawPayload" | "suggestedPlaceId" | "notes">) {
-  if (!isLocationItem(item)) return item.notes?.trim() || null;
-  const reason = typeof item.rawPayload?.semanticReason === "string" ? item.rawPayload.semanticReason : null;
-  switch (reason) {
-    case "existing_review_preserved":
-      return "Already waiting for you before automatic logging was turned on.";
-    case "untrusted_commute_endpoints":
-      return "The start or end place isn’t saved.";
-    case "untrusted_place":
-      return item.eventType === "unknown_stay" ? "New place." : "This place isn’t saved.";
-    case "ambiguous_place":
-      return "It’s near more than one saved place.";
-    case "short_journey_review_only":
-      return "Short journeys aren’t added automatically.";
-    case "journey_contains_stop":
-      return "This trip includes a stop.";
-    case "motion_review_only":
-      return "Timed from Motion & Fitness.";
-    case "time_away_review_only":
-      return "Round trips like this aren’t added automatically.";
-    case "insufficient_route_evidence":
-      return "Route evidence is limited.";
-    case "boundary_uncertainty_exceeded":
-      return "A start or end time is uncertain by more than five minutes.";
-    case "boundary_bounds_missing":
-    case "boundary_bounds_invalid":
-    case "uncertain_boundary":
-      return "The start or end time needs a check.";
-    case "internal_route_gap":
-      return "There is a gap in the journey evidence.";
-    case "commute_overlap_exceeded":
-      return "This journey overlaps tracked time by more than five minutes.";
-    case "location_stay_conflict":
-      return "This visit conflicts with another location block by more than five minutes.";
-    case "insufficient_confidence":
-      return "Confidence is below the automatic threshold.";
-    // Log automatically fallbacks (location v3 bug 8): why a visit at a place with it on came here.
-    case "auto_log_uncertain":
-      return "Not logged automatically · location was less certain than usual.";
-    case "auto_log_overlap":
-      return "Not logged automatically · it overlaps a block.";
-    case "auto_log_logged_before":
-      return "Not logged automatically · this visit was logged once before.";
-    case "auto_log_offered_before":
-      return "Not logged automatically · it was offered in Review before.";
-    case "auto_log_off":
-      return "Log automatically is off for this place.";
-    // Moves that log themselves (PRD D19): why this trip came here instead.
-    case "travel_mode_unknown":
-      return "Not logged automatically · how you travelled isn’t clear.";
-    case "log_trips_off":
-      return "Log trips automatically is off.";
-    case "trip_logged_before":
-      return "Not logged automatically · this trip was logged once before.";
-    case "trip_logging_opted_out":
-      return "Not logged automatically · you stopped logging trips like this.";
-    case "review_mode":
-      // Journeys are never logged automatically in Review mode; an older visit card says only that.
-      return item.eventType === "commute_detected" ? "Trips aren’t logged automatically yet." : "Not logged automatically.";
-    case "segment_not_finalised":
-      return "Location evidence is incomplete.";
-    case "confirmed_time_overlap":
-      return "It overlaps time you already tracked.";
-    default:
-      break;
-  }
-  if (item.rawPayload?.continuityStatus === "uncertain_gap") return "The start or end time needs a check.";
-  if (item.eventType === "commute_detected" && !isTimeAway(item) && item.suggestedPlaceId == null) {
-    return "The start or end place isn’t saved.";
-  }
-  if (item.eventType === "unknown_stay" && item.suggestedPlaceId == null) return "This place isn’t saved.";
-  return "Dayframe asks before logging location time.";
 }
 
 /**
@@ -178,37 +79,6 @@ export function reviewWindow(item: Pick<ReviewItemRow, "suggestedStartedAt" | "s
   return { startMs: start, stopMs: stop };
 }
 
-
-function localDayStart(ms: number) {
-  const date = new Date(ms);
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-}
-
-const SHORT_DAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" });
-
-export function reviewDayLabel(ms: number, nowMs: number) {
-  const day = localDayStart(ms);
-  const today = localDayStart(nowMs);
-  if (day === today) return "Today";
-  if (day === localDayStart(today - 12 * 3_600_000)) return "Yesterday";
-  return SHORT_DAY.format(new Date(ms)).replace(",", "");
-}
-
-
-/**
- * "Today · 21:19–21:26" ("Today · 9:19 PM–9:26 PM" in 12-hour mode); a range over midnight names
- * the end's day too. Null without a window.
- */
-export function reviewWhen(item: Pick<ReviewItemRow, "suggestedStartedAt" | "suggestedStoppedAt">, nowMs: number, clockFormat: ClockFormat) {
-  const clock = (ms: number) => formatClockTime(ms, clockFormat);
-  const window = reviewWindow(item);
-  if (!window) {
-    const start = timeMs(item.suggestedStartedAt);
-    return Number.isFinite(start) ? `${reviewDayLabel(start, nowMs)} · ${clock(start)}` : null;
-  }
-  const sameDay = localDayStart(window.startMs) === localDayStart(window.stopMs);
-  return `${reviewDayLabel(window.startMs, nowMs)} · ${clock(window.startMs)}–${sameDay ? "" : `${reviewDayLabel(window.stopMs, nowMs)} `}${clock(window.stopMs)}`;
-}
 
 /**
  * A held decision is only saved for the suggestion the user saw: a refresh that changed its name,
@@ -281,40 +151,6 @@ export function activeDraft(draft: ReviewLogAsDraft | undefined, categories: rea
   return categories.some((category) => category.id === draft.categoryId) ? draft : { ...draft, categoryId: undefined };
 }
 
-/** The nearest other V2 stay within 15 minutes, which the evidence editor can merge with. */
-export function adjacentV2StayReviewId(item: ReviewItemRow, candidates: readonly ReviewItemRow[]) {
-  if (!hasV2Evidence(item) || item.eventType === "commute_detected") return undefined;
-  const itemStart = timeMs(item.suggestedStartedAt);
-  const itemStop = timeMs(item.suggestedStoppedAt);
-  if (!Number.isFinite(itemStart) || !Number.isFinite(itemStop)) return undefined;
-  const maximumAdjacentGapMs = 15 * 60_000;
-  return candidates
-    .flatMap((candidate) => {
-      if (candidate.id === item.id || !hasV2Evidence(candidate) || candidate.eventType === "commute_detected") return [];
-      const candidateStart = timeMs(candidate.suggestedStartedAt);
-      const candidateStop = timeMs(candidate.suggestedStoppedAt);
-      if (!Number.isFinite(candidateStart) || !Number.isFinite(candidateStop)) return [];
-      const gap = Math.min(Math.abs(candidateStart - itemStop), Math.abs(itemStart - candidateStop));
-      return gap <= maximumAdjacentGapMs ? [{ id: candidate.id, gap }] : [];
-    })
-    .sort((a, b) => a.gap - b.gap || a.id.localeCompare(b.id))[0]?.id;
-}
-
-/** ↑ / ↓ through the queue, wrapping like the prototype. */
-export function stepSelection(ids: readonly string[], currentId: string | null, step: 1 | -1) {
-  if (!ids.length) return null;
-  const index = currentId ? ids.indexOf(currentId) : -1;
-  if (index < 0) return ids[0];
-  return ids[(index + step + ids.length) % ids.length];
-}
-
-/** After a decision the next card is the one below, else the one above (prototype `decide`). */
-export function nextAfterDecision(ids: readonly string[], decidedId: string) {
-  const index = ids.indexOf(decidedId);
-  if (index < 0) return ids[0] ?? null;
-  return ids[index + 1] ?? ids[index - 1] ?? null;
-}
-
 export type ReviewOuting = CardOuting<ReviewItemRow>;
 
 /**
@@ -323,15 +159,6 @@ export type ReviewOuting = CardOuting<ReviewItemRow>;
  */
 export function reviewOutings(items: readonly ReviewItemRow[]) {
   return groupOutings(items);
-}
-
-/** The outing's travel line: "Drives there and back · 11m", "Walks there · 6m", "Travel on · 4m". */
-export function outingSummary(outing: ReviewOuting) {
-  const totalMs = outing.members.reduce((sum, member) => {
-    const span = reviewWindow(member);
-    return sum + (span ? span.stopMs - span.startMs : 0);
-  }, 0);
-  return `${outingTravelWords(outing.members)}${totalMs > 0 ? ` · ${formatSharedDuration(totalMs / 1000)}` : ""}`;
 }
 
 /** Log it / Skip on a grouped card: every member decided together; "Log as" applies to the Stay. */

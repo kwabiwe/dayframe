@@ -76,7 +76,7 @@ describe("fields (web UI audit P4)", () => {
     // After every base size it overrides (Codex r1 on #472: `.df-pe-seg span` came later and won).
     expect(styles.lastIndexOf(coarse)).toBeGreaterThan(styles.lastIndexOf(".df-pe-seg span {"));
     expect(styles.trimEnd().endsWith(coarse.trimEnd())).toBe(true);
-    for (const selector of [".ui-segmented-control button", ".df-pe-seg span", ".df-flist-search input", ".df-logas input"]) {
+    for (const selector of [".ui-segmented-control button", ".df-pe-seg span", ".df-flist-search input"]) {
       expect(coarse, selector).toContain(selector);
     }
     expect(coarse).toMatch(/min-height: 44px;/);

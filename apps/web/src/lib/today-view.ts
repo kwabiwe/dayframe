@@ -7,6 +7,7 @@ import {
   type CoveredActivityBar,
   type GoalCountingCategory
 } from "@dayframe/shared";
+import { asksAsCheck } from "@/lib/calendar-checks";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 /**
@@ -271,7 +272,8 @@ export type PendingReviewSpan = { id: string; title: string; color: string | nul
 export function pendingReviewSpans(items: readonly ReviewItemRow[], startMs: number, endMs: number, nowMs: number): PendingReviewSpan[] {
   const spans: PendingReviewSpan[] = [];
   for (const item of items) {
-    if (item.status !== "open" || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
+    // A timer that ran into a trip is not an ordinary span to look at (step 15): its own UI comes later.
+    if (item.status !== "open" || !asksAsCheck(item) || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
     const clip = clipEntry({ startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt }, startMs, endMs, nowMs);
     if (!clip) continue;
     spans.push({

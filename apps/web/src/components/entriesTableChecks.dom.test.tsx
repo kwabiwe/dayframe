@@ -1066,3 +1066,27 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     }
   });
 });
+
+// Location v4 step 15: the List is where every "?" is answered, but a timer that ran into a trip asks on its block
+// with its own UI later, so it is never one of the List's ordinary checks nor counted by the badge until then.
+describe("a timer that ran into a trip in Calendar › List (location v4 step 15)", () => {
+  beforeEach(() => {
+    clock.todayStartMs = localDayStart(at(12));
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("is not listed as an ordinary \"?\" and the badge leaves it out", () => {
+    const sleep = reviewItems[2];
+    const clash: ReviewItemRow = { ...sleep, id: "00000000-0000-4000-8000-0000000000c1", type: "location_timer_trip_clash",
+      eventType: "timer_trip_clash", rawPayload: { timeEntryId: "e1" } };
+    function Probe() {
+      const checks = useListChecks({ applyTransition: (update) => update(), categories: [], refresh: async () => undefined, reviewItems: [] });
+      return <output data-testid="checks">{checks.checks.map((check) => check.id).join(",")}</output>;
+    }
+    render(<Shell items={[sleep, clash]}><Probe /></Shell>);
+    expect(screen.getByTestId("checks").textContent).toBe(SLEEP);
+    expect(badge()).toBe(1);
+  });
+});

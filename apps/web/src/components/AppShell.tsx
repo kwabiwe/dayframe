@@ -49,7 +49,7 @@ type Overlay = "search" | "profile" | "help" | null;
 const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
-  ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
+  ["G then T, C, P, L, S", "Go to Today, Calendar, Reports, Library, Settings"],
   ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
@@ -115,8 +115,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const goToTimer = useRef<number | undefined>(undefined);
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
-  // Review cards: an outing counts once (PRD D19, PR 12c).
-  const reviewCount = data?.stats.reviewCardCount ?? 0;
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
   // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
   // days; the badge opens the oldest. Before hydration (no local day yet) the server's count stands in.
@@ -299,7 +297,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -370,7 +368,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} calendarHref={calendarHref} checkCount={checkCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover
