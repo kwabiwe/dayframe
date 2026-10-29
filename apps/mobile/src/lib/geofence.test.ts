@@ -1805,5 +1805,39 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     vi.setSystemTime(new Date(2026, 10, 2, 12, 0));
     await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
   });
+
+  it("a capture that ends mid-burst stops the burst at once, whatever its cleanup does (Codex r28 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    captureState.current = false; // signed out; its cleanup failed
+    try {
+      (await import("./location/admissionGuard")).armLocationAdmissionGuard();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("inherited options a stale guard stopped are started again once the owner is current and consenting (Codex r28 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    __resetAccuracyBurstForTests();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await maybeEndAccuracyBurst(await capture());
+    captureState.current = false; // A→B→A while the binding waits
+    try {
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    } finally {
+      captureState.current = true;
+    }
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
 });
 

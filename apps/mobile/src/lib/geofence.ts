@@ -934,6 +934,7 @@ async function startLocationLearningUnsafe(
       return { error, held: null, ended: null };
     }
     nativeLocationMode = held ? "burst" : "normal";
+    stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
     nativeOptionsOwner = capture.binding?.id ?? null;
     return { error: null, held, ended: held ? null : endHeldLeaseAtNormal() };
   });
@@ -1861,6 +1862,7 @@ export async function maybeStartAccuracyBurst(
     const done = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
     if (!done) return false;
     nativeLocationMode = "burst";
+    stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
     nativeOptionsOwner = captureId;
     // A new burst starts only with none recorded, so no earlier note can govern anything any more.
     earliestNativeBurstEndAt = null;
@@ -2093,7 +2095,10 @@ function scheduleAccuracyBurstGuard(lease: AccuracyBurstLease, delayMs: number) 
  * never up to 30 seconds after it (the day's allowance holds; Codex r24 on #619).
  */
 function nextGuardTickMs(lease: AccuracyBurstLease) {
-  const untilStop = lease.stopInMs - (monotonicNow() - lease.takenAt);
+  const elapsed = monotonicNow() - lease.takenAt;
+  // A burst still inside its 3 minutes (a tick run early by a capture change that didn't end it) waits for them.
+  if (lease.nativeDoneAt == null && elapsed < lease.endsInMs) return Math.min(lease.endsInMs - elapsed + 1_000, Math.max(0, lease.stopInMs - elapsed));
+  const untilStop = lease.stopInMs - elapsed;
   return untilStop > 0 ? Math.min(ACCURACY_BURST_RETRY_MS, Math.ceil(untilStop)) : ACCURACY_BURST_RETRY_MS;
 }
 
@@ -2111,6 +2116,7 @@ async function admissionGuardTick(lease: AccuracyBurstLease) {
     if (running === false) return "done" as const;
     if (running && await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
       nativeLocationMode = "normal";
+      stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
       nativeOptionsOwner = null;
       return "ended" as const;
     }
@@ -2149,10 +2155,11 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
       const running = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
       const done = running === false || await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
       if (done) {
-        // Stopped, not normal: a capture still current and consenting starts again on its next admitted wake
-        // (Codex r20 on #619).
+        // Stopped, not normal: a capture current and consenting starts again on its next admitted wake (Codex r20 on
+        // #619), or by recovery, which reads the owner and consent again (Codex r28 on #619).
         nativeLocationMode = "stopped";
         nativeOptionsOwner = null;
+        scheduleStoppedCaptureRecovery();
       }
       return done;
     });
@@ -2171,6 +2178,7 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
       if (accuracyBurstLease !== lease || !isLocationCaptureSnapshotCurrent(lease.capture)) return false;
       if (await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
         nativeLocationMode = "normal";
+        stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
         nativeOptionsOwner = lease.capture.binding?.id ?? null;
         return true;
       }
@@ -2225,6 +2233,7 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
       const restored = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
       if (!restored) return { done: false, failed: true, ended: null };
       nativeLocationMode = "normal";
+      stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
       nativeOptionsOwner = capture.binding?.id ?? null;
       return { done: true, failed: false, ended: endHeldLeaseAtNormal() };
     });
@@ -2254,6 +2263,7 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
       const done = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
       if (done) {
         nativeLocationMode = "normal";
+        stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
         nativeOptionsOwner = capture.binding?.id ?? null;
         confirmLeaseDone(lease);
       }
@@ -2345,7 +2355,11 @@ const heldGuardLease = () => isAdmissionGuard(accuracyBurstLease) ? null : accur
  * r19, r21, r24 on #619). A capture's own options, or a guard bound to an admitted capture, end it.
  */
 function guardWakeAdmission() {
-  if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
+  const held = accuracyBurstLease;
+  // A burst whose capture ended (sign-out, an account change, location off) is stopped now by its own guard, whatever
+  // storage does, never at its 3 minutes (Codex r28 on #619).
+  if (held && held.startedAt !== UNKNOWN_BURST && !isLocationCaptureSnapshotCurrent(held.capture)) scheduleAccuracyBurstGuard(held, 0);
+  if (held || nativeLocationMode !== "unknown") return;
   takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, 0, WAKE_ADMISSION_GUARD_MS);
 }
 registerLocationAdmissionGuard(guardWakeAdmission);
@@ -2384,6 +2398,7 @@ async function protectInheritedAccuracyOptions() {
     if (running === false) return;
     if (running && await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
       nativeLocationMode = "normal";
+      stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
       nativeOptionsOwner = null;
       noteNativeBurstEnd();
       return;
