@@ -382,6 +382,56 @@ describe("LocationEvidenceMap", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("drops a tile MapLibre aborts from the count, so the verdict comes: ready (Codex r5 on #626)", async () => {
+    const map = await mapWithFourPendingTiles();
+    act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
+    act(() => map.emit("load"));
+    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    // A leg switch cancels tile 3: neither failure nor success.
+    act(() => map.emit("sourcedataabort", tileEvent(3)));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("an aborted tile never counts as a success: two of three left failing shows the note", async () => {
+    const map = await mapWithFourPendingTiles();
+    act(() => map.emit("load"));
+    act(() => { for (const x of [0, 1]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
+    act(() => map.emit("sourcedata", tileEvent(2)));
+    act(() => map.emit("sourcedataabort", tileEvent(3)));
+    expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+  });
+
+  it("stops a stuck tile holding the verdict 20 s after the style loads (Codex r5 on #626)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const map = await mapWithFourPendingTiles();
+      act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
+      // Past the 10 s window, short of the cap (vi.waitFor above may have moved the fake clock a little).
+      act(() => { vi.advanceTimersByTime(15_000); });
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(screen.queryByRole("status")).toBeNull();
+      // Its late outcome changes nothing.
+      act(() => map.emit("error", { ...tileEvent(3), error: new Error("502") }));
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a stuck tile from the count at the cap: the failures left still decide", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const map = await mapWithFourPendingTiles();
+      act(() => { for (const x of [0, 1]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
+      act(() => map.emit("sourcedata", tileEvent(2)));
+      act(() => { vi.advanceTimersByTime(20_000); });
+      expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("jumps to new bounds at once under Reduce Motion", async () => {
     mocks.reducedMotion = true;
     mocks.clientFetch.mockResolvedValue(styleResponse());

@@ -34,6 +34,8 @@ const BOUNDS_PADDING = 48;
 const BOUNDS_MAX_ZOOM = 16;
 /** The first load's window for counting tile failures, if MapLibre's `load` never comes. */
 const FIRST_LOAD_WINDOW_MS = 10_000;
+/** After the style loads, tiles still pending this long stop holding the verdict (Codex r5 on #626). */
+const FIRST_LOAD_SETTLE_CAP_MS = 20_000;
 /** A bounds change in place (a leg swap, new evidence): the brand guide's panel range, ease-out (motion.md). */
 const BOUNDS_EASE_MS = 300;
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
@@ -90,6 +92,7 @@ export function LocationEvidenceMap({
     let cancelled = false;
     let map: MapLibreMap | null = null;
     let windowTimer: ReturnType<typeof setTimeout> | null = null;
+    let settleCapTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function initialize() {
       const computedStyle = getComputedStyle(container);
@@ -160,7 +163,15 @@ export function LocationEvidenceMap({
       };
       // The window's 10 s run from the style loading: no tile is asked for before it, so a slow style never
       // closes the window empty.
+      // A safety cap so the verdict can never hang: 20 s after the style loads, the window is closed and any tile
+      // still pending is dropped from the count, neither failure nor success.
       const startFirstLoadWindowTimer = () => {
+        if (settleCapTimer) return;
+        settleCapTimer = setTimeout(() => {
+          for (const [key, outcome] of admitted) if (outcome === "pending") admitted.delete(key);
+          closeFirstLoadWindow();
+          decide();
+        }, FIRST_LOAD_SETTLE_CAP_MS);
         if (windowTimer || !firstLoadWindowOpen) return;
         windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
       };
@@ -208,6 +219,13 @@ export function LocationEvidenceMap({
         if (key && firstLoadWindowOpen && !admitted.has(key)) admitted.set(key, "pending");
       });
       created.on("sourcedata", (event) => settle(event, "loaded"));
+      // A tile cancelled by a pan, zoom or leg switch never settles: it leaves the count (Codex r5 on #626).
+      created.on("sourcedataabort", (event) => {
+        const key = baseTileKey(event);
+        if (!key || admitted.get(key) !== "pending") return;
+        admitted.delete(key);
+        decide();
+      });
       created.on("load", closeFirstLoadWindow);
       created.on("style.load", () => {
         styleLoaded = true;
@@ -232,6 +250,7 @@ export function LocationEvidenceMap({
     return () => {
       cancelled = true;
       if (windowTimer) clearTimeout(windowTimer);
+      if (settleCapTimer) clearTimeout(settleCapTimer);
       mapRef.current = null;
       drawn.current = null;
       map?.remove();
