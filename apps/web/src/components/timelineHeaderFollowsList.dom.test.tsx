@@ -142,4 +142,42 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
     // No load or history entry for an unchanged day.
     expect(new URLSearchParams(window.location.search).get("date")).toBe("2026-10-14");
   });
+
+  it("returns the List and the header to today when Calendar is tapped while the URL already names today (Codex r2 on #625)", async () => {
+    navigation.search = "date=2026-10-18&scope=day&view=list";
+    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    const { ShellSidebarNav, ShellTabBar } = await import("./blocks/ShellNav");
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const { container, getAllByRole } = render(
+      <>
+        <ShellSidebarNav activeId="calendar" checkCount={2} />
+        <ShellTabBar activeId="calendar" checkCount={2} />
+        <TimeReviewViews initialData={bootstrap()} initialPreference={null} initialTodayKey="2026-10-18" renderedAt={local(18, 12).toISOString()} />
+      </>
+    );
+    await act(async () => undefined);
+    // The test's browser doesn't navigate: the route stays /timeline?date=<today>, as Next keeps it.
+    const stay = (event: Event) => event.preventDefault();
+    document.addEventListener("click", stay);
+    try {
+      const [sidebar, tabBar] = getAllByRole("link", { name: /^Calendar/ });
+      for (const link of [sidebar, tabBar]) {
+        // Scrolled into the week before.
+        act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
+        expect(container.querySelector(".timeline-range-navigation")?.textContent).toContain("Thu, 8 Oct 2026");
+        expect(dayLabels(container)[0]).toMatch(/5 Oct/);
+        const before = listed.continuous!.focusRequest;
+        await userEvent.setup({ advanceTimers: () => undefined }).click(link);
+        // A fresh request for the URL's day, today.
+        expect(listed.continuous!.focusRequest).not.toBe(before);
+        expect(listed.continuous!.focusRequest.startsWith("2026-10-18")).toBe(true);
+        // The List lands there and says so: the header reads Today, in today's week.
+        act(() => listed.continuous!.onVisibleDay!(local(18, 0).getTime()));
+        expect(container.querySelector(".timeline-range-navigation")?.textContent).toContain("Today");
+        expect(pressedDay(container)).toMatch(/18 Oct/);
+      }
+    } finally {
+      document.removeEventListener("click", stay);
+    }
+  });
 });

@@ -572,36 +572,44 @@ export function EntriesTable({
   useLayoutEffect(() => {
     trackColumnDayRef.current = trackColumnDay;
   });
-  // A layout change re-measures and re-reads the top day, also when nothing scrolls (the shown day's last row removed,
-  // a group opened, a row growing; Codex r1 on #625): rows added or removed (a MutationObserver) or the table resizing
-  // (a ResizeObserver), at most once a frame.
+  // A layout change re-measures and re-reads the top day, also when nothing scrolls (Codex r1 and r2 on #625): rows
+  // added or removed (a MutationObserver), and anything in the List's content changing size — the table, and what sits
+  // above it (the "N to check" chip, the places filter, "Loading later days…") — or coming and going, which moves every
+  // heading (a ResizeObserver on each of the List's own children). At most once a frame.
   useEffect(() => {
     const root = listScrollRef.current;
     if (!root || !tracksTopDay) return;
     let frame: number | null = null;
-    let observedTable: Element | null = null;
+    const observed = new Set<Element>();
     const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => schedule());
-    const observeTable = () => {
-      const table = root.querySelector("table");
-      if (!resize || table === observedTable) return;
-      if (observedTable) resize.unobserve(observedTable);
-      observedTable = table;
-      if (table) resize.observe(table);
+    const observeContent = () => {
+      if (!resize) return;
+      const children = new Set(root.children);
+      for (const element of observed) {
+        if (children.has(element)) continue;
+        resize.unobserve(element);
+        observed.delete(element);
+      }
+      for (const element of children) {
+        if (observed.has(element)) continue;
+        resize.observe(element);
+        observed.add(element);
+      }
     };
     const schedule = () => {
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
-        observeTable();
+        observeContent();
         trackColumnDayRef.current(true);
       });
     };
     const rowNode = (node: Node) => node.nodeName === "TR" || node.nodeName === "TBODY" || node.nodeName === "TABLE";
     const mutations = typeof MutationObserver === "undefined" ? null : new MutationObserver((records) => {
-      if (records.some((record) => [...record.addedNodes, ...record.removedNodes].some(rowNode))) schedule();
+      if (records.some((record) => record.target === root || [...record.addedNodes, ...record.removedNodes].some(rowNode))) schedule();
     });
     mutations?.observe(root, { childList: true, subtree: true });
-    observeTable();
+    observeContent();
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
       mutations?.disconnect();

@@ -110,6 +110,7 @@ import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useLocationTimelines } from "@/components/location/LocationListRows";
 import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
+import { subscribeToCalendarToday } from "@/lib/calendar-today-request";
 
 type CalendarHoursMode = "fullDay";
 
@@ -425,6 +426,12 @@ export function TimeReviewViews({
   // The day at the top of Calendar › List, as the List reports it for the current date request (until it has, the
   // URL's date stands in, so an earlier visit's day never shows).
   const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
+  // The Calendar nav's tap asks for today every time, also when the URL already names today and the route doesn't
+  // change (Codex r2 on #625): the List positions itself again (on the URL's day, which the link makes today).
+  useEffect(() => {
+    if (!isList) return undefined;
+    return subscribeToCalendarToday(() => setListFocusToken((token) => token + 1));
+  }, [isList]);
   const listTopRequest = state.date;
   const reportListTopDay = useCallback((dayStartMs: number) => setListTop((current) =>
     current?.request === listTopRequest && current.dayStartMs === dayStartMs ? current : { request: listTopRequest, dayStartMs }), [listTopRequest]);

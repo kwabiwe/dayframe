@@ -332,7 +332,9 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
   const listOf = (element: Element) => element.closest(".timeline-list-scroll");
   const rowsOf = (root: Element) => [...root.querySelectorAll("tbody > tr")];
   const CHIP = 52;
-  const above = (root: Element) => (root.querySelector(".timeline-checks-bar") ? CHIP : 0);
+  // The later edge's own height ("Loading later days…" wrapping, say; Codex r2 on #625): 0 unless a test grows it.
+  const layout = { edge: 0 };
+  const above = (root: Element) => (root.querySelector(".timeline-checks-bar") ? CHIP : 0) + layout.edge;
   let restore: () => void = () => undefined;
   beforeEach(() => {
     const rowRect = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
@@ -545,6 +547,42 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     rerender(list(days(7, 20).filter((row) => row.id !== "d12"), { onVisibleDay: report }));
     expect(root.scrollTop).toBe(scrolled);
     await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 11).getTime()));
+  });
+
+  it("re-measures when what sits above the table grows: \"Loading later days…\" (Codex r2 on #625)", async () => {
+    // A ResizeObserver that reports only the elements it watches, as the browser does.
+    const watchers: Array<{ callback: () => void; watched: Set<Element> }> = [];
+    const realObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+    Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: class {
+      watched = new Set<Element>();
+      constructor(callback: () => void) { watchers.push({ callback, watched: this.watched }); }
+      observe(element: Element) { this.watched.add(element); }
+      unobserve(element: Element) { this.watched.delete(element); }
+      disconnect() { this.watched.clear(); }
+    } });
+    try {
+      const report = vi.fn();
+      const { rerender } = render(list(days(7, 20), { onVisibleDay: report, reachedLatest: false }));
+      expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+      // The later edge grows by 200 px with no row added or removed, and the List keeps the 14th in place.
+      layout.edge = 200;
+      rerender(list(days(7, 20), { onVisibleDay: report, reachedLatest: false }));
+      expect(headingTop(14)).toBe(0);
+      const edge = document.querySelector('[data-list-edge="later"]')!;
+      act(() => { for (const watcher of watchers) if (watcher.watched.has(edge)) watcher.callback(); });
+      // A one-pixel scroll: the 14th is still the day at the top.
+      const root = document.querySelector(".timeline-list-scroll")!;
+      fireEvent.wheel(root);
+      root.scrollTop += 1;
+      fireEvent.scroll(root);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
+      expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+      expect(report).not.toHaveBeenCalledWith(new Date(2026, 9, 13).getTime());
+    } finally {
+      layout.edge = 0;
+      if (realObserver) Object.defineProperty(globalThis, "ResizeObserver", realObserver);
+      else delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    }
   });
 
   it("finds the top day on a scroll without measuring every day heading (Codex r1 on #625)", async () => {

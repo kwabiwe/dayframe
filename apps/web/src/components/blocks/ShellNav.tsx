@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
+import { requestCalendarToday } from "@/lib/calendar-today-request";
 import { SHELL_SECTIONS, type ShellSectionId } from "@/lib/shell-nav";
 
 /**
@@ -77,6 +78,7 @@ export function ShellSidebarNav({ activeId, checkCount = 0 }: {
           <Link
             key={section.id}
             href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? checkLabel(count) : undefined}
@@ -104,6 +106,7 @@ export function ShellTabBar({ activeId, checkCount = 0 }: {
           <Link
             key={section.id}
             href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? checkLabel(count) : undefined}
           >
