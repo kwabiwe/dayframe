@@ -100,7 +100,8 @@ describe("web Settings contracts", () => {
   });
 
   it("keeps Settings rows inset and the mobile account trigger at 44 pixels", () => {
-    expect(globalStyles).toMatch(/\.settings-group \.ui-settings-row \+ \.ui-settings-row::before \{[^}]*left: 52px;[^}]*right: 18px;/s);
+    // Inset on both sides through the shared row-divider values (owner rule, 28 Oct 2026).
+    expect(globalStyles).toMatch(/\.settings-group \.ui-settings-row \+ \.ui-settings-row::before \{[^}]*--divider-inset: 18px;[^}]*--divider-inset-start: 52px;/s);
     expect(globalStyles).toMatch(/\.df-mtop-button,\s*\.df-mtop-avatar \{[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;/s);
   });
 

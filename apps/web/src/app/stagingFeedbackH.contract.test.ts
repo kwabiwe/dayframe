@@ -12,14 +12,15 @@ function rule(selector: string) {
 
 describe("Library › Places dividers (H1)", () => {
   it("insets the row and header rules from both card edges instead of drawing full-width borders", () => {
-    expect(rule(".df-library .place-list-row + .place-list-row")).toContain("border-top: 0;");
-    expect(rule(".df-library .places-list-section > header")).toContain("border-bottom: 0;");
-    const divider = rule(".df-library .places-list-section > header::after,\n.df-library .place-list-row + .place-list-row::before");
-    expect(divider).toContain("right: 18px;");
-    expect(divider).toContain("left: 18px;");
+    // Every places list (the Library's and the others) draws the shared inset hairline (owner rule, 28 Oct 2026).
+    expect(rule(".places-list-section > header")).not.toMatch(/border-bottom\s*:\s*1px/);
+    expect(css).not.toMatch(/\n\.place-list-row \+ \.place-list-row \{[^}]*border-top:\s*1px/);
+    const divider = rule(".places-list-section > header::after,\n.place-list-row + .place-list-row::before");
+    expect(divider).toContain("--divider-inset: 18px;");
+    expect(divider).toContain("inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);");
     expect(divider).toContain("height: 1px;");
-    expect(divider).toContain("background: var(--border);");
-    expect(rule(".df-library .place-list-row")).toContain("position: relative;");
+    expect(rule(".df-library .places-list-section > header::after,\n.df-library .place-list-row + .place-list-row::before")).toContain("background: var(--border);");
+    expect(rule(".place-list-row")).toContain("position: relative;");
   });
 });
 
