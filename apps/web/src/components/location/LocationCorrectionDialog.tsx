@@ -201,6 +201,9 @@ export function LocationCorrectionDialog({
   }, []);
   // "Save this place" made the place but couldn't set the visit to it: a retry sets it, and makes no second place.
   const [createdPlaceId, setCreatedPlaceId] = useState<string | null>(null);
+  // Whether a creation was sent whose outcome isn't known, and the places that existed when the dialog opened.
+  const creationAttempted = useRef(false);
+  const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
   // Owner item N): saved places nearest the visit first, as far as the map knows; places further
@@ -384,9 +387,18 @@ export function LocationCorrectionDialog({
     setBusy(true);
     setError(null);
     let placeId = createdPlaceId;
+    const [longitude, latitude] = evidence.map.centre.coordinates;
+    // A creation whose reply was lost may have saved the place: before trying again, look for it — a place by
+    // this name, at this spot, that wasn't one of the places this dialog opened with — and use it (Codex r7 on
+    // #609; /api/places takes no idempotency key).
+    if (!placeId && creationAttempted.current) {
+      placeId = await findCreatedPlace(name, latitude, longitude, openingPlaceIds.current);
+      if (!alive.current) return;
+      if (placeId) setCreatedPlaceId(placeId);
+    }
     if (!placeId) {
-      const [longitude, latitude] = evidence.map.centre.coordinates;
       const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
+      creationAttempted.current = true;
       const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
       const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
@@ -616,6 +628,29 @@ export function LocationCorrectionDialog({
       </div>
     </ModalDialog>
   );
+}
+
+/** Metres between two points a few metres apart (equirectangular is exact enough at this scale). */
+function metresBetween(latitudeA: number, longitudeA: number, latitudeB: number, longitudeB: number) {
+  const radians = Math.PI / 180;
+  const x = (longitudeB - longitudeA) * radians * Math.cos(((latitudeA + latitudeB) / 2) * radians);
+  const y = (latitudeB - latitudeA) * radians;
+  return Math.sqrt(x * x + y * y) * 6_371_000;
+}
+
+/**
+ * A place "Save this place" already created though its reply was lost: same name, within 10 m of the visit's centre,
+ * and not among the places the dialog opened with. Null when there is none (or the list can't be read).
+ */
+async function findCreatedPlace(name: string, latitude: number, longitude: number, existing: ReadonlySet<string>) {
+  const response = await clientFetch("/api/places", { cache: "no-store" }).catch(() => null);
+  const body = response?.ok ? await response.json().catch(() => null) as { places?: Array<{ id?: unknown; name?: unknown; latitude?: unknown; longitude?: unknown }> } | null : null;
+  const wanted = name.trim().toLowerCase();
+  const found = (body?.places ?? []).find((place) => typeof place.id === "string" && !existing.has(place.id) &&
+    typeof place.name === "string" && place.name.trim().toLowerCase() === wanted &&
+    typeof place.latitude === "number" && typeof place.longitude === "number" &&
+    metresBetween(latitude, longitude, place.latitude, place.longitude) <= 10);
+  return typeof found?.id === "string" ? found.id : null;
 }
 
 /** "120 m", "1.4 km". */

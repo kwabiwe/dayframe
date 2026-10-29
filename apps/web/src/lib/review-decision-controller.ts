@@ -218,7 +218,9 @@ export class ReviewDecisionController {
         this.emit();
       })
       .catch((error: unknown) => {
-        if (!this.active.has(decision.token)) return;
+        // Settled meanwhile (saved, decided elsewhere, or resolved by another receipt): final, so a late failure of
+        // its request neither brings it back nor reports an error (Codex r7 on #609).
+        if (this.active.get(decision.token)?.status !== "saving") return;
         this.active.delete(decision.token);
         this.error = error instanceof Error && error.message
           ? `${error.message} It’s back in the queue.`

@@ -441,4 +441,48 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(pressed()).toEqual(["Bus"]);
     expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
   });
+  it("makes a saved place once when the creation's reply is lost: the retry finds it and only sets the visit (Codex r7 on #609)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    const created = { id: "place-new", name: "Pret", latitude: 51.5, longitude: -0.1 };
+    clientFetch.mockReset()
+      // The creation commits, but its reply never arrives.
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      // The retry reads the places first: the new one is there, beside the ones the dialog opened with.
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ places: [...places.map((each) => ({ ...each, latitude: 10, longitude: 20 })), created] }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("needs a connection");
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const calls = clientFetch.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${url}`);
+    expect(calls).toEqual(["POST /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+    expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new" });
+  });
+
+  it("creates the place on a retry when the lost creation hadn't saved it", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      // No new place by that name near here (a same-named one far away doesn't count).
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ places: [{ id: "elsewhere", name: "Pret", latitude: 52, longitude: -1 }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const calls = clientFetch.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${url}`);
+    expect(calls).toEqual(["POST /api/places", "GET /api/places", "POST /api/places", "POST /api/timeline/corrections"]);
+    expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ placeId: "place-new" });
+  });
 });

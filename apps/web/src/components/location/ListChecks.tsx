@@ -34,6 +34,11 @@ function segmentOf(item: ReviewItemRow) {
   return typeof id === "string" && id ? id : null;
 }
 
+/** The workspace of an owner key ("workspace:user"). */
+function workspaceOf(owner: string) {
+  return owner.split(":")[0];
+}
+
 type CheckDecisionsInput = {
   /** The List's transition, which owns every change a "?" makes, restores included. Stable. */
   applyTransition: (update: () => void) => void;
@@ -195,14 +200,24 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
    * #609): their held or saving decisions are settled, nothing revives them, and they stay away until data lists
    * them open again.
    */
+  // A receipt can land lifetimes later (A → B → A; Codex r7 on #609). Each request holds the settle of the lifetime it
+  // started in, which applies its ids through the current controller — a resolved review id is a server fact — but
+  // only while the workspace is still the one the request was made in; otherwise the receipt is dropped.
+  const settleNow = useRef(settleDecisions);
+  const ownerNow = useRef(owner);
+  useLayoutEffect(() => {
+    settleNow.current = settleDecisions;
+    ownerNow.current = owner;
+  });
   const settleResolved = useCallback((itemIds: readonly string[]) => {
     if (!itemIds.length) return;
+    if (workspaceOf(ownerNow.current) !== workspaceOf(owner)) return;
     for (const id of itemIds) resolvedNow.current.add(id);
-    settleDecisions(itemIds);
+    settleNow.current(itemIds);
     setRevived((current) => itemIds.some((id) => current.has(id)) ? new Map([...current].filter(([id]) => !itemIds.includes(id))) : current);
     const over = openItemsAtConflict.current;
     setClosedByServer((current) => new Map([...current, ...itemIds.map((id) => [id, over] as const)]));
-  }, [settleDecisions]);
+  }, [owner]);
 
   return { answer, checks, clearError, itemsById, outings, projectedItems, settleResolved, state, undo };
 }

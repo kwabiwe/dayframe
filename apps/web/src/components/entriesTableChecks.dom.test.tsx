@@ -929,4 +929,65 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(officeRow()).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
   });
+  describe("a Logs as receipt that lands lifetimes later (Codex r7 on #609)", () => {
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    function GridProbe() {
+      const items = useProjectedReviewItems([]);
+      const grid = useGridCorrection({ activities: [errands], clock: "24h", owner: "w1:u1", places: [], refresh: async () => undefined, reviewItems: items,
+        timelines: new Map([[timeline.date, timeline]]), todayStartMs: clock.todayStartMs });
+      const office = timeline.items[0] as Extract<LocationTimeline["items"][number], { kind: "place" }>;
+      return (
+        <>
+          <button onClick={() => grid.open(office, timeline, grid.askingBySegment?.get("seg-office") ?? null)} type="button">Open the office</button>
+          {grid.dialog}
+        </>
+      );
+    }
+    /** Starts Logs as for the office on the Grid in workspace w1; its receipt waits for `land`. */
+    async function startLogsAs() {
+      let land: () => void = () => undefined;
+      clientFetch.mockImplementation((url: string, init: RequestInit) => url === "/api/timeline/corrections"
+        ? new Promise<Response>((resolve) => {
+          land = () => resolve(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e1"], resolvedReviewItemIds: [PLACE] } }), { status: 200 }));
+        })
+        : Promise.resolve(new Response(JSON.stringify(acknowledge(url, init)), { status: 200 })));
+      const view = render(<Shell items={reviewItems}><GridProbe /></Shell>);
+      fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
+      fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+      await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+      return { view, land: () => land() };
+    }
+
+    it("settles the current answer when it lands after A → B → A", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      const { view, land } = await startLogsAs();
+      view.rerender(<Shell items={[]} owner="w2:u1">{null}</Shell>);
+      view.rerender(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
+      // Back in w1, the office's "?" is answered in the List and held for Undo.
+      fireEvent.click(officeRow()!);
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+      expect(badge()).toBe(2);
+      await act(async () => { land(); });
+      // The receipt settled it in the current lifetime's controller: the held Not now is never sent, and Undo brings
+      // nothing back.
+      await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+      expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/review/"))).toEqual([]);
+      const undo = screen.queryByRole("button", { name: "Undo" });
+      if (undo) fireEvent.click(undo);
+      expect(officeRow()).toBeNull();
+      expect(badge()).toBe(2);
+    });
+
+    it("drops it when it lands in another workspace", async () => {
+      const { view, land } = await startLogsAs();
+      // Another workspace that happens to show a "?" with the same id: the receipt isn't its.
+      view.rerender(<Shell items={reviewItems} owner="w2:u1"><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
+      fireEvent.click(officeRow()!);
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+      await act(async () => { land(); });
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+      expect(officeRow()).toBeTruthy();
+      expect(badge()).toBe(3);
+    });
+  });
 });
