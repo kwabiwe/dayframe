@@ -32,8 +32,9 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
 
   it("names the month and the week's total, with no separate framed line (#259)", () => {
     expect(model.month).toBe("October");
-    expect(model.weekTotal).toBe("106h 14m this week");
-    expect(Object.keys(model)).toEqual(["month", "days", "weekTotal"]);
+    expect(model.weekTotal).toBe("106h 14m");
+    expect(model.weekTotalLabel).toBe("Week total 106h 14m, this week");
+    expect(Object.keys(model)).toEqual(["month", "days", "weekTotal", "weekTotalLabel"]);
   });
 
   it("puts each day's total under its date, a dash for none (#256)", () => {
@@ -58,7 +59,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
       weekDays: [28, 29, 30].map((date) => new Date(2026, 8, date)).concat([1, 2, 3, 4].map(day)),
       weekLoggedSeconds: 3600
     });
-    expect(past.weekTotal).toBe("1h in the week of 28 Sept");
+    expect(past.weekTotal).toBe("1h");
+    expect(past.weekTotalLabel).toBe("Week total 1h, the week of 28 Sept");
     expect(past.days.some((d) => d.isToday)).toBe(false);
   });
 
@@ -76,7 +78,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
     // Totals depend on where the browser's days start, so the server render shows a dash.
     expect(beforeHydration.days.every((d) => d.total === "–")).toBe(true);
-    expect(beforeHydration.weekTotal).toBe("– in the week of 5 Oct");
+    expect(beforeHydration.weekTotal).toBe("–");
+    expect(beforeHydration.weekTotalLabel).toBe("Week total –, the week of 5 Oct");
   });
 
   it("marks the server's guess at today (the viewer's zone) until hydration", () => {
@@ -90,7 +93,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
       weekLoggedSeconds: 3600
     });
     expect(beforeHydration.days.filter((d) => d.isToday).map((d) => d.dateNumber)).toEqual([11]);
-    expect(beforeHydration.weekTotal).toBe("– this week");
+    expect(beforeHydration.weekTotal).toBe("–");
+    expect(beforeHydration.weekTotalLabel).toBe("Week total –, this week");
   });
 
   it("shows a day with under a minute framed (Codex r1 on #583)", () => {

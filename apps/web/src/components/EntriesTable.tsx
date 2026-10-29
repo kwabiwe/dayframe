@@ -1457,7 +1457,7 @@ export function EntriesTable({
         </span>
         {interval.stoppedAt
           ? timeInput("finish", interval.stoppedAt)
-          : <span className="timeline-inline-running">Running</span>}
+          : <span className="timeline-inline-running"><span className="sr-only">Running, </span>now</span>}
       </span>
     );
   }
@@ -1682,7 +1682,7 @@ export function EntriesTable({
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="timeline-list-actions">
+                    <div className="timeline-list-actions" data-grouped={isGrouped || undefined} data-running={!entry.stoppedAt || undefined}>
                       <button
                         className="df-icon-action"
                         data-tip={entry.stoppedAt ? "Start again" : "Restart"}

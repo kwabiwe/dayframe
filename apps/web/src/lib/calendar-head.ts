@@ -19,7 +19,9 @@ export type CalendarHeadDay = {
 export type CalendarHeadModel = {
   month: string;
   days: CalendarHeadDay[];
+  /** The week's total alone ("45h 18m"); `weekTotalLabel` names it ("Week total 45h 18m, this week"). */
   weekTotal: string;
+  weekTotalLabel: string;
 };
 
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "long" });
@@ -87,8 +89,10 @@ export function calendarHeadModel({
           : DAY_LONG.format(day)
       };
     }),
-    weekTotal: weekDays.some((day) => toTimelineDateKey(day) === todayKey)
-      ? `${total(weekLoggedSeconds)} this week`
-      : `${total(weekLoggedSeconds)} in the week of ${WEEK_OF.format(weekDays[0] ?? selectedDay)}`
+    // UI review W9 (owner 29 Oct 2026): the toolbar shows only the total; which week it is lives in its name.
+    weekTotal: total(weekLoggedSeconds),
+    weekTotalLabel: weekDays.some((day) => toTimelineDateKey(day) === todayKey)
+      ? `Week total ${total(weekLoggedSeconds)}, this week`
+      : `Week total ${total(weekLoggedSeconds)}, the week of ${WEEK_OF.format(weekDays[0] ?? selectedDay)}`
   };
 }

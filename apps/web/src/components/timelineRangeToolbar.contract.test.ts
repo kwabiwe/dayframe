@@ -108,15 +108,19 @@ describe("Calendar range and toolbar contract", () => {
     // #259: one compact row — the period, the week strip, then Day | Week and Calendar | List.
     const toolbar = timeline.slice(timeline.indexOf('className="timeline-range-toolbar df-cal-toolbar"'), timeline.indexOf('className="timeline-view-stage"'));
     expect(toolbar.indexOf('className="timeline-range-navigation"')).toBeLessThan(toolbar.indexOf("<CalendarHead"));
-    expect(toolbar.indexOf("<CalendarHead")).toBeLessThan(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}'));
-    expect(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}')).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar view"'));
+    expect(toolbar.indexOf("<CalendarHead")).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar scope"'));
+    expect(toolbar.indexOf('ariaLabel="Calendar scope"')).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar view"'));
+    // UI review W8 and E (owner 29 Oct 2026): List drops the arrows and Day | Week; the Week grid drops the strip.
+    expect(toolbar).toContain("{isList ? null : (");
+    expect(toolbar).toContain('showDays={!(state.view === "calendar" && state.scope === "week")}');
     // Card C item 5: a visible Calendar | List switch on web; the round icon menu is the iPhone's only.
     expect(timeline).not.toContain("CalendarViewMenu");
     expect(timeline).toContain('{ id: "calendar", label: "Calendar" }');
     expect(timeline).toContain('{ id: "list", label: "List" }');
-    // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
-    expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
-    expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
+    // In List the period controls don't apply (continuous days, owner 24 Oct 2026): the arrows and Day | Week
+    // leave the row (UI review W8, owner 29 Oct 2026); the date stays, greyed, naming the List's top day.
+    expect(timeline).not.toContain('unavailable: isList ? "Not used in List" : undefined');
+    expect(timeline).not.toContain("timeline-period-not-used");
     expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
     // Card C (27 Oct): List has no second Today button; the grid shows one away from today.
     expect(timeline).toContain("{showsToday || isList ? null : (");

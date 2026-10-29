@@ -98,7 +98,7 @@ describe("row dividers are inset on both sides", () => {
   it("insets the Calendar List's line past the block and before the row's end, as Today's rows", () => {
     const first = ruleBody(".timeline-list-row + .timeline-list-row > td:first-child");
     const last = ruleBody(".timeline-list-row + .timeline-list-row > td:last-child");
-    expect(first).toMatch(/--divider-inset-start: 60px;/);
+    expect(first).toMatch(/--divider-inset-start: 52px;/);
     expect(first).toMatch(/background-position: var\(--divider-inset-start\) 0;/);
     expect(last).toMatch(/--divider-inset: 10px;/);
     expect(last).toMatch(/background-size: calc\(100% - var\(--divider-inset\)\) 1px;/);
@@ -139,17 +139,19 @@ describe("row dividers are inset on both sides", () => {
       expect(spans[0][1], label).toBe(100);
       expect(spans[1], label).toEqual([100, 200]);
       expect(spans[2][0], label).toBe(200);
-      // The leading gap is past the block (60 px), the trailing one 10 px.
-      expect(rtl ? 300 - spans[2][1] : spans[0][0], label).toBe(60);
+      // The leading gap is past the 28 px block (52 px), the trailing one 10 px.
+      expect(rtl ? 300 - spans[2][1] : spans[0][0], label).toBe(52);
       expect(rtl ? spans[0][0] : 300 - spans[2][1], label).toBe(10);
     }
   });
 
   it("insets the List's sideways scroll viewport, so its clip edge never touches the panel", () => {
-    // The table is at least 760 px wide: on phones and beside the Places column the row lines run into
-    // the scroller's clip edge, which must therefore sit inside the panel on both sides.
+    // The table is at least 760 px wide beside the Places column, so the row lines run into the scroller's
+    // clip edge, which must therefore sit inside the panel on both sides. On phones it fits the screen
+    // (UI review W1, owner 29 Oct 2026).
     const tableRules = rules().filter((rule) => rule.selector === ".timeline-list-table").map((rule) => rule.body);
-    expect(tableRules.at(-1 - [...tableRules].reverse().findIndex((body) => /min-width:/.test(body)))).toMatch(/min-width: 760px;/);
+    expect(tableRules.some((body) => /min-width: 760px;/.test(body))).toBe(true);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{\s*\.timeline-list-table \{\s*min-width: 0;/);
     const scroller = rules().filter((rule) => rule.selector === ".timeline-list-scroll").map((rule) => rule.body).join("");
     const inset = Number(scroller.match(/--timeline-list-clip-inset:\s*(\d+)px;/)?.[1]);
     expect(inset).toBeGreaterThanOrEqual(10);
@@ -162,7 +164,8 @@ describe("row dividers are inset on both sides", () => {
     // At rest nothing moves: the table and the sticky "N to check" bar give the inset back.
     expect(tableRules.join(""))
       .toMatch(/padding: 0 calc\(12px - var\(--timeline-list-clip-inset\)\) 12px;/);
-    expect(ruleBody(".timeline-checks-bar.is-sticky")).toMatch(/padding: 0 calc\(12px - var\(--timeline-list-clip-inset\)\);/);
+    // The chip sits at the heading's right end, clear of the day's total (UI review W10, owner 29 Oct 2026).
+    expect(ruleBody(".timeline-checks-bar.is-sticky")).toMatch(/padding: 0 calc\(76px - var\(--timeline-list-clip-inset\)\) 0 0;/);
   });
 
   it("insets dialog header and action lines by the dialog's own padding", () => {
@@ -223,7 +226,7 @@ describe("dividers in forced colours", () => {
     const body = (selector: string) => forced.find((rule) => rule.selector === selector)?.body ?? "";
     expect(body(".timeline-list-row + .timeline-list-row > td::before")).toMatch(/border-top: 1px solid CanvasText;/);
     expect(body(".timeline-list-row + .timeline-list-row > td::before")).toMatch(/inset-inline: 0;/);
-    expect(body(".timeline-list-row + .timeline-list-row > td:first-child::before")).toMatch(/inset-inline-start: 60px;/);
+    expect(body(".timeline-list-row + .timeline-list-row > td:first-child::before")).toMatch(/inset-inline-start: 52px;/);
     expect(body(".timeline-list-row + .timeline-list-row > td:last-child::before")).toMatch(/inset-inline-end: 10px;/);
   });
 });

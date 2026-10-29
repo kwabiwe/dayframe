@@ -106,7 +106,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
   it("moves the week strip, its totals and its report link to the week the List has scrolled into", async () => {
     const { container } = await renderList();
     expect(dayLabels(container)[0]).toMatch(/12 Oct/);
-    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h this week");
+    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h");
 
     // The List reports the 8th at its top: the week before.
     act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
@@ -114,7 +114,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
     expect(dayLabels(container)[0]).toMatch(/5 Oct/);
     expect(dayLabels(container)[6]).toMatch(/11 Oct/);
     expect(pressedDay(container)).toMatch(/8 Oct/);
-    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("3h in the week of 5 Oct");
+    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("3h");
     const report = new URL(container.querySelector<HTMLAnchorElement>(".df-cal-weektotal")!.getAttribute("href")!, "https://dayframe.test");
     expect([report.searchParams.get("from"), report.searchParams.get("to")]).toEqual(["2026-10-05", "2026-10-11"]);
   });

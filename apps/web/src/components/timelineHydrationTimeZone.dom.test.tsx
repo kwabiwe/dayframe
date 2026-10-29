@@ -128,8 +128,10 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(html).not.toContain("calendar-now-line");
     expect(html).not.toMatch(/\b(23|00):(30|45)\b/);
     expect(html).toContain('data-calendar-day-key="2026-10-12"');
-    // #256: each day's total under its date waits for hydration (a dash), as the week total does.
-    expect(html).toContain('<span aria-hidden="true" class="df-cal-day-total df-tnum">–</span>');
+    // #256: each day's total waits for hydration (a dash), as the week total does. The Week grid shows them in
+    // its day columns, not a week strip (UI review E, owner 29 Oct 2026).
+    expect(html).not.toContain("df-cal-day-total");
+    expect(html).toContain('<div aria-hidden="true" class="calendar-day-total tabular">–</div>');
     expect(html).not.toContain("df-cal-framed");
 
     expect(recoverable).toEqual([]);
@@ -150,9 +152,9 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(container.querySelector(".calendar-day-heading.is-today")?.querySelector("[aria-label]")?.getAttribute("aria-label")).toContain("12 Oct");
     expect(container.querySelector(".calendar-grid-scroller")?.hasAttribute("aria-busy")).toBe(false);
     // 45 minutes on Monday (London) and an hour on Wednesday.
-    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m this week");
-    // Day totals, as the bars, count time up to the test's now (00:45 on Monday, London).
-    expect([...container.querySelectorAll(".df-cal-day-total")].map((total) => total.textContent)).toEqual(["15m", "–", "–", "–", "–", "–", "–"]);
+    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m");
+    // The day columns' totals land on the viewer's days after hydration: 45 minutes on Monday, an hour on Wednesday.
+    expect([...container.querySelectorAll(".calendar-day-total")].map((total) => total.textContent)).toEqual(["45m", "–", "1h", "–", "–", "–", "–"]);
     await unmount();
   });
 

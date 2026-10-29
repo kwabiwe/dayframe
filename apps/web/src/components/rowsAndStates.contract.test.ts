@@ -96,9 +96,8 @@ describe("rows (WUI-028, WUI-029)", () => {
     // The meta and tag spans set their own colour elsewhere; inside the line they inherit it.
     expect(lastDeclaration(".timeline-task-secondary-line .timeline-task-meta,\n.timeline-task-secondary-line .tag-metadata", "color")).toBe("inherit");
     expect(rule(".timeline-task-secondary-line .tag-metadata.is-compact")).toContain("font-size: 12px;");
-    expect(rule(".timeline-task-block")).toMatch(/width: 36px;[\s\S]*height: 36px;[\s\S]*border-radius: calc\(36px \* 0\.3\);/);
-    // Today's and Reports' rows moved to a 28 px tile in the UI review (owner 29 Oct 2026); the List follows
-    // in the Calendar PR.
+    expect(rule(".timeline-task-block")).toMatch(/width: 28px;[\s\S]*height: 28px;[\s\S]*border-radius: calc\(28px \* 0\.3\);/);
+    // Today's, Reports' and the List's rows moved to a 28 px tile in the UI review (owner 29 Oct 2026).
     expect(rule(".df-erow-block")).toContain("border-radius: calc(28px * 0.3);");
     expect(rule(".timeline-list-row:hover > td,\n.timeline-list-row:has(:focus-visible) > td")).toContain("var(--surface-muted)");
     // Actions appear on hover or focus, and always on touch screens and narrow layouts.
@@ -176,5 +175,22 @@ describe("row sub-line contrast (WCAG 1.4.3, Codex r2 on #495)", () => {
         expect(contrast(subline, rgb(tokens[fill])), `${header} on ${fill}`).toBeGreaterThanOrEqual(4.5);
       }
     }
+  });
+});
+
+describe("Calendar › List on phones (UI review W1; Codex r1 on #632)", () => {
+  it("fits the screen with times stacked and one action per row, none of them lost", () => {
+    const phone = styles.slice(styles.indexOf("/* Phones (UI review W1"));
+    expect(phone).toMatch(/@media \(max-width: 760px\) \{\s*\.timeline-list-table \{\s*min-width: 0;/);
+    expect(phone).toMatch(/\.timeline-inline-time\[data-clock="12h"\]\.is-running \{[^}]*grid-template-columns: max-content;[^}]*justify-items: end;/);
+    expect(phone).toMatch(/\.timeline-list-actions :is\(\[data-tip="Start again"\], \[data-tip="Restart"\], \[data-tip="Delete"\]\) \{\s*display: none;/);
+    // The running row keeps Restart (the timer bar edits it); a group keeps Delete all (occurrences keep Edit).
+    expect(phone).toMatch(/\.timeline-list-actions\[data-running\] \[data-tip="Restart"\],\s*\.timeline-list-actions\[data-grouped\] \[data-tip="Delete"\] \{\s*display: inline-flex;/);
+    expect(source("components/EntriesTable.tsx")).toContain("data-grouped={isGrouped || undefined} data-running={!entry.stoppedAt || undefined}");
+    // Place rows stack their span too, and the narrowest phones tighten the lead (Codex r2 on #632).
+    expect(phone).toMatch(/\.timeline-list-table \.timeline-location-span\.is-stacked \{\s*display: grid;/);
+    expect(phone).toMatch(/@media \(max-width: 360px\) \{/);
+    // The Yes pill (about 49 px) fits its 56 px column.
+    expect(phone).toMatch(/col\.timeline-list-col-actions \{\s*width: 56px;/);
   });
 });

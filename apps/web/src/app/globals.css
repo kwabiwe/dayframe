@@ -1084,7 +1084,7 @@ textarea.ui-control {
 }
 
 .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:first-child {
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .timeline-task-title {
@@ -1289,36 +1289,54 @@ textarea.ui-control {
 .timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
   height: auto;
   min-height: 0;
-  grid-template-columns: max-content;
-  grid-auto-rows: 24px;
-  justify-items: end;
-  padding: 2px 8px;
+  grid-template-columns: max-content 14px max-content;
+  grid-auto-rows: 28px;
+  padding: 0 6px;
+  align-items: center;
 }
 
 .timeline-list-table .timeline-inline-time-separator {
-  display: none;
+  display: inline-flex;
+  width: 14px;
+  height: 28px;
+  justify-content: center;
 }
 
 .timeline-list-table .timeline-inline-time-control,
 .timeline-list-table .timeline-inline-time-input {
-  height: 24px;
-  min-height: 24px;
+  height: 28px;
+  min-height: 28px;
   text-align: right;
 }
 
 /* The secondary text nudged toward primary, as the row's second line: AA on the card and the hover fill
    (plain textSecondary is 4.39:1 on Daylight's surfaceMuted; Codex r5 on #583). */
-.timeline-list-table .timeline-inline-time > :last-child {
+/* One quiet range, "15:29–16:54" or "17:44–now", and the duration beside it (UI review D, owner
+   29 Oct 2026; it was start over end). */
+.timeline-list-table .timeline-inline-time {
   color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
 }
+
+.timeline-list-table .timeline-inline-time > .timeline-inline-time-control:first-child .timeline-inline-time-input {
+  text-align: right;
+}
+
+.timeline-list-table .timeline-inline-time > :last-child .timeline-inline-time-input {
+  text-align: left;
+}
+
+.timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  padding-block: 6px;
+}
+
 
 /* A running row's "Running" sits in the end's 24 px line like a finished end time (Codex r3 on #583). */
 .timeline-list-table .timeline-inline-running {
   display: inline-flex;
-  height: 24px;
-  min-height: 24px;
+  height: 28px;
+  min-height: 28px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 /* The later shared picker grid must not give triggerless inline wrappers a box. */
@@ -7201,6 +7219,171 @@ dialog.ui-dialog.df-range-custom {
   width: 176px;
 }
 
+.timeline-list-table .timeline-task-cell {
+  align-items: center;
+}
+
+/* List has no arrows: its greyed date takes the navigation's one column (Codex r3 on #632). */
+.timeline-range-navigation[data-unused-in-list] {
+  grid-template-columns: minmax(120px, auto);
+}
+
+/* The Week grid shows only the week's total: it follows the date range instead of floating mid-row (E). */
+.df-cal-week:not(:has(.df-cal-days)) {
+  justify-content: flex-start;
+}
+
+/* Phones: the week strip carries weekday, date and dots; the chosen day's total is in its heading (W2). */
+@media (max-width: 640px) {
+  .df-cal-day-total {
+    display: none;
+  }
+}
+
+/* Phones (UI review W1, owner 29 Oct 2026): the List fits the screen instead of scrolling sideways, so
+   every row shows its times. The times stack, start over end, as on the iPhone, so the title keeps its
+   room; each row keeps one action: Edit, Restart on the running row (the timer bar edits that block), or
+   Delete all on a group (each occurrence keeps its own Edit); the rest are in the editor (Codex r1 on #632). */
+@media (max-width: 760px) {
+  .timeline-list-table {
+    min-width: 0;
+  }
+
+  .timeline-list-table col.timeline-list-col-time {
+    width: 52px;
+  }
+
+  .timeline-list-table[data-clock="12h"] col.timeline-list-col-time {
+    width: 72px;
+  }
+
+  .timeline-list-table col.timeline-list-col-duration {
+    width: 54px;
+  }
+
+  .timeline-list-table col.timeline-list-col-actions {
+    width: 56px;
+  }
+
+  .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:not(:first-child) {
+    padding-inline: 2px;
+  }
+
+  .timeline-list-table .timeline-inline-time,
+  .timeline-list-table .timeline-inline-time.is-running,
+  .timeline-list-table .timeline-inline-time[data-clock="12h"],
+  .timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
+    grid-template-columns: max-content;
+    grid-auto-rows: 24px;
+    justify-items: end;
+    padding: 0 2px;
+    font-size: 12px;
+  }
+
+  .timeline-list-table .timeline-inline-time-separator {
+    display: none;
+  }
+
+  .timeline-list-table .timeline-inline-time-control,
+  .timeline-list-table .timeline-inline-time-input,
+  .timeline-list-table .timeline-inline-running {
+    height: 24px;
+    min-height: 24px;
+  }
+
+  .timeline-list-table .timeline-inline-time > :last-child .timeline-inline-time-input {
+    text-align: right;
+  }
+
+  .timeline-list-duration {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .timeline-list-actions :is([data-tip="Start again"], [data-tip="Restart"], [data-tip="Delete"]) {
+    display: none;
+  }
+
+  .timeline-list-actions[data-running] [data-tip="Restart"],
+  .timeline-list-actions[data-grouped] [data-tip="Delete"] {
+    display: inline-flex;
+  }
+
+  .timeline-list-actions:is([data-running], [data-grouped]) [data-tip="Edit"] {
+    display: none;
+  }
+
+  /* Long words in narrow columns wrap instead of spilling into the next cell (Codex r3 on #632). */
+  .timeline-list-table .timeline-group-time-summary,
+  .timeline-list-table .timeline-location-note {
+    font-size: 11px;
+    line-height: 1.25;
+    text-align: right;
+    white-space: normal;
+  }
+
+  /* A trip's legs toggle sits under its duration (Codex r2 on #632). */
+  .timeline-list-duration-content {
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  /* Place rows stack their span as the block rows do (after the base rules, so it wins). */
+  .timeline-list-table .timeline-location-span.is-stacked {
+    display: grid;
+    justify-items: end;
+    font-size: 12px;
+  }
+
+  .timeline-list-table .timeline-location-span.is-stacked > span + span::before {
+    content: none;
+  }
+}
+
+/* The narrowest phones: a tighter lead and action column so even a group's title keeps room. */
+@media (max-width: 360px) {
+  .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:first-child {
+    padding-inline: 4px 2px;
+  }
+
+  .timeline-list-table .timeline-task-block,
+  .timeline-list-table .timeline-location-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .timeline-list-table .timeline-location-hit {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .timeline-list-table .timeline-task-cell {
+    gap: 6px;
+  }
+
+  .timeline-list-table[data-clock="12h"] col.timeline-list-col-time {
+    width: 64px;
+  }
+
+  .timeline-list-table[data-clock="12h"] .timeline-inline-time {
+    font-size: 11px;
+  }
+
+  .timeline-list-table col.timeline-list-col-duration {
+    width: 48px;
+  }
+
+  .timeline-list-table col.timeline-list-col-actions {
+    width: 48px;
+  }
+
+  .timeline-list-table .timeline-row-yes {
+    padding-inline: 8px;
+  }
+}
+
 .timeline-task-cell {
   container-type: inline-size;
 }
@@ -12999,7 +13182,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .timeline-list-row + .timeline-list-row > td:first-child {
-  --divider-inset-start: 60px;
+  --divider-inset-start: 52px;
   background-position: var(--divider-inset-start) 0;
   background-size: calc(100% - var(--divider-inset-start)) 1px;
 }
@@ -13047,12 +13230,12 @@ dialog.ui-dialog.df-palette {
 
 .timeline-task-block {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   flex: none;
   place-items: center;
   align-self: center;
-  border-radius: calc(36px * 0.3);
+  border-radius: calc(28px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
@@ -13981,12 +14164,12 @@ dialog.ui-dialog.df-palette {
    behind "Show Home and every place"; a journey in progress is one row; a trip's block lists its legs. */
 .timeline-location-mark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   flex: none;
   place-items: center;
   align-self: center;
-  border-radius: calc(36px * 0.3);
+  border-radius: calc(28px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
@@ -14175,8 +14358,8 @@ dialog.ui-dialog.df-palette {
 
 .timeline-location-hit {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
   width: 100%;
   min-height: 44px;
@@ -14227,8 +14410,9 @@ button.timeline-location-hit:focus-visible {
   z-index: 3;
   height: 0;
   overflow: visible;
-  justify-content: center;
-  padding: 0 calc(12px - var(--timeline-list-clip-inset));
+  justify-content: flex-end;
+  /* Clear of the heading's day total at the right end. */
+  padding: 0 calc(76px - var(--timeline-list-clip-inset)) 0 0;
 }
 
 @media (max-width: 760px) {
@@ -14237,9 +14421,22 @@ button.timeline-location-hit:focus-visible {
   }
 }
 
+/* "N to check" sits in the sticky day heading's line, at its right end just before the day's total: a compact
+   quiet amber chip, not a floating banner (UI review W10, owner 29 Oct 2026). */
 .timeline-checks-bar.is-sticky .timeline-checks-chip {
-  margin-top: 6px;
-  box-shadow: 0 4px 14px color-mix(in oklab, black 18%, transparent);
+  position: relative;
+  min-height: 28px;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+}
+
+.timeline-checks-bar.is-sticky .timeline-checks-chip::after {
+  position: absolute;
+  inset: -8px 0;
+  content: "";
 }
 
 /* Card F: on wide web the List and a "Places and trips" column sit side by side. */
@@ -14316,7 +14513,7 @@ button.timeline-location-hit:focus-visible {
 }
 
 .timeline-places-column-item .timeline-location-hit {
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
 }
 
 .timeline-places-column-item b {
@@ -14998,16 +15195,23 @@ button.timeline-location-hit:focus-visible {
 
 /* Calendar (owner items B, D, E, H, K). */
 .timeline-location-span.is-stacked {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
+  display: flex;
+  gap: 0;
   font-size: 14px;
-  font-weight: var(--fw-medium);
-  color: var(--text-primary);
+  font-weight: var(--fw-regular);
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
+  justify-content: flex-end;
+  align-items: baseline;
 }
 
+/* One line, as the block rows: "10:05–11:02", "12:20–now" (UI review D, owner 29 Oct 2026). */
 .timeline-location-span.is-stacked > span + span {
-  color: var(--text-secondary);
+  color: inherit;
+}
+
+.timeline-location-span.is-stacked > span + span::before {
+  padding: 0 3px;
+  content: "–";
 }
 
 .timeline-location-row.is-quiet .timeline-location-mark.is-v4 {
@@ -15143,7 +15347,7 @@ button.timeline-location-hit:focus-visible {
   }
 
   .timeline-list-row + .timeline-list-row > td:first-child::before {
-    inset-inline-start: 60px;
+    inset-inline-start: 52px;
   }
 
   .timeline-list-row + .timeline-list-row > td:last-child::before {
