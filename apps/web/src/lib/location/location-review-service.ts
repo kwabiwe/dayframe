@@ -476,7 +476,7 @@ async function resolveClosedLocationReview(
       action.action === "record_poi_once" && Boolean(action.edit?.categoryId) &&
       item.status === "accepted" &&
       await pickedVenueMatches(client, item, action.applePlaceId, session) &&
-      await venueFreeTimeMatches(client, item, action.edit!, action.name.trim(), session)
+      await venueFreeTimeMatches(client, item, action.edit!, action.name.trim(), action.applePlaceId ?? null, session)
     ) ||
     (
       action.action === "record_poi_once" && !action.edit?.categoryId &&
@@ -491,12 +491,21 @@ async function resolveClosedLocationReview(
       )
     );
   if (equivalent) {
+    // A one-time place with an activity answers a retry with the blocks it made (oldest first), so a retry under
+    // another id still hands the iPhone its block ids (Location review of #620).
+    const venueBlocks = action.action === "record_poi_once" && action.edit?.categoryId
+      ? (await client.query<{ id: string }>(
+          `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3
+            order by started_at, id`,
+          [session.workspaceId, session.userId, item.eventId])).rows.map((row) => row.id)
+      : null;
     return {
       ok: true,
       action: action.action,
       status: item.status,
       alreadyResolved: true,
-      equivalent: true
+      equivalent: true,
+      ...(venueBlocks ? { entryId: venueBlocks[0] ?? null, entryIds: venueBlocks } : {})
     };
   }
   throw new ReviewResolutionError(
@@ -609,7 +618,7 @@ async function performAction(
       await rememberPickedVenue(client, item, action.applePlaceId, session);
       // With an activity (the iPhone's "Visited {name}?" Yes with Logs as, Codex r2 on #620): only the time the
       // person's own blocks don't cover, as Logs as (`log_place`) logs it.
-      if (action.edit?.categoryId) return recordVenueFreeTime(client, item, action.edit, action.name.trim(), session);
+      if (action.edit?.categoryId) return recordVenueFreeTime(client, item, action.edit, action.name.trim(), action.applePlaceId ?? null, session);
       return confirmReview(
         client,
         item,
@@ -772,20 +781,23 @@ async function confirmReview(
  * with the activity and the venue's name as its one-time place label (never a saved place); none when the stay is
  * fully covered. The name is kept on the stay's event either way (`recordedPlaceLabel`), its Apple Place ID on the
  * stay (`rememberPickedVenue`, already done), and the event's last write is confirmed and logged by you, so replay
- * never asks again. A retry finds the review accepted and is acknowledged by `venueFreeTimeMatches`: no second
- * block.
+ * never asks again. Each block takes the edit's tags, as a confirmed block does. The whole effective decision is
+ * kept on the event as a fingerprint (`recordedDecision`, Codex r3 on #620), also when no block is made, and a retry
+ * is acknowledged only when it makes exactly that decision (`venueFreeTimeMatches`): no second block, and a
+ * different decision is a conflict, never acknowledged unapplied.
  */
 async function recordVenueFreeTime(
   client: pg.PoolClient,
   item: LockedReview,
   edit: ReviewEntryEdit,
   name: string,
+  applePlaceId: string | null,
   session: RequestSession
 ) {
-  const window = editedWindow(item, edit);
-  const categoryId = await confirmedLocationCategoryId(client, session, entryKind(item), item.suggestedCategoryId, edit);
+  const decision = await venueDecision(client, item, edit, name, applePlaceId, session);
+  const window = { startedAt: decision.startedAt, stoppedAt: decision.stoppedAt };
+  const { categoryId, description } = decision;
   await validateReferences(client, session, categoryId, null, item.suggestedPlaceId);
-  const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null);
   // The person's own blocks, running ones to now, decide what is free (as log_place reads them).
   const taken = await client.query<{ startedAt: Date; stoppedAt: Date }>(
     `select started_at as "startedAt", coalesce(stopped_at, now()) as "stoppedAt" from time_entries
@@ -804,6 +816,8 @@ async function recordVenueFreeTime(
       [session.workspaceId, session.userId, categoryId, name, item.confidence, description,
         new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), item.eventId]);
     entryIds.push(entry.rows[0].id);
+    // The edit's tags on every block, as the one-block path tags its block (Codex r3 on #620).
+    await syncTimeEntryTags(client, entry.rows[0].id, edit.tags ?? [], session);
   }
   await resolveReviewAndEvent(client, item, session, "accepted");
   await client.query(
@@ -814,32 +828,65 @@ async function recordVenueFreeTime(
   await client.query(
     `update activity_events set review_status = 'confirmed',
        raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object('semanticDisposition', 'logged_by_you',
-         'recordedPlaceLabel', $4::text, 'recordedCategoryId', $5::text)
+         'recordedPlaceLabel', $4::text, 'recordedDecision', $5::text)
      where id = $1 and workspace_id = $2 and user_id = $3`,
-    [item.eventId, session.workspaceId, session.userId, name, categoryId]);
+    [item.eventId, session.workspaceId, session.userId, name, venueDecisionFingerprint(decision)]);
   await auditCorrection(client, session, "record_poi_once", item.segmentId, { entryIds });
   return { ok: true, action: "record_poi_once", status: "accepted", entryId: entryIds[0] ?? null, entryIds };
 }
 
-/** Whether an accepted stay was recorded at this venue with this activity (a retry of `recordVenueFreeTime`). */
+/**
+ * The decision a one-time place with an activity makes, as it takes effect: the venue's name and Apple Place ID, the
+ * activity, the window, the description and the tags (trimmed, lower case, sorted).
+ */
+async function venueDecision(
+  client: pg.PoolClient,
+  item: LockedReview,
+  edit: ReviewEntryEdit,
+  name: string,
+  applePlaceId: string | null,
+  session: RequestSession
+) {
+  const window = editedWindow(item, edit);
+  return {
+    name,
+    applePlaceId,
+    categoryId: await confirmedLocationCategoryId(client, session, entryKind(item), item.suggestedCategoryId, edit),
+    startedAt: window.startedAt,
+    stoppedAt: window.stoppedAt,
+    description: confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null),
+    tags: normalisedTags(edit.tags ?? [])
+  };
+}
+
+/**
+ * A decision's normalised form, kept on the stay's event: equal only for exactly the same effective decision. The
+ * Apple Place ID is checked apart (`pickedVenueMatches`, against the one kept on the stay), so an older app's retry
+ * that sends none stays equivalent, as it is for the one-block path (Codex r1 on #519).
+ */
+function venueDecisionFingerprint(decision: Awaited<ReturnType<typeof venueDecision>>) {
+  return JSON.stringify([decision.name, decision.categoryId, decision.startedAt, decision.stoppedAt,
+    decision.description ?? null, decision.tags]);
+}
+
+/**
+ * Whether an accepted stay was recorded by exactly this decision (a retry of `recordVenueFreeTime`, Codex r3 on
+ * #620): the fingerprint kept on its event, so a fully covered stay with no blocks is checked too.
+ */
 async function venueFreeTimeMatches(
   client: pg.PoolClient,
   item: LockedReview,
   edit: ReviewEntryEdit,
   name: string,
+  applePlaceId: string | null,
   session: RequestSession
 ) {
-  const categoryId = await confirmedLocationCategoryId(client, session, entryKind(item), item.suggestedCategoryId, edit);
-  const event = await client.query<{ label: string | null; category: string | null }>(
-    `select raw_payload ->> 'recordedPlaceLabel' as label, raw_payload ->> 'recordedCategoryId' as category
+  const event = await client.query<{ decision: string | null }>(
+    `select raw_payload ->> 'recordedDecision' as decision
        from activity_events where id = $1 and workspace_id = $2 and user_id = $3`,
     [item.eventId, session.workspaceId, session.userId]);
-  if (event.rows[0]?.label !== name || event.rows[0]?.category !== categoryId) return false;
-  const entries = await client.query<{ categoryId: string | null; placeLabel: string | null }>(
-    `select category_id as "categoryId", place_label as "placeLabel" from time_entries
-      where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`,
-    [session.workspaceId, session.userId, item.eventId]);
-  return entries.rows.every((entry) => entry.categoryId === categoryId && entry.placeLabel === name);
+  const recorded = event.rows[0]?.decision ?? null;
+  return recorded !== null && recorded === venueDecisionFingerprint(await venueDecision(client, item, edit, name, applePlaceId, session));
 }
 
 /** What a confirmed Review becomes: a stay, a journey, or time away from a place. */

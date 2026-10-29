@@ -70,6 +70,11 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
        from time_entries where created_from_event_id = $1 order by started_at`, [event])).rows
     .map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() }));
   const action = { action: "record_poi_once", name: "Exampleton Bakery", applePlaceId: "ISYNTHETICBAKERY", edit: { categoryId } };
+  const tagsOf = async (event: string) => (await database!.query<{ tags: string[] }>(
+    `select coalesce(array_agg(tag.name order by tag.name) filter (where tag.name is not null), '{}') as tags
+       from time_entries entry left join time_entry_tags link on link.time_entry_id = entry.id
+       left join tags tag on tag.id = link.tag_id
+      where entry.created_from_event_id = $1 group by entry.id order by min(entry.started_at)`, [event])).rows.map((row) => row.tags);
 
   it("fills only the gaps around the person's own block, with the name, and is acknowledged once on a retry", async () => {
     const { resolveLocationReviewAction } = await import("./location-review-service");
@@ -91,6 +96,9 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
     // The same answer again (a retry after a lost reply): acknowledged, no second set of blocks.
     const retry = await resolveLocationReviewAction(card.reviewId, action, session);
     expect(retry).toMatchObject({ ok: true, alreadyResolved: true, equivalent: true });
+    // The retry hands back the same blocks' ids, in time order, as the first answer made them.
+    expect((retry as { entryIds?: string[] }).entryIds).toEqual((first as { entryIds: string[] }).entryIds);
+    expect((retry as { entryIds?: string[] }).entryIds).toHaveLength(2);
     expect(await blocksFrom(card.event)).toEqual(blocks);
   });
 
@@ -103,7 +111,7 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
       `select ri.status, ae.raw_payload ->> 'recordedPlaceLabel' as label from review_items ri join activity_events ae on ae.id = ri.event_id
         where ri.id = $1`, [card.reviewId]);
     expect(decided.rows[0]).toEqual({ status: "accepted", label: "Exampleton Bakery" });
-    expect(await resolveLocationReviewAction(card.reviewId, action, session)).toMatchObject({ alreadyResolved: true });
+    expect(await resolveLocationReviewAction(card.reviewId, action, session)).toMatchObject({ alreadyResolved: true, entryId: null, entryIds: [] });
     expect(await blocksFrom(card.event)).toEqual([]);
   });
 
@@ -113,5 +121,42 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
     await resolveLocationReviewAction(card.reviewId, { action: "record_poi_once", name: "Exampleton Bakery" }, session);
     expect((await blocksFrom(card.event)).map((block) => [block.startedAt, block.stoppedAt, block.placeLabel]))
       .toEqual([[at(200), at(230), "Exampleton Bakery"]]);
+  });
+
+  it("tags every block it makes with the edit's tags (Codex r3 on #620)", async () => {
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const card = await stay("seg-tags", 300, 360, [310, 320]);
+    await resolveLocationReviewAction(card.reviewId, { ...action, edit: { categoryId, tags: ["Groceries", "weekly"] } }, session);
+    expect(await tagsOf(card.event)).toEqual([["Groceries", "weekly"], ["Groceries", "weekly"]]);
+  });
+
+  it("acknowledges only the very same decision; other times, tags or words are a conflict, never applied (Codex r3 on #620)", async () => {
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const decision = { ...action, edit: { categoryId, tags: ["weekly"], description: "Bread run" } };
+    const card = await stay("seg-same", 400, 460, [410, 420]);
+    await resolveLocationReviewAction(card.reviewId, decision, session);
+    const blocks = await blocksFrom(card.event);
+    // The same decision again (another device's mutation id, the same effect): acknowledged, with its blocks.
+    expect(await resolveLocationReviewAction(card.reviewId, { ...decision, edit: { ...decision.edit, tags: [" Weekly "] } }, session))
+      .toMatchObject({ alreadyResolved: true, equivalent: true, entryIds: expect.any(Array) });
+    for (const different of [
+      { ...decision, edit: { ...decision.edit, startedAt: at(390), stoppedAt: at(470) } },
+      { ...decision, edit: { ...decision.edit, tags: ["weekly", "treat"] } },
+      { ...decision, edit: { ...decision.edit, description: "Cake run" } },
+      { ...decision, name: "Exampleton Deli" },
+      { ...decision, applePlaceId: "IANOTHERVENUE" }
+    ]) {
+      await expect(resolveLocationReviewAction(card.reviewId, different, session)).rejects.toMatchObject({ code: "resolution_conflict" });
+    }
+    expect(await blocksFrom(card.event)).toEqual(blocks);
+    // An older app's retry without a Place ID is the same decision, as on the one-block path.
+    const older = { action: decision.action, name: decision.name, edit: decision.edit };
+    expect(await resolveLocationReviewAction(card.reviewId, older, session)).toMatchObject({ equivalent: true });
+    // A fully covered stay keeps its decision too: other times are a conflict there as well.
+    const covered = await stay("seg-covered", 500, 530, [490, 540]);
+    await resolveLocationReviewAction(covered.reviewId, action, session);
+    expect(await resolveLocationReviewAction(covered.reviewId, action, session)).toMatchObject({ equivalent: true, entryIds: [] });
+    await expect(resolveLocationReviewAction(covered.reviewId, { ...action, edit: { categoryId, stoppedAt: at(529) } }, session))
+      .rejects.toMatchObject({ code: "resolution_conflict" });
   });
 });

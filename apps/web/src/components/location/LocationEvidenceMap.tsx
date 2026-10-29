@@ -212,27 +212,30 @@ function addEvidenceLayers(
     type: "line",
     paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2], "line-opacity": 0.8 }
   });
-  addGeoJson(map, "samples", {
+  // The sheets' map shows only the visit's area or the trip's route, never its readings (Codex r3 on #620).
+  if (!visitOnly) {
+    addGeoJson(map, "samples", {
+      type: "FeatureCollection",
+      features: evidence.map.acceptedSamples.map((sample) => ({
+        type: "Feature",
+        properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
+        geometry: sample.point
+      }))
+    }, {
+      id: "sample-points",
+      type: "circle",
+      paint: {
+        "circle-color": colours.accent,
+        "circle-opacity": 0.55,
+        "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
+        "circle-stroke-color": colours.surfaceRaised,
+        "circle-stroke-width": 1
+      }
+    });
+  }
+  if (!visitOnly) addGeoJson(map, "rejected-samples", {
     type: "FeatureCollection",
-    features: evidence.map.acceptedSamples.map((sample) => ({
-      type: "Feature",
-      properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
-      geometry: sample.point
-    }))
-  }, {
-    id: "sample-points",
-    type: "circle",
-    paint: {
-      "circle-color": colours.accent,
-      "circle-opacity": 0.55,
-      "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
-      "circle-stroke-color": colours.surfaceRaised,
-      "circle-stroke-width": 1
-    }
-  });
-  addGeoJson(map, "rejected-samples", {
-    type: "FeatureCollection",
-    features: (visitOnly ? [] : evidence.map.rejectedSamples).flatMap((sample) => sample.point
+    features: evidence.map.rejectedSamples.flatMap((sample) => sample.point
       ? [{ type: "Feature" as const, properties: {}, geometry: sample.point }]
       : [])
   }, {
