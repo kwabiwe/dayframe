@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { DayframeDashboardProvider, useDashboardCheckCount, useDashboardOpenOldestCheck } from "@/components/DayframeDashboard";
+import { DayframeDashboardProvider, useDashboardCheckCount, useDashboardOpenCalendarToday } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
@@ -37,8 +37,8 @@ function DashboardTabs() {
   const timerRunning = usePlayOrbRunning();
   // Things to check today and the 7 days before (location v4 step 14).
   const checkCount = useDashboardCheckCount();
-  // Owner, 28 Oct 2026 (concern 4): with a badge showing, the Calendar tab opens the oldest question.
-  const openOldestCheck = useDashboardOpenOldestCheck();
+  // Owner bug (29 Oct 2026): the Calendar tab always opens today, badge or not; the badge is a count only.
+  const openCalendarToday = useDashboardOpenCalendarToday();
 
   return (
     <>
@@ -70,7 +70,7 @@ function DashboardTabs() {
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.today.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
         <NativeTabs.Trigger
-          listeners={{ tabPress: () => { if (checkCount > 0) openOldestCheck?.(); } }}
+          listeners={{ tabPress: () => openCalendarToday?.() }}
           name={DAYFRAME_NATIVE_TABS.calendar.route}
         >
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.calendar} renderingMode="template" />

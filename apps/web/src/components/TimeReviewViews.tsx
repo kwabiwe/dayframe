@@ -110,6 +110,7 @@ import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useLocationTimelines } from "@/components/location/LocationListRows";
 import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
+import { calendarNavigationGeneration, subscribeToCalendarToday } from "@/lib/calendar-today-request";
 
 type CalendarHoursMode = "fullDay";
 
@@ -301,7 +302,13 @@ export function TimeReviewViews({
     container.scrollTop = position.top;
   }, [state.date, state.scope, state.view]);
 
-  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean } = {}) {
+  // A reselection of the URL's day asks the List to position itself again (see `navigate`).
+  const [listFocusToken, setListFocusToken] = useState(0);
+  /**
+   * `reposition`: a deliberate choice of a day (the week strip, the picker; mouse or keyboard). Choosing the day the URL
+   * already names brings Calendar › List back to it, with a fresh positioning request (Codex r1 on #625).
+   */
+  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean; reposition?: boolean } = {}) {
     const nextState = { ...state, ...overrides };
     const href = timelineHref(searchParams.toString(), state, nextState);
     const originSearch = searchParams.toString();
@@ -312,6 +319,7 @@ export function TimeReviewViews({
       nextState.view === state.view
     ) {
       clearDateLoadError();
+      if (options.reposition && state.view === "list") setListFocusToken((token) => token + 1);
       return;
     }
 
@@ -322,7 +330,14 @@ export function TimeReviewViews({
       return;
     }
 
+    // Each Calendar nav tap starts a new generation; a day choice that began in an older one is dropped.
+    const generation = calendarNavigationGeneration();
     const outcome = await loadDate(nextState.date);
+    if (generation !== calendarNavigationGeneration()) {
+      // Calendar was tapped while this loaded: the URL stays on today, and the shell's data goes back to it.
+      if (outcome.ok) void refresh();
+      return;
+    }
     if (!outcome.ok) return;
     if (window.location.search.slice(1) !== originSearch) return;
     if (options.replace) window.history.replaceState(null, "", href);
@@ -415,6 +430,22 @@ export function TimeReviewViews({
     refreshToken: listRefreshToken
   });
   const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
+  // The day at the top of Calendar › List, as the List reports it for the current date request (until it has, the
+  // URL's date stands in, so an earlier visit's day never shows).
+  const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
+  // The Calendar nav's tap asks for today every time, also when the URL already names today and the route doesn't
+  // change (Codex r2 on #625): the List positions itself again (on the URL's day, which the link makes today).
+  // It also ends any day choice still loading (Codex r3 on #625): a read that finishes after the tap never moves the URL.
+  useEffect(() => subscribeToCalendarToday(() => {
+    if (timelineStateRef.current.view === "list") setListFocusToken((token) => token + 1);
+  }), []);
+  const listTopRequest = state.date;
+  const reportListTopDay = useCallback((dayStartMs: number | null) => setListTop((current) => dayStartMs === null
+    ? null
+    : current?.request === listTopRequest && current.dayStartMs === dayStartMs ? current : { request: listTopRequest, dayStartMs }), [listTopRequest]);
+  const listTopDayMs = isList && listTop?.request === listTopRequest ? listTop.dayStartMs : null;
+  // Leaving List forgets it: a List opened again positions itself afresh and reports again (adjusted while rendering).
+  if (!isList && listTop !== null) setListTop(null);
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
@@ -500,20 +531,32 @@ export function TimeReviewViews({
   // Which day is today depends on the browser's time zone. The server render and the hydration
   // pass use the server's guess for the viewer's zone (null: none), then the browser's clock.
   const todayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
-  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, todayKey);
+  // In List the header names the day at the top of the List, never only the URL's date: a "?" link, the chip or
+  // scrolling can leave the List on another day, and the two must agree (owner bug, 29 Oct 2026).
+  const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
+  const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
-  const weekReportFrom = toTimelineDateKey(ranges.week.start);
-  const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
+  // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
+  // link are that week's, from the List's loaded weeks.
+  const headerWeekMoved = headerRanges.week.start.getTime() !== ranges.week.start.getTime();
+  const headWeekEntries = headerWeekMoved ? clipTimelineEntries(listEntries, headerRanges.week, capturedNow) : visibleWeekEntries;
+  const headWeekSeconds = headerWeekMoved
+    ? analyzeTimeIntervals(headWeekEntries.map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt })),
+      { range: headerRanges.week, now: capturedNow }).totalLoggedSeconds
+    : weekAnalysis.totalLoggedSeconds;
+  const weekReportFrom = toTimelineDateKey(headerRanges.week.start);
+  const weekReportTo = toTimelineDateKey(addDays(headerRanges.week.end, -1));
 
   const headModel = calendarHeadModel({
-    entries: visibleWeekEntries,
+    entries: headWeekEntries,
     hydrated,
     nowMs: capturedNow.getTime(),
-    selectedDay: ranges.day.start,
+    selectedDay: headerRanges.day.start,
     todayKeyHint: initialTodayKey,
-    weekDays: ranges.weekDays,
-    weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
+    weekDays: headerRanges.weekDays,
+    weekLoggedSeconds: headWeekSeconds
   });
 
   return (
@@ -545,11 +588,11 @@ export function TimeReviewViews({
             disabled={isDateLoading}
             label={periodLabel}
             unavailable={isList ? "Not used in List" : undefined}
-            onChange={(date) => void navigate({ date })}
+            onChange={(date) => void navigate({ date }, { reposition: true })}
             portal
             portalAlign="center"
             today={todayKey ?? state.date}
-            value={state.date}
+            value={headerDayKey}
           />
           <IconButton
             aria-describedby={isList ? "timeline-period-not-used" : undefined}
@@ -580,7 +623,7 @@ export function TimeReviewViews({
         <CalendarHead
           disabled={isDateLoading}
           model={headModel}
-          onSelectDay={(date) => void navigate({ date })}
+          onSelectDay={(date) => void navigate({ date }, { reposition: true })}
           weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
         />
 
@@ -661,8 +704,9 @@ export function TimeReviewViews({
             continuous={{
               error: listWeeks.error,
               focusDayStartMs: ranges.day.start.getTime(),
-              focusRequest: state.date,
+              focusRequest: `${state.date}#${listFocusToken}`,
               loading: listWeeks.loading,
+              onVisibleDay: reportListTopDay,
               onLoad: listWeeks.load,
               reachedEarliest: listWeeks.reachedEarliest,
               reachedLatest: listWeeks.reachedLatest

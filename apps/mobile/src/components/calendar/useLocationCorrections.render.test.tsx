@@ -690,5 +690,33 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(api!.heldLog).toBeNull();
     mocks.appState = "active";
   });
-});
 
+  // Codex r3 on #625: the Calendar tab's tap moves the List to today while an older day's sheet is open. The sheet keeps
+  // its own day: its item, Logs as and Done stay as they were.
+  it("keeps an older day's sheet whole when the List moves to today: not stale, Logs as offered, Done keeps its corrections", async () => {
+    const olderDay = { dayStart: "2026-10-23T00:00:00.000Z", items: [place] } as unknown as LocationTimeline;
+    const today = { dayStart: "2026-10-29T00:00:00.000Z", items: [] } as unknown as LocationTimeline;
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} timeline={olderDay} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    await settle();
+    // The tab's tap: today's timeline (empty), then a moment with none while it loads.
+    await act(async () => { tree.update(<Probe data={account("a")} timeline={null} />); });
+    await act(async () => { tree.update(<Probe data={account("a")} timeline={today} />); });
+    const sheet = sheetOf(tree)!;
+    expect(sheet.props.stale).toBe(false);
+    expect(sheet.props.target).toMatchObject({ kind: "place", place: { id: "seg-a" } });
+    expect(sheet.props.logAs).toBeTruthy();
+    // Done keeps the sheet's corrections for its own account.
+    const onQueue = sheet.props.onQueue as (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
+    mocks.enqueue.mockClear();
+    await act(async () => { await onQueue([{ request: { kind: "times", itemId: "seg-a" } }], { closing: true }); });
+    expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, [{ request: { kind: "times", itemId: "seg-a" } }]);
+    // Its own day still follows: the item leaving that day's timeline makes a sheet stale, as before.
+    let again!: ReturnType<typeof create>;
+    await act(async () => { again = create(<Probe data={account("a")} timeline={olderDay} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    await act(async () => { again.update(<Probe data={account("a")} timeline={{ ...olderDay, items: [] } as unknown as LocationTimeline} />); });
+    expect(sheetOf(again)?.props.stale).toBe(true);
+  });
+});

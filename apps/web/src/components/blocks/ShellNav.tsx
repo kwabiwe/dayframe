@@ -4,15 +4,15 @@ import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
+import { requestCalendarToday } from "@/lib/calendar-today-request";
 import { SHELL_SECTIONS, type ShellSectionId } from "@/lib/shell-nav";
 
+/**
+ * The badge is a count only (owner, 29 Oct 2026): Calendar always opens on today, badge or not, with no `date=` carried
+ * over. The "N to check" chip in Calendar › List, and a link to one "?", step to a question's day.
+ */
 function checkLabel(count: number) {
-  return `Calendar, ${count} to check in the last 7 days. Opens the oldest.`;
-}
-
-/** Calendar's link: while something is to check, its oldest question (owner, 28 Oct 2026, concern 4). */
-function hrefFor(section: (typeof SHELL_SECTIONS)[number], calendarHref?: string) {
-  return section.id === "calendar" && calendarHref ? calendarHref : section.href;
+  return `Calendar, ${count} to check in the last 7 days`;
 }
 
 /**
@@ -21,10 +21,8 @@ function hrefFor(section: (typeof SHELL_SECTIONS)[number], calendarHref?: string
  * (which retargets from wherever it is when the route changes again), and Reduce Motion moves it
  * without travel. Pages outside the four sections (Settings) fade the thumb out.
  */
-export function ShellSidebarNav({ activeId, calendarHref, checkCount = 0 }: {
+export function ShellSidebarNav({ activeId, checkCount = 0 }: {
   activeId: ShellSectionId | null;
-  /** Calendar's link while something is to check: its oldest question. */
-  calendarHref?: string;
   /** Things to check today and the 6 days before, on Calendar. */
   checkCount?: number;
 }) {
@@ -79,7 +77,8 @@ export function ShellSidebarNav({ activeId, calendarHref, checkCount = 0 }: {
         return (
           <Link
             key={section.id}
-            href={hrefFor(section, calendarHref)}
+            href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? checkLabel(count) : undefined}
@@ -95,8 +94,8 @@ export function ShellSidebarNav({ activeId, calendarHref, checkCount = 0 }: {
 }
 
 /** Below 860 px the sections move to a glass bar along the bottom edge. */
-export function ShellTabBar({ activeId, calendarHref, checkCount = 0 }: {
-  activeId: ShellSectionId | null; calendarHref?: string; checkCount?: number;
+export function ShellTabBar({ activeId, checkCount = 0 }: {
+  activeId: ShellSectionId | null; checkCount?: number;
 }) {
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
@@ -106,7 +105,8 @@ export function ShellTabBar({ activeId, calendarHref, checkCount = 0 }: {
         return (
           <Link
             key={section.id}
-            href={hrefFor(section, calendarHref)}
+            href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? checkLabel(count) : undefined}
           >
