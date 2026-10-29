@@ -485,4 +485,49 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(calls).toEqual(["POST /api/places", "GET /api/places", "POST /api/places", "POST /api/timeline/corrections"]);
     expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ placeId: "place-new" });
   });
+  describe("after a lost creation reply (Codex r8 on #609)", () => {
+    const created = { id: "place-new", name: "Pret", latitude: 51.5, longitude: -0.1 };
+    const listed = () => ({ ok: true, json: async () => ({ places: [...places.map((each) => ({ ...each, latitude: 10, longitude: 20 })), created] }) });
+    const calls = () => clientFetch.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${url}`);
+    async function openAndLoseCreation() {
+      evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+      const onClose = vi.fn();
+      render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+        target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+      await screen.findByTestId("evidence-map");
+      fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await screen.findByRole("alert");
+      return onClose;
+    }
+
+    it("never creates again while it can't check: a failed lookup says so, and the next retry finds it", async () => {
+      clientFetch.mockReset()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(listed())
+        .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+      const onClose = await openAndLoseCreation();
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Couldn't check whether the place was saved"));
+      expect(calls()).toEqual(["POST /api/places", "GET /api/places"]);
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(calls()).toEqual(["POST /api/places", "GET /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+      expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ placeId: "place-new" });
+    });
+
+    it("looks for the name it sent, not one edited since, and uses that place", async () => {
+      clientFetch.mockReset()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(listed())
+        .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+      const onClose = await openAndLoseCreation();
+      fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret A Manger" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(calls()).toEqual(["POST /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+      expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ placeId: "place-new" });
+    });
+  });
 });

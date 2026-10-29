@@ -990,4 +990,33 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       expect(badge()).toBe(3);
     });
   });
+  it("never lets a slow navigation from an earlier chip step reopen its \"?\" after a newer step (Codex r8 on #609)", async () => {
+    const nap = suggestion("00000000-0000-4000-8000-0000000000c3", { title: "Nap", eventSource: "health_sleep",
+      eventType: "health_sleep_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 9, 12)).toISOString(),
+      suggestedStoppedAt: new Date(Date.UTC(2026, 7, 9, 13)).toISOString() });
+    const items = [nap, ...reviewItems];
+    const today = { start: new Date(at(0)), end: new Date(at(24)) };
+    const ninth = { start: new Date(Date.UTC(2026, 7, 9)), end: new Date(Date.UTC(2026, 7, 10)) };
+    try {
+      const { rerender } = render(<EntriesTable {...baseProps()} checksDays={[today]} reviewItems={items} />);
+      // The first press goes to the 9th, not loaded yet; before that navigation lands, the next press opens Sleep.
+      fireEvent.click(await screen.findByRole("button", { name: "4 to check, oldest first" }));
+      expect(router.push).toHaveBeenCalledWith(`/timeline?view=list&scope=day&date=2026-08-09&check=${nap.id}`);
+      fireEvent.click(chip(4));
+      expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
+      const sleep = sleepRow()!;
+      sleep.focus();
+      // The earlier navigation arrives late, with the 9th's rows.
+      search.params = `view=list&scope=day&date=2026-08-09&check=${nap.id}`;
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={items} />);
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+      expect(askingRow("Nap")).toBeTruthy();
+      expect(screen.queryByRole("group", { name: /^Nap, / })).toBeNull();
+      expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
+      expect(document.activeElement).toBe(sleep);
+    } finally {
+      search.params = "";
+    }
+  });
 });

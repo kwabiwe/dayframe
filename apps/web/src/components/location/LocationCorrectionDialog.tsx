@@ -202,7 +202,9 @@ export function LocationCorrectionDialog({
   // "Save this place" made the place but couldn't set the visit to it: a retry sets it, and makes no second place.
   const [createdPlaceId, setCreatedPlaceId] = useState<string | null>(null);
   // Whether a creation was sent whose outcome isn't known, and the places that existed when the dialog opened.
-  const creationAttempted = useRef(false);
+  // The creation sent whose outcome isn't known (its reply was lost): its own name and spot, kept until a lookup
+  // that worked finds the place or confirms it isn't there (Codex r8 on #609).
+  const pendingCreation = useRef<{ name: string; latitude: number; longitude: number } | null>(null);
   const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
@@ -388,22 +390,35 @@ export function LocationCorrectionDialog({
     setError(null);
     let placeId = createdPlaceId;
     const [longitude, latitude] = evidence.map.centre.coordinates;
-    // A creation whose reply was lost may have saved the place: before trying again, look for it — a place by
-    // this name, at this spot, that wasn't one of the places this dialog opened with — and use it (Codex r7 on
-    // #609; /api/places takes no idempotency key).
-    if (!placeId && creationAttempted.current) {
-      placeId = await findCreatedPlace(name, latitude, longitude, openingPlaceIds.current);
+    // A creation whose reply was lost may have saved the place: before trying again, look for it — by the name
+    // and spot that creation sent (not what the fields say now), among places this dialog didn't open with — and use
+    // it, even if the name was edited since (Codex r7, r8 on #609; /api/places takes no idempotency key). A lookup
+    // that fails isn't "not there": nothing is created until one works.
+    const attempted = pendingCreation.current;
+    if (!placeId && attempted) {
+      const lookup = await findCreatedPlace(attempted.name, attempted.latitude, attempted.longitude, openingPlaceIds.current);
       if (!alive.current) return;
-      if (placeId) setCreatedPlaceId(placeId);
+      if (lookup === "failed") {
+        setBusy(false);
+        setError("Couldn't check whether the place was saved. Check your connection and try again.");
+        return;
+      }
+      pendingCreation.current = null;
+      if (lookup) {
+        placeId = lookup;
+        setCreatedPlaceId(placeId);
+      }
     }
     if (!placeId) {
       const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
-      creationAttempted.current = true;
+      pendingCreation.current = { name, latitude, longitude };
       const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
       const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
       if (!alive.current) return;
       placeId = created?.place?.id ?? null;
+      // A refusal is a known outcome (nothing saved); only a lost or unreadable reply stays unknown.
+      if (placeId || (response && !response.ok)) pendingCreation.current = null;
       if (!placeId) {
         setBusy(false);
         setError("The place wasn't saved. Saving a place needs a connection.");
@@ -640,11 +655,13 @@ function metresBetween(latitudeA: number, longitudeA: number, latitudeB: number,
 
 /**
  * A place "Save this place" already created though its reply was lost: same name, within 10 m of the visit's centre,
- * and not among the places the dialog opened with. Null when there is none (or the list can't be read).
+ * and not among the places the dialog opened with. Null when the list says there is none; "failed" when the list
+ * can't be read, which says nothing either way.
  */
-async function findCreatedPlace(name: string, latitude: number, longitude: number, existing: ReadonlySet<string>) {
+async function findCreatedPlace(name: string, latitude: number, longitude: number, existing: ReadonlySet<string>): Promise<string | null | "failed"> {
   const response = await clientFetch("/api/places", { cache: "no-store" }).catch(() => null);
   const body = response?.ok ? await response.json().catch(() => null) as { places?: Array<{ id?: unknown; name?: unknown; latitude?: unknown; longitude?: unknown }> } | null : null;
+  if (!body || !Array.isArray(body.places)) return "failed";
   const wanted = name.trim().toLowerCase();
   const found = (body?.places ?? []).find((place) => typeof place.id === "string" && !existing.has(place.id) &&
     typeof place.name === "string" && place.name.trim().toLowerCase() === wanted &&

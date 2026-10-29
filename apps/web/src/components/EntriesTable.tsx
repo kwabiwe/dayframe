@@ -577,7 +577,11 @@ export function EntriesTable({
    * Owner concern 4 (28 Oct 2026): "N to check" steps oldest first through every "?" that still asks, across
    * days. A "?" on a day the List hasn't loaded opens that day (the List then opens it, see `check=` below).
    */
-  const nextAskingCheck = () => {
+  // Each chip press is a step with its own token; a step that goes to an unloaded day remembers the token its link
+  // was made with, so a slow earlier navigation arriving after a newer step never reopens its "?" (Codex r8 on #609).
+  const chipSteps = useRef({ latest: 0, links: new Map<string, number>() });
+  const nextAskingCheck = (fromChip = false) => {
+    if (fromChip) chipSteps.current.latest += 1;
     if (!askingOrder.length) return null;
     const at = askingOrder.findIndex((check) => check.id === focusedCheck);
     const next = askingOrder[(at + 1) % askingOrder.length];
@@ -587,11 +591,13 @@ export function EntriesTable({
     const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
     // Remembered as the current one, so the next press goes on from it even before (or without) the day loading.
     setFocusedCheck(next.id);
+    if (fromChip) chipSteps.current.links.set(next.id, chipSteps.current.latest);
     router.push(`/timeline?view=list&scope=day&date=${key}&check=${encodeURIComponent(next.id)}`);
     return next.id;
   };
   /** "N to check": the next "?", oldest first across days, opens and comes into view. Returns its id. */
   const nextCheck = () => nextAskingCheck();
+  const pressChip = () => nextAskingCheck(true);
   /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
   const openPlaceDialog = (place: TimelinePlace, checkId: string | null) => {
     setCorrectionCheckId(checkId);
@@ -712,6 +718,12 @@ export function EntriesTable({
   useEffect(() => {
     if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
     if (!openFirstCheck && !linkedCheckRow) return;
+    // The link a chip step made that a newer step has passed: consumed without opening or moving focus.
+    const stepToken = chipSteps.current.links.get(checkParam);
+    if (stepToken !== undefined && stepToken !== chipSteps.current.latest) {
+      openedFromLink.current = checkParam;
+      return;
+    }
     const frame = requestAnimationFrame(() => {
       openedFromLink.current = checkParam;
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
@@ -1304,7 +1316,7 @@ export function EntriesTable({
           scrollContainerRef(element);
         }}
       >
-        {localTimeReady ? <ChecksChip count={askingOrder.length} onNext={nextCheck} /> : null}
+        {localTimeReady ? <ChecksChip count={askingOrder.length} onNext={pressChip} /> : null}
         {/* Owner item H: a quiet filter at the top of the List, not a filled pill under it. */}
         {localTimeReady && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
           <div className="timeline-places-filter">
