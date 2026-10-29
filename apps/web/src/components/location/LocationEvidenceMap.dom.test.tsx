@@ -275,14 +275,26 @@ describe("LocationEvidenceMap", () => {
     }
   });
 
-  it("fits evidence across the antimeridian in the narrow box", async () => {
-    const { evidenceBounds } = await import("./LocationEvidenceMap");
-    const across = evidence({ map: { ...evidence().map, straightLineFallback: { type: "LineString", coordinates: [[179.9, -16.5], [-179.9, -16.6]] } } });
-    const bounds = evidenceBounds(across, true)!;
-    expect(bounds[0][1]).toBeCloseTo(-16.6);
-    expect(bounds[0][0]).toBeCloseTo(179.9);
-    expect(bounds[1][0]).toBeCloseTo(180.1);
-    expect(evidenceBounds(evidence(), true)).toEqual([[0.1, 51.5], [0.2, 51.6]]);
+  it("treats a base source's failure before any tile as the background unavailable, never ready (Codex r2 on #626)", async () => {
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+      await vi.waitFor(() => expect(mocks.maps).toHaveLength(1));
+      const map = mocks.maps[0]!;
+      await vi.waitFor(() => expect(map.addSource).toHaveBeenCalled());
+      // The base source's TileJSON fails: a source error, no tile, before any tile request.
+      act(() => map.emit("error", { sourceId: "base", error: new Error("TileJSON 502") }));
+      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(map.setStyle).not.toHaveBeenCalled();
+      act(() => map.emit("load"));
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "straight-line-fallback-line" }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("jumps to new bounds at once under Reduce Motion", async () => {

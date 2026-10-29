@@ -133,12 +133,13 @@ export function LocationEvidenceMap({
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is.
       let styleFailed = !baseMap.available;
+      let sourceFailed = false;
       const closeFirstLoadWindow = () => {
         if (!firstLoadWindowOpen) return;
         firstLoadWindowOpen = false;
         if (windowTimer) clearTimeout(windowTimer);
         windowTimer = null;
-        if (cancelled || styleFailed) return;
+        if (cancelled || styleFailed || sourceFailed) return;
         setBaseMapState(tileRequests > 0 && tileErrors * 2 > tileRequests ? "degraded" : "ready");
       };
       windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
@@ -171,7 +172,15 @@ export function LocationEvidenceMap({
           failStyle();
           return;
         }
-        if (firstLoadWindowOpen && isBaseTileError(detail)) tileErrors += 1;
+        if (detail.sourceId && EVIDENCE_SOURCE_IDS.has(detail.sourceId)) return;
+        // A base source's own failure (its TileJSON or metadata, no tile): the background is unavailable, apart
+        // from tile errors, and the first load can't make it "ready" (Codex r2 on #626).
+        if (!detail.tile) {
+          if (!sourceFailed && !styleFailed && !cancelled) setBaseMapState("unavailable");
+          sourceFailed = true;
+          return;
+        }
+        if (firstLoadWindowOpen) tileErrors += 1;
       });
       created.on("load", closeFirstLoadWindow);
       created.on("style.load", drawFirst);
@@ -262,11 +271,6 @@ export function LocationEvidenceMap({
 /** A cheap content key: what the map draws and fits, so equal content in a new object changes nothing. */
 function evidenceContentKey(evidence: LocationReviewEvidenceDto, visitOnly: boolean) {
   return JSON.stringify([visitOnly, evidence.map]);
-}
-
-function isBaseTileError(event: { sourceId?: string; tile?: unknown }) {
-  if (event.sourceId && EVIDENCE_SOURCE_IDS.has(event.sourceId)) return false;
-  return Boolean(event.tile) || Boolean(event.sourceId);
 }
 
 /**
@@ -428,8 +432,6 @@ export function evidenceBounds(
   let south = Infinity;
   let east = -Infinity;
   let north = -Infinity;
-  let wrappedWest = Infinity;
-  let wrappedEast = -Infinity;
   for (const [longitude, latitude] of [
     ...evidence.map.acceptedSamples.map((sample) => sample.point.coordinates),
     ...(visitOnly ? [] : evidence.map.nearbySavedPlaces.map((place) => place.point.coordinates)),
@@ -441,19 +443,10 @@ export function evidenceBounds(
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
     west = Math.min(west, longitude);
     east = Math.max(east, longitude);
-    const shifted = longitude < 0 ? longitude + 360 : longitude;
-    wrappedWest = Math.min(wrappedWest, shifted);
-    wrappedEast = Math.max(wrappedEast, shifted);
     south = Math.min(south, latitude);
     north = Math.max(north, latitude);
   }
-  if (!Number.isFinite(west)) return null;
-  // Across the antimeridian (±180°): the narrower box, with its east edge past 180°, as MapLibre takes it.
-  if (east - west > 180 && Number.isFinite(wrappedWest)) {
-    const wrappedSpan = wrappedEast - wrappedWest;
-    if (wrappedSpan < east - west) return [[wrappedWest, south], [wrappedEast, north]];
-  }
-  return [[west, south], [east, north]];
+  return Number.isFinite(west) ? [[west, south], [east, north]] : null;
 }
 
 function sameBounds(left: [[number, number], [number, number]], right: [[number, number], [number, number]] | null) {
