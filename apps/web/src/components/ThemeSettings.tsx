@@ -35,10 +35,10 @@ export function ThemeSettings() {
   return (
     <SettingsRow
       className="settings-appearance-row"
-      label="Appearance"
+      label="Theme"
       detail={choice === "system"
-        ? "Follows your browser and operating system."
-        : `Uses Dayframe’s ${choice === "dark" ? "Midnight" : "Daylight"} appearance on this browser.`}
+        ? "Follows your system."
+        : `${choice === "dark" ? "Midnight" : "Daylight"} on this browser.`}
       action={(
         <SegmentedControl
           ariaLabel="Appearance"

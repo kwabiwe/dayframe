@@ -391,7 +391,7 @@ export function PlacesLocationSettings() {
       <SettingsRow
         glyph="map-pin"
         label="Saved places"
-        detail="Places Dayframe recognises, and whether visits there are suggested."
+        detail="Places Dayframe recognises."
         action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
       />
       <TripLoggingSetting />
@@ -467,7 +467,7 @@ export function TripLoggingSwitch({ refresh, revision, stored, userId }: {
       <label className="place-suggestion-toggle df-set-trips">
         <span>
           <strong>Log trips automatically</strong>
-          <small id="df-set-trips-hint">Trips between your places become blocks when it’s clear how you travelled. Anything unclear is asked in Calendar.</small>
+          <small id="df-set-trips-hint">When it’s clear how you travelled between your places.</small>
         </span>
         <input
           aria-describedby="df-set-trips-hint"
@@ -514,7 +514,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="download"
         label="Export data"
-        detail="Every block, activity and place in one file."
+        detail="All your data in one file."
         action={(
           // UIA-312: one Export; the spreadsheet and the raw history sit in a small menu beside it.
           <div className="df-export">
@@ -532,7 +532,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="trash-2"
         label="Recent location evidence"
-        detail="Raw map evidence is normally deleted after seven days. Confirmed blocks and saved places are kept."
+        detail="Raw location is deleted after 7 days. Blocks and saved places stay."
         action={(
           <Button variant="danger" compact onClick={() => setConfirmDelete(true)}>
             Delete recent evidence
