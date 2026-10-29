@@ -8,10 +8,14 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-const storage = vi.hoisted(() => new Map<string, string>());
+const storage = vi.hoisted(() => Object.assign(new Map<string, string>(), { paused: null as Promise<void> | null }));
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
-    getItem: async (key: string) => storage.get(key) ?? null,
+    // Reads can be held back (`paused`), to keep a registration in flight across account changes.
+    getItem: async (key: string) => {
+      if (storage.paused) await storage.paused;
+      return storage.get(key) ?? null;
+    },
     removeItem: async (key: string) => { storage.delete(key); },
     setItem: async (key: string, value: string) => { storage.set(key, value); }
   }
@@ -41,11 +45,17 @@ vi.mock("../../lib/reviewSyncStore", () => ({
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
+vi.mock("../../lib/api", () => ({
+  createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
+  fetchTimelineItemEvidence: vi.fn(async () => ({ segment: { kind: "stay" }, map: { centre: null, stayRadiusMeters: 40, nearbySavedPlaces: [] } }))
+}));
+vi.mock("./LocationCorrectionSheet", () => ({ LocationCorrectionSheet: "LocationCorrectionSheet" }));
 
 const account = await import("../../lib/mobileAccount");
 const outbox = await import("../../lib/timelineCorrectionOutbox");
 const answers = await import("../../lib/reviewAnswersAfterCorrections");
 const { useCalendarCheckAnswers } = await import("./useCalendarCheckAnswers");
+const { useLocationCorrections } = await import("./useLocationCorrections");
 
 const OWNER = { userId: "user-a", workspaceId: "ws-a" };
 const C1 = "6f000000-0000-4000-8000-0000000000c1";
@@ -115,9 +125,60 @@ describe("late starts of waiting answers, over the real store (Codex r14 on #610
     expect(await states()).toEqual(["held"]);
     act(() => { tree.unmount(); });
     // The corrections are queued, then its start comes: no List any more.
-    act(() => { startAfterCorrections("a", true, "6f000000-0000-4000-8000-0000000000e1", "owner-a", OWNER); });
+    act(() => { startAfterCorrections("a", true, "6f000000-0000-4000-8000-0000000000e1", "owner-a", OWNER, account.currentMobileAccountEpoch()); });
     await flush();
     expect(await states()).toEqual(["committed"]);
+  });
+
+  it("withdraws an answer whose registration outlived an account change, even back to the same account (Codex r16 on #610)", async () => {
+    const { result, switchTo } = mount();
+    let resume!: () => void;
+    storage.paused = new Promise((resolve) => { resume = resolve; });
+    act(() => { result.current.answer("a", true); });
+    // A → B → A while its registration is in flight.
+    await account.activateMobileAccount({ userId: "user-b", workspaceId: "ws-b" });
+    switchTo("owner-b");
+    await account.activateMobileAccount(OWNER);
+    switchTo("owner-a");
+    storage.paused = null;
+    resume();
+    await flush();
+    expect(result.current.held).toBeNull();
+    expect(await states()).toEqual([]);
+  });
+
+  it("withdraws a Logs as whose registration outlived an account change, even back to the same account (Codex r16 on #610)", async () => {
+    const place = { kind: "place", id: "segment-a", status: "finalised", startedAt: at(10), stoppedAt: at(11), placeId: null, learnedPlaceId: null,
+      name: null, role: null, matchKind: "unknown", confidence: "low", blockIds: [] };
+    const timeline = { items: [place] } as never;
+    const placesData = (userId: string) => ({ ...data, user: { id: userId }, workspace: { id: userId === "user-a" ? "ws-a" : "ws-b" },
+      categories: [{ id: "6f000000-0000-4000-8000-0000000000c9", name: "Errands", color: "teal", isPinned: true }] }) as unknown as MobileBootstrap;
+    const DATA_A = placesData("user-a");
+    const DATA_B = placesData("user-b");
+    const hookRef: { current: ReturnType<typeof useLocationCorrections> | null } = { current: null };
+    function Places({ value }: { value: MobileBootstrap }) {
+      hookRef.current = useLocationCorrections({ acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
+        showNotice: () => undefined, theme: {} as never, timeline });
+      return hookRef.current.sheet;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Places value={DATA_A} />); });
+    act(() => { hookRef.current!.openPlace(place as never, "Unknown place"); });
+    await flush();
+    const logAs = tree.root.findAll((node) => (node.type as unknown) === "LocationCorrectionSheet")[0].props.logAs as { onLog: (id: string) => void };
+    let resume!: () => void;
+    storage.paused = new Promise((resolve) => { resume = resolve; });
+    act(() => { logAs.onLog("6f000000-0000-4000-8000-0000000000c9"); });
+    await account.activateMobileAccount({ userId: "user-b", workspaceId: "ws-b" });
+    act(() => { tree.update(<Places value={DATA_B} />); });
+    await account.activateMobileAccount(OWNER);
+    act(() => { tree.update(<Places value={DATA_A} />); });
+    storage.paused = null;
+    resume();
+    await flush();
+    expect(hookRef.current!.heldLog).toBeNull();
+    expect(await states()).toEqual([]);
+    act(() => { tree.unmount(); });
   });
 
   it("starts its Undo hold when nothing changed, and settles it when the Undo ends", async () => {

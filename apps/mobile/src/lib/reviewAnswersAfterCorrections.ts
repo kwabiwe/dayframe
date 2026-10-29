@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
-import { mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
+import { currentMobileAccountEpoch, mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
 import type { ReviewAnswerVenue } from "./reviewAnswer";
 
 /**
@@ -290,7 +290,7 @@ export async function releaseAnswersAfterCorrections(input: {
       // Killed during its Undo window: never answered, as a held answer isn't.
       if (item.held && item.held.run !== run) continue;
       // Being recovered (its Undo's end not yet written, or given up): the recovery runner decides it.
-      if (recovery.has(item.id)) {
+      if (recovery.has(item.id) && mobileAccountOwnersEqual(recovery.get(item.id)!.owner, input.owner)) {
         keep.push(item);
         continue;
       }
@@ -334,13 +334,16 @@ export type AnswerAfterCorrectionsState = "held" | "committing" | "committed" | 
  * account (`inScope`, read from the record itself when the runner runs; Codex r13 and r14 on #610). Within one run of
  * the app: a relaunch drops a still-held record anyway, as a held answer.
  */
-type Recovery = { op: "commit" | "abandon"; attempts: number };
+/** `owner`: the account that asked for it; only that account's runner does it, for its own records (Codex r16). */
+type Recovery = { op: "commit" | "abandon"; attempts: number; owner: MobileAccountOwner };
 const recovery = new Map<string, Recovery>();
 
 /** This owner's waiting records with their state, for hiding (and showing again) their "?". */
 export async function readAnswersAfterCorrectionsWithState(owner: MobileAccountOwner) {
   return (await readAnswersAfterCorrections(owner)).map((record) => {
-    const pending = recovery.get(record.id);
+    const asked = recovery.get(record.id);
+    // Work another account asked for never changes how this account's record reads (Codex r16 on #610).
+    const pending = asked && mobileAccountOwnersEqual(asked.owner, owner) ? asked : undefined;
     const state: AnswerAfterCorrectionsState = pending?.op === "abandon" ? "abandoned"
       : pending?.op === "commit" ? "committing"
         : record.held ? "held" : "committed";
@@ -365,7 +368,7 @@ export async function withdrawAnswerAfterCorrections(owner: MobileAccountOwner, 
     if (!await cancelAnswerAfterCorrections(owner, id)) return;
     recovery.delete(id);
   } catch {
-    recovery.set(id, { op: "abandon", attempts: 0 });
+    recovery.set(id, { op: "abandon", attempts: 0, owner });
     notify();
   }
 }
@@ -384,7 +387,7 @@ export async function settleAnswerAfterCorrections(owner: MobileAccountOwner, id
     notify();
     return "committed" as const;
   } catch {
-    recovery.set(id, { op: "commit", attempts: 1 });
+    recovery.set(id, { op: "commit", attempts: 1, owner });
     notify();
     if (!options.inFront) return "committing" as const;
     // Tried again at once, for its own account.
@@ -404,8 +407,13 @@ export function finishWaitingStart(owner: MobileAccountOwner, id: string, checks
   sameAccount: () => boolean; present: () => boolean; start: () => boolean;
   /** Whether it may still go at all (its "?" open and unchanged since the tap); false withdraws it. */
   valid?: () => boolean;
+  /**
+   * The account lifetime it was registered in (`currentMobileAccountEpoch`; Codex r16 on #610): any account change
+   * since — even A → B → A — makes it stale, and it is withdrawn.
+   */
+  generation: number;
 }) {
-  if (!checks.sameAccount() || (checks.valid && !checks.valid())) {
+  if (checks.generation !== currentMobileAccountEpoch() || !checks.sameAccount() || (checks.valid && !checks.valid())) {
     void withdrawAnswerAfterCorrections(owner, id);
     return "withdrawn" as const;
   }
@@ -439,14 +447,15 @@ export async function recoverAnswersAfterCorrections(owner: MobileAccountOwner) 
       recovery.delete(id);
       continue;
     }
-    if (!inScope(record, owner)) continue;
+    // Only work this account asked for, on its own record (Codex r16 on #610).
+    if (!mobileAccountOwnersEqual(pending.owner, owner) || !inScope(record, owner)) continue;
     if (pending.op === "commit") {
       try {
         await commitAnswerAfterCorrections(owner, id);
         recovery.delete(id);
         continue;
       } catch {
-        recovery.set(id, { op: "abandon", attempts: 0 });
+        recovery.set(id, { op: "abandon", attempts: 0, owner });
         abandoned.push(id);
       }
     }

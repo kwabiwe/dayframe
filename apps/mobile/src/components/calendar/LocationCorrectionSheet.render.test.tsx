@@ -506,6 +506,35 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onLog).not.toHaveBeenCalled();
   });
 
+  it("keeps an unavailable answer unavailable, and stays open with its question when an answer is refused (Codex r16 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // No skip label (an incomplete suggestion, a rejected change of its own): no "Not now" in its place.
+    const none = sheetWith({ question: { text: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered here.",
+      yesLabel: null, noLabel: null, onAnswer: vi.fn() } });
+    expect(none.root.findAll((node) => node.props.testID === "location-correction-question-no")).toHaveLength(0);
+    expect(none.root.findAll((node) => node.props.testID === "location-correction-question-yes")).toHaveLength(0);
+    // The gate refuses it: the sheet stays open, says so, and nothing is taken as answered.
+    const onDismissed = vi.fn();
+    const refused = sheetWith({ onDismissed, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: () => false } });
+    act(() => { refused.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onDismissed).not.toHaveBeenCalled();
+    expect(refused.root.findAll((node) => node.props.testID === "location-correction-question").length).toBeGreaterThan(0);
+    expect(refused.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+    // With changes of its own, refused before anything is queued: stays open too.
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[]) => Promise<unknown> }) => {
+      await options.beforeEnqueue?.(["cid-1"]);
+    });
+    const dismissedToo = vi.fn();
+    const withChanges = sheetWith({ onDismissed: dismissedToo, onQueue: onQueue as never, question: { text: "Visited Pret?", detail: null,
+      yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn(), answerAfter: async () => { throw new Error("This can't be answered here now."); } } });
+    act(() => { withChanges.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { withChanges.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(dismissedToo).not.toHaveBeenCalled();
+    expect(withChanges.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+  });
+
   it("answers at once when the sheet has nothing of its own to keep", () => {
     const onAnswer = vi.fn();
     const onQueue = vi.fn(async () => undefined);

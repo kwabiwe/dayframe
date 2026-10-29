@@ -23,7 +23,7 @@ import {
 } from "../../lib/timelineCorrectionOutbox";
 import { finishWaitingStart, settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { sayIfStillHere } from "../../lib/guardedNotice";
-import type { MobileAccountOwner } from "../../lib/mobileAccount";
+import { currentMobileAccountEpoch, type MobileAccountOwner } from "../../lib/mobileAccount";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
@@ -342,6 +342,8 @@ export function useLocationCorrections({
     newIds: readonly string[]) => {
     if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
+    // The account lifetime it is registered in: any account change since, even back to this one, makes it stale (r16).
+    const generation = currentMobileAccountEpoch();
     // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
     const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId } });
@@ -351,6 +353,7 @@ export function useLocationCorrections({
       // away settles it at once, quietly, otherwise its Undo hold starts — never left held.
       start: () => {
         finishWaitingStart(owner, id, {
+          generation,
           sameAccount: () => sheetOwnerKey === currentOwner.current,
           present: () => mounted.current && appInFront(),
           start: () => {
@@ -419,6 +422,7 @@ export function useLocationCorrections({
           const placeItemId = shown.place.id;
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
+          const generation = currentMobileAccountEpoch();
           void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, []).then((waiting) => {
             // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
@@ -427,7 +431,7 @@ export function useLocationCorrections({
             }
             // A plain one, by the same rule: another account drops it; the place sheets gone or Dayframe away keeps
             // it on the phone at once, quietly; otherwise its Undo hold starts.
-            if (currentOwner.current !== sheetOwner) return;
+            if (currentOwner.current !== sheetOwner || generation !== currentMobileAccountEpoch()) return;
             logTokens.current += 1;
             const log = { token: logTokens.current, ownerKey: sheetOwner, title,
               request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId } };

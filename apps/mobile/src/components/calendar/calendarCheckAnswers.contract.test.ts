@@ -110,14 +110,14 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     // Every sheet answer, with or without new changes, through the one shared registration (Codex r6 on #610).
     expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
     // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
-    expect(dashboard).toContain("onAnswer: (yes) => { checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null); },");
+    expect(dashboard).toContain("onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");
     expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     // Started through the store's one completion path (Codex r14 on #610).
-    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner);");
+    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
     expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
@@ -146,7 +146,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
+    expect(hook).toContain("return { answer, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
     expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
     expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");

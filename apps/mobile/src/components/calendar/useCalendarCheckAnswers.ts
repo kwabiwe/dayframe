@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { outingKeyOf } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
-import type { MobileAccountOwner } from "../../lib/mobileAccount";
+import { currentMobileAccountEpoch, type MobileAccountOwner } from "../../lib/mobileAccount";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
@@ -342,8 +342,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     });
     return () => {
       subscription.remove();
-      hold.flush();
+      // Unavailable first, so the flush's own outcomes say nothing (Codex r16 on #610).
       alive.current = false;
+      hold.flush();
     };
   }, [hold]);
 
@@ -447,6 +448,20 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])) };
   };
+  const canAnswer = (itemId: string) => {
+    if (!ownerRef.current) return false;
+    const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
+    if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId) || registering.current.has(itemId)) return false;
+    const current = hold.current();
+    const heldNow = current?.kind === "single"
+      ? [current.itemId, ...((current as HeldAnswer).outing?.members.map((member) => member.itemId) ?? [])]
+      : [];
+    const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
+    if (heldNow.includes(itemId) || savingNow.has(itemId)) return false;
+    return calendarCheckAnswerable(listed, syncStatesRef.current);
+  };
+  const canAnswerRef = useRef(canAnswer);
+  canAnswerRef.current = canAnswer;
   /**
    * Starts an answer whose waiting record is already registered (the gate's, or an edited sheet's) through the store's
    * one completion path (Codex r14 on #610): another account than the one it was registered for withdraws it; the List
@@ -454,7 +469,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * changed since the tap (`expected`), withdraws it.
    */
   const startWaitingAnswer = (itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
-    recordOwner: MobileAccountOwner, options: { expected?: AnswerSet; outing?: boolean } = {}) => finishWaitingStart(recordOwner, recordId, {
+    recordOwner: MobileAccountOwner, generation: number, options: { expected?: AnswerSet; outing?: boolean } = {}) => finishWaitingStart(recordOwner, recordId, {
+    generation,
     sameAccount: () => ownerRef.current !== null && ownerRef.current === registeredFor,
     present: () => alive.current && inFront.current,
     valid: () => {
@@ -484,7 +500,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     options: { afterCorrections?: string } = {}): boolean => {
     if (options.afterCorrections) {
       const recordOwner = accountOf(shownRef.current);
-      return recordOwner ? startWaitingAnswer(itemId, logged, options.afterCorrections, ownerRef.current, recordOwner) === "started" : false;
+      return recordOwner
+        ? startWaitingAnswer(itemId, logged, options.afterCorrections, ownerRef.current, recordOwner, currentMobileAccountEpoch()) === "started" : false;
     }
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
@@ -494,8 +511,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // refresh brings meanwhile (Codex r8 and r9 on #610).
     const expected = answerSetOf(listed);
     if (registering.current.has(itemId)) return false;
+    // Not answerable here now (no complete window, a waiting or rejected change of its own, already answered): refused
+    // at once, never taken and dropped later (Codex r16 on #610).
+    if (!canAnswer(itemId)) return false;
     registering.current.add(itemId);
     const owner = ownerRef.current;
+    // The account lifetime it was asked in: an account change since, even back to this one, makes it stale (r16).
+    const generation = currentMobileAccountEpoch();
     const id = createReviewClientMutationId();
     // An outing waits for its trips' queued corrections too, and its record answers them with it (Codex r10 on #610).
     const memberIds = [...expected.members.keys()];
@@ -508,12 +530,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } }).then((record) => {
       registering.current.delete(itemId);
       if (!record) {
-        if (ownerRef.current === owner) holdAnswer(itemId, logged, venue, { expected });
+        if (ownerRef.current === owner && generation === currentMobileAccountEpoch()) holdAnswer(itemId, logged, venue, { expected });
         return;
       }
       // Waiting for a correction: no Apple place with it (the correction says where it was). The one completion path
       // (Codex r14 on #610): withdrawn, settled quietly, or held for Undo — never left held.
-      startWaitingAnswer(itemId, logged, id, owner, { userId: data.user.id, workspaceId: data.workspace.id }, { expected, outing: memberIds.length > 0 });
+      startWaitingAnswer(itemId, logged, id, owner, { userId: data.user.id, workspaceId: data.workspace.id }, generation,
+        { expected, outing: memberIds.length > 0 });
     }, () => {
       registering.current.delete(itemId);
       sayFor(owner, false, () => Alert.alert("Calendar", "Couldn’t save this answer on this iPhone."));
@@ -563,6 +586,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
 
   /** An edited sheet's answer, registered for `registeredFor` (`recordOwner`), started through the one completion path. */
   const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
-    recordOwner: MobileAccountOwner) => startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner), []);
-  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
+    recordOwner: MobileAccountOwner, generation: number) =>
+    startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner, generation), []);
+  /**
+   * Whether a "?" can be answered here now (Codex r16 on #610): listed and open, a complete window, no waiting or
+   * rejected change of its own, not already answered (held or saving) or being saved on the deck. An answer to one that
+   * can't is refused at once, never accepted and dropped later.
+   */
+  const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
+  return { answer, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
 }

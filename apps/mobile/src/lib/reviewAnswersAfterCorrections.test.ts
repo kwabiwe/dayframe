@@ -281,6 +281,20 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_B)).map((each) => each.state)).toEqual(["held"]);
   });
 
+  it("keeps recovery to the account that asked: A's request for B's record is never done by B's runner, nor by A's (Codex r16 on #610)", async () => {
+    await answers.holdAnswerAfterCorrections(OWNER_B, { id: "m-b", reviewItemId: "ri-b", logged: true, waitsFor: [C1] });
+    const theirs = storage.get("dayframe.reviewAnswersAfterCorrections.v1");
+    // A asks to settle and withdraw it while reads fail, so the store can't see whose it is then.
+    vi.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error("disk")).mockRejectedValueOnce(new Error("disk"));
+    await answers.settleAnswerAfterCorrections(OWNER_A, "m-b", { inFront: false });
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-b");
+    // B's runner, then A's: neither touches B's record, and B still reads it as held.
+    await answers.recoverAnswersAfterCorrections(OWNER_B);
+    await answers.recoverAnswersAfterCorrections(OWNER_A);
+    expect(storage.get("dayframe.reviewAnswersAfterCorrections.v1")).toBe(theirs);
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_B)).map((each) => each.state)).toEqual(["held"]);
+  });
+
   it("recovers a Logs as whose Undo-end write failed, or gives it back (Codex r12 on #610)", async () => {
     const register = (id: string) => answers.registerAfterCorrections(OWNER_A, { id, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [C1], itemIds: ["seg-a"] },

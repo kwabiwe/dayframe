@@ -95,9 +95,10 @@ export function LocationCorrectionSheet({
    * Grid item opens the sheet directly. An answer closes the sheet (with any change made in it kept too).
    */
   question?: {
-    text: string; detail?: string | null; yesLabel: string | null; noLabel: string;
-    /** Answers now (held for Undo): the sheet has no changes of its own. */
-    onAnswer: (yes: boolean) => void;
+    /** A missing label is an answer that isn't available here: its pill isn't shown (Codex r16 on #610). */
+    text: string; detail?: string | null; yesLabel: string | null; noLabel: string | null;
+    /** Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays. */
+    onAnswer: (yes: boolean) => boolean | void;
     /**
      * Answers after the sheet's own changes (Codex r2 on #610): kept on the phone first, waiting for the corrections
      * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
@@ -342,7 +343,11 @@ export function LocationCorrectionSheet({
       ? placeCorrections(target.place, { choice, times }, places)
       : tripCorrections(target.trip, { times });
     if (!corrections.length) {
-      question.onAnswer(yes);
+      // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
+      if (question.onAnswer(yes) === false) {
+        setSaveError("This can't be answered here right now.");
+        return;
+      }
       kept.current = true;
       setCloseKept(true);
       return;
@@ -421,10 +426,12 @@ export function LocationCorrectionSheet({
                 <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.surface }]}>{question.yesLabel}</Text>
               </Pressable>
             ) : null}
-            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
-              style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
-              <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
-            </Pressable>
+            {question.noLabel ? (
+              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
+                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
+                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ) : null}

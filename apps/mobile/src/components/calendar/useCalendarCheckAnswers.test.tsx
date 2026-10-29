@@ -375,6 +375,34 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     });
   });
 
+  it("refuses at once an answer the List can't take here, never registering it (Codex r16 on #610)", () => {
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // An incomplete suggestion (no complete window), and one with a rejected change of its own.
+    const { result, update } = mount(withAccount([suggestion("a", { suggestedStoppedAt: null }), suggestion("b")]));
+    update({ states: new Set(["b"]) });
+    let taken = true;
+    act(() => { taken = result.current.answer("a", true); });
+    expect(taken).toBe(false);
+    act(() => { taken = result.current.answer("b", false); });
+    expect(taken).toBe(false);
+    expect(result.current.canAnswer("a")).toBe(false);
+    expect(result.current.canAnswer("b")).toBe(false);
+    expect(gate.waitForItemCorrections).not.toHaveBeenCalled();
+    expect(result.current.held).toBeNull();
+  });
+
+  it("says nothing when a held answer's suggestion changed and the List goes away (Codex r16 on #610)", async () => {
+    const { result, rerender, tree } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    rerender(bootstrap([suggestion("a", { suggestedStoppedAt: at(13) })]));
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    act(() => { tree.unmount(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
   it("Undo brings the “?” back and saves nothing", async () => {
     const { result } = mount(bootstrap([suggestion("a")]));
     act(() => { result.current.answer("a", false); });

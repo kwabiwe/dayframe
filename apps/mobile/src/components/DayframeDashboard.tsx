@@ -173,6 +173,7 @@ import {
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import {
   activateMobileAccount,
+  currentMobileAccountEpoch,
   deactivateMobileAccount
 } from "@/lib/mobileAccount";
 import {
@@ -2172,10 +2173,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // The row and the sheet already say the times; only words that add something stay.
         detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
         yesLabel: question.logLabel ?? null,
-        noLabel: question.skipLabel ?? "Not now",
+        // An answer that isn't available stays unavailable: no "Not now" in place of a missing one (Codex r16 on #610).
+        noLabel: question.skipLabel ?? null,
         // No changes in the sheet: checkAnswers.answer is the one gated entry point, so it never goes ahead of a
         // correction queued for its place or trip from an earlier Done (Codex r6 and r7 on #610).
-        onAnswer: (yes) => { checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null); },
+        onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
         // to the Review outbox only once the server has every one of them. No Apple place with it: the corrections say
@@ -2187,13 +2189,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           // to its record is for that account (r15).
           const registeredFor = scopedOwnerKey;
           const registeredOwner = correctionOwner;
+          const generation = currentMobileAccountEpoch();
+          // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps
+          // its question and nothing is queued (Codex r16 on #610).
+          if (!checkAnswers.canAnswer(check.id)) throw new Error("This can't be answered here now.");
           const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
             action: { kind: "answer", reviewItemId: check.id, logged: yes } });
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
               // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
-              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner);
+              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);
             },
             cancel: () => withdrawAnswerAfterCorrections(registeredOwner, id)
           };
