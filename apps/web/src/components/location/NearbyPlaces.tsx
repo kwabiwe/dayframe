@@ -105,7 +105,8 @@ export function NearbyPlaces({
   const typed = text.length > 0;
   const shown: State = !typed ? nearby
     : searched?.query === text ? searched.state
-      : { status: "loading", rows: searched?.state.rows ?? [] };
+      // A newer query shows "Looking…", never the last query's rows to pick from (Codex r3 on #633).
+      : { status: "loading", rows: [] };
   return (
     <div className="location-correction-nearby" data-section="nearby">
       <label className="location-correction-nearby-search">
@@ -127,7 +128,7 @@ export function NearbyPlaces({
         </ul>
       ) : (
         <p aria-live="polite" className="location-correction-nearby-note" role="status">
-          {shown.status === "loading" ? "Looking nearby…" : shown.status === "unavailable" ? "Nearby places aren’t available right now."
+          {shown.status === "loading" ? (typed ? "Looking…" : "Looking nearby…") : shown.status === "unavailable" ? "Nearby places aren’t available right now."
             : typed ? "No places match." : "No places nearby."}
         </p>
       )}

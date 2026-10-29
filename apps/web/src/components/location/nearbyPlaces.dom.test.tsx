@@ -56,6 +56,10 @@ describe("NearbyPlaces", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search places" }), { target: { value: "library" } });
     expect(await screen.findByRole("list", { name: "Places found" })).not.toBeNull();
     expect(screen.getByText("Example Library")).not.toBeNull();
+    // A new query never leaves the last answer's rows to pick from while it looks (Codex r3 on #633).
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search places" }), { target: { value: "library hall" } });
+    expect(screen.queryByText("Example Library")).toBeNull();
+    expect(screen.getByText("Looking…")).not.toBeNull();
   });
 
   it("drops out when MapKit fails for the page", async () => {
