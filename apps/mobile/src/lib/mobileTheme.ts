@@ -11,6 +11,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { loadClockFormatPreference } from "./clockFormat";
 import { MOBILE_DISPLAY_FONT } from "./mobileTypography";
+import { insetDividerStyle } from "./insetDivider";
 import * as SystemUI from "expo-system-ui";
 import {
   StyleSheet,
@@ -480,7 +481,6 @@ function createStyles(theme: MobileTheme) {
     },
     settingsNewActivityText: { color: theme.onAccent, fontFamily: monoFont, fontSize: 16, fontWeight: "700" },
     settingsActivityRow: { alignItems: "center", flexDirection: "row", minHeight: 60, paddingRight: 8 },
-    settingsActivityRowDivider: { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth },
     settingsActivityOpen: { alignItems: "center", flex: 1, flexDirection: "row", gap: 12, minHeight: 60, paddingLeft: 16, paddingVertical: 8 },
     settingsActivityBlock: { alignItems: "center", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
     settingsActivityText: { flex: 1, minWidth: 0 },
@@ -501,8 +501,6 @@ function createStyles(theme: MobileTheme) {
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {
       alignItems: "center",
-      borderTopColor: theme.border,
-      borderTopWidth: StyleSheet.hairlineWidth,
       flexDirection: "row",
       gap: 12,
       minHeight: 52,
@@ -546,11 +544,8 @@ function createStyles(theme: MobileTheme) {
       paddingBottom: 4,
       textTransform: "uppercase"
     },
-    overflowMenuDivider: {
-      height: StyleSheet.hairlineWidth,
-      marginHorizontal: 18,
-      backgroundColor: theme.border
-    },
+    // The menu's rows pad 18 a side; its lines are inset by the same (owner rule, 28 Oct 2026).
+    overflowMenuDivider: insetDividerStyle({ color: theme.border, end: 18, start: 18 }),
     reportScreenTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
@@ -1062,14 +1057,7 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 10
     },
-    taskSuggestionRowDivider: {
-      position: "absolute",
-      top: 0,
-      left: 12,
-      right: 12,
-      height: 1,
-      backgroundColor: theme.border
-    },
+    taskSuggestionRowDivider: insetDividerStyle({ color: theme.border, edge: "top", end: 12, start: 12 }),
     // The prototype's description field (UIA-050): a darker inset with 20-point semibold text.
     activeEditDescriptionInput: {
       // Daylight's inset is nearly white on the white sheet; the muted fill keeps the field visible.
@@ -1121,14 +1109,7 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center"
     },
-    tagSuggestionDivider: {
-      position: "absolute",
-      top: 0,
-      left: 12,
-      right: 12,
-      height: 1,
-      backgroundColor: theme.border
-    },
+    tagSuggestionDivider: insetDividerStyle({ color: theme.border, edge: "top", end: 12, start: 12 }),
     tagSuggestionText: {
       flex: 1,
       color: theme.textPrimary,

@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph, type VenueStay } from "@dayframe/shared";
 import { formatPlaceDistance, nearbyPlaceCategory } from "../../lib/placeCategories";
 import { learnedLocationName, locationEvidenceDetails, locationEvidenceLine } from "../../lib/locationEvidenceSummary";
@@ -946,7 +947,7 @@ export function LocationReviewCorrectionEditor({
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
                   >
-                    {index > 0 ? <View style={editorStyles.tripStopDivider} /> : null}
+                    {index > 0 ? <InsetDivider color={theme.border} paddedBy="src/lib/mobileTheme.ts:settingsScrollContent" style={{ marginBottom: 6 }} /> : null}
                     <Text
                       {...mobileTextProps("body")}
                       accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}
@@ -1536,6 +1537,7 @@ export function LocationReviewCorrectionEditor({
                         onPress={useManualMapPin}
                         theme={theme}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </Reanimated.View>
                   ) : null}
                 </>
@@ -1769,7 +1771,6 @@ function ResultRow({
       onPress={onPress}
       style={({ pressed }) => [
         resultRowStyles.row,
-        divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
         pressed ? { opacity: 0.72 } : null
       ]}
       testID={testID}
@@ -1788,6 +1789,7 @@ function ResultRow({
           <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[resultRowStyles.detail, { color: theme.textSecondary }]}>{inside}</Text>
         ) : null}
       </View>
+      {divider ? <InsetDivider color={theme.border} edge="top" end={12} start={glyph ? 42 : 12} /> : null}
     </Pressable>
   );
 }
@@ -1894,8 +1896,6 @@ function createEditorStyles(theme: MobileTheme) {
     section: { padding: 16, gap: 12 },
     inlineRow: {
       alignItems: "center",
-      borderTopColor: theme.border,
-      borderTopWidth: StyleSheet.hairlineWidth,
       flexDirection: "row",
       gap: 10,
       paddingHorizontal: 16,
@@ -1911,7 +1911,6 @@ function createEditorStyles(theme: MobileTheme) {
       paddingHorizontal: 12
     },
     tripStops: { marginTop: 8, gap: 6 },
-    tripStopDivider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginBottom: 6 },
     tripStopRow: { color: theme.textPrimary, fontSize: 15, lineHeight: 20 },
     answerRow: {
       minHeight: 58,

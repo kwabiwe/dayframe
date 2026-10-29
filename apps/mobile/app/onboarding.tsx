@@ -3,6 +3,7 @@
 // Each permission explains itself before iOS asks, every step can wait ("Not now" / "Later"),
 // and nothing here starts a timer or logs time. The screen owns permissions and the step state;
 // `src/lib/onboarding.ts` holds the order and the words.
+import { InsetDivider } from "../src/components/InsetDivider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
@@ -1024,7 +1025,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
             accessibilityLabel={[row.title, row.state === "on" ? "on" : row.state === "later" ? "later" : null, row.detail].filter(Boolean).join(", ")}
             accessible
             key={row.key}
-            style={[styles.summaryRow, index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}
+            style={styles.summaryRow}
           >
             <View style={[styles.summaryGlyph, { backgroundColor: block.fill }]}>
               <DayframeIcon color={block.text} glyph={glyph} size={18} />
@@ -1042,6 +1043,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
                 </Text>
               </View>
             )}
+            {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={62} /> : null}
           </View>
         );
       })}
@@ -1050,7 +1052,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
         <View
           accessibilityLabel={`Quick starts on Today: ${pinned.map((item) => item.name).join(", ")}`}
           accessible
-          style={[styles.doneTiles, { borderTopColor: theme.border }]}
+          style={styles.doneTiles}
           testID="onboarding-done-tiles"
         >
           {pinned.map((item) => {
@@ -1062,6 +1064,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
               </View>
             );
           })}
+          <InsetDivider color={theme.border} edge="top" end={14} start={14} />
         </View>
       ) : null}
     </View>
@@ -1189,7 +1192,6 @@ function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; o
             onPress={() => onToggle(choice.key)}
             style={({ pressed }) => [
               styles.summaryRow,
-              index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
               pressed ? { backgroundColor: theme.surfaceMuted } : null
             ]}
             testID={`onboarding-health-${choice.key}`}
@@ -1204,6 +1206,7 @@ function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; o
             <View style={[styles.check, { backgroundColor: checked ? theme.success : theme.surfaceMuted }]}>
               {checked ? <DayframeIcon color={theme.background} glyph="check" size={14} strokeWidth={3} /> : null}
             </View>
+            {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={62} /> : null}
           </Pressable>
         );
       })}
@@ -1299,7 +1302,8 @@ const styles = StyleSheet.create({
   summaryState: { fontSize: 13, fontWeight: "700" },
   summaryPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 28, paddingHorizontal: 12 },
   summaryDot: { borderRadius: 4, height: 8, width: 8 },
-  doneTiles: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 12 },
+  // Padded as the summary rows (14 a side), so the tiles and their line never meet the card's edges.
+  doneTiles: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingBottom: 14, paddingHorizontal: 14, paddingTop: 12 },
   doneTile: { alignItems: "center", borderRadius: 10, flexDirection: "row", gap: 6, maxWidth: "100%", minHeight: 32, paddingHorizontal: 10 },
   doneTileText: { flexShrink: 1, fontSize: 12, fontWeight: "700" },
   check: { alignItems: "center", borderRadius: 12, height: 24, justifyContent: "center", width: 24 },

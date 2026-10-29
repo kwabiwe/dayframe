@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
@@ -32,7 +33,6 @@ import {
   RefreshControl,
   ScrollView,
   Share,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -2599,7 +2599,7 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                       >
                         <Pressable
                           accessibilityHint="Edits this activity"
@@ -2635,6 +2635,7 @@ export default function SettingsScreen() {
                             size={18}
                           />
                         </Pressable>
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -2647,7 +2648,7 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                         testID={`activities-archived-${category.id}`}
                       >
                         <View style={styles.settingsActivityOpen}>
@@ -2665,6 +2666,7 @@ export default function SettingsScreen() {
                           onPress={() => void restoreArchivedActivity(category)}
                           theme={theme}
                         />
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -3441,7 +3443,7 @@ function HealthTypeSheet({
                   entering={localPresenceEntering(reduceMotion)}
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
-                  style={[styles.healthNameRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  style={styles.healthNameRow}>
                   <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
                   <TextInput
                     accessibilityLabel={`${label} name`}
@@ -3463,6 +3465,7 @@ function HealthTypeSheet({
                     }}
                     value={nameDraft}
                   />
+                  <InsetDivider color={theme.border} edge="top" />
                 </Reanimated.View>
               ) : null}
             </SettingsBlockGroup>

@@ -29,7 +29,7 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { activityMarkerRadius, DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { mobileFailureKind } from "@/lib/friendlyError";
 import type { MobileBootstrap } from "@/lib/api";
@@ -918,26 +918,6 @@ const s = StyleSheet.create({
     borderRadius: 999,
   },
   chart: { alignItems: "center", paddingVertical: 8 },
-  categoryList: { gap: 0 },
-  category: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    alignItems: "center",
-    minHeight: 38,
-    paddingVertical: 5,
-    gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  // X3: activity markers are small rounded-square blocks, never round dots.
-  dot: { height: 10, width: 10, borderRadius: activityMarkerRadius(10) },
-  name: { flex: 1, minWidth: 0, fontSize: 14 },
-  numbers: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    flexShrink: 0,
-    alignItems: "baseline",
-  },
-  number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
   unavailable: { paddingVertical: 24, gap: 12 },
 });
 
