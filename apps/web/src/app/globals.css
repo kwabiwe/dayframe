@@ -8463,35 +8463,30 @@ dialog.ui-dialog.df-palette {
   grid-column: span 6;
 }
 
-/* One owner for the chip's arrival and departure (Codex r1 on #572): its row opens and closes in height and
-   fades, and while closed it gives back the grid's gap, so the cards below move instead of jumping. */
-.df-today-checks {
-  display: grid;
-  grid-column: span 12;
-  grid-template-rows: 1fr;
-  transition:
-    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 160ms ease-out;
+/* Today's "N to check" sits at the end of the total's line (UI review W10, owner 29 Oct 2026): amber text,
+   a 44 px hit area, a short fade in; it leaves at once and nothing around it moves. */
+.df-today-check-link {
+  position: relative;
+  color: var(--warning-text);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  animation: df-presence-in 160ms ease-out backwards;
 }
 
-.df-today-checks > div {
-  min-height: 0;
-  overflow: hidden;
-  /* Room for the chip's focus ring inside the clip. */
-  padding: 3px;
-  margin: -3px;
+.df-today-check-link::after {
+  position: absolute;
+  inset: -12px -4px;
+  content: "";
 }
 
-.df-today-checks[data-open="false"] {
-  grid-template-rows: 0fr;
-  margin-bottom: calc(-1 * var(--df-today-gap));
-  opacity: 0;
+.df-today-check-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-today-checks {
-    transition: none;
+  .df-today-check-link {
+    animation: none;
   }
 }
 
@@ -8538,10 +8533,10 @@ dialog.ui-dialog.df-palette {
 .df-eyebrow {
   margin: 0 0 8px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--type-meta);
   font-weight: var(--fw-medium);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .df-today-hero {
@@ -8831,7 +8826,7 @@ dialog.ui-dialog.df-palette {
 
 .df-mw-row {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  grid-template-columns: 52px minmax(0, 1fr) 64px;
   align-items: center;
   gap: 10px;
   min-height: 36px;
@@ -8874,6 +8869,7 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
   font-weight: var(--fw-medium);
   text-align: right;
+  white-space: nowrap;
 }
 
 .df-rows {
@@ -8908,7 +8904,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow + .df-erow::before {
   --divider-inset: 10px;
-  --divider-inset-start: 60px;
+  /* Past the 28 px tile: 8 px padding, the tile and the 12 px gap (UI review, 29 Oct 2026). */
+  --divider-inset-start: 48px;
   position: absolute;
   top: 0;
   inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
@@ -8936,14 +8933,14 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-main {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 76px;
+  grid-template-columns: 28px minmax(0, 1fr) auto 64px;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
-  min-height: 56px;
+  min-height: 46px;
   border: 0;
-  border-radius: 14px;
-  padding: 6px 10px;
+  border-radius: 10px;
+  padding: 4px 8px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -8953,12 +8950,14 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-block {
   display: grid;
-  width: 36px;
+  width: 28px;
   place-items: center;
   /* The X3 radius (WUI-028: 30% of the 36 px block), fixed so a tall block keeps round corners. */
-  border-radius: calc(36px * 0.3);
+  border-radius: calc(28px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
+  height: 28px;
+  align-self: center;
 }
 
 .df-erow-block.df-block {
@@ -9057,7 +9056,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-rank-row .df-erow-main {
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   text-decoration: none;
 }
 
@@ -9459,17 +9458,16 @@ dialog.ui-dialog.df-palette {
   }
 
   .df-erow-main {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     gap: 12px;
   }
 
   .df-erow-block {
-    width: 32px;
+    width: 28px;
   }
 
   .df-erow-when,
-  .df-erow-acts,
-  .df-today-blocks-hint {
+  .df-erow-acts {
     display: none;
   }
 
@@ -11144,10 +11142,6 @@ dialog.ui-dialog.df-palette {
 }
 
 @media (pointer: coarse) {
-  .df-hint-fine {
-    display: none;
-  }
-
   .df-hint-coarse {
     display: inline;
   }
@@ -13533,18 +13527,26 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-report-row .df-erow-main {
-  grid-template-columns: 36px minmax(0, 1fr) auto 76px;
+  grid-template-columns: 28px minmax(0, 1fr) auto 64px;
 }
 
 .df-report-row-when {
-  display: grid;
-  justify-items: end;
+  display: flex;
   line-height: 1.25;
+  justify-content: flex-end;
+  align-items: baseline;
+  white-space: nowrap;
 }
 
 .df-report-row-when small {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* One line: "Thu 29 Oct · 17:44–now" (UI review W19, owner 29 Oct 2026). */
+.df-report-row-when small::after {
+  content: " · ";
+  white-space: pre;
 }
 
 .df-report-row-flag {
@@ -13629,11 +13631,11 @@ dialog.ui-dialog.df-palette {
 
 @media (max-width: 860px) {
   .df-report-row .df-erow-main {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     grid-template-rows: auto auto;
     column-gap: 12px;
     row-gap: 2px;
-    min-height: 56px;
+    min-height: 48px;
   }
 
   .df-report-row .df-erow-block,
