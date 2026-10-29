@@ -14,7 +14,7 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
-  type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
+  withTrialProgress, type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
 import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
   GEOFENCE_REFRESH_RADIUS_TOLERANCE_METERS, insideRefreshCircle, IOS_GEOFENCE_LIMIT, normalizedGeofenceRadius,
@@ -864,11 +864,16 @@ async function startLocationLearningUnsafe(
   // past its 3 minutes ends here.
   const burst = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    let next = state ?? startAccuracyBurstTrial(now);
-    if (accuracyBurstDue(next, now)) next = endAccuracyBurst(next, now);
-    return { state: next, result: Boolean(next.active) };
-  });
-  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(burst));
+    const next = state ?? startAccuracyBurstTrial(now);
+    // Still within its 3 minutes: keep best accuracy; past them (or unreadable state): normal capture.
+    return { state: withTrialProgress(next, now), result: next.active && !accuracyBurstDue(next, now) ? next.active.startedAt : null };
+  }).catch(() => null);
+  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(burst)));
+  // Normal options are in place again: a burst that ran past its 3 minutes (across a relaunch, say) ends now.
+  if (!burst) {
+    await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
+      .catch(() => undefined);
+  }
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
     locationLearningActive: true,
@@ -1635,29 +1640,37 @@ export async function stopGeofencesIfStarted() {
 export async function stopLocationLearningIfStarted() {
   const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false);
   if (started) await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK);
-  // Capture stopping (sign-out, an account change, location off) ends a burst at once, counted for what it ran.
+  // Capture stopped (sign-out, an account change, location off), so best accuracy did too: a burst ends now,
+  // counted for what it ran.
   await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
     .catch(() => undefined);
 }
 
 const ACCURACY_BURST_STATE_KEY = "dayframe.location.burstTrial.v1";
+/** A stored trial that can't be read as one: treated as finished (no bursts), and never overwritten by a new one. */
+const UNREADABLE_ACCURACY_TRIAL: AccuracyBurstState = { startedDay: "0001-01-01", furthestTrialDay: Number.MAX_SAFE_INTEGER, days: {} };
 let accuracyBurstChain: Promise<unknown> = Promise.resolve();
 
-/** The trial's state on this iPhone, read and written one change at a time (both location tasks change it). */
+/**
+ * The trial's state on this iPhone, read and written one change at a time (both location tasks change it). A
+ * storage read that fails aborts the change rather than starting the trial again (Codex r1 on #619).
+ */
 function withAccuracyBurstState<T>(
   change: (state: AccuracyBurstState | null) => Promise<{ state: AccuracyBurstState | null; result: T }>
 ): Promise<T> {
   const run = accuracyBurstChain.then(async () => {
-    const stored = await AsyncStorage.getItem(ACCURACY_BURST_STATE_KEY).catch(() => null);
+    const stored = await AsyncStorage.getItem(ACCURACY_BURST_STATE_KEY);
     let state: AccuracyBurstState | null = null;
-    try {
-      const parsed = stored ? JSON.parse(stored) as AccuracyBurstState : null;
-      state = parsed && typeof parsed.startedDay === "string" && parsed.days && typeof parsed.days === "object" ? parsed : null;
-    } catch {
-      state = null;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as AccuracyBurstState;
+        state = parsed && typeof parsed.startedDay === "string" && parsed.days && typeof parsed.days === "object" ? parsed : UNREADABLE_ACCURACY_TRIAL;
+      } catch {
+        state = UNREADABLE_ACCURACY_TRIAL;
+      }
     }
     const { state: next, result } = await change(state);
-    if (next && next !== state) await AsyncStorage.setItem(ACCURACY_BURST_STATE_KEY, JSON.stringify(next));
+    if (next && next !== state && next !== UNREADABLE_ACCURACY_TRIAL) await AsyncStorage.setItem(ACCURACY_BURST_STATE_KEY, JSON.stringify(next));
     return result;
   });
   accuracyBurstChain = run.catch(() => undefined);
@@ -1666,7 +1679,7 @@ function withAccuracyBurstState<T>(
 
 /** The accuracy trial's state, for Sync help and shared diagnostics. */
 export function readAccuracyBurstState() {
-  return withAccuracyBurstState(async (state) => ({ state, result: state }));
+  return withAccuracyBurstState(async (state) => ({ state: state === UNREADABLE_ACCURACY_TRIAL ? null : state, result: state === UNREADABLE_ACCURACY_TRIAL ? null : state }));
 }
 
 /**
@@ -1694,7 +1707,8 @@ function learningUpdateOptions(burst: boolean): Location.LocationTaskOptions {
 
 /**
  * A saved place's exit (a departure) or entry (an arrival), or an iOS Visit's departure or arrival at any place,
- * starts a burst when the trial allows one; a Visit never takes the day's last one.
+ * starts a burst when the trial allows one; a Visit never takes the day's last one. A burst past its 3 minutes is
+ * settled first, so a late end never lets the next start early.
  */
 export async function maybeStartAccuracyBurst(
   kind: AccuracyBurstKind, capture: LocationCaptureSnapshot, source: "saved_place" | "visit" = "saved_place"
@@ -1702,32 +1716,43 @@ export async function maybeStartAccuracyBurst(
   const trigger = accuracyBurstTrigger(kind, source);
   if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
   if (!await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)) return false;
+  await maybeEndAccuracyBurst(capture);
+  // Ownership is checked inside the change, so a stale lifetime's callback never starts one (Codex r1 on #619).
   const started = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    if (!state || !accuracyBurstDecision(state, now, trigger).start) return { state, result: false };
+    if (!state || !isLocationCaptureSnapshotCurrent(capture) || !accuracyBurstDecision(state, now, trigger).start) return { state, result: false };
     return { state: startAccuracyBurst(state, kind, now, trigger), result: true };
   });
   if (!started) return false;
   const ok = isLocationCaptureSnapshotCurrent(capture) &&
     await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
   if (!ok) {
+    // Best accuracy never started: the burst ends at once (it ran for no time).
     await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }));
     return false;
   }
   return true;
 }
 
-/** The first reading after a burst's 3 minutes brings normal capture back. */
+/**
+ * A reading after a burst's 3 minutes brings normal capture back. The burst stays recorded until normal options
+ * are really in place, so a failed restore is tried again with the next reading, and its time counts in full
+ * (Codex r1 on #619). Only the capture lifetime that owns the task restores it.
+ */
 export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
-  const ended = await withAccuracyBurstState(async (state) => {
+  const due = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    if (!state || !accuracyBurstDue(state, now)) return { state, result: false };
-    return { state: endAccuracyBurst(state, now), result: true };
+    const result = state && isLocationCaptureSnapshotCurrent(capture) && accuracyBurstDue(state, now) ? state.active!.startedAt : null;
+    return { state: state ? withTrialProgress(state, now) : state, result };
   });
-  if (ended && isLocationCaptureSnapshotCurrent(capture)) {
-    await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).catch(() => undefined);
-  }
-  return ended;
+  if (!due) return false;
+  const restored = isLocationCaptureSnapshotCurrent(capture) &&
+    await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
+  if (!restored) return false;
+  return withAccuracyBurstState(async (state) => {
+    if (!state?.active || state.active.startedAt !== due) return { state, result: false };
+    return { state: endAccuracyBurst(state, new Date()), result: true };
+  });
 }
 
 function geofenceSource(radiusMeters: number): "geofence_specific" | "geofence_broad" {

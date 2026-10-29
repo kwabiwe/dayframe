@@ -1035,7 +1035,44 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
     expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
       expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
-    await expect(readAccuracyBurstState()).resolves.toMatchObject({ days: { [localDay(new Date())]: { count: 1, seconds: 180 } } });
+    // Normal capture came back at 8:03:30: the burst ran 3.5 minutes, and that is what counts.
+    await expect(readAccuracyBurstState()).resolves.toMatchObject({ days: { [localDay(new Date())]: { count: 1, seconds: 210 } } });
+  });
+
+  it("a failed restore keeps the burst recorded and is tried again with the next reading (Codex r1 on #619)", async () => {
+    await maybeStartAccuracyBurst("departure", await capture());
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 3, 10));
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 4, 0));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())]).toMatchObject({ seconds: 240 });
+  });
+
+  it("a stale capture lifetime neither starts nor ends a burst (Codex r1 on #619)", async () => {
+    await maybeStartAccuracyBurst("departure", await capture());
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 3, 30));
+    captureState.current = false;
+    try {
+      await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+      expect((await readAccuracyBurstState())?.active).toBeTruthy();
+      await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a storage read that fails never starts the trial over (Codex r1 on #619)", async () => {
+    const finished = JSON.stringify({ startedDay: "2026-10-01", furthestTrialDay: 20, days: {} });
+    asyncStore.set(BURST_KEY, finished);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValueOnce(new Error("locked"));
+    await expect(maybeStartAccuracyBurst("departure", await capture())).rejects.toThrow("locked");
+    expect(asyncStore.get(BURST_KEY)).toBe(finished);
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
   });
 
   it("never bursts on an off day of the trial, nor while location updates aren't running", async () => {

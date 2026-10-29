@@ -1673,6 +1673,8 @@ export default function SettingsScreen() {
         readFreezeDiagnostics(),
         getStorageQuarantineDiagnostics().catch(() => null)
       ]);
+      // Read before the owner is checked again, so the share never waits after that check (Codex r1 on #619).
+      const accuracyTrialState = await readAccuracyBurstState().catch(() => null);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (freezes) setFreezeSnapshot(freezes);
       const snapshot = {
@@ -1724,7 +1726,7 @@ export default function SettingsScreen() {
         freezes: supportFreezeDiagnostics(freezes),
         locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays),
         // The accuracy trial's days: arm, burst count and seconds only (card K).
-        accuracyTrial: accuracyBurstDiagnostics(await readAccuracyBurstState().catch(() => null)),
+        accuracyTrial: accuracyBurstDiagnostics(accuracyTrialState, new Date()),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
