@@ -132,5 +132,11 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     const ended = endAccuracyBurst(started, day(2, 7, 8));
     expect(ended.days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
   });
+
+  it("a clock set back counts a late-starting burst to its own hard stop, from when best accuracy started (Codex r20 on #619)", () => {
+    const reserved = startAccuracyBurst(trial, "departure", day(2, 8, 0));
+    const late = { ...reserved, active: { ...reserved.active!, nativeStartedAt: day(2, 8, 10).toISOString() } };
+    expect(endAccuracyBurst(late, day(2, 7, 18)).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
+  });
 });
 

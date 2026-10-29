@@ -1259,5 +1259,34 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("an admission slower than its guard still leaves a consenting owner's capture running (Codex r20 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched with normal capture running
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    try {
+      let delayed = false;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && !delayed) {
+          delayed = true;
+          await new Promise((resolve) => setTimeout(resolve, 31_000));
+        }
+        return read(k);
+      });
+      const wake = learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+      await vi.advanceTimersByTimeAsync(32_000);
+      await wake;
+      expect(h.stopExpo).toHaveBeenCalled();
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

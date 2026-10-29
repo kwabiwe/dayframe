@@ -192,7 +192,10 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs
   // Elapsed time measured while it ran wins over wall-clock timestamps, which a clock change moves (Codex r7 on #619).
   // Without elapsed time, a clock set back behind the start can't measure what ran: the most it could have run, to
   // its hard stop, counts instead (Codex r19 on #619).
-  const hardStop = state.active.stopBy ? Date.parse(state.active.stopBy) : recorded + ACCURACY_BURST_DURATION_MS + ACCURACY_BURST_FORCE_STOP_MS;
+  // The hard stop's length, from when best accuracy started: a recording delayed past its own deadline never shrinks
+  // it (Codex r20 on #619).
+  const hardStop = started + (state.active.stopBy ? Math.max(0, Date.parse(state.active.stopBy) - recorded)
+    : ACCURACY_BURST_DURATION_MS + ACCURACY_BURST_FORCE_STOP_MS);
   const ended = elapsedMs != null && Number.isFinite(elapsedMs) ? started + Math.max(0, elapsedMs)
     : now.getTime() < started ? Math.max(started, hardStop) : now.getTime();
   const trigger = state.active.trigger;
