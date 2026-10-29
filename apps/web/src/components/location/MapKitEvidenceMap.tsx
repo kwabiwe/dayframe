@@ -56,8 +56,9 @@ declare global {
   }
 }
 
-/** How long a token request may take before MapKit is given up on for the page. */
+/** How long a token request, and the MapKit script, may take before MapKit is given up on for the page. */
 const TOKEN_TIMEOUT_MS = 10_000;
+const SCRIPT_TIMEOUT_MS = 15_000;
 
 let loading: Promise<MapKit> | null = null;
 /**
@@ -133,14 +134,23 @@ export function loadMapKit(): Promise<MapKit> {
       ready();
       return;
     }
-    window.__dayframeMapKitReady = ready;
     const script = document.createElement("script");
     script.src = MAPKIT_SCRIPT_URL;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.dataset.callback = "__dayframeMapKitReady";
     script.dataset.libraries = "map,overlays";
+    // A script that neither loads nor errors in time is a failure for the page too (Codex r2 on #633).
+    const deadline = setTimeout(() => {
+      failPage();
+      reject(new Error("MapKit JS did not load in time"));
+    }, SCRIPT_TIMEOUT_MS);
+    window.__dayframeMapKitReady = () => {
+      clearTimeout(deadline);
+      ready();
+    };
     script.onerror = () => {
+      clearTimeout(deadline);
       failPage();
       reject(new Error("MapKit JS did not load"));
     };

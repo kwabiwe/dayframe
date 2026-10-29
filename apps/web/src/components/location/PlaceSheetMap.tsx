@@ -20,10 +20,17 @@ type Provider = "probing" | "mapkit" | "maplibre";
 let pageProvider: Provider = "probing";
 let probing: Promise<Provider> | null = null;
 
+/** A probe that hasn't answered by then counts as no MapKit for the page (Codex r2 on #633). */
+const PROBE_TIMEOUT_MS = 8_000;
+
 function probeProvider(): Promise<Provider> {
-  probing ??= clientFetch("/api/mapkit-token")
+  if (probing) return probing;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  probing = clientFetch("/api/mapkit-token", { signal: controller.signal })
     .then((response) => (response.ok ? "mapkit" as const : "maplibre" as const))
     .catch(() => "maplibre" as const)
+    .finally(() => clearTimeout(timer))
     .then((provider) => {
       pageProvider = provider;
       return provider;
