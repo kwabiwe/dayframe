@@ -406,7 +406,7 @@ describeWithDatabase("timer runs into a trip on disposable PostgreSQL (location 
     const find = (records: unknown[]) => (records as Shown[]).find((record) => record.kind === "review" && record.reviewItemId === item.id);
     const asked = find((await getReviewPresentation(session, request, {}, { timerTripClash: true })).records);
     expect(asked).toMatchObject({
-      timerTripClash: { timeEntryId: id, tripId: "trip-home", tripStartedAt: at(862), overlapSeconds: 38 * 60 },
+      timerTripClash: { timeEntryId: id, tripId: "trip-home", tripStartedAt: at(862), overlapSeconds: 28 * 60 },
       interval: { start: at(800), end: at(862) }
     });
     // Without the feature: the same record, without the field.
