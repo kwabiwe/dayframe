@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { outingKeyOf } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
+import type { MobileAccountOwner } from "../../lib/mobileAccount";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
@@ -12,6 +13,7 @@ import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOuti
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
 import { finishWaitingStart, settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
+import { sayIfStillHere } from "../../lib/guardedNotice";
 
 /** A held answer, with the account that gave it. */
 type HeldAnswer = ReviewDeckHeldDecision & {
@@ -25,7 +27,12 @@ type HeldAnswer = ReviewDeckHeldDecision & {
   afterCorrections?: string;
   /** Settled while the app was away or the List gone: saved at once, with nothing said (Codex r8 and r9 on #610). */
   quiet?: boolean;
+  /** The account its waiting record was registered for: every write to it is made for that account (Codex r15). */
+  recordOwner?: MobileAccountOwner;
 };
+/** The account a bootstrap belongs to, when it says. */
+const accountOf = (data: MobileBootstrap | null | undefined): MobileAccountOwner | null =>
+  data?.user?.id && data.workspace?.id ? { userId: data.user.id, workspaceId: data.workspace.id } : null;
 /** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
 type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
@@ -109,6 +116,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // The List's own lifetime: a held answer is still saved when it goes away, but nothing is said or shown
   // after it (Codex r4 on #582).
   const alive = useRef(true);
+  // The one guarded notifier (Codex r15 on #610): said only while Dayframe is in front, the List is here (and the
+  // answer not a quiet one), and the account is the one it was for.
+  const sayFor = (owner: string | null, quiet: boolean | undefined, say: () => void) => sayIfStillHere({
+    inFront: () => inFront.current, mounted: () => alive.current && !quiet, sameAccount: () => ownerRef.current === owner
+  }, say);
   const savingRef = useRef(saving);
 
   const isOpen = (item: MobileReviewItem) => isOpenReviewItem(item) && !decidedRef.current.has(item.id);
@@ -143,7 +155,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   const save = (decision: HeldAnswer, verified = false) => {
     if (decision.owner !== ownerRef.current) {
       // Another account now: never saved there.
-      if (decision.afterCorrections) void withdrawAnswerAfterCorrections(decision.afterCorrections);
+      if (decision.afterCorrections && decision.recordOwner) void withdrawAnswerAfterCorrections(decision.recordOwner, decision.afterCorrections);
       return;
     }
     const owner = decision.owner;
@@ -154,15 +166,17 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       // hook, keeps its "?" (an outing's trips too) out of the List from now: held, committing or committed records
       // hide them; an abandoned one shows them (Codex r11 on #610). The store's recovery runner carries on with a
       // record whose Undo's end couldn't be written, whatever becomes of this hook.
-      // By its id alone: the store takes the record's own scope (Codex r13 on #610).
+      // For the account it was registered for; the store writes only in that account's scope (Codex r15 on #610).
       const id = decision.afterCorrections;
-      void settleAnswerAfterCorrections(id, { inFront: alive.current && inFront.current }).then((outcome) => {
+      if (!decision.recordOwner) return;
+      void settleAnswerAfterCorrections(decision.recordOwner, id, { inFront: alive.current && inFront.current }).then((outcome) => {
         if (outcome !== "abandoned" || ownerRef.current !== owner) return;
         restore(owner, heldIds);
-        // Rechecked now the store has finished: only an answer still in front, with the List here, says so (Codex r12).
-        if (!alive.current || !inFront.current || decision.quiet) return;
-        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
-        Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+        // Through the one guarded notifier, checked now the store has finished (Codex r12 and r15 on #610).
+        sayFor(owner, decision.quiet, () => {
+          AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+          Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+        });
       });
       return;
     }
@@ -176,9 +190,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const notSaved = (error: unknown) => {
       unhide(heldIds);
       restore(owner, heldIds);
-      if (!present()) return;
-      AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
-      Alert.alert("Calendar", friendlyMobileErrorMessage(error, "Couldn’t save this answer on this iPhone."));
+      sayFor(owner, decision.quiet, () => {
+        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+        Alert.alert("Calendar", friendlyMobileErrorMessage(error, "Couldn’t save this answer on this iPhone."));
+      });
     };
     const item = resolveOpen(decision.itemId);
     if (!item) {
@@ -195,7 +210,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (reviewDeckProposalSignature(item) !== decision.proposal || members === null || !hasSuggestedTimeWindow(item)) {
       unhide(heldIds);
       restore(owner, heldIds);
-      if (present()) AccessibilityInfo.announceForAccessibility(`${decision.title} changed, so it was not saved. Check it again.`);
+      sayFor(owner, decision.quiet, () => AccessibilityInfo.announceForAccessibility(`${decision.title} changed, so it was not saved. Check it again.`));
       return;
     }
     const affected = [item, ...members];
@@ -264,7 +279,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       settle(true);
       if (ownerRef.current !== owner) return;
       void synchroniseReviewMutations().catch(() => undefined);
-      if (present()) AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`);
+      sayFor(owner, decision.quiet, () => AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`));
     }).catch((error) => {
       settle(false);
       if (ownerRef.current !== owner) return;
@@ -299,8 +314,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const current = hold.current();
     if (current) {
       hold.undo(current.token);
-      const waiting = (current as HeldAnswer).afterCorrections;
-      if (waiting) void withdrawAnswerAfterCorrections(waiting);
+      const waiting = current as HeldAnswer;
+      if (waiting.afterCorrections && waiting.recordOwner) void withdrawAnswerAfterCorrections(waiting.recordOwner, waiting.afterCorrections);
     }
     known.current.clear();
     setSaving(null);
@@ -342,7 +357,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // registered changes): the lifecycle is read here, so an answer settling while the app is away or the List is gone
   // is saved at once, with no Undo hold, no haptic and nothing said, through its save too.
   const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean } = {}): boolean => {
+    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean; recordOwner?: MobileAccountOwner } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
     const quiet = !alive.current || !inFront.current;
@@ -351,7 +366,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const changed = () => {
       // Its times or place (or an outing's trips) changed while the gate answered: not this answer's to confirm (as
       // the deck's proposal_changed); the "?" stays to be checked again.
-      if (!quiet) AccessibilityInfo.announceForAccessibility(`${listed.title?.trim() || "Suggestion"} changed, so it was not saved. Check it again.`);
+      sayFor(ownerRef.current, quiet, () => AccessibilityInfo.announceForAccessibility(`${listed.title?.trim() || "Suggestion"} changed, so it was not saved. Check it again.`));
       return false;
     };
     if (options.expected && reviewDeckProposalSignature(listed) !== options.expected.proposal) return changed();
@@ -400,6 +415,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       owner: ownerRef.current,
       ...(logged && venue && !members.length ? { venue } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
+      ...(options.recordOwner ? { recordOwner: options.recordOwner } : {}),
       ...(quiet ? { quiet: true } : {}),
       ...(members.length && outingKey ? {
         outing: { key: outingKey, members: members.map((member) => ({ key: member.id, itemId: member.id,
@@ -414,7 +430,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     }
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     // As the deck says it (Codex r2 on #582): the answer, and that Undo is there while its window runs.
-    AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`);
+    sayFor(ownerRef.current, false, () => AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`));
     return true;
     // The answers read the hook's refs, which hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -438,7 +454,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * changed since the tap (`expected`), withdraws it.
    */
   const startWaitingAnswer = (itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
-    options: { expected?: AnswerSet; outing?: boolean } = {}) => finishWaitingStart(recordId, {
+    recordOwner: MobileAccountOwner, options: { expected?: AnswerSet; outing?: boolean } = {}) => finishWaitingStart(recordOwner, recordId, {
     sameAccount: () => ownerRef.current !== null && ownerRef.current === registeredFor,
     present: () => alive.current && inFront.current,
     valid: () => {
@@ -451,7 +467,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       return members.size === options.expected.members.size
         && [...members].every(([id, signature]) => options.expected!.members.get(id) === signature);
     },
-    start: () => holdAnswer(itemId, logged, null, { afterCorrections: recordId, ...options })
+    start: () => holdAnswer(itemId, logged, null, { afterCorrections: recordId, recordOwner, ...options })
   });
   const startWaitingAnswerRef = useRef(startWaitingAnswer);
   startWaitingAnswerRef.current = startWaitingAnswer;
@@ -466,7 +482,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    */
   const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
     options: { afterCorrections?: string } = {}): boolean => {
-    if (options.afterCorrections) return startWaitingAnswer(itemId, logged, options.afterCorrections, ownerRef.current) === "started";
+    if (options.afterCorrections) {
+      const recordOwner = accountOf(shownRef.current);
+      return recordOwner ? startWaitingAnswer(itemId, logged, options.afterCorrections, ownerRef.current, recordOwner) === "started" : false;
+    }
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
@@ -494,10 +513,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       }
       // Waiting for a correction: no Apple place with it (the correction says where it was). The one completion path
       // (Codex r14 on #610): withdrawn, settled quietly, or held for Undo — never left held.
-      startWaitingAnswer(itemId, logged, id, owner, { expected, outing: memberIds.length > 0 });
+      startWaitingAnswer(itemId, logged, id, owner, { userId: data.user.id, workspaceId: data.workspace.id }, { expected, outing: memberIds.length > 0 });
     }, () => {
       registering.current.delete(itemId);
-      if (ownerRef.current === owner && alive.current) Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+      sayFor(owner, false, () => Alert.alert("Calendar", "Couldn’t save this answer on this iPhone."));
     });
     return true;
   }, [holdAnswer]);
@@ -508,10 +527,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (!undone || undone.kind !== "single") return;
     const answer = undone as HeldAnswer;
     // Undo takes back the answer only: the sheet's corrections stay (Codex r2 on #610).
-    if (answer.afterCorrections) void withdrawAnswerAfterCorrections(answer.afterCorrections);
+    if (answer.afterCorrections && answer.recordOwner) void withdrawAnswerAfterCorrections(answer.recordOwner, answer.afterCorrections);
     // An answer whose suggestion a refresh paged out while held comes back whole (outing included).
     restore(answer.owner, [answer.itemId, ...(answer.outing?.members.map((member) => member.itemId) ?? [])]);
-    AccessibilityInfo.announceForAccessibility(`${answer.title} is back.`);
+    sayFor(answer.owner, false, () => AccessibilityInfo.announceForAccessibility(`${answer.title} is back.`));
     // The refs hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
@@ -542,8 +561,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
-  /** An edited sheet's answer, registered for `registeredFor`, started through the one completion path. */
-  const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null) =>
-    startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor), []);
+  /** An edited sheet's answer, registered for `registeredFor` (`recordOwner`), started through the one completion path. */
+  const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
+    recordOwner: MobileAccountOwner) => startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner), []);
   return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
 }

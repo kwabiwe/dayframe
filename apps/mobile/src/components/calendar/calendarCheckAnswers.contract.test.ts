@@ -117,7 +117,7 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     // Started through the store's one completion path (Codex r14 on #610).
-    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor);");
+    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner);");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
     expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
@@ -148,8 +148,8 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
     expect(hook).toContain("return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
-    expect(hook).toContain("finishWaitingStart(recordId, {");
-    expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(id, {");
+    expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
+    expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");
     expect(hook).not.toMatch(/return \{[^}]*holdAnswer/);
   });
 
@@ -186,6 +186,24 @@ describe("waiting records are written only through the store's shared paths (Cod
     for (const path of ["./useCalendarCheckAnswers.ts", "./useLocationCorrections.tsx"]) {
       expect(source(path)).toMatch(/settleAnswerAfterCorrections|withdrawAnswerAfterCorrections/);
     }
+  });
+});
+
+describe("one guarded notifier for the answer, Logs as and recovery flows (Codex r15 on #610)", () => {
+  // Every notice, alert and announcement in these files is said inside the guarded notifier (or its hook's wrapper).
+  const unguarded = (text: string, wrappers: readonly string[]) => {
+    const lines = text.split("\n");
+    return lines.flatMap((line, index) => {
+      if (!/\b(showNotice\(|Alert\.alert\(|announceForAccessibility\()/.test(line)) return [];
+      if (/=> showNotice\(message\)\);?$/.test(line.trim()) || /\(\) => showNotice\(message\)\)/.test(line)) return [];
+      const window = lines.slice(Math.max(0, index - 3), index + 1).join("\n");
+      return wrappers.some((wrapper) => window.includes(wrapper)) ? [] : [`${index + 1}: ${line.trim()}`];
+    });
+  };
+  it("routes every notice in the answers hook, the place sheets and the recovery runner through it", () => {
+    expect(unguarded(source("./useCalendarCheckAnswers.ts"), ["sayFor("])).toEqual([]);
+    expect(unguarded(source("./useLocationCorrections.tsx"), ["sayForLog(", "sayIfStillHere("])).toEqual([]);
+    expect(unguarded(source("./useAnswersAfterCorrections.ts"), ["sayIfStillHere("])).toEqual([]);
   });
 });
 

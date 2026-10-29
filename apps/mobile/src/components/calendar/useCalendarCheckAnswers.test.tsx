@@ -35,15 +35,15 @@ const waiting = vi.hoisted(() => {
     settleOutcome: null as null | "committed" | "committing" | "abandoned",
     // The store's shared withdraw, as its deletion goes.
     // The store's one completion path, over the mocked settle and withdraw.
-    finishWaitingStart: (id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
-      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void mock.withdrawAnswerAfterCorrections(id); return "withdrawn"; }
-      if (!checks.present()) { void mock.settleAnswerAfterCorrections(id, { inFront: false }); return "settled"; }
+    finishWaitingStart: (owner: unknown, id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void mock.withdrawAnswerAfterCorrections(owner, id); return "withdrawn"; }
+      if (!checks.present()) { void mock.settleAnswerAfterCorrections(owner, id, { inFront: false }); return "settled"; }
       if (checks.start()) return "started";
-      void mock.withdrawAnswerAfterCorrections(id);
+      void mock.withdrawAnswerAfterCorrections(owner, id);
       return "withdrawn";
     },
-    withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
-    settleAnswerAfterCorrections: vi.fn(async (id: string, _options: { inFront: boolean }) => {
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
+    settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
       try {
         await mock.commitAnswerAfterCorrections(id);
         return mock.settleOutcome ?? "committed";
@@ -136,7 +136,8 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
   it("lets an answer after corrections go only through its waiting record, after Undo; Undo removes the record (Codex r2 on #610)", async () => {
     waiting.commitAnswerAfterCorrections.mockClear();
     waiting.cancelAnswerAfterCorrections.mockClear();
-    const { result } = mount(bootstrap([suggestion("a"), suggestion("b")]));
+    // Its data says its account: a waiting record is written only for its own account (Codex r15 on #610).
+    const { result } = mount({ ...bootstrap([suggestion("a"), suggestion("b")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
     let taken = false;
     act(() => { taken = result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
     expect(taken).toBe(true);
@@ -166,7 +167,7 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
 
   it("ends a waiting answer's Undo too when its change is refused before Undo runs out, so the “?” stays back (Codex r4 on #610)", async () => {
     waiting.commitAnswerAfterCorrections.mockClear();
-    const { result } = mount(bootstrap([suggestion("a")]));
+    const { result } = mount({ ...bootstrap([suggestion("a")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
     act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
     expect(result.current.hiddenIds.has("a")).toBe(true);
     act(() => { result.current.restoreAnswered(["a"]); });
@@ -319,7 +320,7 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       await flush();
-      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith("m-1", { inFront: true });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), "m-1", { inFront: true });
       expect(retried.result.current.held).toBeNull();
       expect(Alert.alert).not.toHaveBeenCalled();
       // Given up in front: the not-saved words.

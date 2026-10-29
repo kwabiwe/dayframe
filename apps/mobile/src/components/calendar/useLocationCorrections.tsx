@@ -22,6 +22,8 @@ import {
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
 import { finishWaitingStart, settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { sayIfStillHere } from "../../lib/guardedNotice";
+import type { MobileAccountOwner } from "../../lib/mobileAccount";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
@@ -215,8 +217,9 @@ export function useLocationCorrections({
   // has it, the day's blocks are read again so the place shows them.
   // `afterCorrections`: a Logs as that waits for the sheet's corrections (its record's id): the end of its Undo lets
   // the record go, and the record queues `log_place` once they are acknowledged (Codex r4 on #610).
+  // `recordOwner`: the account its waiting record was registered for; every write to it is for that account (Codex r15).
   const [heldLog, setHeldLog] = useState<{ token: number; ownerKey: string; title: string; request: QueuedCorrection["request"];
-    afterCorrections?: string } | null>(null);
+    afterCorrections?: string; recordOwner?: MobileAccountOwner } | null>(null);
   const logTokens = useRef(0);
   const sentLogs = useRef(new Set<string>());
   // Kept on the phone for the account it was picked for; sent only while the app is in front (the queue's own
@@ -224,22 +227,27 @@ export function useLocationCorrections({
   const commitLogRef = useRef<(log: NonNullable<typeof heldLog>, send: boolean) => void>(() => undefined);
   // A hold is consumed once, at once: a second ending (the timer, then leaving the app) never queues it again
   // (Codex r2 on #606).
+  // The hold now, owned by this ref (Codex r15 on #610): set the moment a hold starts and cleared the moment it ends,
+  // never derived during render, so a teardown before the next render still finds it.
   const heldNow = useRef<NonNullable<typeof heldLog> | null>(null);
-  heldNow.current = heldLog;
   const consumed = useRef(new Set<number>());
+  // Notices from a Logs as: said only while Dayframe is in front, the place sheets are here and the account is the one
+  // it was for (the one guarded notifier).
+  const sayForLog = (logOwnerKey: string, message: string) => sayIfStillHere({
+    inFront: appInFront, mounted: () => mounted.current, sameAccount: () => logOwnerKey === currentOwner.current
+  }, () => showNotice(message));
   commitLogRef.current = (log, send) => {
     if (consumed.current.has(log.token)) return;
     consumed.current.add(log.token);
+    if (heldNow.current?.token === log.token) heldNow.current = null;
     if (log.afterCorrections) {
-      // The store's shared settle and withdraw (Codex r12 on #610): a failed write is recovered by its runner, or the
-      // Logs as is given up — its record hides nothing, and the place's "?" shows again.
-      if (log.ownerKey !== currentOwner.current) void withdrawAnswerAfterCorrections(log.afterCorrections);
+      // The store's shared settle and withdraw (Codex r12 on #610), for the account it was registered for (r15): a
+      // failed write is recovered by its runner, or the Logs as is given up — its record hides nothing.
+      if (!log.recordOwner) return;
+      if (log.ownerKey !== currentOwner.current) void withdrawAnswerAfterCorrections(log.recordOwner, log.afterCorrections);
       else {
-        void settleAnswerAfterCorrections(log.afterCorrections, { inFront: appInFront() && mounted.current }).then((outcome) => {
-          // Said only when it was given up and Dayframe is still in front, with the List here, for this account.
-          if (outcome === "abandoned" && appInFront() && mounted.current && log.ownerKey === currentOwner.current) {
-            showNotice("That place wasn't logged. Try again.");
-          }
+        void settleAnswerAfterCorrections(log.recordOwner, log.afterCorrections, { inFront: appInFront() && mounted.current }).then((outcome) => {
+          if (outcome === "abandoned") sayForLog(log.ownerKey, "That place wasn't logged. Try again.");
         });
       }
       return;
@@ -250,14 +258,16 @@ export function useLocationCorrections({
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
       // Sent only while the app is in front, then and at every step of the send (Codex r2 on #606).
       return send && appInFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: appInFront }) : undefined;
-    }).catch(() => showNotice("That place wasn't logged. Try again."));
+    }).catch(() => sayForLog(log.ownerKey, "That place wasn't logged. Try again."));
   };
   useEffect(() => {
     if (!heldLog) return;
     // Another account (or none): the held log is dropped, never sent for it.
     if (heldLog.ownerKey !== ownerKey) {
+      if (heldNow.current?.token === heldLog.token) heldNow.current = null;
+      consumed.current.add(heldLog.token);
       setHeldLog(null);
-      if (heldLog.afterCorrections) void withdrawAnswerAfterCorrections(heldLog.afterCorrections);
+      if (heldLog.afterCorrections && heldLog.recordOwner) void withdrawAnswerAfterCorrections(heldLog.recordOwner, heldLog.afterCorrections);
       return;
     }
     const finish = (send: boolean) => {
@@ -297,14 +307,17 @@ export function useLocationCorrections({
   const holdLog = (next: NonNullable<typeof heldLog>) => {
     if (next.ownerKey !== currentOwner.current) return false;
     if (heldNow.current) commitLogRef.current(heldNow.current, true);
+    heldNow.current = next;
     setHeldLog(next);
     return true;
   };
   const undoLog = useCallback(() => {
-    if (heldNow.current) {
-      consumed.current.add(heldNow.current.token);
+    const held = heldNow.current;
+    heldNow.current = null;
+    if (held) {
+      consumed.current.add(held.token);
       // Undo takes back the Logs as only: the sheet's corrections stay.
-      if (heldNow.current.afterCorrections) void withdrawAnswerAfterCorrections(heldNow.current.afterCorrections);
+      if (held.afterCorrections && held.recordOwner) void withdrawAnswerAfterCorrections(held.recordOwner, held.afterCorrections);
     }
     setHeldLog(null);
   }, []);
@@ -337,17 +350,17 @@ export function useLocationCorrections({
       // The one completion path (Codex r14 on #610): another account withdraws it, the place sheets gone or Dayframe
       // away settles it at once, quietly, otherwise its Undo hold starts — never left held.
       start: () => {
-        finishWaitingStart(id, {
+        finishWaitingStart(owner, id, {
           sameAccount: () => sheetOwnerKey === currentOwner.current,
           present: () => mounted.current && appInFront(),
           start: () => {
             logTokens.current += 1;
             return holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
-              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
+              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id, recordOwner: owner });
           }
         });
       },
-      cancel: () => withdrawAnswerAfterCorrections(id)
+      cancel: () => withdrawAnswerAfterCorrections(owner, id)
     };
   };
   const activities = useMemo(() => [...(data?.categories ?? [])]
@@ -367,8 +380,10 @@ export function useLocationCorrections({
     const refused = pending.filter((item) => item.failureKind === "permanent");
     const fresh = refused.filter((item) => !announced.current.has(item.clientCorrectionId));
     for (const item of fresh) announced.current.add(item.clientCorrectionId);
-    if (fresh.length === 1) showNotice(fresh[0].lastError ?? "That change wasn't saved.");
-    else if (fresh.length > 1) showNotice(`${fresh.length} changes weren't saved. ${fresh[0].lastError ?? ""}`.trim());
+    // Through the one guarded notifier, for the account whose corrections they were.
+    const refusalOwner = ownerKey ?? "";
+    if (fresh.length === 1) sayForLog(refusalOwner, fresh[0].lastError ?? "That change wasn't saved.");
+    else if (fresh.length > 1) sayForLog(refusalOwner, `${fresh.length} changes weren't saved. ${fresh[0].lastError ?? ""}`.trim());
     if (removalAttempts.current.key !== refusedKey) removalAttempts.current = { key: refusedKey, count: 0 };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let current = true;
@@ -418,7 +433,7 @@ export function useLocationCorrections({
               request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId } };
             if (!mounted.current || !appInFront()) commitLogRef.current(log, false);
             else holdLog(log);
-          }, () => showNotice("That place wasn't logged. Try again."));
+          }, () => sayForLog(sheetOwner, "That place wasn't logged. Try again."));
         },
         onLogAfter: async (categoryId, ids) => {
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";

@@ -74,7 +74,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     review.enqueueReviewMutation.mockClear();
     outbox.pending = [{ clientCorrectionId: C1 }];
     await answers.holdAnswerAfterCorrections(OWNER, { id: "m-1", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections("m-1");
+    await answers.commitAnswerAfterCorrections(OWNER, "m-1");
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe owner={OWNER} />); });
     await flush();
@@ -103,7 +103,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     outbox.pending = [{ clientCorrectionId: C1 }];
     await answers.holdAnswerAfterCorrections(OWNER, { id: LOG, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections(LOG);
+    await answers.commitAnswerAfterCorrections(OWNER, LOG);
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe owner={OWNER} />); });
     await flush();
@@ -122,7 +122,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     outbox.pending = [{ clientCorrectionId: C1, failureKind: "permanent" }];
     await answers.holdAnswerAfterCorrections(OWNER, { id: LOG, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections(LOG);
+    await answers.commitAnswerAfterCorrections(OWNER, LOG);
     await flush();
     expect(outbox.enqueue).not.toHaveBeenCalled();
     expect(await answers.readAnswersAfterCorrections(OWNER)).toEqual([]);
@@ -139,7 +139,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     // The record as the gate writes it for an outing.
     const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
     storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify(stored.map((record) => ({ ...record, outingMemberIds: ["ri-in", "ri-out"], acknowledged: [C1] }))));
-    await answers.commitAnswerAfterCorrections("m-out");
+    await answers.commitAnswerAfterCorrections(OWNER, "m-out");
     function OutingProbe() {
       useAnswersAfterCorrections({ data: outingData, owner: OWNER });
       return null;
@@ -164,7 +164,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [C1], itemIds: ["seg-a"] },
       { readPending: async () => [], readAcknowledged: () => [] });
     // The Dashboard goes away during its Undo: the place sheets settle it at once, quietly.
-    expect(await answers.settleAnswerAfterCorrections(LOG, { inFront: false })).toBe("committed");
+    expect(await answers.settleAnswerAfterCorrections(OWNER, LOG, { inFront: false })).toBe("committed");
     // The correction is acknowledged meanwhile; a new Dashboard comes up.
     await answers.noteTimelineCorrectionAcknowledged(OWNER, C1);
     outbox.pending = [];
@@ -183,7 +183,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     outbox.pending = [{ clientCorrectionId: C1 }];
     await answers.registerAfterCorrections(OWNER, { id: "m-out", reviewItemId: "ri-1", logged: true, outingMemberIds: ["ri-in", "ri-out"],
       newIds: [C1], itemIds: ["seg-a"] }, { readPending: async () => [], readAcknowledged: () => [] });
-    await answers.commitAnswerAfterCorrections("m-out");
+    await answers.commitAnswerAfterCorrections(OWNER, "m-out");
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe owner={OWNER} />); });
     await flush();
@@ -203,7 +203,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     await flush();
     // Undo ends while away: the write fails, and the record is `committing` (still hiding its "?").
     storage.failWrites = 1;
-    expect(await answers.settleAnswerAfterCorrections("m-c", { inFront: false })).toBe("committing");
+    expect(await answers.settleAnswerAfterCorrections(OWNER, "m-c", { inFront: false })).toBe("committing");
     act(() => { tree.unmount(); });
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER))[0].state).toBe("committing");
     // A new Dashboard, in front: the store's runner tries again, and it is committed.
@@ -216,7 +216,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     storage.clear();
     await answers.holdAnswerAfterCorrections(OWNER, { id: "m-d", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
     storage.failWrites = 1;
-    await answers.settleAnswerAfterCorrections("m-d", { inFront: false });
+    await answers.settleAnswerAfterCorrections(OWNER, "m-d", { inFront: false });
     dropped.mockClear();
     storage.failWrites = 1;
     act(() => { tree = create(<Probe owner={OWNER} />); });
@@ -234,7 +234,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     outbox.pending = [{ clientCorrectionId: C1 }];
     await answers.holdAnswerAfterCorrections(OWNER, { id: "m-slow", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
     storage.failWrites = 1;
-    await answers.settleAnswerAfterCorrections("m-slow", { inFront: false });
+    await answers.settleAnswerAfterCorrections(OWNER, "m-slow", { inFront: false });
     native.Alert.alert.mockClear();
     native.AccessibilityInfo.announceForAccessibility.mockClear();
     dropped.mockClear();
@@ -258,7 +258,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     await answers.holdAnswerAfterCorrections(OWNER, { id: "m-old", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
     // Given up, and its deletion fails: abandoned, so it hides nothing.
     storage.failWrites = 3;
-    expect(await answers.settleAnswerAfterCorrections("m-old", { inFront: true })).toBe("abandoned");
+    expect(await answers.settleAnswerAfterCorrections(OWNER, "m-old", { inFront: true })).toBe("abandoned");
     storage.failWrites = 0;
     // Its record is still there (its deletion failed), abandoned.
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER)).map((each) => [each.record.id, each.state])).toEqual([["m-old", "abandoned"]]);
@@ -271,7 +271,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
       { readPending: async () => [], readAcknowledged: () => [] });
     await flush();
     expect(probe.current!.waitingIds.has("ri-1")).toBe(true);
-    await answers.cancelAnswerAfterCorrections("m-new");
+    await answers.cancelAnswerAfterCorrections(OWNER, "m-new");
     await flush();
     expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
     act(() => { tree.unmount(); });
@@ -282,7 +282,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     dropped.mockClear();
     outbox.pending = [{ clientCorrectionId: C1, failureKind: "permanent" }];
     await answers.holdAnswerAfterCorrections(OWNER, { id: "m-3", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections("m-3");
+    await answers.commitAnswerAfterCorrections(OWNER, "m-3");
     act(() => { create(<Probe owner={OWNER} />); });
     await flush();
     expect(dropped).toHaveBeenCalledWith(["ri-1"]);

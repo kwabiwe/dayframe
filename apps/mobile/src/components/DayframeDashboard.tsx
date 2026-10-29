@@ -2183,17 +2183,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         answerAfter: async (yes, ids) => {
           if (!correctionOwner || !check.segmentId) throw new Error("No account.");
           const id = createReviewClientMutationId();
-          // The account it is registered for: its start checks it is still this one (Codex r14 on #610).
+          // The account it is registered for: its start checks it is still this one (Codex r14 on #610), and every write
+          // to its record is for that account (r15).
           const registeredFor = scopedOwnerKey;
+          const registeredOwner = correctionOwner;
           const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
             action: { kind: "answer", reviewItemId: check.id, logged: yes } });
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
               // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
-              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor);
+              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner);
             },
-            cancel: () => withdrawAnswerAfterCorrections(id)
+            cancel: () => withdrawAnswerAfterCorrections(registeredOwner, id)
           };
         }
       };

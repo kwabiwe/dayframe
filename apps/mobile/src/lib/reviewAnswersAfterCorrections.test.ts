@@ -51,7 +51,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
 
   it("waits for every correction, then releases the answer once the server has acknowledged them", async () => {
     await answerWithCorrections();
-    await answers.commitAnswerAfterCorrections("m-1");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-1");
     expect((await releaseWith()).release).not.toHaveBeenCalled();
     const replies = [json(200, { ok: true }), json(503, { error: "busy" })];
     vi.stubGlobal("fetch", vi.fn(async () => replies.shift()!));
@@ -86,7 +86,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
 
   it("drops the answer when a correction is refused, or leaves the queue without being acknowledged", async () => {
     await answerWithCorrections();
-    await answers.commitAnswerAfterCorrections("m-1");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-1");
     vi.stubGlobal("fetch", vi.fn(async () => json(409, { error: "This place is already in a block." })));
     const refusal = await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
     expect(refusal.refused.map((item) => item.clientCorrectionId)).toEqual([C1, C2]);
@@ -100,7 +100,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     await outbox.enqueueTimelineCorrections(OWNER_A, [correction("seg-9", "6f000000-0000-4000-8000-000000000009")]);
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-2", reviewItemId: "ri-2", logged: false, waitsFor: ["6f000000-0000-4000-8000-000000000009"] });
     await outbox.removeTimelineCorrections(["6f000000-0000-4000-8000-000000000009"]);
-    await answers.commitAnswerAfterCorrections("m-2");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-2");
     const gone = await releaseWith();
     expect(gone.release).not.toHaveBeenCalled();
     expect(gone.dropped.map((item) => item.id)).toEqual(["m-2"]);
@@ -118,7 +118,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     // The sheet reopened, Logs as picked: it waits for the earlier correction.
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: C2, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections(C2);
+    await answers.commitAnswerAfterCorrections(OWNER_A, C2);
     // Back online, the correction is refused.
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       sent.push(JSON.parse(init.body as string));
@@ -145,7 +145,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     const record = await shared.waitForItemCorrections(OWNER_A, { id: "m-yes", itemId: "seg-a", newIds: [],
       action: { kind: "answer", reviewItemId: "ri-1", logged: true } });
     expect(record).toMatchObject({ waitsFor: [C1], acknowledged: [] });
-    await answers.commitAnswerAfterCorrections("m-yes");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-yes");
     expect((await releaseWith()).release).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", vi.fn(async () => json(409, { error: "This place is already in a block." })));
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
@@ -163,7 +163,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     const record = await shared.waitForItemCorrections(OWNER_A, { id: "m-out", itemId: "stay-seg", memberItemIds: ["trip-in", "trip-out"], newIds: [],
       action: { kind: "answer", reviewItemId: "ri-stay", logged: true, outingMemberIds: ["ri-in", "ri-out"] } });
     expect(record).toMatchObject({ waitsFor: [C1], outingMemberIds: ["ri-in", "ri-out"] });
-    await answers.commitAnswerAfterCorrections("m-out");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-out");
     expect((await releaseWith()).release).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", vi.fn(async () => json(409, { error: "This trip is already in a block." })));
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
@@ -186,7 +186,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [], itemIds: ["seg-a"] }, queue);
     await acknowledging;
     expect((await answers.readAnswersAfterCorrections(OWNER_A))[0].acknowledged).toEqual([C1]);
-    await answers.commitAnswerAfterCorrections("log-1");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "log-1");
     // C1 has left the queue: acknowledged, so the log goes.
     const release = vi.fn(async (): Promise<Outcome> => "released");
     await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [], release });
@@ -199,7 +199,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
 
   it("counts a dependency that just left the queue, still in its memory, as accepted when releasing, never refused (Codex r6 on #610)", async () => {
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-4", reviewItemId: "ri-4", logged: true, waitsFor: [C1] });
-    await answers.commitAnswerAfterCorrections("m-4");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-4");
     const release = vi.fn(async (): Promise<Outcome> => "released");
     const result = await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [],
       readAcknowledged: () => [{ clientCorrectionId: C1 }], release });
@@ -210,11 +210,11 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
   it("an Undo whose deletion fails leaves the record abandoned at once (it hides nothing), and the runner deletes it (Codex r12 on #610)", async () => {
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-undo", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
     vi.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error("disk full"));
-    await answers.withdrawAnswerAfterCorrections("m-undo");
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-undo");
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A)).map((each) => [each.record.id, each.state])).toEqual([["m-undo", "abandoned"]]);
     // Never released while being recovered.
     await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
-    await answers.commitAnswerAfterCorrections("m-undo").catch(() => undefined);
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-undo").catch(() => undefined);
     expect((await releaseWith()).release).not.toHaveBeenCalled();
     await answers.recoverAnswersAfterCorrections(OWNER_A);
     expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
@@ -229,8 +229,8 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     // B signs in; A's Undo deletions fail.
     await account.activateMobileAccount(OWNER_B);
     vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error("disk full")).mockRejectedValueOnce(new Error("disk full"));
-    await answers.withdrawAnswerAfterCorrections("m-a");
-    await answers.withdrawAnswerAfterCorrections("log-a");
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-a");
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "log-a");
     // B's runner never touches A's work.
     await answers.recoverAnswersAfterCorrections(OWNER_B);
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A)).map((each) => [each.record.id, each.state]))
@@ -247,7 +247,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
     storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify([...stored,
       { ...stored[0], id: "m-there", reviewItemId: "ri-2", backendId: "https://elsewhere.example", held: undefined, acknowledged: [C1] }]));
-    await answers.commitAnswerAfterCorrections("m-here");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-here");
     await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
     const release = vi.fn(async (_record: { id: string }): Promise<Outcome> => "released");
     await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [], release });
@@ -259,27 +259,49 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     expect(answers.inScope({ userId: OWNER_A.userId, workspaceId: OWNER_A.workspaceId }, OWNER_A)).toBe(true);
   });
 
+  it("writes only in scope: another backend's or account's id passed to commit, cancel, settle or withdraw is a no-op (Codex r15 on #610)", async () => {
+    await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-there", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    const raw = () => JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
+    // Make it another backend's record (same account).
+    storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify(raw().map((record) => ({ ...record, backendId: "https://elsewhere.example" }))));
+    const before = storage.get("dayframe.reviewAnswersAfterCorrections.v1");
+    expect(await answers.commitAnswerAfterCorrections(OWNER_A, "m-there")).toBe(false);
+    expect(await answers.cancelAnswerAfterCorrections(OWNER_A, "m-there")).toBe(false);
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, "m-there", { inFront: true })).toBe("ignored");
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-there");
+    expect(storage.get("dayframe.reviewAnswersAfterCorrections.v1")).toBe(before);
+    // Another account's id, this backend: no-op too.
+    storage.clear();
+    await answers.holdAnswerAfterCorrections(OWNER_B, { id: "m-b", reviewItemId: "ri-b", logged: true, waitsFor: [C1] });
+    const theirs = storage.get("dayframe.reviewAnswersAfterCorrections.v1");
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, "m-b", { inFront: true })).toBe("ignored");
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-b");
+    expect(storage.get("dayframe.reviewAnswersAfterCorrections.v1")).toBe(theirs);
+    // Nothing was put to recovery for them either.
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_B)).map((each) => each.state)).toEqual(["held"]);
+  });
+
   it("recovers a Logs as whose Undo-end write failed, or gives it back (Codex r12 on #610)", async () => {
     const register = (id: string) => answers.registerAfterCorrections(OWNER_A, { id, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [C1], itemIds: ["seg-a"] },
       { readPending: async () => [], readAcknowledged: () => [] });
     await register(C2);
     vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error("disk full"));
-    expect(await answers.settleAnswerAfterCorrections(C2, { inFront: false })).toBe("committing");
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, C2, { inFront: false })).toBe("committing");
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A))[0].state).toBe("committing");
     await answers.recoverAnswersAfterCorrections(OWNER_A);
     expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A))[0].state).toBe("committed");
     // Failing again on the runner's try: given back — the record goes, nothing is logged.
-    await answers.cancelAnswerAfterCorrections(C2);
+    await answers.cancelAnswerAfterCorrections(OWNER_A, C2);
     await register("6f000000-0000-4000-8000-000000000003");
     vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error("disk full")).mockRejectedValueOnce(new Error("disk full"));
-    expect(await answers.settleAnswerAfterCorrections("6f000000-0000-4000-8000-000000000003", { inFront: true })).toBe("abandoned");
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, "6f000000-0000-4000-8000-000000000003", { inFront: true })).toBe("abandoned");
     expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
   });
 
   it("is kept on the phone: a relaunch still releases it once its corrections are acknowledged", async () => {
     await answerWithCorrections(OWNER_A, [C1]);
-    await answers.commitAnswerAfterCorrections("m-1");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-1");
     // A held one (Undo still running when the app was killed) never survives a relaunch.
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-held", reviewItemId: "ri-9", logged: true, waitsFor: [C1] });
     // The app is killed and opened again: nothing in memory, the same storage.
@@ -296,8 +318,8 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
   it("keeps each account's answers its own, and logout clears only that account's", async () => {
     await answerWithCorrections(OWNER_A, [C1]);
     await answers.holdAnswerAfterCorrections(OWNER_B, { id: "m-b", reviewItemId: "ri-b", logged: true, waitsFor: [C2] });
-    await answers.commitAnswerAfterCorrections("m-1");
-    await answers.commitAnswerAfterCorrections("m-b");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-1");
+    await answers.commitAnswerAfterCorrections(OWNER_B, "m-b");
     // Another account's acknowledgement of the same id never counts for this one.
     await answers.noteTimelineCorrectionAcknowledged(OWNER_B, C1);
     expect((await answers.readAnswersAfterCorrections(OWNER_A))[0].acknowledged).toEqual([]);
@@ -311,7 +333,7 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
 
   it("Undo during the wait takes back the answer and nothing else: the corrections still go", async () => {
     await answerWithCorrections(OWNER_A, [C1]);
-    await answers.cancelAnswerAfterCorrections("m-1");
+    await answers.cancelAnswerAfterCorrections(OWNER_A, "m-1");
     const fetch = vi.fn(async () => json(200, { ok: true }));
     vi.stubGlobal("fetch", fetch);
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
@@ -322,13 +344,13 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-3", reviewItemId: "ri-3", logged: true, waitsFor: [C1] });
     await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
     expect((await releaseWith()).release).not.toHaveBeenCalled();
-    await answers.commitAnswerAfterCorrections("m-3");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-3");
     expect((await releaseWith()).released).toEqual(["ri-3"]);
   });
 
   it("keeps an answer whose release can't happen yet (its \"?\" not read yet), and forgets one whose \"?\" is gone", async () => {
     await answerWithCorrections(OWNER_A, [C1]);
-    await answers.commitAnswerAfterCorrections("m-1");
+    await answers.commitAnswerAfterCorrections(OWNER_A, "m-1");
     await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
     await releaseWith(vi.fn(async (): Promise<Outcome> => "wait"));
     expect(await answers.readAnswersAfterCorrections(OWNER_A)).toHaveLength(1);

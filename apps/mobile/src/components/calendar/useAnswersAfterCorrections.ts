@@ -21,6 +21,7 @@ import {
   synchroniseTimelineCorrections
 } from "../../lib/timelineCorrectionOutbox";
 import { AccessibilityInfo, Alert, AppState } from "react-native";
+import { sayIfStillHere } from "../../lib/guardedNotice";
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -106,10 +107,12 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       void recoverAnswersAfterCorrections(who).then(({ abandoned, abandonedReviewItemIds }) => {
         if (!live || !abandoned.length) return;
         if (abandonedReviewItemIds.length) droppedRef.current?.(abandonedReviewItemIds);
-        // Rechecked now recovery has finished (its writes can be slow): said only while still in front (Codex r12 on #610).
-        if (AppState.currentState !== "active") return;
-        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
-        Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+        // Through the one guarded notifier, checked now recovery has finished (its writes can be slow; Codex r12 and r15):
+        // in front, this Dashboard still here, and still this account (the effect is this account's).
+        sayIfStillHere({ inFront: () => AppState.currentState === "active", mounted: () => live, sameAccount: () => live }, () => {
+          AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+          Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+        });
       }, () => undefined);
     };
     let draining = false;

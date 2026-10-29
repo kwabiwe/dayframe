@@ -43,19 +43,19 @@ const waiting = vi.hoisted(() => ({
   noteTimelineCorrectionAcknowledged: vi.fn(async (..._args: unknown[]) => undefined),
   // The store's shared settle and withdraw, as the raw writes go.
   settleOutcome: "committed" as "committed" | "committing" | "abandoned",
-  settleAnswerAfterCorrections: vi.fn(async (id: string, _options: { inFront: boolean }) => {
+  settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
     await waiting.commitAnswerAfterCorrections(id);
     return waiting.settleOutcome;
   }),
   // The store's one completion path, over the mocked settle and withdraw.
-    finishWaitingStart: (id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
-      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void waiting.withdrawAnswerAfterCorrections(id); return "withdrawn"; }
-      if (!checks.present()) { void waiting.settleAnswerAfterCorrections(id, { inFront: false }); return "settled"; }
+    finishWaitingStart: (owner: unknown, id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void waiting.withdrawAnswerAfterCorrections(owner, id); return "withdrawn"; }
+      if (!checks.present()) { void waiting.settleAnswerAfterCorrections(owner, id, { inFront: false }); return "settled"; }
       if (checks.start()) return "started";
-      void waiting.withdrawAnswerAfterCorrections(id);
+      void waiting.withdrawAnswerAfterCorrections(owner, id);
       return "withdrawn";
     },
-    withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await waiting.cancelAnswerAfterCorrections(id); })
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await waiting.cancelAnswerAfterCorrections(id); })
 }));
 vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
 // The shared registration (afterCorrections.ts), as the queue in `mocks.queued` would answer it.
@@ -413,7 +413,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
       act(() => { handle.start(); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
-      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.any(String), { inFront: true });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: true });
       expect(showNotice).toHaveBeenCalledWith("That place wasn't logged. Try again.");
       // Its write is slow and Dayframe leaves meanwhile: given up, but nothing said.
       showNotice.mockClear();
@@ -447,7 +447,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
       act(() => { handle.start(); });
       await act(async () => { tree.unmount(); });
-      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.any(String), { inFront: false });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
       await act(async () => { vi.advanceTimersByTime(10_000); });
       expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledTimes(1);
       expect(showNotice).not.toHaveBeenCalled();
@@ -480,7 +480,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
     await act(async () => { tree.unmount(); });
     act(() => { handle.start(); });
-    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.any(String), { inFront: false });
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
     expect(api!.heldLog).toBeNull();
     // Another account signs in between its registration and its start.
     await act(async () => { tree = create(<Probe data={account("a")} />); });
@@ -490,8 +490,72 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
     await act(async () => { tree.update(<Probe data={account("b")} />); });
     act(() => { handle.start(); });
-    expect(waiting.withdrawAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+    expect(waiting.withdrawAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), recordId);
     expect(api!.heldLog).toBeNull();
+  });
+
+  it("finds a Logs as hold started in the same batch as its unmount, and settles it (Codex r15 on #610)", async () => {
+    waiting.settleAnswerAfterCorrections.mockClear();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+    let handle!: { start: () => void };
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+    // The hold starts and the place sheets go away before any re-render.
+    act(() => {
+      handle.start();
+      tree.unmount();
+    });
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledOnce();
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, expect.any(String), { inFront: false });
+  });
+
+  it("says nothing of a late plain Logs as failure after teardown, backgrounding or an account switch (Codex r15 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      const showNotice = vi.fn();
+      const failLater = () => {
+        let fail!: () => void;
+        mocks.enqueue.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = () => reject(new Error("disk full")); }));
+        return () => act(async () => { fail(); await Promise.resolve(); await Promise.resolve(); });
+      };
+      const holdAndEnd = async (tree: ReturnType<typeof create>) => {
+        act(() => { api!.openPlace(place, "Unknown place"); });
+        const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+        await act(async () => { logAs.onLog("cat-errands"); });
+        await act(async () => { vi.advanceTimersByTime(4_800); });
+      };
+      // Teardown.
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      let fail = failLater();
+      await holdAndEnd(tree);
+      await act(async () => { tree.unmount(); });
+      await fail();
+      // Backgrounding.
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      fail = failLater();
+      await holdAndEnd(tree);
+      mocks.appState = "background";
+      await fail();
+      mocks.appState = "active";
+      // An account switch.
+      fail = failLater();
+      await holdAndEnd(tree);
+      await act(async () => { tree.update(<Probe data={account("b")} showNotice={showNotice} />); });
+      await fail();
+      expect(showNotice).not.toHaveBeenCalled();
+      // In front, same account, here: said.
+      await act(async () => { tree.update(<Probe data={account("a")} showNotice={showNotice} />); });
+      fail = failLater();
+      await holdAndEnd(tree);
+      await fail();
+      expect(showNotice).toHaveBeenCalledWith("That place wasn't logged. Try again.");
+    } finally {
+      mocks.appState = "active";
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the Logs as hold through Dashboard renders, and keeps it on the phone when the app leaves (Codex r1 on #606)", async () => {

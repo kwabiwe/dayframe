@@ -115,7 +115,7 @@ describe("late starts of waiting answers, over the real store (Codex r14 on #610
     expect(await states()).toEqual(["held"]);
     act(() => { tree.unmount(); });
     // The corrections are queued, then its start comes: no List any more.
-    act(() => { startAfterCorrections("a", true, "6f000000-0000-4000-8000-0000000000e1", "owner-a"); });
+    act(() => { startAfterCorrections("a", true, "6f000000-0000-4000-8000-0000000000e1", "owner-a", OWNER); });
     await flush();
     expect(await states()).toEqual(["committed"]);
   });
