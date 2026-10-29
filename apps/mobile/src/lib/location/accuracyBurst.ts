@@ -9,6 +9,8 @@
 export const ACCURACY_BURST_DURATION_MS = 3 * 60_000;
 /** A burst can't start within this long of the last one ending. */
 export const ACCURACY_BURST_COOLDOWN_MS = 5 * 60_000;
+/** A burst still recorded this long past its 3 minutes stops location updates outright (if the day allows that long). */
+export const ACCURACY_BURST_FORCE_STOP_MS = 5 * 60_000;
 export const ACCURACY_BURST_MAX_PER_DAY = 6;
 /** Under the 20 minutes a day at best accuracy the location energy budget allows (performance.md). */
 export const ACCURACY_BURST_MAX_SECONDS_PER_DAY = 18 * 60;
@@ -42,6 +44,11 @@ export type AccuracyBurstState = {
     captureId?: string;
     /** The time zone offset when it started (minutes, as `getTimezoneOffset`): its days are counted on that basis. */
     offsetMinutes?: number;
+    /**
+     * When location updates are stopped outright if normal capture still isn't back: 5 minutes past its 3, and never
+     * past the day's remaining best-accuracy allowance (Codex r3 on #619).
+     */
+    stopBy?: string;
   };
   lastEndedAt?: string;
   /** Bursts by local day: how many started, and their seconds at best accuracy. */
@@ -130,11 +137,13 @@ export function startAccuracyBurst(
   const today = state.days[key] ?? { count: 0, seconds: 0 };
   const byTrigger = today.byTrigger ?? {};
   const forTrigger = byTrigger[trigger] ?? { count: 0, seconds: 0 };
+  const allowanceMs = Math.max(0, ACCURACY_BURST_MAX_SECONDS_PER_DAY - today.seconds) * 1000;
+  const stopBy = new Date(now.getTime() + Math.min(ACCURACY_BURST_DURATION_MS + ACCURACY_BURST_FORCE_STOP_MS, Math.max(allowanceMs, ACCURACY_BURST_DURATION_MS)));
   return {
     ...withTrialProgress(state, now),
     active: {
       kind, trigger, startedAt: now.toISOString(), endsAt: new Date(now.getTime() + ACCURACY_BURST_DURATION_MS).toISOString(),
-      ...(captureId ? { captureId } : {}), offsetMinutes: now.getTimezoneOffset()
+      ...(captureId ? { captureId } : {}), offsetMinutes: now.getTimezoneOffset(), stopBy: stopBy.toISOString()
     },
     days: { ...state.days, [key]: { ...today, count: today.count + 1, byTrigger: { ...byTrigger, [trigger]: { ...forTrigger, count: forTrigger.count + 1 } } } }
   };

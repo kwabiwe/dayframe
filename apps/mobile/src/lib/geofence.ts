@@ -872,7 +872,7 @@ async function startLocationLearningUnsafe(
   }).catch(() => null);
   await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(burst)));
   if (burst) {
-    scheduleAccuracyBurstEnd(capture, 1_000);
+    scheduleAccuracyBurstEnd(capture, burst, 1_000);
   } else {
     // Normal options are in place: any recorded burst (past its 3 minutes, or another lifetime's) ends now.
     await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
@@ -1645,14 +1645,14 @@ export async function stopLocationLearningIfStarted() {
   // An unknown native state is not a stopped one: stop anyway, and end a burst only once updates have really
   // stopped, so sign-out or location off never leaves best accuracy running untracked (Codex r2 on #619).
   const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
-  let stopped = started === false;
   if (started !== false) {
-    stopped = await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, (error) => {
-      if (started) throw error;
-      return false;
+    await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(async (error) => {
+      // A stop that failed while the state was unknown is fine only if updates turn out not to run; otherwise the
+      // failure is the caller's, so teardown never reports success with updates maybe running (Codex r3 on #619).
+      if (started === null && await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null) === false) return;
+      throw error;
     });
   }
-  if (!stopped) return;
   clearAccuracyBurstTimer();
   // Capture stopped (sign-out, an account change, location off), so best accuracy did too: a burst ends now,
   // counted for what it ran.
@@ -1663,8 +1663,6 @@ export async function stopLocationLearningIfStarted() {
 const ACCURACY_BURST_STATE_KEY = "dayframe.location.burstTrial.v1";
 /** A stored trial that can't be read as one: treated as finished (no bursts), and never overwritten by a new one. */
 const UNREADABLE_ACCURACY_TRIAL: AccuracyBurstState = { startedDay: "0001-01-01", furthestTrialDay: Number.MAX_SAFE_INTEGER, days: {} };
-/** A burst still recorded this long past its 3 minutes stops location updates outright (the next refresh restarts them). */
-const ACCURACY_BURST_FORCE_STOP_MS = 5 * 60_000;
 /** While a burst runs past its 3 minutes, normal capture is tried again this often, readings or not. */
 const ACCURACY_BURST_RETRY_MS = 30_000;
 let accuracyBurstChain: Promise<unknown> = Promise.resolve();
@@ -1767,29 +1765,39 @@ export async function maybeStartAccuracyBurst(
     }));
     return false;
   }
-  scheduleAccuracyBurstEnd(capture, ACCURACY_BURST_DURATION_MS + 1_000);
+  // Only the burst still recorded as this lifetime's takes the safety timer: a late start never replaces the
+  // timer of a burst started since (Codex r3 on #619).
+  const current = await readAccuracyBurstState().catch(() => null);
+  if (isLocationCaptureSnapshotCurrent(capture) && current?.active?.startedAt === started && current.active.captureId === captureId) {
+    scheduleAccuracyBurstEnd(capture, started, ACCURACY_BURST_DURATION_MS + 1_000);
+  }
   return true;
 }
 
 /**
- * A safety bound that needs no reading: the burst's end is tried again on a timer while the process runs, and a
- * burst still recorded 5 minutes past its 3 stops location updates outright, so best accuracy never outlives the
- * daily budget because readings stopped or a restore keeps failing (Codex r2 on #619).
+ * A safety bound that needs no reading: while the process runs, the burst's end is tried again on a timer until
+ * normal capture is confirmed back or updates are confirmed stopped, whatever fails on the way; at its `stopBy`
+ * (5 minutes past its 3, never past the day's remaining allowance) updates are stopped outright, and the next
+ * capture refresh restarts them (Codex r2–r3 on #619). A relaunch ends a recorded burst on its first reading.
  */
-function scheduleAccuracyBurstEnd(capture: LocationCaptureSnapshot, delayMs: number) {
+function scheduleAccuracyBurstEnd(capture: LocationCaptureSnapshot, startedAt: string, delayMs: number) {
   clearAccuracyBurstTimer();
   accuracyBurstTimer = setTimeout(() => {
     accuracyBurstTimer = null;
-    void maybeEndAccuracyBurst(capture).then(async (ended) => {
-      if (ended) return;
-      const state = await readAccuracyBurstState().catch(() => null);
-      if (!state?.active || state.active.captureId !== capture.binding?.id || !isLocationCaptureSnapshotCurrent(capture)) return;
-      if (Date.now() - Date.parse(state.active.endsAt) >= ACCURACY_BURST_FORCE_STOP_MS) {
-        await stopLocationLearningIfStarted().catch(() => undefined);
-        return;
+    void (async () => {
+      if (await maybeEndAccuracyBurst(capture)) return;
+      const state = await readAccuracyBurstState();
+      // No longer this burst (ended, or another started), or this lifetime is over (its teardown stops updates).
+      if (!state?.active || state.active.startedAt !== startedAt || !isLocationCaptureSnapshotCurrent(capture)) return;
+      const stopBy = Date.parse(state.active.stopBy ?? state.active.endsAt);
+      if (Date.now() >= stopBy) {
+        await stopLocationLearningIfStarted();
+        if (!(await readAccuracyBurstState())?.active) return;
       }
-      scheduleAccuracyBurstEnd(capture, ACCURACY_BURST_RETRY_MS);
-    }).catch(() => undefined);
+      scheduleAccuracyBurstEnd(capture, startedAt, ACCURACY_BURST_RETRY_MS);
+    })().catch(() => {
+      if (isLocationCaptureSnapshotCurrent(capture)) scheduleAccuracyBurstEnd(capture, startedAt, ACCURACY_BURST_RETRY_MS);
+    });
   }, delayMs);
 }
 

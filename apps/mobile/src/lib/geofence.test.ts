@@ -1126,11 +1126,12 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect((await readAccuracyBurstState())?.active).toEqual(other);
   });
 
-  it("an unknown native state is never taken for stopped updates (Codex r2 on #619)", async () => {
+  it("an unknown native state is never taken for stopped updates (Codex r2–r3 on #619)", async () => {
     await maybeStartAccuracyBurst("departure", await capture());
     locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("unknown"));
     locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
-    await stopLocationLearningIfStarted();
+    // Updates may still run: the failure is the caller's, so teardown can't report success (Codex r3 on #619).
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
     expect((await readAccuracyBurstState())?.active).toBeTruthy();
     locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("unknown"));
     await stopLocationLearningIfStarted();
@@ -1157,5 +1158,26 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     asyncStore.delete(BURST_KEY);
     await maybeEndAccuracyBurst(await capture());
     expect(JSON.parse(asyncStore.get(BURST_KEY)!)).toMatchObject({ startedDay: localDay(new Date()), days: {} });
+  });
+
+  it("the safety timer keeps trying until capture is confirmed, and stops by the day's remaining allowance (Codex r3 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    // Five bursts used (15 minutes): this one may run at most the 3 minutes left.
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 15 * 60 } } }));
+    await maybeStartAccuracyBurst("departure", await capture());
+    expect(JSON.parse(asyncStore.get(BURST_KEY)!).active.stopBy).toBe(new Date(2026, 10, 2, 8, 3).toISOString());
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    // The first forced stop fails too: the timer keeps going rather than giving up.
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    // The day stays within its 18 minutes.
+    expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(18 * 60 + 35);
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
   });
 });
