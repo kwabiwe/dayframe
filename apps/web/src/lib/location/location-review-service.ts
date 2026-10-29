@@ -1,5 +1,5 @@
 import { hashedPatternKey, persistedStayKey, recordLearnedName } from "./name-patterns";
-import { nameBand, type NameBand } from "@dayframe/shared";
+import { nameBand, normalizeTagName, type NameBand } from "@dayframe/shared";
 import {
   LocationReviewActionSchema,
   stableLocationId,
@@ -855,7 +855,8 @@ async function venueDecision(
     startedAt: window.startedAt,
     stoppedAt: window.stoppedAt,
     description: confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null),
-    tags: normalisedTags(edit.tags ?? [])
+    // Tag identities as they are stored (`syncTimeEntryTags`): the shared slug, each once, sorted (Codex r4 on #620).
+    tags: [...new Set((edit.tags ?? []).map((name) => normalizeTagName(name).normalizedName))].sort()
   };
 }
 

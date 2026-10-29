@@ -159,4 +159,18 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
     await expect(resolveLocationReviewAction(covered.reviewId, { ...action, edit: { categoryId, stoppedAt: at(529) } }, session))
       .rejects.toMatchObject({ code: "resolution_conflict" });
   });
+
+  it("matches tags by their stored identity: case, spacing, hyphens and repeats are the same tag (Codex r4 on #620)", async () => {
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const card = await stay("seg-tag-identity", 600, 660, null);
+    await resolveLocationReviewAction(card.reviewId, { ...action, edit: { categoryId, tags: ["Deep Work", "weekly"] } }, session);
+    for (const tags of [["deep-work", "weekly"], ["  Deep Work  ", " weekly"], ["Deep Work", "deep-work", "weekly", "Weekly"], ["weekly", "deep work"]]) {
+      expect(await resolveLocationReviewAction(card.reviewId, { ...action, edit: { categoryId, tags } }, session))
+        .toMatchObject({ alreadyResolved: true, equivalent: true });
+    }
+    await expect(resolveLocationReviewAction(card.reviewId, { ...action, edit: { categoryId, tags: ["Deep Work", "monthly"] } }, session))
+      .rejects.toMatchObject({ code: "resolution_conflict" });
+    await expect(resolveLocationReviewAction(card.reviewId, { ...action, edit: { categoryId, tags: ["Deep Work"] } }, session))
+      .rejects.toMatchObject({ code: "resolution_conflict" });
+  });
 });
