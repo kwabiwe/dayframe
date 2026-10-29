@@ -518,18 +518,31 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
   });
 
   it("names the selected day while the top is where it would be: today with nothing listed yet, not the day before", async () => {
-    // Today is the 21st with no block; the List's newest heading is the 20th.
+    // Today is the 20th (this file's clock) with no block; the List's newest heading is the 19th.
     const today = vi.fn();
-    render(list(days(7, 20), { focusDayStartMs: new Date(2026, 9, 21).getTime(), focusRequest: "2026-10-21", onVisibleDay: today }));
-    expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, 21).getTime());
+    render(list(days(7, 19), { focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20", onVisibleDay: today }));
+    expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, 20).getTime());
     // Scrolled down to an earlier day's heading: that day.
     const root = document.querySelector(".timeline-list-scroll")!;
     fireEvent.wheel(root);
     root.scrollTop = 600;
     fireEvent.scroll(root);
-    const topDay = [20, 19, 18, 17, 16, 15, 14, 13].filter((day) => headingTop(day) <= 48).at(-1)!;
-    expect(topDay).toBeLessThan(20);
+    const topDay = [19, 18, 17, 16, 15, 14, 13, 12].filter((day) => headingTop(day) <= 48).at(-1)!;
+    expect(topDay).toBeLessThan(19);
     await waitFor(() => expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime()));
+  });
+
+  it("names the day really at the top when an earlier selected day loses its last block (Codex r5 on #625)", async () => {
+    // The 14th is selected (not today) and at the top; its only block is deleted elsewhere, nothing scrolls.
+    const report = vi.fn();
+    const { rerender } = render(list(days(7, 19), { onVisibleDay: report }));
+    expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    const scrolled = document.querySelector(".timeline-list-scroll")!.scrollTop;
+    rerender(list(days(7, 19).filter((row) => row.id !== "d14"), { onVisibleDay: report }));
+    expect(document.querySelector(".timeline-list-scroll")!.scrollTop).toBe(scrolled);
+    // The 13th now sits at the top, and the header says so.
+    expect(headingTop(13)).toBeLessThanOrEqual(48);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 13).getTime()));
   });
 
   it("re-reads the top day after a layout change with no scroll: the shown day's last row removed (Codex r1 on #625)", async () => {

@@ -567,10 +567,12 @@ export function EntriesTable({
     const index = Math.max(0, low - 1);
     const dayStart = offsets[index].dayStart;
     setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
-    // The header names the selected day while the List's top is where that day would be: a day with nothing listed
-    // (today before any block) sits between its nearest earlier heading and the one above it, newest first.
+    // Today with nothing listed yet is named while the List's top is where today would be (between its nearest earlier
+    // heading and the one above it, newest first). Only today: an earlier selected day that lost its last row names the
+    // day really at the top (Codex r5 on #625).
     const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
-    const shown = focusDayStartMs !== null && dayStart <= focusDayStartMs && focusDayStartMs < newerStart ? focusDayStartMs : dayStart;
+    const emptyToday = focusDayStartMs !== null && focusDayStartMs === todayStartMs;
+    const shown = emptyToday && dayStart <= focusDayStartMs && focusDayStartMs < newerStart ? focusDayStartMs : dayStart;
     setTopDayStartMs((current) => current === shown ? current : shown);
   };
   const trackColumnDayRef = useRef(trackColumnDay);
