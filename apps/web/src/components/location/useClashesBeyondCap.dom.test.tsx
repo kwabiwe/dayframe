@@ -110,6 +110,7 @@ describe("useClashesBeyondCap", () => {
   it("the shell feeds it the stable canonical bootstrap, never the selected period's data (Codex r1 on #623)", () => {
     const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
     expect(shell).toContain("useClashesBeyondCap({ bootstrapItems: canonicalItems, dataVersion: canonical, owner: canonicalOwner, todayStartMs })");
-    expect(shell).toContain("const canonicalOwner = canonical ? `${canonical.workspace.id}:${canonical.user.id}` : \"\";");
+    expect(shell).toContain("const owner = canonical ? `${canonical.workspace.id}:${canonical.user.id}` : \"\";");
+    expect(shell).toContain("const canonicalOwner = owner;");
   });
 });
