@@ -173,6 +173,61 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect((second.result.current.held as { afterCorrections?: string }).afterCorrections).toBeUndefined();
   });
 
+  describe("while the gate answers (Codex r8 on #610)", () => {
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // The gate's registration, finished by hand.
+    const deferGate = () => {
+      let finish!: (record: unknown) => void;
+      gate.waitForItemCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      return (record: unknown) => act(async () => { finish(record); await Promise.resolve(); await Promise.resolve(); });
+    };
+
+    it("never confirms a proposal that changed while it registered: Yes for 10–11, a refresh brings 10–13", async () => {
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      rerender(withAccount([suggestion("a", { suggestedStoppedAt: at(13) })]));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Waiting for a correction too: its record goes, never confirmed.
+      const finishWaiting = deferGate();
+      const other = mount(withAccount([suggestion("b")]));
+      act(() => { other.result.current.answer("b", true); });
+      other.rerender(withAccount([suggestion("b", { suggestedStoppedAt: at(13) })]));
+      await finishWaiting({ id: "client-id" });
+      expect(other.result.current.held).toBeNull();
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      await finish({ id: "client-id" });
+      expect(result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("saves at once and says nothing when the List went away while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, tree } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish({ id: "client-id" });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+    });
+  });
+
   it("Undo brings the “?” back and saves nothing", async () => {
     const { result } = mount(bootstrap([suggestion("a")]));
     act(() => { result.current.answer("a", false); });

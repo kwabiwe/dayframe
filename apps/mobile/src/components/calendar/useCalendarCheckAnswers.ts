@@ -303,10 +303,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       return { ...now, ids: new Set([...now.ids].filter((id) => !now.awaiting.has(id))), awaiting: new Set() };
     });
   }, [locallyDecidedIds]);
-  // Backgrounding saves a held answer now; so does the Dashboard going away.
+  // Backgrounding saves a held answer now; so does the Dashboard going away. `inFront`: an answer whose gate settles
+  // while the app is away is saved at once, as that flush would have (Codex r8 on #610).
+  const inFront = useRef(true);
   useEffect(() => {
     alive.current = true;
     const subscription = AppState.addEventListener("change", (state) => {
+      inFront.current = state === "active";
       if (state !== "active") hold.flush();
     });
     return () => {
@@ -320,12 +323,22 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * Holds an answer for Undo; a new answer saves the one held before it. `afterCorrections`: the id of its waiting
    * record. Whether it was taken. Only through `answer`, which decides first whether it must wait.
    */
+  // `proposal`: the suggestion as it was when tapped; one that has changed since is never answered (Codex r8 on #610).
+  // `quiet`: the app left (or the List went away) while the gate was answering: saved at once, with nothing said.
   const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string } = {}): boolean => {
+    options: { afterCorrections?: string; proposal?: string; quiet?: boolean } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
     if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return false;
+    if (options.proposal !== undefined && reviewDeckProposalSignature(listed) !== options.proposal) {
+      // Its times or place changed while the gate answered: not this answer's to confirm (as the deck's
+      // proposal_changed); the "?" stays to be checked again.
+      if (alive.current && !options.quiet) {
+        AccessibilityInfo.announceForAccessibility(`${listed.title?.trim() || "Suggestion"} changed, so it was not saved. Check it again.`);
+      }
+      return false;
+    }
     // Already answered (held, or saving and not yet handed over): a repeat tap never saves the first answer
     // early and so never takes its Undo away (Codex r4 on #582).
     const current = hold.current();
@@ -361,7 +374,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       title,
       color: "",
       seconds: 0,
-      proposal: reviewDeckProposalSignature(listed),
+      proposal: options.proposal ?? reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
       ...(logged && venue && !members.length ? { venue } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
@@ -370,6 +383,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       } : {})
     };
     hold.hold(decision);
+    if (options.quiet) {
+      // Saved now, as backgrounding (or the List going away) saves a held answer: no Undo window, nothing said.
+      hold.flush();
+      return true;
+    }
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     // As the deck says it (Codex r2 on #582): the answer, and that Undo is there while its window runs.
     AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`);
@@ -393,6 +411,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
     if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue);
+    // The suggestion as tapped: the answer is held against it, never against what a refresh brings meanwhile.
+    const proposal = reviewDeckProposalSignature(listed);
     if (registering.current.has(itemId)) return false;
     registering.current.add(itemId);
     const owner = ownerRef.current;
@@ -404,9 +424,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
         if (record) void cancelAnswerAfterCorrections(id).catch(() => undefined);
         return;
       }
+      // The lifecycle as it is now: away or gone, it is saved at once, as the flush would have (Codex r8 on #610).
+      const quiet = !alive.current || !inFront.current;
       // Waiting for a correction: no Apple place with it (the correction says where it was).
-      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
-      if (!record) holdAnswer(itemId, logged, venue);
+      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id, proposal, quiet })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+      if (!record) holdAnswer(itemId, logged, venue, { proposal, quiet });
     }, () => {
       registering.current.delete(itemId);
       if (ownerRef.current === owner && alive.current) Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
