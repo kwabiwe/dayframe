@@ -307,10 +307,10 @@ export function LocationEvidenceMap({
             role="status"
           >
             {baseMapState === "loading"
-              ? "Loading map background…"
+              ? "Loading map…"
               : baseMapState === "degraded"
-                ? "Some of the map background didn’t load. Evidence remains visible."
-                : "Map background is unavailable. Evidence remains visible."}
+                ? "Some of the map didn’t load."
+                : "Map unavailable"}
           </p>
         ) : null}
       </div>

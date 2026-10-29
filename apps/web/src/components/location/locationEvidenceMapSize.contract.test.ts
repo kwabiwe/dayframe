@@ -14,7 +14,7 @@ function blocks(selector: string) {
 describe("the map's placeholder and frame are one size (glitch fix 3)", () => {
   it("defines the frame height once", () => {
     const definitions = [...css.matchAll(/--location-evidence-frame-height:\s*([^;]+);/g)].map((match) => match[1].trim());
-    expect(definitions).toEqual(["18rem"]);
+    expect(definitions).toEqual(["160px"]);
   });
 
   it("sizes the frame, the map, the empty state and the loading placeholder from it", () => {

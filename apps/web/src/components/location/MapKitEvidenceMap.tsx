@@ -47,6 +47,22 @@ type MapKit = {
   Style: new (options: Record<string, unknown>) => MkStyle;
   CircleOverlay: new (centre: MkCoordinate, radius: number, options: { style: MkStyle }) => MkOverlay;
   PolylineOverlay: new (points: MkCoordinate[], options: { style: MkStyle }) => MkOverlay;
+  PointsOfInterestSearch: new (options: { center: MkCoordinate; radius: number }) => {
+    search(callback: (error: unknown, data?: { places?: MkPlace[] }) => void): number;
+    cancel?(id: number): boolean;
+  };
+  Search: new (options: { coordinate?: MkCoordinate; region?: object; includePointsOfInterest?: boolean }) => {
+    search(query: string, callback: (error: unknown, data?: { places?: MkPlace[] }) => void): number;
+    cancel?(id: number): boolean;
+  };
+};
+
+/** A place from MapKit JS's searches. */
+export type MkPlace = {
+  name?: string;
+  id?: string;
+  formattedAddress?: string;
+  coordinate?: { latitude: number; longitude: number };
 };
 
 declare global {
@@ -61,6 +77,7 @@ const TOKEN_TIMEOUT_MS = 10_000;
 const SCRIPT_TIMEOUT_MS = 15_000;
 
 let loading: Promise<MapKit> | null = null;
+export type { MapKit };
 /**
  * MapKit failed for this page (a token request that failed or stalled, an authorisation error, the script not
  * loading): every map, mounted now or later, falls back to MapLibre (Codex r1 on #633).
@@ -82,13 +99,15 @@ export function resetMapKitPage() {
 }
 
 /** Calls `listener` once MapKit has failed for the page (at once if it already has); returns the unsubscribe. */
-function onPageFailure(listener: () => void) {
+export function onPageFailure(listener: () => void) {
   if (pageFailed) {
     listener();
     return () => undefined;
   }
   failureListeners.add(listener);
-  return () => failureListeners.delete(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
 }
 
 /** A token for MapKit, or a page failure: a non-2xx answer, a body without a token, a network error or a stall. */
@@ -139,7 +158,7 @@ export function loadMapKit(): Promise<MapKit> {
     script.async = true;
     script.crossOrigin = "anonymous";
     script.dataset.callback = "__dayframeMapKitReady";
-    script.dataset.libraries = "map,overlays";
+    script.dataset.libraries = "map,overlays,services";
     // A script that neither loads nor errors in time is a failure for the page too (Codex r2 on #633).
     const deadline = setTimeout(() => {
       failPage();

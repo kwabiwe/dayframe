@@ -15,7 +15,7 @@ const LocationEvidenceMap = dynamic(() => import("@/components/location/Location
 const MapKitEvidenceMap = dynamic(() => import("@/components/location/MapKitEvidenceMap").then((module) => module.MapKitEvidenceMap),
   { ssr: false, loading: () => <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" /> });
 
-type Provider = "probing" | "mapkit" | "maplibre";
+export type Provider = "probing" | "mapkit" | "maplibre";
 
 let pageProvider: Provider = "probing";
 let probing: Promise<Provider> | null = null;
@@ -44,10 +44,14 @@ export function resetPlaceSheetMapProvider() {
   probing = null;
 }
 
-export function PlaceSheetMap({ caption, evidence }: { caption: string | null; evidence: LocationReviewEvidenceDto }) {
+/**
+ * Whether this page shows Apple's map: "probing" until the server answers, then "mapkit" or "maplibre". `enabled`
+ * false asks nothing (a dialog with nothing to look up).
+ */
+export function useMapProvider(enabled = true): [Provider, (next: Provider) => void] {
   const [provider, setProvider] = useState<Provider>(pageProvider);
   useEffect(() => {
-    if (provider !== "probing") return undefined;
+    if (!enabled || provider !== "probing") return undefined;
     let cancelled = false;
     void probeProvider().then((next) => {
       if (!cancelled) setProvider(next);
@@ -55,7 +59,16 @@ export function PlaceSheetMap({ caption, evidence }: { caption: string | null; e
     return () => {
       cancelled = true;
     };
-  }, [provider]);
+  }, [enabled, provider]);
+  const fallBack = (next: Provider) => {
+    pageProvider = next;
+    setProvider(next);
+  };
+  return [provider, fallBack];
+}
+
+export function PlaceSheetMap({ caption, evidence }: { caption: string | null; evidence: LocationReviewEvidenceDto }) {
+  const [provider, setProvider] = useMapProvider();
 
   if (provider === "probing") return <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" />;
   if (provider === "mapkit") {
@@ -63,10 +76,7 @@ export function PlaceSheetMap({ caption, evidence }: { caption: string | null; e
       <MapKitEvidenceMap
         caption={caption}
         evidence={evidence}
-        onUnavailable={() => {
-          pageProvider = "maplibre";
-          setProvider("maplibre");
-        }}
+        onUnavailable={() => setProvider("maplibre")}
       />
     );
   }
