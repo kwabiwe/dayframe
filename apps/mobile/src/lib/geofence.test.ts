@@ -110,6 +110,7 @@ const {
   recordGeofenceTransition,
   REPICK_MIN_INTERVAL_MS,
   __resetGeofenceRepickClockForTests,
+  __resetAccuracyBurstForTests,
   maybeEndAccuracyBurst,
   maybeStartAccuracyBurst,
   readAccuracyBurstState,
@@ -1018,6 +1019,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
     locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(true);
+    __resetAccuracyBurstForTests();
   });
 
   afterEach(() => {
@@ -1361,5 +1363,38 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(state?.active).toBeUndefined();
     expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(70);
     expect(state?.days["2026-11-02"].seconds).toBeLessThan(80);
+  });
+
+  it("a settlement write that fails keeps the confirmed end, retried until storage takes it (Codex r9 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(70_000);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.setItem).mockRejectedValue(new Error("full"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => { asyncStore.set(key, value); return Promise.resolve(); });
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(80);
+  });
+
+  it("a headless teardown with no lease keeps the moment updates stopped (Codex r9 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBe(70);
   });
 });
