@@ -88,6 +88,13 @@ const HEALTH_DEBUG_LOOKBACK_DAYS = 14;
 const HEALTH_DEBUG_SAMPLE_LIMIT = 100;
 
 let healthReprocessInFlight: Promise<HealthReviewReprocessResult> | null = null;
+/**
+ * Every caller's guards on the pass in flight, its starter's and those that joined it (Codex r3 on #615): before each
+ * further batch every one is checked, so a caller that asked only while in front (Calendar › List) stops a pass it
+ * joined when it leaves the front, instead of riding along without its guards.
+ */
+type HealthReprocessGuard = { signal?: AbortSignal; beforeRequest?: () => Promise<boolean> };
+let healthReprocessGuards: HealthReprocessGuard[] = [];
 let lastHealthReprocessAt = 0;
 let healthReprocessBackoffUntil = 0;
 
@@ -768,7 +775,12 @@ export async function reprocessExistingHealthReviewItems(
   } = {},
 ) {
   const now = Date.now();
-  if (healthReprocessInFlight) return healthReprocessInFlight;
+  const guard: HealthReprocessGuard | null = options.signal || options.beforeRequest
+    ? { signal: options.signal, beforeRequest: options.beforeRequest } : null;
+  if (healthReprocessInFlight) {
+    if (guard) healthReprocessGuards.push(guard);
+    return healthReprocessInFlight;
+  }
   if (!options.force && now < healthReprocessBackoffUntil)
     return skippedHealthReprocessResult("Backoff active.");
   if (
@@ -778,13 +790,22 @@ export async function reprocessExistingHealthReviewItems(
     return skippedHealthReprocessResult("Recently checked.");
   }
 
+  const guards: HealthReprocessGuard[] = guard ? [guard] : [];
+  healthReprocessGuards = guards;
+  const everyGuardWants = async () => {
+    for (const each of [...guards]) {
+      if (each.signal?.aborted) return false;
+      if (each.beforeRequest && !(await each.beforeRequest().catch(() => false))) return false;
+    }
+    return true;
+  };
   healthReprocessInFlight = (async () => {
     try {
       const result = await reprocessHealthReviewItemBatches(
         preferences ?? (await getHealthImportPreferences()),
         options.mappings ?? (await getHealthAutoLogMappings()),
         options.force === true,
-        options,
+        { ...options, beforeRequest: everyGuardWants, isAborted: () => guards.some((each) => each.signal?.aborted) },
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -795,6 +816,7 @@ export async function reprocessExistingHealthReviewItems(
       return failedHealthReprocessResult(error);
     } finally {
       healthReprocessInFlight = null;
+      if (healthReprocessGuards === guards) healthReprocessGuards = [];
     }
   })();
   return healthReprocessInFlight;
@@ -804,7 +826,7 @@ async function reprocessHealthReviewItemBatches(
   preferences: HealthImportPreferences,
   mappings: HealthAutoLogMappings,
   force: boolean,
-  options: { signal?: AbortSignal; deadlineAt?: number; beforeRequest?: () => Promise<boolean> } = {},
+  options: { signal?: AbortSignal; deadlineAt?: number; beforeRequest?: () => Promise<boolean>; isAborted?: () => boolean } = {},
 ) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
@@ -834,7 +856,7 @@ async function reprocessHealthReviewItemBatches(
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;
     if ("nextCursor" in result && !result.nextCursor) break;
-    if (options.signal?.aborted || Date.now() >= deadlineAt) {
+    if (options.signal?.aborted || options.isAborted?.() || Date.now() >= deadlineAt) {
       combined.partial = true;
       combined.hasMore = true;
       break;

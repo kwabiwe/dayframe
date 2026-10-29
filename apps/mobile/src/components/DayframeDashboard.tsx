@@ -261,6 +261,7 @@ import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/cale
 import { useCheckLinks } from "@/components/calendar/useCheckLinks";
 import { lookupReviewItemStart } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import { firstCheckReachingDay } from "@/lib/reviewLinks";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
@@ -2864,15 +2865,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
-  // Calendar › List on a day with nothing selected: an old link's item that no longer asks (Codex r2 on #615).
+  // Calendar › List on a day with nothing selected: an old link's item that no longer asks (Codex r2 on #615). Every
+  // selection is cleared first, the same day included (Codex r3 on #615): the open question and any waiting request
+  // or scroll (so a List mounting from the Grid has nothing to replay), and an open sheet.
+  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
+  const [calendarSelectionClear, setCalendarSelectionClear] = useState(0);
+  const closeCorrectionSheet = locationCorrections.closeSheet;
   const openListDay = useCallback((dayKey: string) => {
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    setCalendarSelectionClear((count) => count + 1);
+    closeCorrectionSheet();
     changeCalendarLayout("list");
     selectCalendarDay(dayKey);
     router.navigate("/(tabs)/calendar");
-  }, [changeCalendarLayout, selectCalendarDay]);
+  }, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
   // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
-  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
   // `dayKey` keeps a given day selected (today, for a "?" that started yesterday; Codex r1 on #615), else its start day.
   const openCheckOn = useCallback((checkId: string, dayKey?: string) => {
     const check = calendarChecks.checks.find((each) => each.id === checkId);
@@ -2911,7 +2920,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   healthReprocessOwnerRef.current = scopedOwnerKey;
   const calendarListInFrontRef = useRef(calendarListInFront);
   calendarListInFrontRef.current = calendarListInFront;
-  const healthReloadOnFront = useRef(false);
+  // One consumer for the reload it asks for: whichever comes last, the request or being in front and signed in
+  // (Codex r3 on #615).
+  const requestHealthReload = useDeferredReload(appIsForeground && authState === "authenticated",
+    () => { void loadRef.current({ silent: true }); });
   useEffect(() => {
     if (!calendarListInFront || !scopedOwnerKey) return;
     const ownerKey = scopedOwnerKey;
@@ -2922,17 +2934,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       .then((outcome) => {
         if (outcome !== "changed" && outcome !== "interrupted") return;
         if (healthReprocessOwnerRef.current !== ownerKey) return;
-        if (outcome === "changed" && AppState.currentState === "active") void loadRef.current({ silent: true });
-        else healthReloadOnFront.current = true;
+        requestHealthReload();
       })
       .catch((error) => { if (error instanceof AuthRequiredError) transitionToSignedOut(); });
     return () => controller.abort();
-  }, [calendarListInFront, scopedOwnerKey, transitionToSignedOut]);
-  useEffect(() => {
-    if (!appIsForeground || !healthReloadOnFront.current) return;
-    healthReloadOnFront.current = false;
-    void loadRef.current({ silent: true });
-  }, [appIsForeground]);
+  }, [calendarListInFront, requestHealthReload, scopedOwnerKey, transitionToSignedOut]);
   // Old Review links and Today's ribbon (step 15, `reviewLinks.ts`): held until signed in with the bootstrap in, then
   // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
   const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
@@ -3898,6 +3904,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onNextCheck={openNextCheck}
                   onSwipeDay={shiftSelectedCalendarDay}
                   openCheckRequest={calendarCheckTarget}
+                  clearSelectionRequest={calendarSelectionClear}
                   timelineReadAt={calendarTimelineRequestedAt}
                   onRequestFreshRead={() => setCheckTimelineReads((count) => count + 1)}
                   clockFormat={clockFormat}

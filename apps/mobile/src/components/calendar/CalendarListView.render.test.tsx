@@ -331,6 +331,51 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(JSON.stringify(questions(health.tree)[0].props.children)).toContain("Log your sleep?");
   });
 
+  it("clears the open question and a waiting request on a clear request, the same day included (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    const rerender = (tree: ReturnType<typeof create>, extra: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...extra} />);
+    });
+    // Another question is open (a decided item's link then lands on this same day).
+    const { tree } = render({ ...props, openCheckRequest: { id: "c-sleep", request: 1 } });
+    expect(questions(tree)).toHaveLength(1);
+    rerender(tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(questions(tree)).toHaveLength(0);
+    // A request still waiting for the day's places is dropped too: they arrive, and nothing opens.
+    const waiting = render({ ...props, timeline: null, openCheckRequest: { id: "c-unknown", request: 2 } });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    act(() => {
+      waiting.tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={null} {...props} openCheckRequest={null} clearSelectionRequest={1} />);
+    });
+    rerender(waiting.tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(waiting.tree)).toHaveLength(0);
+  });
+
+  it("replays nothing when it mounts from the Grid after a cleared selection (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    // The Dashboard's fallback cleared its request (null) and the scroll (0) before the List mounted again.
+    const { tree } = render({ ...props, openCheckRequest: null, scrollToFirstCheck: 0, clearSelectionRequest: 3 });
+    expect(questions(tree)).toHaveLength(0);
+    expect(onOpenPlace).not.toHaveBeenCalled();
+  });
+
   it("holds a request for a place's \"?\" until the day's places are read, then opens its sheet, never the card (Codex r1 on #610)", () => {
     const onOpenPlace = vi.fn();
     const onOpenCheck = vi.fn();

@@ -68,6 +68,7 @@ export function CalendarListView({
   onNextCheck,
   onSwipeDay,
   openCheckRequest = null,
+  clearSelectionRequest = 0,
   timelineReadAt = null,
   onRequestFreshRead,
   clockFormat,
@@ -114,6 +115,11 @@ export function CalendarListView({
    * Health's under its row. A new request each time.
    */
   openCheckRequest?: { id: string; request: number; at?: number } | null;
+  /**
+   * A new number closes the open question and drops any waiting request or scroll, the same day included (an old
+   * link's item that no longer asks opens its day with nothing selected; Codex r3 on #615).
+   */
+  clearSelectionRequest?: number;
   /**
    * When the shown day's places were read (asked for). A request made after it (`at`) for a place's or trip's "?"
    * the read lacks waits for the next read of that day before asking under its row (Codex r3 on #610).
@@ -277,6 +283,13 @@ export function CalendarListView({
   // It stands until the caller makes a new request after it.
   const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number } | null>(null);
   const tapRequests = useRef(0);
+  const [clearedFor, setClearedFor] = useState(clearSelectionRequest);
+  if (clearedFor !== clearSelectionRequest) {
+    setClearedFor(clearSelectionRequest);
+    setOpenCheckId(null);
+    setTapRequest(null);
+    pendingScroll.current = null;
+  }
   const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
     || (timelineReadAt ?? 0) >= request.at;

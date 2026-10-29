@@ -895,6 +895,34 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
   });
 
+  it("stops an automatic pass Calendar › List joined once the List leaves the front: no second batch (Codex r3 on #615)", async () => {
+    const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+    resetCalendarHealthReprocessForTests();
+    let releaseFirst!: (value: unknown) => void;
+    apiMocks.reprocessHealthReviewItems.mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }));
+    apiMocks.reprocessHealthReviewItems.mockResolvedValue({
+      ok: true, checkedCount: 0, confirmedCount: 0, ignoredCount: 0, leftInReviewCount: 0, skippedCount: 0, failedCount: 0,
+      updatedCategoryCount: 0, remainingReviewCount: 0, batchSize: 25, partial: false, hasMore: false, errorSummary: []
+    });
+    // An automatic pass (no guards of its own) is sending its first batch.
+    const automatic = reprocessExistingHealthReviewItems(undefined, { force: true });
+    await vi.waitFor(() => expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1));
+    // Calendar › List comes to the front and joins it, then the app leaves the front.
+    let inFront = true;
+    const controller = new AbortController();
+    const calendar = reprocessHealthOnCalendarFront({ ownerKey: "joined", isCurrentOwner: () => true, isInFront: () => inFront, signal: controller.signal });
+    inFront = false;
+    controller.abort();
+    releaseFirst({
+      ok: true, checkedCount: 25, confirmedCount: 25, ignoredCount: 0, leftInReviewCount: 0, skippedCount: 0, failedCount: 0,
+      updatedCategoryCount: 25, remainingReviewCount: 88, batchSize: 25, partial: true, hasMore: true, nextCursor: "next", errorSummary: []
+    });
+    await expect(calendar).resolves.toBe("interrupted");
+    await expect(automatic).resolves.toMatchObject({ partial: true, hasMore: true });
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
+    apiMocks.reprocessHealthReviewItems.mockReset();
+  });
+
   it("keeps background Health review reprocess failures non-fatal", async () => {
     apiMocks.reprocessHealthReviewItems.mockRejectedValueOnce(new Error("Unable to reprocess Health review items: 500"));
 
