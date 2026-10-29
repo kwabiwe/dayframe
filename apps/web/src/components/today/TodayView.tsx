@@ -1,8 +1,7 @@
 "use client";
 
-import { DAYFRAME_APP_ICONS, formatClockHour } from "@dayframe/shared";
+import { formatClockHour } from "@dayframe/shared";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { resolveActivityIcon, withGoalExclusions } from "@dayframe/shared";
@@ -173,8 +172,6 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     ? todaysChecks(askingChecks(projectedItems, todayStartMs), todayStartMs)
     : null, [projectedItems, todayStartMs]);
   const liveCheckCount = todayChecks ? todayChecks.length : data.stats.dayCheckCount ?? 0;
-  const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);
-  if (liveCheckCount > 0 && liveCheckCount !== shownCheckCount) setShownCheckCount(liveCheckCount);
   const togglePattern = useCallback((key: string) => {
     setOpenPatterns((current) => {
       const next = new Set(current);
@@ -234,17 +231,6 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   return (
     <div className="df-today">
       <h1 className="sr-only">Today</h1>
-      {/* Location v4 step 14: the Review card is now one quiet chip, opening Calendar › List at the first "?". */}
-      <div aria-hidden={dayCheckCount > 0 ? undefined : true} className="df-today-checks" data-open={dayCheckCount > 0}
-        inert={dayCheckCount > 0 ? undefined : true}>
-        <div>
-          <Link className="timeline-checks-chip" href={todayChecks?.length ? oldestCheckHref(todayChecks) : "/timeline?view=list&scope=day&check=first"}>
-            <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
-            {shownCheckCount} to check today
-            <ChevronRight aria-hidden="true" size={14} />
-          </Link>
-        </div>
-      </div>
       <section className="df-card df-today-hero" aria-labelledby="df-today-total">
         <div className="df-today-hero-top">
           <div>
@@ -255,8 +241,19 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
             </p>
             <p className="df-today-sub">
               {goal.goalSeconds < goal.totalSeconds
-                ? `framed today · ${formatDuration(goal.goalSeconds)} toward your ${formatDuration(goal.goalMinutes * 60)} goal (${goal.percent}%)`
-                : `framed today · ${goal.percent}% of your ${formatDuration(goal.goalMinutes * 60)} goal`}
+                ? `framed · ${formatDuration(goal.goalSeconds)} toward ${formatDuration(goal.goalMinutes * 60)} (${goal.percent}%)`
+                : `framed · ${goal.percent}% of ${formatDuration(goal.goalMinutes * 60)}`}
+              {/* Location v4 step 14's "N to check today", in the total's line (UI review W10, owner 29 Oct
+                  2026): it opens Calendar › List at today's oldest "?". It fades in where the line ends, so
+                  nothing moves, and leaves at once. */}
+              {dayCheckCount > 0 ? (
+                <>
+                  {" · "}
+                  <Link className="df-today-check-link" href={todayChecks?.length ? oldestCheckHref(todayChecks) : "/timeline?view=list&scope=day&check=first"}>
+                    {dayCheckCount} to check
+                  </Link>
+                </>
+              ) : null}
             </p>
           </div>
           <GoalCells cells={goal.cells} />
@@ -334,7 +331,6 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           <h2 id="df-today-blocks-title">Today&apos;s blocks</h2>
           <span className="df-faint">
             {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
-            <span className="df-today-blocks-hint"> · hover a row for actions</span>
           </span>
         </div>
         {actionError || deleteError ? (
