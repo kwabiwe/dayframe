@@ -9,7 +9,9 @@ const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", imp
 describe("native Calendar production contract", () => {
   it("tells VoiceOver a \"?\" block opens its question, never Review (Codex r12 on #610)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
-    expect(rootView).toContain('.accessibilityHint(entry.isReview ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")');
+    // A block with its own "?" (location v4 design §7) opens its question too, and has the same amber dot.
+    expect(rootView).toContain('.accessibilityHint(entry.isReview || entry.asking ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")');
+    expect(rootView).toContain("if entry.isReview || entry.asking {");
     expect(rootView).not.toContain('"Opens Review"');
   });
 

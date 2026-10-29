@@ -30,6 +30,7 @@ import {
 } from "./db";
 import { getLocationGroups, withLocationGroups, type LocationGroup } from "./location/location-groups";
 import { placeDisplayNameSql } from "./place-display";
+import { reviewProposalHash } from "./review-proposal-hash";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
 import { addDaysToDateKey, mondayOfDateKey, zonedDateKey, zonedStartOfDay, zonedWallHour } from "./viewer-time-zone";
@@ -192,6 +193,11 @@ export type ReviewItemRow = {
    * presentation uses), so a calendar draws that moment once. Only the bootstrap list sets it.
    */
   linkedEntryIds?: string[];
+  /**
+   * "A block ran into your trip" only (location v4 design §7): the proposal its End it is sent with
+   * (`expectedProposalHash`), so an answer to a question that changed meanwhile is refused (409 `proposal_changed`).
+   */
+  proposalHash?: string;
 };
 
 export type ActivityRow = {
@@ -1357,7 +1363,9 @@ async function getActiveEntry(session: RequestSession) {
 }
 
 async function getReviewItems(session: RequestSession) {
-  const result = await query<ReviewItemRow>(
+  const result = await query<ReviewItemRow & {
+    hashEventId: string | null; hashTitle: string; hashCategoryId: string | null; hashPlaceId: string | null; hashRevision: string | Date | null;
+  }>(
     `select ri.id,
             ri.type,
             case
@@ -1387,6 +1395,11 @@ async function getReviewItems(session: RequestSession) {
             ri.notes,
             ae.raw_payload as "rawPayload",
             ri.created_at as "createdAt",
+            ri.event_id as "hashEventId",
+            ri.title as "hashTitle",
+            ri.suggested_category_id as "hashCategoryId",
+            ri.suggested_place_id as "hashPlaceId",
+            coalesce(ri.resolved_at, ri.created_at) as "hashRevision",
             coalesce((
               select array_agg(te.id::text order by te.id)
               from time_entries te
@@ -1407,7 +1420,17 @@ async function getReviewItems(session: RequestSession) {
      limit 100`,
     [session.workspaceId, session.userId]
   );
-  return result.rows;
+  return result.rows.map(({ hashEventId, hashTitle, hashCategoryId, hashPlaceId, hashRevision, ...row }) =>
+    // "A block ran into your trip" is answered on its block with End it, sent with the proposal it was shown
+    // (location v4 design §7): the same hash the Review answer checks (`genericProposalHash`).
+    row.type === TIMER_TRIP_CLASH_REVIEW_TYPE ? {
+      ...row,
+      proposalHash: reviewProposalHash({
+        reviewItemId: row.id, eventId: hashEventId, locationSegmentId: null, sourceKind: "generic", title: hashTitle,
+        categoryId: hashCategoryId, placeId: hashPlaceId, startedAt: row.suggestedStartedAt, stoppedAt: row.suggestedStoppedAt,
+        confidence: row.confidence, eventSource: row.eventSource, eventType: row.eventType, semanticRevision: hashRevision
+      })
+    } : row);
 }
 
 async function getActivityEvents(session: RequestSession) {
@@ -1487,8 +1510,6 @@ async function getDashboardStats(
            and ri.suggested_started_at is not null
            and ri.suggested_started_at < $7::timestamptz
            and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $8::timestamptz
-           -- A timer that ran into a trip asks on its block with its own UI, which comes later (step 15).
-           and ri.type <> '${TIMER_TRIP_CLASH_REVIEW_TYPE}'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "checkCount",
         (select count(*)::int
          from review_items ri
@@ -1497,7 +1518,6 @@ async function getDashboardStats(
            and ri.suggested_started_at is not null
            and ri.suggested_started_at < $3::timestamptz
            and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $2::timestamptz
-           and ri.type <> '${TIMER_TRIP_CLASH_REVIEW_TYPE}'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "dayCheckCount"
      from time_entries
       where workspace_id = $1

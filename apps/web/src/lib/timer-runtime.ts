@@ -372,6 +372,7 @@ export async function runTimerStartMutation({
   beforeStart,
   dedupeRunning = false,
   guard,
+  isShownRunning,
   startAt
 }: {
   gate: TimerMutationGate;
@@ -404,6 +405,12 @@ export async function runTimerStartMutation({
    */
   dedupeRunning?: boolean;
   /**
+   * Whether the running block is shown running: false while an End it for it is held or saving (location v4 design §7),
+   * so a quick start for it starts a new block instead of reporting it already running (Codex r2 on #618). The
+   * snapshot itself (what is sent and kept) stays canonical.
+   */
+  isShownRunning?: (entry: NonNullable<BootstrapData["activeEntry"]>) => boolean;
+  /**
    * Checked inside the gate, against the snapshot this Start would replace, before anything is
    * shown: a message refuses the Start (Undo of a discard that would overlap; Codex r1 on #469).
    */
@@ -420,7 +427,8 @@ export async function runTimerStartMutation({
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
     const startedAt = startAt ?? now();
-    if (dedupeRunning && startMatchesRunning(acceptedSnapshot.activeEntry, { ...draft, categoryId: draft.categoryId || null })) {
+    const shownRunning = acceptedSnapshot.activeEntry && (isShownRunning?.(acceptedSnapshot.activeEntry) ?? true) ? acceptedSnapshot.activeEntry : null;
+    if (dedupeRunning && startMatchesRunning(shownRunning, { ...draft, categoryId: draft.categoryId || null })) {
       return { ok: true, own: true, alreadyRunning: true, unchanged: acceptedSnapshot.activeEntry, replaced: null, switchedAt: startedAt } as const;
     }
     onAccepted?.();

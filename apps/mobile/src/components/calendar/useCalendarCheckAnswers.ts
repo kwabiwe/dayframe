@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Alert, AppState } from "react-native";
-import { outingKeyOf } from "@dayframe/shared";
+import { outingKeyOf, timerTripClashQuestion } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { currentMobileAccountEpoch, type MobileAccountOwner } from "../../lib/mobileAccount";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
-import { asksAsCheck, hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
-import { reviewAnswerMutation, type ReviewAnswerVenue } from "../../lib/reviewAnswer";
+import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
+import { reviewAnswerMutation, timerTripClashProposalHash, type ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
@@ -33,6 +33,9 @@ type HeldAnswer = ReviewDeckHeldDecision & {
 /** The account a bootstrap belongs to, when it says. */
 const accountOf = (data: MobileBootstrap | null | undefined): MobileAccountOwner | null =>
   data?.user?.id && data.workspace?.id ? { userId: data.user.id, workspaceId: data.workspace.id } : null;
+/** What VoiceOver says an answer did: a block that ran into a trip is ended or kept; anything else logged or skipped. */
+const answerVerb = (item: MobileReviewItem, logged: boolean) => timerTripClashQuestion(item)
+  ? logged ? "Ended" : "Kept" : logged ? "Logged" : "Skipped";
 /** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
 type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
@@ -63,9 +66,15 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
 export function settledCheckBase(reviewItems: readonly MobileReviewItem[], hidden: {
   decided: ReadonlySet<string>; answering: ReadonlySet<string>; resolved: ReadonlySet<string>;
   waitingIds: ReadonlySet<string>; waitingSegments: ReadonlySet<string>; syncStateIds: ReadonlySet<string>;
+  /**
+   * Whether a "?" still asks where it is answered (location v4 design §7): a block that ran into a trip asks only
+   * while its block, as this iPhone has it, still runs into the trip, and only when it can be put on its block
+   * (`clashAsksHere`). Absent: every open item asks.
+   */
+  stillAsks?: (item: MobileReviewItem) => boolean;
 }) {
-  // A timer-into-trip clash item is no ordinary "?" until its block UI ships (#615; asksAsCheck).
-  const open = reviewItems.filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !hidden.decided.has(item.id)
+  // One filter for the List, the Grid, the badge, Today's chip and Earlier this week's chips (Codex r1 on #617, #618).
+  const open = reviewItems.filter((item) => isOpenReviewItem(item) && (hidden.stillAsks?.(item) ?? true) && !hidden.decided.has(item.id)
     && !hidden.answering.has(item.id) && !hidden.resolved.has(item.id)
     // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
     // abandoned record never hides it (Codex r11 on #610).
@@ -132,6 +141,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     inFront: () => inFront.current, mounted: () => alive.current && !quiet, sameAccount: () => ownerRef.current === owner
   }, say);
   const savingRef = useRef(saving);
+  // How each answer held or saving here went (Log it / End it, or not), for what the Calendar shows meanwhile.
+  const answeredLogged = useRef(new Map<string, boolean>());
 
   const isOpen = (item: MobileReviewItem) => isOpenReviewItem(item) && !decidedRef.current.has(item.id);
   // Listed (or brought back) and open, listed and decided (undefined), or left out of the list (the known copy).
@@ -289,7 +300,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       settle(true);
       if (ownerRef.current !== owner) return;
       void synchroniseReviewMutations().catch(() => undefined);
-      sayFor(owner, decision.quiet, () => AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`));
+      sayFor(owner, decision.quiet, () => AccessibilityInfo.announceForAccessibility(`${answerVerb(item, decision.logged)}. Saved on this iPhone. Waiting to sync.`));
     }).catch((error) => {
       settle(false);
       if (ownerRef.current !== owner) return;
@@ -328,6 +339,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       if (waiting.afterCorrections && waiting.recordOwner) void withdrawAnswerAfterCorrections(waiting.recordOwner, waiting.afterCorrections);
     }
     known.current.clear();
+    answeredLogged.current.clear();
     setSaving(null);
     setRestored(null);
   }, [hold, ownerKey]);
@@ -393,6 +405,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // waiting or rejected change of its own (the deck's rule): such a "?" offers its own screen instead
     // (Codex r3 and r10 on #582).
     if (!calendarCheckAnswerable(listed, syncStatesRef.current)) return false;
+    // End it is sent with the proposal it showed: an item without one (an older server) can only be kept.
+    if (logged && timerTripClashQuestion(listed) && !timerTripClashProposalHash(listed)) return false;
     // The outing the List asks about: the one map it folds and counts with, over the items it shows (none
     // held or saving), so a trip answered on its own never joins it (Codex r5 on #582).
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
@@ -433,6 +447,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
         proposal: options.expected?.members.get(member.id) ?? reviewDeckProposalSignature(member) })) }
       } : {})
     };
+    answeredLogged.current.set(listed.id, logged);
     hold.hold(decision);
     if (quiet) {
       // Saved now, as backgrounding (or the List going away) saves a held answer: no Undo window, nothing said.
@@ -441,7 +456,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     }
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     // As the deck says it (Codex r2 on #582): the answer, and that Undo is there while its window runs.
-    sayFor(ownerRef.current, false, () => AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`));
+    sayFor(ownerRef.current, false, () => AccessibilityInfo.announceForAccessibility(`${answerVerb(listed, logged)} ${title}. Undo is available for a few seconds.`));
     return true;
     // The answers read the hook's refs, which hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -594,6 +609,12 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
+  /**
+   * The "?" answered yes here and not yet handed over to the outbox's own record (held for Undo, or saving): a block
+   * that ran into a trip shows ended at the trip's start meanwhile (location v4 design §7). Undo takes it out.
+   */
+  const answeredYesIds = useMemo(() => new Set([...hiddenIds].filter((id) => answeredLogged.current.get(id) === true)), [hiddenIds]);
+
   /** An edited sheet's answer, registered for `registeredFor` (`recordOwner`), started through the one completion path. */
   const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
     recordOwner: MobileAccountOwner, generation: number) =>
@@ -604,5 +625,5 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * can't is refused at once, never accepted and dropped later.
    */
   const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
-  return { answer, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
+  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
 }

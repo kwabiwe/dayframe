@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { timerTripClash, timerTripClashStillAsks, timerTripClashTitle, type TimerTripClashEntry } from "./timerTripClash";
+import {
+  isTimerTripClashItem, timerTripClash, timerTripClashAsksOnBlock, timerTripClashEndedBlock, timerTripClashQuestion,
+  timerTripClashStillAsks, timerTripClashTitle, timerTripClashWords, type TimerTripClashEntry
+} from "./timerTripClash";
 
 const at = (time: string) => `2026-10-28T${time}:00.000Z`;
 const block = (startedAt: string, stoppedAt: string | null, extra: Partial<TimerTripClashEntry> = {}): TimerTripClashEntry => ({
@@ -71,5 +74,41 @@ describe("timerTripClashTitle", () => {
     expect(timerTripClashTitle("Team sync", 18 * 60)).toBe("Team sync ran 18m into your trip");
     expect(timerTripClashTitle("  ", 65 * 60)).toBe("This block ran 1h 5m into your trip");
     expect(timerTripClashTitle(null, 120 * 60)).toBe("This block ran 2h into your trip");
+  });
+});
+
+describe("the clash question on its block (clients)", () => {
+  const payload = { timeEntryId: "entry-1", tripId: "t1", tripStartedAt: at("14:22"), tripStoppedAt: at("14:50"), overlapSeconds: 1080 };
+  const item = { type: "location_timer_trip_clash", eventType: "timer_trip_clash", rawPayload: payload, title: "Team sync ran 18m into your trip" };
+
+  it("reads the question from the event's payload, by Review type or event type", () => {
+    expect(isTimerTripClashItem(item)).toBe(true);
+    expect(isTimerTripClashItem({ type: undefined, eventType: "timer_trip_clash" })).toBe(true);
+    expect(isTimerTripClashItem({ type: "activity_suggestion", eventType: "unknown_stay" })).toBe(false);
+    expect(timerTripClashQuestion(item)).toEqual(payload);
+    expect(timerTripClashQuestion({ ...item, type: "activity_suggestion", eventType: "unknown_stay" })).toBeNull();
+    expect(timerTripClashQuestion({ ...item, rawPayload: { ...payload, tripId: "" } })).toBeNull();
+    expect(timerTripClashQuestion({ ...item, rawPayload: { ...payload, tripStartedAt: "soon" } })).toBeNull();
+    expect(timerTripClashQuestion({ ...item, rawPayload: { ...payload, overlapSeconds: undefined } })?.overlapSeconds).toBe(0);
+  });
+
+  it("keeps asking for a block not loaded here, and stops once the loaded block no longer runs into the trip", () => {
+    const question = timerTripClashQuestion(item)!;
+    expect(timerTripClashAsksOnBlock(question, undefined, now)).toBe(true);
+    expect(timerTripClashAsksOnBlock(question, null, now)).toBe(false);
+    expect(timerTripClashAsksOnBlock(question, block("13:00", null), now)).toBe(true);
+    // The running block was stopped (End it, or a Stop): the projection ends it at the trip's start.
+    expect(timerTripClashAsksOnBlock(question, timerTripClashEndedBlock(block("13:00", null), question), now)).toBe(false);
+    expect(timerTripClashEndedBlock(block("13:00", null), question).stoppedAt).toBe(at("14:22"));
+  });
+
+  it("words: the server's title, End it at the trip's start in local time, Keep it; never 'timer'", () => {
+    const question = timerTripClashQuestion(item)!;
+    const words = timerTripClashWords(item, question, "Team sync", "24h");
+    const local = new Date(at("14:22"));
+    const hhmm = `${String(local.getHours()).padStart(2, "0")}:${String(local.getMinutes()).padStart(2, "0")}`;
+    expect(words).toEqual({ question: "Team sync ran 18m into your trip", endLabel: `End it at ${hhmm}`, keepLabel: "Keep it", endsAt: hhmm });
+    expect(timerTripClashWords({ title: " " }, question, "Deep work", "24h").question).toBe("Deep work ran 18m into your trip");
+    expect(JSON.stringify(words).toLowerCase()).not.toContain("timer");
   });
 });

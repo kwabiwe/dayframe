@@ -24,7 +24,6 @@ import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
-import { oldestCheckHref, todaysChecks } from "@/lib/calendar-checks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { duplicateTimeEntry, splitTimeEntry } from "@/lib/time-entry-split";
 import { timeEntryTitle } from "@/lib/display";
@@ -56,7 +55,8 @@ import { useLocalDayStartMs, useMediaQuery } from "@/components/useCalendarClock
 import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-preferences";
 import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
+import { blockQuestionWords, CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useEndedBlocks, useListChecks } from "@/components/location/ListChecks";
+import { checkBlockId, clashBlocksFrom, clashStillAsks, drawsAsOwnCheck, oldestCheckHref, todaysChecks } from "@/lib/calendar-checks";
 import { reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
@@ -251,7 +251,7 @@ function emptyDayTimeline(day: DateRange): LocationTimeline {
 }
 
 export function EntriesTable({
-  entries,
+  entries: loadedEntries,
   categories,
   tags = [],
   groupByDay = false,
@@ -267,7 +267,8 @@ export function EntriesTable({
   reviewItems = NO_REVIEW_ITEMS,
   checksDay = null,
   checksDays,
-  continuous
+  continuous,
+  noticeStackedAbove = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -296,10 +297,21 @@ export function EntriesTable({
   checksDays?: readonly DateRange[];
   /** Calendar › List's continuous days: loads weeks at either end as the List scrolls. */
   continuous?: ContinuousListProps;
+  /** Another toast (a delete's Undo) holds the bottom place: the "?" answer's Undo sits above it (Codex r2 on #618). */
+  noticeStackedAbove?: "above" | "above-tall" | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
   const searchParams = useSearchParams();
+  // End it held, saving or saved here: the block shows ended at its trip's start (the running one too) until the
+  // data says so itself; Undo puts it back (location v4 design §7).
+  const endedBlocks = useEndedBlocks();
+  const entries = useMemo(() => endedBlocks.size ? loadedEntries.map((entry) => {
+    const endsAt = endedBlocks.get(entry.id);
+    return endsAt && (entry.stoppedAt === null || Date.parse(entry.stoppedAt) > Date.parse(endsAt))
+      ? { ...entry, stoppedAt: endsAt, durationSeconds: Math.max(0, Math.round((Date.parse(endsAt) - Date.parse(entry.startedAt)) / 1000)) }
+      : entry;
+  }) : loadedEntries, [endedBlocks, loadedEntries]);
   const {
     clearTimerError,
     createCategory,
@@ -316,6 +328,8 @@ export function EntriesTable({
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  // The block whose "?" was opened last (it ran into a trip): its group of repeats shows opened, as for `entry=`.
+  const [revealedEntryId, setRevealedEntryId] = useState<string | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const inlineEditorRef = useRef<TimelineInlineEditorState | null>(null);
   const [openInlineDatePickerKey, setOpenInlineDatePickerKey] = useState<string | null>(null);
@@ -369,13 +383,28 @@ export function EntriesTable({
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     openCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
-  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  // The List's own blocks, as shown (a local edit or Stop): a block that no longer runs into its trip stops asking here.
+  const listBlocks = useMemo(() => clashBlocksFrom(entries, categories), [categories, entries]);
+  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, blocks: listBlocks, categories,
+    refresh: async () => { await onChanged?.(); }, reviewItems });
   // Owner concern 4 (28 Oct 2026): only "?" from today and the 6 days before ask; an older one's place stays a
   // plain row. The chip counts and steps through all of them, oldest first, across days.
   const todayStartMs = useLocalDayStartMs();
   const askingStartMs = todayStartMs === null ? null : checkAskingStartMs(todayStartMs);
-  const shownChecks = useMemo(() => askingStartMs !== null ? listChecks.checks.filter((check) => checkStillAsks(check, askingStartMs)) : [],
-    [askingStartMs, listChecks.checks]);
+  const shownChecks = useMemo(() => askingStartMs !== null ? listChecks.checks.filter((check) => {
+    const item = listChecks.itemsById.get(check.id);
+    return checkStillAsks(check, askingStartMs) && (!item || clashStillAsks(item, listBlocks, nowMs));
+  }) : [], [askingStartMs, listBlocks, listChecks.checks, listChecks.itemsById, nowMs]);
+  // A block that ran into a trip asks on its block's row (design §7), never on a row of its own.
+  const rowChecks = useMemo(() => shownChecks.filter((check) => {
+    const item = listChecks.itemsById.get(check.id);
+    return !item || drawsAsOwnCheck(item);
+  }), [listChecks.itemsById, shownChecks]);
+  const blockChecks = useMemo(() => new Map(shownChecks.flatMap((check) => {
+    const blockId = checkBlockId(listChecks.itemsById.get(check.id));
+    return blockId ? [[blockId, check.id] as const] : [];
+  })), [listChecks.itemsById, shownChecks]);
+  const checkBlocks = useMemo(() => new Map([...blockChecks].map(([blockId, checkId]) => [checkId, blockId] as const)), [blockChecks]);
   const askingOrder = useMemo(() => checksOldestFirst(shownChecks), [shownChecks]);
   // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
   // arrive after the bootstrap (Codex r1 on #572).
@@ -399,7 +428,7 @@ export function EntriesTable({
       .map((timeline) => ({
         dayStartMs: Date.parse(timeline.dayStart),
         dayLabel: formatDate(timeline.dayStart),
-        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace && !columnShown, checks: shownChecks, hideCovered: true })
+        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace && !columnShown, checks: rowChecks, hideCovered: true })
       }))
       .sort((a, b) => b.dayStartMs - a.dayStartMs);
     const onPlace = new Set<string>();
@@ -430,7 +459,7 @@ export function EntriesTable({
       }
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
-  }, [columnShown, dayTimelines, entries, localTimeReady, nowMs, shownChecks, showEveryPlace]);
+  }, [columnShown, dayTimelines, entries, localTimeReady, nowMs, rowChecks, showEveryPlace]);
   // A trip read on two days (it spans midnight): the freshest copy wins. `locationTimelines` come in
   // read order (oldest read first), so the last one read is last here (Codex r2, r5 on #584).
   const tripByBlock = useMemo(
@@ -588,6 +617,8 @@ export function EntriesTable({
     const next = askingOrder[(at + 1) % askingOrder.length];
     const row = checkRows.find((other) => checkOf(other)?.id === next.id);
     if (row) return openCheckRow(row);
+    const block = blockOfCheck(next.id);
+    if (block) return openBlockCheck(block, next.id);
     const day = new Date(next.startedAt ?? nowMs);
     const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
     // Remembered as the current one, so the next press goes on from it even before (or without) the day loading.
@@ -606,8 +637,37 @@ export function EntriesTable({
     if (!first) return null;
     const row = checkRows.find((other) => checkOf(other)?.id === first.id);
     if (row) return openCheckRow(row);
+    const block = blockOfCheck(first.id);
+    if (block) return openBlockCheck(block, first.id);
     router.replace(oldestCheckHref([first]));
     return null;
+  };
+  /** The block a block's "?" asks on (a block that ran into a trip), when this List has it. */
+  const blockOfCheck = (checkId: string) => {
+    const blockId = checkBlocks.get(checkId);
+    return blockId ? entries.find((entry) => entry.id === blockId) : undefined;
+  };
+  /**
+   * A block's "?" (location v4 design §7): its editor opens with the question at the top, and its row (in its group,
+   * opened) comes into view. The editor's own entrance is the motion; with Reduce Motion the scroll is instant.
+   */
+  const openBlockCheck = (entry: TimeEntryRow, checkId: string) => {
+    applyTimelineRegroup(() => setFocusedCheck(checkId));
+    // A block inside a group of repeats shows with its group opened.
+    setRevealedEntryId(entry.id);
+    openFullEditor(entry);
+    requestAnimationFrame(() => document.getElementById(`timeline-entry-${entry.id}`)
+      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+    return checkId;
+  };
+  /** A block's "?" answered from its editor: held for Undo like any answer; the editor closes, focus moves on. */
+  const answerBlockCheck = (checkId: string, yes: boolean, label: string) => {
+    applyTimelineRegroup(() => {
+      listChecks.answer(checkId, yes ? "log" : "skip", label);
+      setFocusedCheck(null);
+    });
+    setEditingEntry(null);
+    focusCheck(null);
   };
   /** "N to check": the next "?", oldest first across days, opens and comes into view. */
   const pressChip = () => nextAskingCheck(true);
@@ -619,6 +679,22 @@ export function EntriesTable({
   const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
     setCorrectionCheckId(checkId);
     openCorrection({ kind: "trip", trip, route: trip.route });
+  };
+  /**
+   * A block's mark: when the block asks (it ran into a trip), the mark is the control that opens its editor with the
+   * question at the top, read as "…, Needs a look" (design §7); otherwise the mark alone.
+   */
+  const renderBlockMark = (asking: TimeEntryRow | undefined, mark: ReactNode) => {
+    const checkId = asking ? blockChecks.get(asking.id) : undefined;
+    const item = checkId ? listChecks.itemsById.get(checkId) : undefined;
+    if (!asking || !checkId || !item) return mark;
+    const words = blockQuestionWords(item, timeEntryTitle(asking), clock);
+    return (
+      <button aria-label={`${timeEntryTitle(asking)}: ${words.question}, Needs a look`} className="timeline-block-ask"
+        data-check-key={`block-${asking.id}`} data-tip="Needs a look" onClick={() => openBlockCheck(asking, checkId)} type="button">
+        {mark}
+      </button>
+    );
   };
   /** A location row, its "?" and, while open, an Apple Health question (no dialog) under it. */
   const renderLocationRow = (row: LocationListRow) => {
@@ -692,9 +768,11 @@ export function EntriesTable({
     if (pendingRestore.current) {
       const restoredId = pendingRestore.current;
       const restoredRow = locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === restoredId);
-      if (!restoredRow) return;
+      // A block's "?" comes back on its block's row.
+      const restoredKey = restoredRow?.key ?? (checkBlocks.has(restoredId) ? `block-${checkBlocks.get(restoredId)}` : null);
+      if (!restoredKey) return;
       pendingRestore.current = null;
-      pendingFocus.current = restoredRow.key;
+      pendingFocus.current = restoredKey;
     }
     const key = pendingFocus.current;
     if (key === undefined) {
@@ -707,7 +785,7 @@ export function EntriesTable({
     }
     const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
     // Wait while the "?" it moves to has not rendered yet.
-    if (key && !row && checkRows.some((other) => other.key === key)) return;
+    if (key && !row && (checkRows.some((other) => other.key === key) || [...blockChecks.keys()].some((blockId) => `block-${blockId}` === key))) return;
     pendingFocus.current = undefined;
     (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
   });
@@ -717,6 +795,8 @@ export function EntriesTable({
   const openFirstCheck = checkParam === "first";
   // The badge and the chip link to one "?" by its id (owner concern 4); it opens once its row is in.
   const linkedCheckRow = checkParam && !openFirstCheck ? checkRows.find((row) => checkOf(row)?.id === checkParam) : undefined;
+  // A link to a block's "?" opens its block's editor once the block is listed.
+  const linkedBlock = checkParam && !openFirstCheck && !linkedCheckRow ? blockOfCheck(checkParam) : undefined;
   const openedFromLink = useRef<string | null>(null);
   // A link can open its "?" before that day's places are read: it opens under its own row then. When the place or
   // trip arrives and the question is still open, its dialog opens in its place, once (Codex r1 on #609).
@@ -731,8 +811,8 @@ export function EntriesTable({
     chipSteps.current.links.clear();
   }, [checkParam]);
   useEffect(() => {
-    if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
-    if (!openFirstCheck && !linkedCheckRow) return;
+    if (!checkParam || openedFromLink.current === checkParam || (!checkRows.length && !blockChecks.size)) return;
+    if (!openFirstCheck && !linkedCheckRow && !linkedBlock) return;
     // The link a chip step made that a newer step has passed: consumed without opening or moving focus.
     const stepToken = chipSteps.current.links.get(checkParam);
     if (stepToken !== undefined && stepToken !== chipSteps.current.latest) {
@@ -747,7 +827,7 @@ export function EntriesTable({
       // (Codex r10 on #609).
       chipSteps.current.links.delete(checkParam);
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
-      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : firstTodayCheck();
+      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : linkedBlock ? openBlockCheck(linkedBlock, checkParam) : firstTodayCheck();
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
@@ -1377,7 +1457,7 @@ export function EntriesTable({
               const isGrouped = group.entries.length > 1;
               const isExpanded = isGrouped && (
                 expandedGroups.has(group.key) ||
-                group.entries.some((occurrence) => occurrence.id === highlightedEntryId)
+                group.entries.some((occurrence) => occurrence.id === highlightedEntryId || occurrence.id === revealedEntryId)
               );
               const overlappingOccurrences = group.entries.filter(
                 (occurrence) => (overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0
@@ -1436,9 +1516,15 @@ export function EntriesTable({
                           {group.entries.length}
                         </button>
                       ) : null}
-                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). */}
-                      <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
-                        seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
+                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). A block that
+                          ran into a trip carries its one "?" on its mark, which opens its editor (design §7); a group's
+                          row carries it while it is closed. */}
+                      {renderBlockMark(
+                        isGrouped ? isExpanded ? undefined : group.entries.find((occurrence) => blockChecks.has(occurrence.id)) : entry,
+                        <ListBlockMark asking={isGrouped ? !isExpanded && group.entries.some((occurrence) => blockChecks.has(occurrence.id)) : blockChecks.has(entry.id)}
+                          category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
+                          seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
+                      )}
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}
@@ -1553,8 +1639,10 @@ export function EntriesTable({
                     >
                       <td className="px-3 py-3">
                         <div className="timeline-task-cell timeline-occurrence-task">
-                          <ListBlockMark category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence}
-                            seconds={intervalSeconds(occurrenceInterval, capturedNow)} />
+                          {renderBlockMark(occurrence,
+                            <ListBlockMark asking={blockChecks.has(occurrence.id)}
+                              category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence}
+                              seconds={intervalSeconds(occurrenceInterval, capturedNow)} />)}
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
@@ -1649,7 +1737,7 @@ export function EntriesTable({
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
-            message={listChecks.state.notice.label} onAction={listChecks.undo}
+            message={listChecks.state.notice.label} onAction={listChecks.undo} stacked={noticeStackedAbove}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>
@@ -1685,6 +1773,15 @@ export function EntriesTable({
           capturedNow={capturedNow}
           categories={categories}
           entry={editingEntry}
+          // A block that ran into a trip asks at the top of its editor (design §7): End it / Keep it, held for Undo.
+          question={(() => {
+            const checkId = blockChecks.get(editingEntry.id);
+            const item = checkId ? listChecks.itemsById.get(checkId) : undefined;
+            if (!checkId || !item) return null;
+            const words = blockQuestionWords(item, timeEntryTitle(editingEntry), clock);
+            return { text: words.question, yesLabel: words.yesLabel, noLabel: words.noLabel,
+              onAnswer: (yes: boolean) => answerBlockCheck(checkId, yes, yes ? words.endedLabel : words.keptLabel) };
+          })()}
           isTimerBusy={isTimerBusy}
           onClose={() => setEditingEntry(null)}
           onCreateCategory={createCategory}
@@ -1835,18 +1932,20 @@ function ExtraDayRows({ day, renderRow }: { day: ExtraListDay; renderRow: (row: 
  * never a thin colour bar): 36 px wide, its height following the block's length (`blockRowHeight`), X3
  * corners; no activity is a neutral block.
  */
-function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | null; entry: TimeEntryRow; seconds: number }) {
+function ListBlockMark({ asking = false, category, entry, seconds }: { asking?: boolean; category: CategoryRow | null; entry: TimeEntryRow; seconds: number }) {
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
   return (
     <span
       aria-hidden="true"
-      className={`timeline-task-block${entry.categoryId ? " df-block" : ""}`}
+      className={`timeline-task-block${entry.categoryId ? " df-block" : ""}${asking ? " is-asking" : ""}`}
       style={{
         ...(entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
         height: blockRowHeight(seconds * 1000)
       }}
     >
       <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={16} />
+      {/* The one amber "?" dot, as on location rows (design §7). */}
+      {asking ? <span className="timeline-location-dot" /> : null}
     </span>
   );
 }

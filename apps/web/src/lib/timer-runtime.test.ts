@@ -239,6 +239,27 @@ describe("shell timer runtime", () => {
     expect(sent).toEqual(["work"]);
   });
 
+  it("starts a new block when the matching running one is shown ended by End it (Codex r2 on #618)", async () => {
+    const gate = createTimerMutationGate();
+    const focus = entry({ id: "focus-entry", description: null, categoryId: "focus", tagNames: [], tags: [] });
+    let current = bootstrapData(focus);
+    let draft: TimerDraft = timerDraftForEntry(focus);
+    const sent: string[] = [];
+    const run = (shownRunning: boolean) => runTimerStartMutation({
+      gate, snapshot: current, currentDraft: draft, input: { categoryId: "focus", description: "", tagNames: [] },
+      now: () => "2026-08-24T16:00:00.000Z", createOptimisticId: (startedAt) => `optimistic:${startedAt}`,
+      getCurrentDraft: () => draft, getCurrentSnapshot: () => current, commit: (next) => { current = next; },
+      setDraft: (next) => { draft = next; }, setBusy: () => undefined, setError: () => undefined,
+      send: async () => { sent.push("focus"); }, refresh: async () => undefined, dedupeRunning: true,
+      isShownRunning: () => shownRunning
+    });
+    await expect(run(true)).resolves.toMatchObject({ ok: true, alreadyRunning: true });
+    expect(sent).toEqual([]);
+    // Shown ended: a real Start (the server ends the old block; End it then sets its end), sent from the canonical snapshot.
+    await expect(run(false)).resolves.toMatchObject({ ok: true, own: true, alreadyRunning: false, replaced: focus });
+    expect(sent).toEqual(["focus"]);
+  });
+
   it("cancels a queued latest Start inertly when its provider is disposed", async () => {
     const gate = createTimerMutationGate();
     let finishStop: (() => void) | undefined;
