@@ -883,10 +883,17 @@ async function startLocationLearningUnsafe(
     // Normal options are in place: any recorded burst (past its 3 minutes, done, or another lifetime's) ends now,
     // at its confirmed moment when this process holds its lease.
     const lease = held;
-    if (lease) confirmLeaseDone(lease);
+    if (lease) {
+      confirmLeaseDone(lease);
+      pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
+    } else {
+      noteNativeBurstEnd();
+    }
     await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, lease) : state, result: undefined }))
       .then(() => { if (lease && accuracyBurstLease === lease) accuracyBurstLease = null; })
       .catch(() => undefined);
+    // Confirms once storage holds it, retried until it does (Codex r10 on #619).
+    settlePendingAccuracyBursts();
   }
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
@@ -1664,7 +1671,7 @@ export async function stopLocationLearningIfStarted() {
     });
   }
   clearAccuracyBurstTimer();
-  lastNativeLocationStopAt = Date.now();
+  noteNativeBurstEnd();
   const lease = accuracyBurstLease;
   accuracyBurstLease = null;
   // Capture stopped (sign-out, an account change, location off), so best accuracy did too: its end is confirmed
@@ -1823,10 +1830,15 @@ function confirmLeaseDone(lease: AccuracyBurstLease) {
 const pendingAccuracyBurstSettlements = new Map<string, AccuracyBurstLease>();
 let accuracyBurstSettlementTimer: ReturnType<typeof setTimeout> | null = null;
 /**
- * The last time this process stopped location updates (a teardown, a headless one too, with or without a lease):
- * a burst that had started before it ended then at the latest (Codex r9 on #619).
+ * The earliest moment, not yet settled, that this process confirmed best accuracy over without a lease to hold it
+ * (location updates stopped, or normal options restored by a capture refresh, a headless one too): a burst that had
+ * started before it ended then at the latest. A later moment never replaces it (Codex r9–r10 on #619).
  */
-let lastNativeLocationStopAt: number | null = null;
+let earliestNativeBurstEndAt: number | null = null;
+
+function noteNativeBurstEnd(at = Date.now()) {
+  if (earliestNativeBurstEndAt == null || at < earliestNativeBurstEndAt) earliestNativeBurstEndAt = at;
+}
 
 /** Settles a burst's time from its lease when one is known: the confirmed moment and elapsed time, never a later one. */
 function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLease | null) {
@@ -1834,14 +1846,14 @@ function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLeas
   const startedAt = state.active.startedAt;
   const known = lease?.startedAt === startedAt ? lease
     : accuracyBurstLease?.startedAt === startedAt ? accuracyBurstLease : pendingAccuracyBurstSettlements.get(startedAt) ?? null;
+  // An earlier confirmed end without a lease (a headless stop or restore) wins over a lease rebuilt since.
+  const earlier = earliestNativeBurstEndAt != null && earliestNativeBurstEndAt >= Date.parse(startedAt) ? earliestNativeBurstEndAt : null;
   // Kept until a retry sees the burst no longer stored: a write that fails never loses it (Codex r9 on #619).
   if (known) {
     confirmLeaseDone(known);
-    return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known));
+    if (earlier == null || earlier >= known.nativeDoneAt!) return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known));
   }
-  if (lastNativeLocationStopAt != null && lastNativeLocationStopAt >= Date.parse(startedAt)) {
-    return endAccuracyBurst(state, new Date(lastNativeLocationStopAt));
-  }
+  if (earlier != null) return endAccuracyBurst(state, new Date(earlier));
   return endAccuracyBurst(state, new Date());
 }
 
@@ -1852,26 +1864,26 @@ export function __resetAccuracyBurstForTests() {
   accuracyBurstSettlementTimer = null;
   accuracyBurstLease = null;
   pendingAccuracyBurstSettlements.clear();
-  lastNativeLocationStopAt = null;
+  earliestNativeBurstEndAt = null;
   accuracyBurstChain = Promise.resolve();
 }
 
 /** Retries a confirmed burst's settlement until storage takes it (storage only: native capture is already done). */
 function settlePendingAccuracyBursts() {
-  if (accuracyBurstSettlementTimer || (!pendingAccuracyBurstSettlements.size && lastNativeLocationStopAt == null)) return;
+  if (accuracyBurstSettlementTimer || (!pendingAccuracyBurstSettlements.size && earliestNativeBurstEndAt == null)) return;
   accuracyBurstSettlementTimer = setTimeout(() => {
     accuracyBurstSettlementTimer = null;
     void withAccuracyBurstState(async (state) => {
       const active = state?.active;
       const settle = active && (pendingAccuracyBurstSettlements.has(active.startedAt) ||
-        (lastNativeLocationStopAt != null && lastNativeLocationStopAt >= Date.parse(active.startedAt) && accuracyBurstLease?.startedAt !== active.startedAt));
+        (earliestNativeBurstEndAt != null && earliestNativeBurstEndAt >= Date.parse(active.startedAt) && accuracyBurstLease?.startedAt !== active.startedAt));
       return { state: settle ? settleAccuracyBurst(state!, null) : state, result: undefined };
     }).then(() => readAccuracyBurstState()).then((state) => {
       // Once storage holds the result, a burst no longer recorded needs nothing more.
       for (const startedAt of [...pendingAccuracyBurstSettlements.keys()]) {
         if (state?.active?.startedAt !== startedAt) pendingAccuracyBurstSettlements.delete(startedAt);
       }
-      if (!state?.active || Date.parse(state.active.startedAt) > (lastNativeLocationStopAt ?? 0)) lastNativeLocationStopAt = null;
+      if (!state?.active || Date.parse(state.active.startedAt) > (earliestNativeBurstEndAt ?? 0)) earliestNativeBurstEndAt = null;
     }).catch(() => undefined).finally(settlePendingAccuracyBursts);
   }, ACCURACY_BURST_RETRY_MS);
 }
