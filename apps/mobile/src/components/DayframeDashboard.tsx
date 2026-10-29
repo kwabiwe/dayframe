@@ -51,7 +51,7 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
-import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
+import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
@@ -1976,8 +1976,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
     onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
-  // the same transaction, as their own "Not now" (#609), so they leave at once, until the day is read again.
-  const resolvedByCorrections = useMemo(() => new Set(correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])),
+  // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
+  // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
+  const resolvedByCorrections = useMemo(() => reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged),
     [correctionQueue.acknowledged]);
   const calendarCheckBase = useMemo(() => {
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
@@ -2160,7 +2161,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
-    // A place logged with Logs as: its blocks come with the next read of the day.
+    // A place logged with Logs as: its blocks, and on an outing's stay its trips' (#612), come with this one read of
+    // the day, once the server acknowledged it; none is projected before (the Undo window shows none).
     onLogged: () => { void load(); },
     pending: correctionQueue.pending,
     // Owner items A, B, I (28 Oct 2026): a sheet opened from a row or the Grid asks its item's "?" on top.

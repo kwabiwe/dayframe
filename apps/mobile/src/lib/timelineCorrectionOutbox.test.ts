@@ -233,4 +233,30 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     const [head] = await outbox.readPendingTimelineCorrections(OWNER_A);
     expect(await outbox.getTimelineCorrectionDiagnostics(OWNER_A)).toMatchObject({ pendingCount: 2, nextRetryAt: head.nextAttemptAt });
   });
+
+  it("keeps an outing Logs as's resolved \"?\", the trips' too, once, even when a lost reply made it go again with its id (#612)", async () => {
+    const CATEGORY = "6f000000-0000-4000-8000-0000000000c1";
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-stay", categoryId: CATEGORY }, { createId });
+    // The first reply is lost: kept on the phone, sent again with the same id.
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Network request failed"); }));
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toEqual([]);
+    // The retry gets the blocks the first attempt made back: the place's, then each trip's (the server's own receipt).
+    const delivered = vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-stay", "entry-trip-in", "entry-trip-out"],
+      resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"] } }));
+    vi.stubGlobal("fetch", delivered);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(JSON.parse((delivered.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).clientCorrectionId)
+      .toBe("6f000000-0000-4000-8000-000000000001");
+    const acknowledged = outbox.readAcknowledgedTimelineCorrections(OWNER_A);
+    expect(acknowledged).toHaveLength(1);
+    expect(acknowledged[0]).toMatchObject({ clientCorrectionId: "6f000000-0000-4000-8000-000000000001", request: { kind: "log_place" },
+      resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"] });
+    // A Logs as on a place that was no outing's stay: its own "?" only, unchanged.
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: CATEGORY }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-cafe"], resolvedReviewItemIds: ["review-cafe"] } })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.resolvedReviewItemIds))
+      .toEqual([["review-trip-in", "review-trip-out", "review-stay"], ["review-cafe"]]);
+  });
 });

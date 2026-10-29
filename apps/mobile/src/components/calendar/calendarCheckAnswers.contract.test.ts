@@ -123,8 +123,9 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
   });
 
-  it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
-    expect(dashboard).toContain("correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])");
+  it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {
+    // The helper is unit-tested in timelineCorrectionProjection.test.ts.
+    expect(dashboard).toContain("reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged)");
     expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
   });
 

@@ -14,6 +14,17 @@ export function correctionsToShow(
 }
 
 /**
+ * The "?" the server resolved with the corrections it acknowledged (#609, #612): a Logs as on a place with an open
+ * "?" closes the place's, and, on an outing's stay, its trips' too (they are logged as their own blocks). They leave
+ * the List and Grid at once, until the day is read again. Only acknowledged ones: a correction still on the phone
+ * (a Logs as in its Undo window or queued) resolves nothing yet, and its blocks come only with the read the
+ * acknowledgement starts — no block, the place's or a trip's, is ever made up here.
+ */
+export function reviewItemIdsResolvedByCorrections(acknowledged: readonly AcknowledgedTimelineCorrection[]): ReadonlySet<string> {
+  return new Set(acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? []));
+}
+
+/**
  * The List as it will be once the queued corrections are sent (location v4 step 12): each one the phone
  * still holds, in order, over the timeline the server last gave. A refused one is left out, so the row is
  * back as it was while the List says why. Pure; the server's next timeline replaces it.
