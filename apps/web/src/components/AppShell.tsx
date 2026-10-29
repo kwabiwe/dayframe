@@ -227,7 +227,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
+  const persistentTimer = <PersistentTimerBar onToday={pathname === "/"} workspaceMode={isTimeline} />;
   // The timer band draws its hairline only once page content has scrolled under it (C1), on every
   // page: Calendar's band is the same opaque canvas and its grid scrolls inside its own panel.
   const timerBandRef = useRef<HTMLDivElement | null>(null);

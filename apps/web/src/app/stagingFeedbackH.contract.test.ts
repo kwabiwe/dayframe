@@ -81,7 +81,7 @@ describe("command timer Description (H3, Trello 213)", () => {
   });
 
   it("keeps the live ring on the bar", () => {
-    expect(rule(".df-cmd.is-live")).toMatch(/inset 0 0 0 2px color-mix\(in oklab, var\(--block/);
+    expect(rule(".df-cmd.is-live")).toMatch(/inset 0 0 0 1\.5px color-mix\(in oklab, var\(--block/);
   });
 });
 

@@ -35,11 +35,11 @@ describe("persistent block shell contract", () => {
 
   it("keeps the Blocks command bar on one track: activity, description, time, action, secondary", () => {
     expect(styles).toMatch(/\.df-cmd \{[^}]*grid-template-areas: "activity description time action secondary";/s);
-    expect(styles).toMatch(/\.df-cmd-activity \{[^}]*width: 48px;[^}]*height: 48px;/s);
-    expect(styles).toMatch(/\.df-cmd-go \{[^}]*height: 48px;[^}]*background: var\(--accent\);/s);
+    expect(styles).toMatch(/\.df-cmd-activity \{[^}]*width: var\(--web-control-height\);[^}]*height: var\(--web-control-height\);/s);
+    expect(styles).toMatch(/\.df-cmd-go \{[^}]*height: var\(--web-control-height\);[^}]*background: var\(--accent\);/s);
     expect(styles).toMatch(/\.df-cmd-time \{[^}]*grid-area: time;/s);
     expect(styles).toMatch(/\.df-cmd-secondary \{[^}]*grid-area: secondary;/s);
-    expect(styles).toMatch(/\.df-cmd-icon\.ui-icon-button \{[^}]*width: 44px;[^}]*height: 44px;/s);
+    expect(styles).toMatch(/\.df-cmd-icon\.ui-icon-button \{[^}]*width: var\(--web-control-height\);[^}]*height: var\(--web-control-height\);/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
     expect(timer).toContain('label="More block actions"');
     expect(timer).toContain("Discard running block");
@@ -73,9 +73,23 @@ describe("persistent block shell contract", () => {
     expect(compoundControl).toContain('className="inline-selected-tag-overflow"');
   });
 
+  it("draws quick start as quiet pills with the activity's colour tile, and the clock in the system font (UI review B, A)", () => {
+    expect(styles).toMatch(/\.df-quick-button\.df-block \{[^}]*background: var\(--surface-muted\);[^}]*color: var\(--text-primary\);/s);
+    expect(styles).toMatch(/\.df-quick-button svg\[data-glyph\] \{[^}]*background: var\(--block\);[^}]*color: var\(--on-block\);/s);
+    expect(styles).toMatch(/\.df-quick-button kbd \{[^}]*display: none;/s);
+    expect(styles).toMatch(/\.df-quick:is\(:hover, :focus-within\) \.df-quick-button kbd \{[^}]*display: grid;/s);
+    expect(styles).toMatch(/\.df-cmd-clock \{[^}]*font-family: -apple-system[^}]*font-size: 22px;[^}]*font-weight: var\(--fw-strong\);/s);
+    expect(timer).toContain('onToday ? "is-today" : ""');
+  });
+
   it("keeps compact overlays and the block row usable at phone widths", () => {
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd \{[^}]*"activity description action secondary"[^}]*"time time time time";/);
-    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button \{[^}]*min-height: 44px;/);
+    // UI review (owner 29 Oct 2026): a running block is one row on phones; quick start shows on Today
+    // only, as 36 px pills with a 44 px hit area.
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-wrap\.is-running \.df-cmd \{[^}]*"activity description time action secondary";/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd-wrap:not\(\.is-today\) \.df-quick \{[^}]*display: none;/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button \{[^}]*min-height: 36px;/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button::before \{[^}]*inset: -4px 0;/);
     expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(232px, calc\(100dvh - 96px\)\);/s);
     expect(styles).toMatch(/\.swiss-category-trigger \{[^}]*width: 100%;[^}]*min-width: 0;/s);
     expect(styles).toMatch(/\.swiss-category-trigger-value \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*overflow: hidden;/s);
