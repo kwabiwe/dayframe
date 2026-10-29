@@ -1,5 +1,6 @@
 // Blocks parity step 6a-1: the Settings page's grouped lists (prototype ios.html openSettings).
 // Presentational only: the Settings screen owns data, permissions and every action.
+import { InsetDivider } from "../InsetDivider";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, blockColorsFor } from "@dayframe/shared";
@@ -134,12 +135,14 @@ export function SettingsBlockRow({
       ) : null}
     </View>
   );
-  const dividerStyle = divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null;
+  // Settings rows pad 16 a side and have no lead icon: the line is inset 16 on both (owner rule, 28 Oct 2026).
+  const dividerLine = divider ? <InsetDivider color={theme.border} edge="top" /> : null;
   if (onPress && control) {
     // A row with its own control (a switch) whose text opens more: the text is the button, the
     // control stays separate (UIA-085, Apple Health types).
     return (
-      <View style={[blockStyles.row, dividerStyle]} testID={testID}>
+      <View style={blockStyles.row} testID={testID}>
+        {dividerLine}
         <Pressable
           accessibilityHint={accessibilityHint}
           accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
@@ -171,12 +174,12 @@ export function SettingsBlockRow({
         onPress={onPress}
         style={({ pressed }) => [
           blockStyles.row,
-          dividerStyle,
           disabled ? { opacity: 0.45 } : null,
           pressed ? { backgroundColor: theme.surfaceMuted } : null
         ]}
         testID={testID}
       >
+        {dividerLine}
         {text}
         <View onLayout={(event) => recordMobileLayout(diagnostic, "settings.chevron", event)} style={blockStyles.rowValue}>
           {value ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ color: theme.textMuted }}>{value}</Text> : null}
@@ -191,9 +194,10 @@ export function SettingsBlockRow({
     <View
       accessibilityLabel={!control && value ? `${title}, ${value}${subtitle ? `, ${subtitle}` : ""}` : undefined}
       accessible={!control && value ? true : undefined}
-      style={[blockStyles.row, dividerStyle]}
+      style={blockStyles.row}
       testID={testID}
     >
+      {dividerLine}
       {text}
       {value && !control ? (
         <View style={blockStyles.rowValue}>
@@ -224,8 +228,9 @@ export function SettingsIssueRow({
 }) {
   return (
     <View
-      style={[blockStyles.issue, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}
+      style={blockStyles.issue}
     >
+      {divider ? <InsetDivider color={theme.border} edge="top" /> : null}
       <View style={blockStyles.rowText}>
         <Text {...mobileTextProps("itemTitle")} style={[blockStyles.rowTitle, { color: theme.textPrimary }]}>{title}</Text>
         <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{detail}</Text>

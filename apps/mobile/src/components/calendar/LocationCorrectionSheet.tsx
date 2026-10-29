@@ -27,6 +27,8 @@ import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../.
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { SheetNearbySearch } from "./SheetNearbySearch";
+import { InsetDivider } from "../InsetDivider";
+import { COMPACT_PILL_HIT_SLOP, compactPillStyles } from "../compactPill";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
   correctable,
@@ -423,17 +425,17 @@ export function LocationCorrectionSheet({
         <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
           <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionText, { color: theme.textPrimary }]}>{question.text}</Text>
           {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
-          <View style={styles.pills}>
+          <View style={compactPillStyles.answers}>
             {question.yesLabel ? (
               <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(true)}
-                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
-                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.surface }]}>{question.yesLabel}</Text>
+                style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
+                <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>{question.yesLabel}</Text>
               </Pressable>
             ) : null}
             {question.noLabel ? (
               <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
-                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
-                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
+                style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
+                <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.noLabel}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -692,8 +694,10 @@ function PlaceView({ choice, correctableItem, distances, onChoose, place, places
           return (
             <Pressable key={option.key} accessibilityLabel={`${option.title}, ${option.detail}`} accessibilityRole="radio"
               accessibilityState={{ checked }} onPress={() => onChoose(option.pick)}
-              style={({ pressed }) => [styles.option, index > 0 ? [styles.divided, { borderTopColor: theme.border }] : null, { opacity: pressed ? 0.7 : 1 }]}
+              style={({ pressed }) => [styles.option, { opacity: pressed ? 0.7 : 1 }]}
               testID={`location-correction-place-${option.key}`}>
+              {/* Past the 18-point icon (14 + 18 + 12) and the group's 14 of padding. */}
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={44} /> : null}
               <DayframeIcon color={theme.textSecondary} glyph={option.glyph} size={18} />
               <View style={styles.optionText}>
                 <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.optionTitle, { color: theme.textPrimary }]}>{option.title}</Text>
@@ -825,15 +829,9 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
   );
 }
 
-/** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
-const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
-
 const styles = StyleSheet.create({
   // Owner items A, N (28 Oct 2026): the "?" at the top of the sheet, and "More places".
   question: { gap: 6, borderRadius: 16, padding: 14, marginBottom: 12 },
-  // The compact inline pill (CalendarListView's Yes pill): 32 points tall, its hitSlop making a 44-point target.
-  compactPill: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", paddingHorizontal: 16, borderRadius: DAYFRAME_BLOCKS.radius.pill },
-  compactPillText: { fontSize: 14, fontWeight: "700" },
   questionText: { fontSize: 17, fontWeight: "700" },
   morePlaces: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 6 },
@@ -849,7 +847,6 @@ const styles = StyleSheet.create({
   hint: { fontSize: 13, lineHeight: 18 },
   group: { borderRadius: 14, overflow: "hidden" },
   option: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 8 },
-  divided: { borderTopWidth: StyleSheet.hairlineWidth },
   optionText: { flex: 1, gap: 1 },
   optionTitle: { fontSize: 16, fontWeight: "600", lineHeight: 21 },
   tickSpace: { width: 16 },

@@ -25,6 +25,8 @@ import {
   type TripLeg
 } from "@dayframe/shared";
 import { DayframeIcon } from "../icons/DayframeIcon";
+import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
+import { COMPACT_PILL_HIT_SLOP, compactPillStyles } from "../compactPill";
 import type { NativeCalendarPresentationEntry } from "../../lib/nativeCalendarPresentation";
 import type { ReviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -431,12 +433,14 @@ export function CalendarListView({
         {items.length === 0 ? (
           <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>Nothing framed yet.</Text>
         ) : items.map((item, index) => {
-          const divider = index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null;
+          // Inset past the block and before the row's end (owner rule, 28 Oct 2026), as Today's rows.
+          const divider = index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={DIVIDER_INSET_PAST_BLOCK} /> : null;
           if (item.kind === "block") {
             const trip = trips.get(item.entry.entryId);
             const open = openLegs.has(item.entry.entryId);
             return (
-              <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)} style={divider}>
+              <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)}>
+              {divider}
                 <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => onOpenEntry(item.entry)}
                   onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} time={time} />
                 {trip && open ? (
@@ -451,7 +455,8 @@ export function CalendarListView({
             <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} key={item.key}
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
-              style={divider}>
+             >
+              {divider}
               <LocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles}
                 onOpenCheck={onOpenCheck ? (id) => { lastOpenedCheckId.current = id; onOpenCheck(id); } : undefined}
                 onOpenPlace={onOpenPlace ? (place, label) => { lastOpenedCheckId.current = checkIdOf(item.row) ?? lastOpenedCheckId.current; onOpenPlace(place, label); } : undefined}
@@ -480,9 +485,6 @@ export function CalendarListView({
     </ScrollView>
   );
 }
-
-/** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
-const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
 
 /** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet. */
 export type CalendarCheckKind = "health" | "place" | "trip" | "none";
@@ -700,9 +702,9 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
   };
   const YesPill = ({ checkId, label }: { checkId: string; label: string }) => (
     <Pressable accessibilityHint="Answers its question" accessibilityLabel={label} accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP}
-      onPress={() => onYes?.(checkId)} style={({ pressed }) => [styles.yesPill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}
+      onPress={() => onYes?.(checkId)} style={({ pressed }) => [compactPillStyles.pill, styles.yesPillGap, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}
       testID={`calendar-list-yes-${checkId}`}>
-      <Text {...mobileTextProps("control")} style={[styles.yesPillText, { color: theme.background }]}>{label}</Text>
+      <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.background }]}>{label}</Text>
     </Pressable>
   );
   const Times = ({ fromMs, toMs, open }: { fromMs: number; toMs: number | null; open: boolean }) => (
@@ -810,38 +812,38 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
       {question.detail && !/\d:\d\d/.test(question.detail) ? (
         <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text>
       ) : null}
-      <View style={styles.answers}>
+      <View style={[compactPillStyles.answers, styles.answersGap]}>
         {question.logLabel ? (
           <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.background }]}>{question.logLabel}</Text>
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.background }]}>{question.logLabel}</Text>
           </Pressable>
         ) : null}
         {edit && onMore ? (
           <Pressable accessibilityHint="Opens it on its own screen to edit it" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
             testID="calendar-list-answer-edit"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.moreLabel}</Text>
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.moreLabel}</Text>
           </Pressable>
         ) : null}
         {question.skipLabel ? (
           <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
           </Pressable>
         ) : null}
         {question.opens && onOpen ? (
           <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onOpen}
             testID="calendar-list-answer-open"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Open it</Text>
           </Pressable>
         ) : null}
         {!edit && onMore ? (
           <Pressable accessibilityHint="Opens it on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
             testID="calendar-list-answer-more"
-            style={({ pressed }) => [styles.answer, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textSecondary }]}>More…</Text>
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textSecondary }]}>More…</Text>
           </Pressable>
         ) : null}
       </View>
@@ -892,13 +894,10 @@ const styles = StyleSheet.create({
   legsToggle: { alignSelf: "flex-start", minHeight: 28, justifyContent: "center" },
   filter: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", minHeight: 32, paddingHorizontal: 4 },
   filterText: { fontSize: 13, fontWeight: "600" },
-  // The compact pill (owner, 28 Oct 2026): the size for every inline action; COMPACT_PILL_HIT_SLOP keeps 44 points.
-  yesPill: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 16, marginTop: 6 },
-  yesPillText: { fontSize: 14, fontWeight: "700" },
+  // The compact pill (owner, 28 Oct 2026) is compactPillStyles.pill; COMPACT_PILL_HIT_SLOP keeps 44 points.
+  yesPillGap: { marginTop: 6 },
   question: { marginHorizontal: 14, marginBottom: 12, marginLeft: 62, borderRadius: 14, padding: 12, gap: 4 },
   questionTitle: { fontSize: 15, fontWeight: "700" },
-  // Room between compact pills for their 44-point targets (6 of hitSlop above and below each).
-  answers: { flexDirection: "row", flexWrap: "wrap", columnGap: 8, rowGap: 12, marginTop: 8 },
-  answer: { minHeight: 32, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 16, justifyContent: "center" },
-  answerText: { fontSize: 14, fontWeight: "700" }
+  // compactPillStyles.answers keeps room between rows of pills for their 44-point targets.
+  answersGap: { marginTop: 8 }
 });

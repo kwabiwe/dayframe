@@ -1,3 +1,4 @@
+import { InsetDivider } from "../src/components/InsetDivider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -540,7 +541,8 @@ export default function PlaceEditorScreen() {
     <SafeAreaView style={styles.safeArea}>
       {/* The shared sheet head (UIA-006) on the pushed route: eyebrow and title, the coral Save. A
           pushed page has no sheet to swipe, so a circular close control leads; it stays put. */}
-      <View style={[editorStyles.head, { borderBottomColor: theme.border }]}>
+      <View style={editorStyles.head}>
+        <InsetDivider color={theme.border} edge="bottom" />
         <BlocksSheetHead
           action={{
             accessibilityHint: validation.ok ? undefined : validation.message,
@@ -675,10 +677,10 @@ export default function PlaceEditorScreen() {
                           onPress={() => void chooseSuggestion(suggestion)}
                           style={({ pressed }) => [
                             editorStyles.resultRow,
-                            { borderTopColor: theme.border },
                             pressed ? { backgroundColor: theme.surfaceMuted } : null
                           ]}
                         >
+                          <InsetDivider color={theme.border} edge="top" start={46} />
                           <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.places} size={18} />
                           <View style={editorStyles.resultText}>
                             <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
@@ -699,8 +701,9 @@ export default function PlaceEditorScreen() {
                     entering={localPresenceEntering(reduceMotion)}
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
-                    style={[editorStyles.resultRow, { borderTopColor: theme.border }]}
+                    style={editorStyles.resultRow}
                   >
+                    <InsetDivider color={theme.border} edge="top" start={46} />
                     <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={18} />
                     <View style={editorStyles.resultText}>
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>{selectedResult.title}</Text>
@@ -724,11 +727,11 @@ export default function PlaceEditorScreen() {
                   onPress={() => void useCurrentLocation()}
                   style={({ pressed }) => [
                     editorStyles.resultRow,
-                    { borderTopColor: theme.border },
                     pressed ? { backgroundColor: theme.surfaceMuted } : null
                   ]}
                   testID="place-editor-current-location"
                 >
+                  <InsetDivider color={theme.border} edge="top" start={46} />
                   <TargetGlyph color={theme.textPrimary} />
                   <View style={editorStyles.resultText}>
                     <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
@@ -942,7 +945,8 @@ export default function PlaceEditorScreen() {
                         />
                       </Reanimated.View>
                     ) : null}
-                    <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.fieldRow}>
+                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Block name</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -982,7 +986,8 @@ export default function PlaceEditorScreen() {
                     entering={localPresenceEntering(reduceMotion)}
                     exiting={localPresenceExiting(reduceMotion)}
                   >
-                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <View style={editorStyles.fieldRow}>
+                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Latitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -996,7 +1001,8 @@ export default function PlaceEditorScreen() {
                         value={latitudeText}
                       />
                     </View>
-                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <View style={editorStyles.fieldRow}>
+                      <InsetDivider color={theme.border} edge="top" />
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Longitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -1123,7 +1129,6 @@ function formatOptionalCoordinate(value?: number | null) {
 
 const editorStyles = StyleSheet.create({
   head: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
     paddingBottom: 8,
     paddingHorizontal: 16,
     paddingTop: 6
@@ -1142,7 +1147,6 @@ const editorStyles = StyleSheet.create({
   suggestionScroller: { maxHeight: 294 },
   resultRow: {
     alignItems: "center",
-    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: 12,
     minHeight: 52,

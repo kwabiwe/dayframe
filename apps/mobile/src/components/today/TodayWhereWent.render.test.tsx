@@ -34,6 +34,7 @@ vi.mock("../../lib/motion", () => ({
 
 import { buildTodayWhereWent, type TodayWhereWentModel } from "../../lib/todayWhereWent";
 import { TodayWhereWent, whereWentColumns } from "./TodayWhereWent";
+import { InsetDivider } from "../InsetDivider";
 
 const theme = {
   accent: "#FF6248",
@@ -94,7 +95,12 @@ describe("TodayWhereWent", () => {
     expect(button.props.accessibilityHint).toBe("Opens Reports for today");
     expect(flat(button.props.style({ pressed: false })).minHeight).toBe(44);
     // One hairline divider at the top: the strip folds into the ribbon card, no card of its own.
-    expect(flat(button.props.style({ pressed: false }))).toMatchObject({ borderTopColor: "#2A3345", borderTopWidth: 0.5 });
+    // Inset by the ribbon card's padding, through the shared divider (owner rule, 28 Oct 2026).
+    const dividers = button.findAllByType(InsetDivider as never);
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0].props).toMatchObject({ color: "#2A3345", edge: "top" });
+    expect(dividers[0].props.paddedBy).toMatch(/ribbon card/);
+    expect(flat(button.props.style({ pressed: false })).borderTopWidth).toBeUndefined();
     expect(flat(button.props.style({ pressed: false })).backgroundColor).toBeUndefined();
     // Nothing inside is a separate accessibility element.
     expect(tree.root.findAll((node) => node !== button && node.props.accessible === true && typeof node.type === "string")).toHaveLength(0);

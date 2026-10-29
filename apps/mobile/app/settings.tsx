@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
@@ -32,7 +33,6 @@ import {
   RefreshControl,
   ScrollView,
   Share,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -2599,8 +2599,9 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                       >
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                         <Pressable
                           accessibilityHint="Edits this activity"
                           accessibilityLabel={`${category.name}, ${week}`}
@@ -2647,9 +2648,10 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                         testID={`activities-archived-${category.id}`}
                       >
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                         <View style={styles.settingsActivityOpen}>
                           <View style={[styles.settingsActivityBlock, styles.settingsActivityBlockArchived, { backgroundColor: colors.fill }]}>
                             <ActivityIcon color={colors.text} icon={category.icon} name={category.name} size={18} />
@@ -3441,7 +3443,8 @@ function HealthTypeSheet({
                   entering={localPresenceEntering(reduceMotion)}
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
-                  style={[styles.healthNameRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  style={styles.healthNameRow}>
+                  <InsetDivider color={theme.border} edge="top" />
                   <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
                   <TextInput
                     accessibilityLabel={`${label} name`}

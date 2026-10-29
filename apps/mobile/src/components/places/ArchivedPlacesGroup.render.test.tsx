@@ -6,7 +6,7 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-vi.mock("react-native", () => ({ Text: "Text", View: "View" }));
+vi.mock("react-native", () => ({ StyleSheet: { hairlineWidth: 0.5 }, Text: "Text", View: "View" }));
 vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" } }));
 vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
 vi.mock("./ReflowBlockGroup", async () => {

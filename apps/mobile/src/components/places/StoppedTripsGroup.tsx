@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../InsetDivider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
@@ -100,7 +101,8 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
             exiting={localPresenceExiting(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
-            <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-trip-${index}`}>
+            <View style={styles.placesRow} testID={`places-trip-${index}`}>
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               <View accessible accessibilityLabel={`Trip ${trip.label}, waits in Review`} style={styles.placesRowMain}>
                 <View style={styles.placesBlock}>
                   <DayframeIcon color={theme.textSecondary} glyph="route" size={18} />

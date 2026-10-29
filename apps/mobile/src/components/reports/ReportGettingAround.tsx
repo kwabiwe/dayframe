@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { DAYFRAME_BLOCKS, DAYFRAME_LEG_MODE_ICONS, LEG_MODE_LABEL, type DayframeGlyph, type ReportSummary } from "@dayframe/shared";
@@ -43,7 +44,8 @@ export function ReportGettingAround({ reduceMotion, summary, theme }: { reduceMo
       </View>
       {rows.map((row, index) => (
         <View accessible accessibilityLabel={`${row.label}, ${spokenReportDuration(row.seconds)}`} key={row.key}
-          style={[styles.row, index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null]}>
+          style={styles.row}>
+          {index > 0 ? <InsetDivider color={theme.border} edge="top" paddedBy="the Getting around card's 16-point padding" start={38} /> : null}
           <View style={[styles.icon, { backgroundColor: theme.surfaceMuted }]}>
             <DayframeIcon color={theme.textSecondary} glyph={row.glyph} size={16} />
           </View>

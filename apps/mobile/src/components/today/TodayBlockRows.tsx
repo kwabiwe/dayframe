@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -361,7 +362,8 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   return (
     <View
       onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.row.${entry.id}`, event)}
-      style={[styles.row, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
+      style={styles.row}>
+      {divider ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_BLOCK} /> : null}
       {replayable ? (
         <Reanimated.View
           accessibilityElementsHidden

@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { useState } from "react";
 import {
   Pressable,
@@ -197,8 +198,9 @@ function Option({
       accessibilityLabel={label}
       accessibilityState={{ checked }}
       onPress={onPress}
-      style={[s.option, divider ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null]}
+      style={s.option}
     >
+      {divider ? <InsetDivider color={theme.border} edge="top" paddedBy="the sheet's content padding" start={46} /> : null}
       <View style={[s.optionBlock, { backgroundColor: option.color }]}>
         {option.isUncategorized || option.isUnavailable ? null : (
           <ActivityIcon color={onBlockColor(option.color, theme.textPrimary)} icon={option.icon} name={option.name} size={16} />

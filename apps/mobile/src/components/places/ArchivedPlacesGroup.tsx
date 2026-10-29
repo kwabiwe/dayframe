@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../InsetDivider";
 import { Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
@@ -47,7 +48,8 @@ export function ArchivedPlacesGroup({
             exiting={localPresenceExiting(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
-            <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-archived-${row.id}`}>
+            <View style={styles.placesRow} testID={`places-archived-${row.id}`}>
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               <View accessible accessibilityLabel={row.accessibilityLabel} style={styles.placesRowMain}>
                 <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
                   <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />

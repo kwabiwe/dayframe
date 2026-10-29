@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { useRef, useState } from "react";
 import { AccessibilityInfo, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import Reanimated, { LayoutAnimationConfig } from "react-native-reanimated";
@@ -213,11 +214,11 @@ export function PlaceRoleSheet({
                         onPress={() => choose(place)}
                         style={({ pressed }) => [
                           sheetStyles.choice,
-                          index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
                           pressed ? { backgroundColor: theme.surfaceMuted } : null
                         ]}
                         testID={`place-role-choice-${place.id}`}
                       >
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" /> : null}
                         <View style={sheetStyles.choiceText}>
                           <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[sheetStyles.choiceName, { color: theme.textPrimary }]}>{name}</Text>
                           {secondary ? (

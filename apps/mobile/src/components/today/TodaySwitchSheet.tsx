@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
 import { useRef } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -95,11 +96,11 @@ export function TodaySwitchSheet({
                   }}
                   style={({ pressed }) => [
                     styles.row,
-                    index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
                     pressed ? styles.pressed : null,
                   ]}
                   testID={`today-switch-${entry.id}`}
                 >
+                  {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={DIVIDER_INSET_PAST_BLOCK} /> : null}
                   <ActivityBlockMark
                     categoryColor={entry.categoryColor ?? entry.categoryId ?? null}
                     categoryIcon={activityIconFor(entry.categoryId)}
