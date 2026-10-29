@@ -1180,4 +1180,38 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(18 * 60 + 35);
     locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
   });
+
+  it("a stale lifetime's timer never restores or stops anyone's capture (Codex r4 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+      expect(locationMocks.stopLocationUpdatesAsync).not.toHaveBeenCalled();
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("brings normal capture back, and stops by its deadline, while storage keeps failing; the time is settled once it works (Codex r4 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalled();
+    // Restores keep failing and storage too: at its deadline (5 minutes past its 3) updates are stopped anyway.
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
 });
