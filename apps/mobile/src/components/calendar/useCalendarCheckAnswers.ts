@@ -10,7 +10,7 @@ import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAn
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
-import { cancelAnswerAfterCorrections, settleAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 
 /** A held answer, with the account that gave it. */
@@ -99,6 +99,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ? { ...data, reviewItems: [...data.reviewItems, ...shownRestored.filter((item) => !data.reviewItems.some((loaded) => loaded.id === item.id))] }
     : data, [data, shownRestored]);
   const dataRef = useRef(data);
+  // The account a waiting record belongs to, for the store's shared settle and withdraw (Codex r12 on #610).
+  const recordOwnerNow = () => {
+    const bootstrap = dataRef.current;
+    return bootstrap?.user?.id && bootstrap.workspace?.id ? { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id } : null;
+  };
   const shownRef = useRef(shown);
   const ownerRef = useRef(ownerKey);
   const decidedRef = useRef(locallyDecidedIds);
@@ -143,7 +148,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   const save = (decision: HeldAnswer, verified = false) => {
     if (decision.owner !== ownerRef.current) {
       // Another account now: never saved there.
-      if (decision.afterCorrections) void cancelAnswerAfterCorrections(decision.afterCorrections).catch(() => undefined);
+      if (decision.afterCorrections) void withdrawAnswerAfterCorrections(recordOwnerNow(), decision.afterCorrections);
       return;
     }
     const owner = decision.owner;
@@ -160,7 +165,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       void settleAnswerAfterCorrections(recordOwner, id, { inFront: alive.current && inFront.current }).then((outcome) => {
         if (outcome !== "abandoned" || ownerRef.current !== owner) return;
         restore(owner, heldIds);
-        if (!alive.current || decision.quiet) return;
+        // Rechecked now the store has finished: only an answer still in front, with the List here, says so (Codex r12).
+        if (!alive.current || !inFront.current || decision.quiet) return;
         AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
         Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
       });
@@ -300,7 +306,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (current) {
       hold.undo(current.token);
       const waiting = (current as HeldAnswer).afterCorrections;
-      if (waiting) void cancelAnswerAfterCorrections(waiting).catch(() => undefined);
+      if (waiting) void withdrawAnswerAfterCorrections(recordOwnerNow(), waiting);
     }
     known.current.clear();
     setSaving(null);
@@ -465,13 +471,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } }).then((record) => {
       registering.current.delete(itemId);
       if (ownerRef.current !== owner) {
-        if (record) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+        if (record) void withdrawAnswerAfterCorrections(recordOwnerNow(), id);
         return;
       }
       // Waiting for a correction: no Apple place with it (the correction says where it was). The lifecycle is read
       // where it settles (holdAnswer).
       if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id, expected, outing: memberIds.length > 0 })) {
-        void cancelAnswerAfterCorrections(id).catch(() => undefined);
+        void withdrawAnswerAfterCorrections(recordOwnerNow(), id);
       }
       if (!record) holdAnswer(itemId, logged, venue, { expected });
     }, () => {
@@ -487,7 +493,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (!undone || undone.kind !== "single") return;
     const answer = undone as HeldAnswer;
     // Undo takes back the answer only: the sheet's corrections stay (Codex r2 on #610).
-    if (answer.afterCorrections) void cancelAnswerAfterCorrections(answer.afterCorrections).catch(() => undefined);
+    if (answer.afterCorrections) void withdrawAnswerAfterCorrections(recordOwnerNow(), answer.afterCorrections);
     // An answer whose suggestion a refresh paged out while held comes back whole (outing included).
     restore(answer.owner, [answer.itemId, ...(answer.outing?.members.map((member) => member.itemId) ?? [])]);
     AccessibilityInfo.announceForAccessibility(`${answer.title} is back.`);

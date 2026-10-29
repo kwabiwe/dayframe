@@ -33,6 +33,8 @@ const waiting = vi.hoisted(() => {
     cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
     // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
     settleOutcome: null as null | "committed" | "committing" | "abandoned",
+    // The store's shared withdraw, as its deletion goes.
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
     settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
       try {
         await mock.commitAnswerAfterCorrections(id);
@@ -321,6 +323,21 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(given.result.current.hiddenIds.has("b")).toBe(false);
       expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
       waiting.settleOutcome = null;
+    });
+
+    it("says nothing when the store gives an answer up after Dayframe left during its slow write (Codex r12 on #610)", async () => {
+      vi.mocked(Alert.alert).mockClear();
+      let finish!: () => void;
+      waiting.settleAnswerAfterCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve("abandoned"); }));
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true, null, { afterCorrections: "m-slow" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      await act(async () => { finish(); await Promise.resolve(); await Promise.resolve(); });
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
     });
 
     it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {

@@ -21,7 +21,7 @@ import {
   type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
-import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
@@ -231,8 +231,16 @@ export function useLocationCorrections({
     if (consumed.current.has(log.token)) return;
     consumed.current.add(log.token);
     if (log.afterCorrections) {
-      if (log.ownerKey !== currentOwner.current) void cancelAnswerAfterCorrections(log.afterCorrections).catch(() => undefined);
-      else void commitAnswerAfterCorrections(log.afterCorrections).catch(() => showNotice("That place wasn't logged. Try again."));
+      // The store's shared settle and withdraw (Codex r12 on #610): a failed write is recovered by its runner, or the
+      // Logs as is given up — its record hides nothing, and the place's "?" shows again.
+      const recordOwner = userId && workspaceId ? { userId, workspaceId } : null;
+      if (log.ownerKey !== currentOwner.current) void withdrawAnswerAfterCorrections(recordOwner, log.afterCorrections);
+      else {
+        void settleAnswerAfterCorrections(recordOwner, log.afterCorrections, { inFront: appInFront() }).then((outcome) => {
+          // Said only when it was given up and Dayframe is still in front, for this account.
+          if (outcome === "abandoned" && appInFront() && log.ownerKey === currentOwner.current) showNotice("That place wasn't logged. Try again.");
+        });
+      }
       return;
     }
     if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
@@ -248,7 +256,7 @@ export function useLocationCorrections({
     // Another account (or none): the held log is dropped, never sent for it.
     if (heldLog.ownerKey !== ownerKey) {
       setHeldLog(null);
-      if (heldLog.afterCorrections) void cancelAnswerAfterCorrections(heldLog.afterCorrections).catch(() => undefined);
+      if (heldLog.afterCorrections) void withdrawAnswerAfterCorrections(userId && workspaceId ? { userId, workspaceId } : null, heldLog.afterCorrections);
       return;
     }
     const finish = (send: boolean) => {
@@ -283,7 +291,7 @@ export function useLocationCorrections({
     if (heldNow.current) {
       consumed.current.add(heldNow.current.token);
       // Undo takes back the Logs as only: the sheet's corrections stay.
-      if (heldNow.current.afterCorrections) void cancelAnswerAfterCorrections(heldNow.current.afterCorrections).catch(() => undefined);
+      if (heldNow.current.afterCorrections) void withdrawAnswerAfterCorrections(userId && workspaceId ? { userId, workspaceId } : null, heldNow.current.afterCorrections);
     }
     setHeldLog(null);
   }, []);
@@ -318,7 +326,7 @@ export function useLocationCorrections({
         holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
           request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
       },
-      cancel: () => cancelAnswerAfterCorrections(id)
+      cancel: () => withdrawAnswerAfterCorrections(owner, id)
     };
   };
   const activities = useMemo(() => [...(data?.categories ?? [])]

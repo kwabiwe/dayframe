@@ -636,7 +636,7 @@ private struct DayframeCalendarEntriesLayer: View {
           )
           .zIndex(Double(laidOut.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
-          .accessibilityHint(entry.isReview ? "Opens Review" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
+          .accessibilityHint(entry.isReview ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
         }
       }

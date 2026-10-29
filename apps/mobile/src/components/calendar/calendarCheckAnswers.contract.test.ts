@@ -160,3 +160,28 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
   });
 });
 
+describe("waiting records are written only through the store's shared paths (Codex r12 on #610)", () => {
+  it("leaves the raw commit and delete to the store and its recovery runner", () => {
+    const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const sources: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) {
+          if (name !== "node_modules") walk(path);
+        } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) sources.push(path);
+      }
+    };
+    walk(join(root, "src"));
+    walk(join(root, "app"));
+    const raw = sources.filter((path) => !path.endsWith("reviewAnswersAfterCorrections.ts")
+      && /\b(commitAnswerAfterCorrections|cancelAnswerAfterCorrections)\b/.test(readFileSync(path, "utf8")));
+    expect(raw).toEqual([]);
+    for (const path of ["./useCalendarCheckAnswers.ts", "./useLocationCorrections.tsx"]) {
+      expect(source(path)).toMatch(/settleAnswerAfterCorrections|withdrawAnswerAfterCorrections/);
+    }
+  });
+});
+

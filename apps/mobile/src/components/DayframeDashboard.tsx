@@ -111,7 +111,7 @@ import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
-import { cancelAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
+import { withdrawAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "@/lib/afterCorrections";
 import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
 import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
@@ -2188,9 +2188,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
-              if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+              if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void withdrawAnswerAfterCorrections(correctionOwner, id);
             },
-            cancel: () => cancelAnswerAfterCorrections(id)
+            cancel: () => withdrawAnswerAfterCorrections(correctionOwner, id)
           };
         }
       };

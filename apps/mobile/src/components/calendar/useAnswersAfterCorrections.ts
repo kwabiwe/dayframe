@@ -106,6 +106,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       void recoverAnswersAfterCorrections(who).then(({ abandoned, abandonedReviewItemIds }) => {
         if (!live || !abandoned.length) return;
         if (abandonedReviewItemIds.length) droppedRef.current?.(abandonedReviewItemIds);
+        // Rechecked now recovery has finished (its writes can be slow): said only while still in front (Codex r12 on #610).
+        if (AppState.currentState !== "active") return;
         AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
         Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
       }, () => undefined);

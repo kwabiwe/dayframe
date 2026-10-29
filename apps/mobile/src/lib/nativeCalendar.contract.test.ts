@@ -7,6 +7,12 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
+  it("tells VoiceOver a \"?\" block opens its question, never Review (Codex r12 on #610)", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    expect(rootView).toContain('.accessibilityHint(entry.isReview ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")');
+    expect(rootView).not.toContain('"Opens Review"');
+  });
+
   it("shares the Places lane's 44-point targets with the long press, and clips a trip's legs to the drawn day (Codex r1 on #610)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");

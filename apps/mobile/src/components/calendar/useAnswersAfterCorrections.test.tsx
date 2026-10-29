@@ -6,7 +6,7 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-const storage = vi.hoisted(() => Object.assign(new Map<string, string>(), { failWrites: 0 }));
+const storage = vi.hoisted(() => Object.assign(new Map<string, string>(), { failWrites: 0, beforeWrite: null as null | (() => void) }));
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: async (key: string) => storage.get(key) ?? null,
@@ -18,6 +18,7 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
       storage.delete(key);
     },
     setItem: async (key: string, value: string) => {
+      storage.beforeWrite?.();
       if (storage.failWrites > 0) {
         storage.failWrites -= 1;
         throw new Error("disk full");
@@ -26,11 +27,12 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     }
   }
 }));
-vi.mock("react-native", () => ({
+const native = vi.hoisted(() => ({
   AccessibilityInfo: { announceForAccessibility: vi.fn() },
   Alert: { alert: vi.fn() },
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) }
 }));
+vi.mock("react-native", () => native);
 const outbox = vi.hoisted(() => ({
   pending: [] as Array<{ clientCorrectionId: string; failureKind?: string }>,
   listeners: new Set<() => void>(),
@@ -202,6 +204,29 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     expect(dropped).toHaveBeenCalledWith(["ri-1"]);
     act(() => { tree.unmount(); });
     storage.failWrites = 0;
+  });
+
+  it("gives an answer back but says nothing when Dayframe leaves during the runner's slow write (Codex r12 on #610)", async () => {
+    storage.clear();
+    outbox.pending = [{ clientCorrectionId: C1 }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-slow", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    storage.failWrites = 1;
+    await answers.settleAnswerAfterCorrections(OWNER, "m-slow", { inFront: false });
+    native.Alert.alert.mockClear();
+    native.AccessibilityInfo.announceForAccessibility.mockClear();
+    dropped.mockClear();
+    // The runner's retry write fails and, while it runs, Dayframe goes to the background.
+    storage.failWrites = 1;
+    storage.beforeWrite = () => { native.AppState.currentState = "background"; };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    storage.beforeWrite = null;
+    native.AppState.currentState = "active";
+    expect(dropped).toHaveBeenCalledWith(["ri-1"]);
+    expect(native.Alert.alert).not.toHaveBeenCalled();
+    expect(native.AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
   });
 
   it("keeps an abandoned answer's \"?\" visible through a new answer and its Undo, while its deletion fails (Codex r11 on #610)", async () => {

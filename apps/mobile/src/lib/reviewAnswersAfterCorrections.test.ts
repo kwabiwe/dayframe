@@ -17,6 +17,7 @@ const account = await import("./mobileAccount");
 const outbox = await import("./timelineCorrectionOutbox");
 const answers = await import("./reviewAnswersAfterCorrections");
 const shared = await import("./afterCorrections");
+const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
 
 // Codex r2 on #610: synthetic ids only.
 const OWNER_A = { userId: "user-a", workspaceId: "workspace-a" };
@@ -204,6 +205,37 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
       readAcknowledged: () => [{ clientCorrectionId: C1 }], release });
     expect(release).toHaveBeenCalledOnce();
     expect(result.dropped).toEqual([]);
+  });
+
+  it("an Undo whose deletion fails leaves the record abandoned at once (it hides nothing), and the runner deletes it (Codex r12 on #610)", async () => {
+    await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-undo", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    vi.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error("disk full"));
+    await answers.withdrawAnswerAfterCorrections(OWNER_A, "m-undo");
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A)).map((each) => [each.record.id, each.state])).toEqual([["m-undo", "abandoned"]]);
+    // Never released while being recovered.
+    await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
+    await answers.commitAnswerAfterCorrections("m-undo").catch(() => undefined);
+    expect((await releaseWith()).release).not.toHaveBeenCalled();
+    await answers.recoverAnswersAfterCorrections(OWNER_A);
+    expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
+  });
+
+  it("recovers a Logs as whose Undo-end write failed, or gives it back (Codex r12 on #610)", async () => {
+    const register = (id: string) => answers.registerAfterCorrections(OWNER_A, { id, reviewItemId: "", logged: true,
+      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [C1], itemIds: ["seg-a"] },
+      { readPending: async () => [], readAcknowledged: () => [] });
+    await register(C2);
+    vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error("disk full"));
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, C2, { inFront: false })).toBe("committing");
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A))[0].state).toBe("committing");
+    await answers.recoverAnswersAfterCorrections(OWNER_A);
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER_A))[0].state).toBe("committed");
+    // Failing again on the runner's try: given back — the record goes, nothing is logged.
+    await answers.cancelAnswerAfterCorrections(C2);
+    await register("6f000000-0000-4000-8000-000000000003");
+    vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error("disk full")).mockRejectedValueOnce(new Error("disk full"));
+    expect(await answers.settleAnswerAfterCorrections(OWNER_A, "6f000000-0000-4000-8000-000000000003", { inFront: true })).toBe("abandoned");
+    expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
   });
 
   it("is kept on the phone: a relaunch still releases it once its corrections are acknowledged", async () => {

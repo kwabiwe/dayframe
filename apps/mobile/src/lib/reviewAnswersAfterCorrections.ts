@@ -317,6 +317,28 @@ export function answeredReviewItemIds(record: AnswerAfterCorrections) {
   return [...(record.reviewItemId ? [record.reviewItemId] : []), ...(record.outingMemberIds ?? [])];
 }
 
+/** The scope a record's recovery runs in: the owner given, or the record's own (read when none is given). */
+async function recoveryScope(owner: MobileAccountOwner | null, id: string) {
+  if (owner) return scopeOf(owner);
+  const record = (await serialised(readAll).catch(() => [] as AnswerAfterCorrections[])).find((item) => item.id === id);
+  return scopeOf(record ? { userId: record.userId, workspaceId: record.workspaceId } : null);
+}
+
+/**
+ * Takes a waiting answer or Logs as back (Undo, another account, a hold that couldn't start; Codex r12 on #610). The
+ * one way callers delete a record: if the deletion fails, the record is `abandoned` at once — it hides nothing — and
+ * the recovery runner tries the deletion again. Never throws.
+ */
+export async function withdrawAnswerAfterCorrections(owner: MobileAccountOwner | null, id: string) {
+  try {
+    await cancelAnswerAfterCorrections(id);
+    recovery.delete(id);
+  } catch {
+    recovery.set(id, { scope: await recoveryScope(owner, id), op: "abandon", attempts: 0 });
+    notify();
+  }
+}
+
 /**
  * Lets a record go once its Undo ends. Failing, it becomes `committing` and is tried again: at once when Dayframe is
  * in front (`inFront`), otherwise by the recovery runner on the next return to the front or Dashboard mount.
@@ -329,7 +351,7 @@ export async function settleAnswerAfterCorrections(owner: MobileAccountOwner | n
     notify();
     return "committed" as const;
   } catch {
-    recovery.set(id, { scope: scopeOf(owner), op: "commit", attempts: 1 });
+    recovery.set(id, { scope: await recoveryScope(owner, id), op: "commit", attempts: 1 });
     notify();
     if (!options.inFront || !owner) return "committing" as const;
     return (await recoverAnswersAfterCorrections(owner)).abandoned.includes(id) ? "abandoned" as const : "committing" as const;
