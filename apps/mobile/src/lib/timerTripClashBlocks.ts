@@ -1,4 +1,4 @@
-import { timerTripClashAsksOnBlock, timerTripClashQuestion, type TimerTripClashEntry } from "@dayframe/shared";
+import { isTimerTripClashItem, timerTripClashAsksOnBlock, timerTripClashQuestion, type TimerTripClashEntry } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 /**
@@ -28,16 +28,35 @@ function clashEntryOf(entry: MobileTimeEntry, data: MobileBootstrap): TimerTripC
 }
 
 /**
- * Whether a clash item still asks, from the block as this iPhone has it now (queued edits, Stop and an End it
- * applied): a block not loaded here keeps asking (the server's question stands); one that no longer runs into the
- * trip stops at once. Items that are not clashes are not this rule's: true.
+ * Whether a "?" still asks where it is answered (location v4 design §7). Anything that is not a block that ran into a
+ * trip: true. A clash asks only when it can be put on its block (its payload names it; a record recovered past the
+ * bootstrap's cap carries none, so it is never counted without a surface to answer it, Codex r1 on #618), and only
+ * while that block, as this iPhone has it now (queued edits, Stop and End it applied), still runs into the trip. A
+ * block not loaded here keeps asking (the server's question stands); one deleted on this iPhone (`deletedIds`: held
+ * for Undo or queued) stops at once.
  */
 export function clashStillAsksHere(item: MobileReviewItem, data: MobileBootstrap | null | undefined, now: number,
-  blocks: ReadonlyMap<string, MobileTimeEntry> = bootstrapBlocksById(data)) {
+  blocks: ReadonlyMap<string, MobileTimeEntry> = bootstrapBlocksById(data), deletedIds: ReadonlySet<string> = new Set()) {
+  if (!isTimerTripClashItem(item)) return true;
   const question = timerTripClashQuestion(item);
-  if (!question || !data) return true;
+  if (!question || !data) return false;
+  if (deletedIds.has(question.timeEntryId)) return timerTripClashAsksOnBlock(question, null, now);
   const entry = blocks.get(question.timeEntryId);
   return timerTripClashAsksOnBlock(question, entry ? clashEntryOf(entry, data) : undefined, now);
+}
+
+/** The blocks deleted on this iPhone and not yet gone from the server: held for Undo, or a queued delete. */
+export function locallyDeletedBlockIds(
+  heldIds: readonly string[],
+  commands: readonly { operation: string; targetEntryId?: string; optimisticEntryId?: string; failureKind?: string }[]
+) {
+  const ids = new Set(heldIds);
+  for (const command of commands) {
+    if (command.operation !== "delete" || command.failureKind === "permanent") continue;
+    if (command.targetEntryId) ids.add(command.targetEntryId);
+    if (command.optimisticEntryId) ids.add(command.optimisticEntryId);
+  }
+  return ids;
 }
 
 /** The blocks with a "?" on them: block id → its clash item id (the first by id, if a block had two). */

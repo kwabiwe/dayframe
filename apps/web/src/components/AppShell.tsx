@@ -20,7 +20,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, clashBlocksFrom, oldestCheckHref } from "@/lib/calendar-checks";
-import { CheckDecisionsProvider, useProjectedReviewItems } from "@/components/location/ListChecks";
+import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -82,19 +82,34 @@ const NO_CATEGORIES: readonly CategoryRow[] = [];
  * and survives leaving the List. Another workspace or person starts it afresh.
  */
 function CheckDecisionsHost({ children }: { children: ReactNode }) {
-  const { data, refresh } = useAppShellRuntime();
+  const { canonicalShellData, data, refresh, shellData } = useAppShellRuntime();
   const owner = data ? `${data.workspace.id}:${data.user.id}` : "";
   const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
   // The blocks the shell has (the running one last, so it wins): a "block ran into your trip" stops asking once its
   // block no longer runs into the trip (location v4 design §7).
-  const blocks = useMemo(() => data ? clashBlocksFrom([...data.historyEntries ?? [], ...data.weekEntries ?? [], ...data.dayEntries ?? [],
-    ...data.entries ?? [], ...(data.activeEntry ? [data.activeEntry] : [])], data.categories) : undefined, [data]);
+  // As the server last sent them (not the End it projection), so a projection is confirmed against canonical data.
+  const canonical = canonicalShellData ?? shellData ?? data;
+  const blocks = useMemo(() => canonical ? clashBlocksFrom([...canonical.historyEntries ?? [], ...canonical.weekEntries ?? [],
+    ...canonical.dayEntries ?? [], ...canonical.entries ?? [], ...(canonical.activeEntry ? [canonical.activeEntry] : [])],
+  canonical.categories) : undefined, [canonical]);
   return (
     <CheckDecisionsProvider blocks={blocks} categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
       reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
+      <EndedBlocksToTimer />
       {children}
     </CheckDecisionsProvider>
   );
+}
+
+/** Hands the "?" owner's End it projections to the timer's owner, so the bar, Today and Calendar show them (design §7). */
+function EndedBlocksToTimer() {
+  const { setProjectedEnds } = useAppShellRuntime();
+  const ended = useEndedBlocks();
+  useEffect(() => {
+    setProjectedEnds?.(ended);
+  }, [ended, setProjectedEnds]);
+  useEffect(() => () => setProjectedEnds?.(new Map()), [setProjectedEnds]);
+  return null;
 }
 
 function AppShellContent({ children }: { children: ReactNode }) {

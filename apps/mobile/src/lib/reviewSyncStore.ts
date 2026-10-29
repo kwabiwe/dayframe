@@ -1771,7 +1771,11 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
       // A learned name, offered in Location evidence's Name (Codex r1 on #481).
       ...(record.learnedName ? { nameSource: "learned" } : {})
     } : null,
-    createdAt: record.createdAt
+    createdAt: record.createdAt,
+    // "A block ran into your trip" (location v4 design §7): End it is sent with this proposal, so a presentation read
+    // replacing the cached copy keeps it (Codex r1 on #618). Its block payload is not in the record: the cache keeps
+    // the bootstrap's (same proposal), and a record known only from a presentation read never asks (clashStillAsksHere).
+    ...(isTimerTripClashItem(record) && record.status === "open" && record.proposalHash ? { proposalHash: record.proposalHash } : {})
   };
 }
 

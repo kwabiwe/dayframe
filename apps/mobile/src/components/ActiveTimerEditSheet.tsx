@@ -2619,7 +2619,12 @@ export function ActiveTimerEditSheet({
                   title={headTitle}
                 />
               </Pressable>
-              {question ? <BlockQuestionCard question={question} reduceMotion={reduceMotion} theme={theme} /> : null}
+              {question ? (
+                // Unsaved edits first (Codex r1 on #618): the answers wait, and a tap asks to discard them, so an answer
+                // never closes the sheet over a draft.
+                <BlockQuestionCard locked={draftHasUnsavedChanges} onLocked={presentDiscardConfirmation} question={question}
+                  reduceMotion={reduceMotion} theme={theme} />
+              ) : null}
 
               <Pressable
                 accessible={false}

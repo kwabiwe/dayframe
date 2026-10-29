@@ -24,6 +24,7 @@ import {
   writePendingTimerDetails
 } from "@/lib/timer-draft-store";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
+import { projectBlockEnds } from "@/lib/block-end-projection";
 import { snapshotFitsViewerZone } from "@/lib/viewer-time-zone";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import { goalDrafts } from "@/lib/goal-stepper";
@@ -133,7 +134,19 @@ type RuntimeContext = {
   updateActiveStartTime: (startedAt: string, options?: { expectedEntryIds?: readonly string[] }) => Promise<MutationOutcome>;
   /** The blocks as the runtime has them now (newer than the last render after an awaited mutation). */
   readShellData: () => BootstrapData | null;
+  /**
+   * The shell's data as the server last sent it, without the End it projection below (the "?" owner confirms its
+   * projections against it). `data` and `shellData` are projected.
+   */
+  canonicalShellData?: BootstrapData | null;
+  /**
+   * End it held, saving or queued for a block that ran into a trip (location v4 design §7), by block id: the trip's
+   * start. The timer shows that block ended there — the running one no longer runs, so the bar, Today and the
+   * Calendar offer Start, not Stop — until Undo, a refusal or canonical data retires it (Codex r1 on #618).
+   */
+  setProjectedEnds?: (ends: ReadonlyMap<string, string>) => void;
 };
+
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
 export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS;
@@ -1437,12 +1450,23 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [commitData]);
 
-  const toggleTimer = useCallback(() => (
-    dataRef.current?.activeEntry ? stopTimer() : startTimer()
-  ), [startTimer, stopTimer]);
+  // End it projections (design §7): a running block End it ends shows ended, so the timer's one action is Start.
+  const [projectedEnds, setProjectedEndsState] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const projectedEndsRef = useRef(projectedEnds);
+  useLayoutEffect(() => {
+    projectedEndsRef.current = projectedEnds;
+  }, [projectedEnds]);
+  const setProjectedEnds = useCallback((ends: ReadonlyMap<string, string>) => setProjectedEndsState((current) =>
+    current.size === ends.size && [...ends].every(([id, at]) => current.get(id) === at) ? current : ends), []);
+  const toggleTimer = useCallback(() => {
+    const active = dataRef.current?.activeEntry;
+    // Shown ended (End it held or saving): Start, which ends it on the server as any Start does; End it then sets its end.
+    return active && !projectedEndsRef.current.has(active.id) ? stopTimer() : startTimer();
+  }, [startTimer, stopTimer]);
 
-  const selectedData = data?.dateRange.selectedDate === selectedDate ? data : null;
-  const shownActive = data?.activeEntry ?? null;
+  const shownData = useMemo(() => projectBlockEnds(data, projectedEnds), [data, projectedEnds]);
+  const selectedData = shownData?.dateRange.selectedDate === selectedDate ? shownData : null;
+  const shownActive = shownData?.activeEntry ?? null;
   const timerDraftEdited = shownActive !== null && timerDraftEditedFields(
     timerDraft,
     timerDraftBase.entryId === shownActive.id ? timerDraftBase.draft : timerDraftForEntry(shownActive)
@@ -1469,7 +1493,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     refresh,
     selectedDate,
     setTimerDraft,
-    shellData: data,
+    shellData: shownData,
+    canonicalShellData: data,
+    setProjectedEnds,
     startEntryAgain,
     startTimer,
     stopTimer,
@@ -1499,7 +1525,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     refresh,
     selectedData,
     selectedDate,
+    setProjectedEnds,
     setTimerDraft,
+    shownData,
     startEntryAgain,
     startTimer,
     stopTimer,

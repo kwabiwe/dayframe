@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkAskingStartMs, checksOldestFirst, checkStillAsks, listCheckOverlaps, type ListCheck } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 import { reviewAnswerMutation, reviewAnswerQuestion } from "./reviewAnswer";
-import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, projectTimerTripClashEnds } from "./timerTripClashBlocks";
+import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds } from "./timerTripClashBlocks";
 
 // Location v4 design §7, synthetic Exampleton data: "Team sync ran 18m into your trip", asked on its block.
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).toISOString();
@@ -45,6 +45,23 @@ describe("a block that ran into a trip, on its block (location v4 design §7)", 
     // The running block stopped (a queued Stop) before the trip ran 5 minutes on.
     expect(clashStillAsksHere(clash(), data([], [clash()], block({ stoppedAt: at(29, 10, 45) })), now)).toBe(false);
     expect(clashStillAsksHere(clash(), data([], [clash()], block({ stoppedAt: null })), now)).toBe(true);
+  });
+
+  it("never asks without a surface: a record recovered past the cap (no block payload) is not counted (Codex r1 on #618)", () => {
+    // A presentation record carries no payload: the item can't be put on its block, so it doesn't ask.
+    expect(clashStillAsksHere(clash({ rawPayload: null }), data([block()]), now)).toBe(false);
+    expect(clashStillAsksHere(clash(), null, now)).toBe(false);
+  });
+
+  it("stops asking for a block deleted here (held for Undo or queued), apart from one only not loaded (Codex r1 on #618)", () => {
+    const deleted = locallyDeletedBlockIds(["held-1"], [
+      { operation: "delete", targetEntryId: "block-1" }, { operation: "delete", optimisticEntryId: "local-1" },
+      { operation: "update", targetEntryId: "edited" }, { operation: "delete", targetEntryId: "refused", failureKind: "permanent" }
+    ]);
+    expect([...deleted].sort()).toEqual(["block-1", "held-1", "local-1"]);
+    // Gone from the projected data and known deleted: no longer asks. Not loaded and not deleted: still asks.
+    expect(clashStillAsksHere(clash(), data([]), now, undefined, deleted)).toBe(false);
+    expect(clashStillAsksHere(clash(), data([]), now, undefined, new Set())).toBe(true);
   });
 
   it("counts once, in the badge's 7 days, Today's chip on its day, oldest first with the others", () => {

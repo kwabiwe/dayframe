@@ -20,23 +20,43 @@ export type BlockQuestion = {
  * sheet's presentation owns its entrance and exit; it only fades in or out on its own when the question arrives or
  * leaves while the sheet is up (none with Reduce Motion).
  */
-export function BlockQuestionCard({ question, reduceMotion, theme }: { question: BlockQuestion; reduceMotion: boolean; theme: MobileTheme }) {
+export function BlockQuestionCard({ locked = false, onLocked, question, reduceMotion, theme }: {
+  /** The sheet has unsaved edits: the answers are disabled until they are saved or discarded (as on the web). */
+  locked?: boolean;
+  /** A tap on a disabled answer: the sheet's own "Discard changes?" prompt. */
+  onLocked?: () => void;
+  question: BlockQuestion;
+  reduceMotion: boolean;
+  theme: MobileTheme;
+}) {
+  const press = (end: boolean) => {
+    if (locked) onLocked?.();
+    else question.onAnswer(end);
+  };
+  const lockedHint = locked ? "Save or discard your changes to answer" : undefined;
   return (
     <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}
       style={[styles.card, { backgroundColor: theme.surfaceMuted }]} testID="time-entry-sheet-question">
       <View accessibilityLabel={`${question.text}. Needs a look`} accessible role="group">
         <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.text, { color: theme.textPrimary }]}>{question.text}</Text>
       </View>
+      {locked ? (
+        <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }} testID="time-entry-sheet-question-locked">
+          Save or discard your changes to answer.
+        </Text>
+      ) : null}
       <View style={compactPillStyles.answers}>
         {question.endLabel ? (
-          <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => question.onAnswer(true)}
-            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}
+          <Pressable accessibilityHint={lockedHint} accessibilityRole="button" accessibilityState={{ disabled: locked }}
+            hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => press(true)}
+            style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: locked ? 0.4 : pressed ? 0.8 : 1 }]}
             testID="time-entry-sheet-question-end">
             <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>{question.endLabel}</Text>
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => question.onAnswer(false)}
-          style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}
+        <Pressable accessibilityHint={lockedHint} accessibilityRole="button" accessibilityState={{ disabled: locked }}
+          hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => press(false)}
+          style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: locked ? 0.4 : pressed ? 0.8 : 1 }]}
           testID="time-entry-sheet-question-keep">
           <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.keepLabel}</Text>
         </Pressable>

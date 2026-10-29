@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LocationTimeline, TimelineCorrectionRequest, TimelinePlace, TimelineTrip } from "@dayframe/shared";
-import { correctionsToShow, projectTimelineCorrections } from "./timelineCorrectionProjection";
-import type { PendingTimelineCorrection } from "./timelineCorrectionOutbox";
+import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "./timelineCorrectionProjection";
+import type { AcknowledgedTimelineCorrection, PendingTimelineCorrection } from "./timelineCorrectionOutbox";
 
 // Location v4 step 12: synthetic ids, names and times only.
 const at = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
@@ -137,3 +137,25 @@ describe("the List with the corrections the phone still holds (location v4 step 
   });
 });
 
+describe("Logs as on an outing's stay, its trips logged with it (#612)", () => {
+  const logAs = { kind: "log_place", subject: "place", itemId: "seg-b", categoryId: "6f000000-0000-4000-8000-0000000000c1" } as const;
+  const acked = (resolvedReviewItemIds?: string[]): AcknowledgedTimelineCorrection =>
+    ({ ...queued(logAs), acknowledgedAt: Date.parse(at(300)), ...(resolvedReviewItemIds ? { resolvedReviewItemIds } : {}) });
+
+  it("makes up no block, the place's or a trip's, while the Logs as is still on the phone (its Undo window or queue)", () => {
+    const projected = projectTimelineCorrections(timeline, [queued(logAs)])!;
+    expect(projected.items).toEqual(timeline.items);
+    expect(projected.items.every((item) => item.blockIds.length === 0)).toBe(true);
+    // Nothing on the phone resolves a "?" either: only an acknowledgement does.
+    expect(reviewItemIdsResolvedByCorrections([])).toEqual(new Set());
+  });
+
+  it("settles the stay's and the trips' \"?\" the acknowledgement resolved, and only those", () => {
+    expect(reviewItemIdsResolvedByCorrections([acked(["review-stay", "review-trip-in", "review-trip-out"])]))
+      .toEqual(new Set(["review-stay", "review-trip-in", "review-trip-out"]));
+    // A Logs as on a place that was no outing's stay: its own "?" only, as before.
+    expect(reviewItemIdsResolvedByCorrections([acked(["review-place"])])).toEqual(new Set(["review-place"]));
+    // A correction that resolved nothing.
+    expect(reviewItemIdsResolvedByCorrections([acked()])).toEqual(new Set());
+  });
+});

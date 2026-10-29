@@ -43,7 +43,9 @@ describe("Calendar › List answers and Today's toasts (Codex r2 on #582)", () =
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
-    expect(dashboard).toContain("return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };");
+    // settledCheckBase folds with calendarCheckOutings (unit-tested in useCalendarCheckAnswers.test.tsx).
+    expect(dashboard).toContain("return settledCheckBase(shownCalendarData?.reviewItems ?? [], {");
+    expect(dashboard).toContain("syncStateIds: reviewSyncStateIds");
     expect(dashboard).toContain("const { open, outings, folded } = calendarCheckBase;");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
@@ -65,12 +67,13 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
-    expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
+    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
   });
 
-  it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
-    expect(dashboard).toContain("correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])");
-    expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
+  it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {
+    // The helper is unit-tested in timelineCorrectionProjection.test.ts.
+    expect(dashboard).toContain("reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged)");
+    expect(dashboard).toContain("resolved: resolvedByCorrections,");
   });
 
   it("classifies each \"?\" so only Apple Health's and a legacy one without a segment ask under their row, and never sends a row to Review", () => {
@@ -211,12 +214,24 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard).toContain("if (checkAnswers.answer(checkId, end)) dismiss();");
     expect(dashboard).toContain("useEffect(() => subscribeTimerTripClashChanged(() => { void loadRef.current({ silent: true }); }), []);");
     expect(dashboard).toContain("const shownCalendarData = useMemo(() => projectTimerTripClashEnds(checkAnswers.data, clashEnds), [checkAnswers.data, clashEnds]);");
-    expect(source("../ActiveTimerEditSheet.tsx")).toContain("{question ? <BlockQuestionCard question={question} reduceMotion={reduceMotion} theme={theme} /> : null}");
+    // Unsaved edits first: the answers wait and ask to save or discard (Codex r1 on #618).
+    expect(source("../ActiveTimerEditSheet.tsx")).toContain("<BlockQuestionCard locked={draftHasUnsavedChanges} onLocked={presentDiscardConfirmation} question={question}");
+  });
+
+  it("shows End it on every timer surface while held or queued, and Play starts a block over one it ended (Codex r1 on #618)", () => {
+    expect(dashboard).toContain("const timerShownData = useMemo(() => projectTimerTripClashEnds(data, timerClashEnds), [data, timerClashEnds]);");
+    expect(dashboard).toContain("const activeEntryForDisplay = timerShownData?.activeEntry ?? null;");
+    expect(dashboard).toContain("setTimerClashEnds((current) => sameClashEnds(current, clashEnds) ? current : clashEnds);");
+    expect(dashboard).toContain("const entryId = running && running !== clashEndedActiveRef.current ? running : undefined;");
+    // Deleted here is not "not loaded": its question stops (tombstones from the delete hold and the queued deletes).
+    expect(dashboard).toContain("setQueuedDeletes({ owner: scopedOwnerKey, ids: locallyDeletedBlockIds([], commands) });");
   });
 
   it("counts a block that ran into a trip as one \"?\", asked on its block, never a row or a dashed block of its own", () => {
     // List rows, the Grid's blocks (askingChecks), the badge, Today's chip and the reminder all read calendarCheckBase.
-    expect(dashboard).toContain("isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)\n      && clashStillAsksHere(item, shownCalendarData, minuteNow, blocks)");
+    // settledCheckBase is the one filter (Earlier this week's chips too, #617), with the clash's block validity.
+    expect(source("./useCalendarCheckAnswers.ts")).toContain("isOpenReviewItem(item) && (hidden.stillAsks?.(item) ?? true) && !hidden.decided.has(item.id)");
+    expect(dashboard).toContain("stillAsks: (item) => clashStillAsksHere(item, shownCalendarData, minuteNow, blocks, locallyDeletedIds)");
     expect(dashboard).toContain("useReviewNudgeCount(nudgeOwner, askingChecks.length,");
     expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
     expect(dashboard).toContain("askingEntryIds: askingBlockIds,");

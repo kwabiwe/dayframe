@@ -177,18 +177,28 @@ function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowl
     return items.filter((item) => !hidden.has(item.id) && clashStillAsks(item, blocks));
   }, [blocks, closedByServer, heldOutings, items, state.hiddenIds]);
 
-  // End it held, saving or saved here: its block shows ended at the trip's start until the data says so itself, the
-  // running block too (design §7); Undo or a refused save puts it back.
-  const endedBlocks = useMemo(() => {
-    const ended = new Map<string, string>();
-    for (const decision of state.decided) {
-      if (decision.kind !== "log") continue;
-      const item = itemsById.get(decision.itemId) ?? snapshots.get(decision.itemId);
-      const question = item ? timerTripClashQuestion(item) : null;
-      if (question) ended.set(question.timeEntryId, question.tripStartedAt);
-    }
-    return ended as ReadonlyMap<string, string>;
-  }, [itemsById, snapshots, state.decided]);
+  // End it held, saving or saved here: its block shows ended at the trip's start, the running block too (design §7);
+  // Undo or a refused save puts it back. The projection retires once canonical data confirms it (Codex r1 on #618):
+  // the question has left fresh data (the controller then settles the decision, so it is no longer hidden here), or
+  // the block's own end in the data is the trip's start. A retired projection never returns, so a later edit that
+  // extends the block shows as it is.
+  const [confirmedEnds, setConfirmedEnds] = useState<ReadonlySet<string>>(() => new Set());
+  const endCandidates = useMemo(() => state.decided.flatMap((decision) => {
+    if (decision.kind !== "log" || !state.hiddenIds.has(decision.itemId) || confirmedEnds.has(decision.clientMutationId)) return [];
+    const item = itemsById.get(decision.itemId) ?? snapshots.get(decision.itemId);
+    const question = item ? timerTripClashQuestion(item) : null;
+    return question ? [{ mutationId: decision.clientMutationId, blockId: question.timeEntryId, endsAt: question.tripStartedAt }] : [];
+  }), [confirmedEnds, itemsById, snapshots, state.decided, state.hiddenIds]);
+  const newlyConfirmed = endCandidates.filter((candidate) => {
+    const stoppedAt = blocks?.get(candidate.blockId)?.stoppedAt;
+    return stoppedAt != null && Math.abs(Date.parse(stoppedAt) - Date.parse(candidate.endsAt)) < 1_000;
+  });
+  if (newlyConfirmed.length) setConfirmedEnds((current) => new Set([...current, ...newlyConfirmed.map((candidate) => candidate.mutationId)]));
+  const endedBlocks = useMemo(() => new Map(endCandidates
+    .filter((candidate) => !newlyConfirmed.some((confirmed) => confirmed.mutationId === candidate.mutationId))
+    .map((candidate) => [candidate.blockId, candidate.endsAt] as const)) as ReadonlyMap<string, string>,
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- newlyConfirmed is derived from endCandidates and blocks
+  [blocks, endCandidates]);
 
   /** Answers a "?" (held for Undo). `label` names a block's answer ("Ended Team sync at 09:42", "Kept Team sync"). */
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind, label?: string) => {
@@ -246,13 +256,31 @@ function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowl
     setClosedByServer((current) => new Map([...current, ...itemIds.map((id) => [id, over] as const)]));
   }, [owner]);
 
-  return { answer, checks, clearError, endedBlocks, itemsById, outings, projectedItems, settleResolved, state, undo };
+  /**
+   * A saved correction whose receipt landed after its dialog had gone (the List left, or the Grid's dialog closed,
+   * while it was saving; Codex r1 on #617): the day is read again once, so its blocks (a Logs as's, an outing's
+   * trips' too) show. As with settleResolved, the dialog holds the callback of the lifetime it was made in, which
+   * reads through the current lifetime's refresh (the List's while it is shown, otherwise the shell's) when the
+   * signed-in workspace and user are still the receipt's — after A → B → A too — and never for another (Codex r2 on #617).
+   */
+  const refreshNow = useRef(refresh);
+  useLayoutEffect(() => {
+    refreshNow.current = refresh;
+  });
+  const refreshAfterReceipt = useCallback(() => {
+    if (ownerNow.current !== owner) return;
+    void Promise.resolve().then(() => refreshNow.current()).catch(() => undefined);
+  }, [owner]);
+
+  return { answer, checks, clearError, endedBlocks, itemsById, outings, projectedItems, refreshAfterReceipt, settleResolved, state, undo };
 }
 
 type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
 type SharedCheckDecisions = CheckDecisions & {
   /** The List, while it is shown, lends its transition and its refresh (which also reloads its weeks). */
   register: (applyTransition: (update: () => void) => void, refresh: () => Promise<unknown>) => () => void;
+  /** A surface's deletes held for Undo (its ids, by its own key): known-deleted blocks. */
+  reportDeleted: (source: object, ids: ReadonlySet<string>) => void;
 };
 const CheckDecisionsContext = createContext<SharedCheckDecisions | null>(null);
 
@@ -272,21 +300,61 @@ export function CheckDecisionsProvider({ blocks, categories, children, owner, re
   const onAcknowledged = useCallback((body: Record<string, unknown>) => {
     if (body.stoppedRunningTimer === true && lent.current.refresh) void shellRefresh.current().catch(() => undefined);
   }, []);
-  const decisions = useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowledged, owner, refresh: refreshAll, reviewItems });
+  // Blocks deleted here and held for Undo (the List's, the Grid's and Today's deletes): known gone, so their "block ran
+  // into your trip" stops asking, unlike a block that is only not loaded (Codex r1 on #618).
+  const [deletedBySource, setDeletedBySource] = useState<ReadonlyMap<object, ReadonlySet<string>>>(() => new Map());
+  const reportDeleted = useCallback((source: object, ids: ReadonlySet<string>) => setDeletedBySource((current) => {
+    if (current.get(source) === ids || (!ids.size && !current.has(source))) return current;
+    const next = new Map(current);
+    if (ids.size) next.set(source, ids);
+    else next.delete(source);
+    return next;
+  }), []);
+  const knownBlocks = useMemo(() => {
+    if (!deletedBySource.size) return blocks;
+    const merged = new Map(blocks ?? []);
+    for (const ids of deletedBySource.values()) for (const id of ids) merged.set(id, null);
+    return merged as ClashBlocks;
+  }, [blocks, deletedBySource]);
+  const decisions = useCheckDecisionsState({ applyTransition, blocks: knownBlocks, categories, onAcknowledged, owner, refresh: refreshAll, reviewItems });
   const register = useCallback((transition: (update: () => void) => void, listRefresh: () => Promise<unknown>) => {
     lent.current = { transition, refresh: listRefresh };
     return () => {
       if (lent.current.transition === transition) lent.current = { transition: null, refresh: null };
     };
   }, []);
-  const value = useMemo(() => ({ ...decisions, register }), [decisions, register]);
+  const value = useMemo(() => ({ ...decisions, register, reportDeleted }), [decisions, register, reportDeleted]);
   return <CheckDecisionsContext.Provider value={value}>{children}</CheckDecisionsContext.Provider>;
+}
+
+/** Reports a surface's deletes held for Undo, so a deleted block's "?" stops asking at once (Codex r1 on #618). */
+export function useReportDeletedBlocks(ids: ReadonlySet<string>) {
+  const report = useContext(CheckDecisionsContext)?.reportDeleted;
+  const [source] = useState(() => ({}));
+  useEffect(() => {
+    report?.(source, ids);
+  }, [ids, report, source]);
+  useEffect(() => () => report?.(source, new Set()), [report, source]);
+}
+
+/**
+ * The shared "?" decisions, when a provider owns them (the Grid answers a block's "?" through them, held for Undo,
+ * hidden everywhere and sent once; Codex r1 on #618); null without one.
+ */
+export function useSharedCheckDecisions() {
+  return useContext(CheckDecisionsContext);
 }
 
 const NO_SETTLE = () => undefined;
 /** Settles review items a receipt resolved another way (the Grid's answers and corrections), when a provider owns decisions. */
 export function useSettleResolved(): (reviewItemIds: readonly string[]) => void {
   return useContext(CheckDecisionsContext)?.settleResolved ?? NO_SETTLE;
+}
+
+const NO_REFRESH: (() => void) | undefined = undefined;
+/** The decisions owner's refresh for a receipt that lands after its dialog has gone (Codex r1 on #617), when there is one. */
+export function useRefreshAfterReceipt(): (() => void) | undefined {
+  return useContext(CheckDecisionsContext)?.refreshAfterReceipt ?? NO_REFRESH;
 }
 
 /** The open review items as the List shows them, for counts outside it; the items as given without a provider. */

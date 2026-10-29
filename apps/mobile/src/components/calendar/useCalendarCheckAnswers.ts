@@ -56,6 +56,33 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
   return { outings, folded };
 }
 
+/**
+ * The "?" still open as this phone has settled them (Codex r1 on #573, part 3b, #609, #610, #617): the data's open
+ * suggestions less those decided here and not yet synced, held for Undo or saving, waiting for a sheet's corrections
+ * (by id or by their place's segment), or resolved by an acknowledged correction (a Logs as, an outing's trips'
+ * included), with the outings they fold. The one projection the Calendar (List, Grid, badge) and Today's Earlier
+ * this week chips count from, so they never disagree while a refresh is out.
+ */
+export function settledCheckBase(reviewItems: readonly MobileReviewItem[], hidden: {
+  decided: ReadonlySet<string>; answering: ReadonlySet<string>; resolved: ReadonlySet<string>;
+  waitingIds: ReadonlySet<string>; waitingSegments: ReadonlySet<string>; syncStateIds: ReadonlySet<string>;
+  /**
+   * Whether a "?" still asks where it is answered (location v4 design §7): a block that ran into a trip asks only
+   * while its block, as this iPhone has it, still runs into the trip, and only when it can be put on its block
+   * (`clashAsksHere`). Absent: every open item asks.
+   */
+  stillAsks?: (item: MobileReviewItem) => boolean;
+}) {
+  // One filter for the List, the Grid, the badge, Today's chip and Earlier this week's chips (Codex r1 on #617, #618).
+  const open = reviewItems.filter((item) => isOpenReviewItem(item) && (hidden.stillAsks?.(item) ?? true) && !hidden.decided.has(item.id)
+    && !hidden.answering.has(item.id) && !hidden.resolved.has(item.id)
+    // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
+    // abandoned record never hides it (Codex r11 on #610).
+    && !hidden.waitingIds.has(item.id)
+    && !(typeof item.rawPayload?.clientSegmentId === "string" && hidden.waitingSegments.has(item.rawPayload.clientSegmentId)));
+  return { open, ...calendarCheckOutings(open, hidden.syncStateIds) };
+}
+
 /** Whether a "?" can be answered in the List: a complete window and no waiting or rejected change of its own. */
 export function calendarCheckAnswerable(item: MobileReviewItem, syncStateIds: ReadonlySet<string>) {
   return hasSuggestedTimeWindow(item) && !syncStateIds.has(item.id);

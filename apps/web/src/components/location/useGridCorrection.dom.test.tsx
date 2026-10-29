@@ -13,6 +13,8 @@ vi.mock("@/lib/client-auth-fetch", () => ({
 }));
 
 const { useGridCorrection } = await import("./useGridCorrection");
+const { CheckDecisionsProvider, useProjectedReviewItems } = await import("./ListChecks");
+const { askingChecks } = await import("@/lib/calendar-checks");
 
 // The Grid's place and trip dialogs (owner item A; Codex r1 on #609). Synthetic ids, made-up names.
 const at = (hour: number, minute = 0) => new Date(2026, 9, 27, hour, minute).toISOString();
@@ -136,6 +138,53 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands",
       clientCorrectionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("settles an outing's trips' \"?\" with its stay's from a Logs as receipt, before the one refresh brings their blocks (#612)", async () => {
+    const refresh = vi.fn(async () => undefined);
+    clientFetch.mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [WALK, STAY] } }), { status: 200 }));
+    // The Grid as the Calendar has it: the decisions owner's projection of the same items, the "?" counted from it.
+    function Projected({ items }: { items: ReviewItemRow[] }) {
+      const projected = useProjectedReviewItems(items);
+      return (
+        <>
+          <output data-testid="asking">{askingChecks(projected, TODAY).map((check) => check.id).join(",")}</output>
+          <output data-testid="open">{projected.filter((item) => item.status === "open").map((item) => item.id).join(",")}</output>
+          <Grid items={[...projected]} refresh={refresh} />
+        </>
+      );
+    }
+    const items = outing();
+    render(<CheckDecisionsProvider categories={[]} owner="w1:u1" refresh={refresh} reviewItems={items}><Projected items={items} /></CheckDecisionsProvider>);
+    expect(screen.getByTestId("asking").textContent).toBe(STAY);
+    expect(screen.getByTestId("open").textContent).toBe(`${STAY},${WALK}`);
+    fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
+    // The data still lists both open; the receipt settled both, so nothing asks, and the day was read once.
+    expect(screen.getByTestId("asking").textContent).toBe("");
+    expect(screen.getByTestId("open").textContent).toBe("");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the day once when a Logs as's receipt lands after its dialog closed (Codex r1 on #617)", async () => {
+    const refresh = vi.fn(async () => undefined);
+    let release!: () => void;
+    clientFetch.mockImplementation(() => new Promise<Response>((resolve) => {
+      release = () => resolve(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe"], resolvedReviewItemIds: ["q1"] } }), { status: 200 }));
+    }));
+    const view = render(<Grid refresh={refresh} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    // A refresh no longer lists the cafe: its dialog closes while the POST is out.
+    view.rerender(<Grid refresh={refresh} timelines={[timeline([])]} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => { release(); });
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   });
 
   it("asks nothing for a \"?\" more than 7 days old", () => {

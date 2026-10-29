@@ -1613,6 +1613,20 @@ describe("a block that ran into a trip in the Review outbox", () => {
     expect(await store.readPendingTimerTripClashEnds({ workspaceId: syntheticId(902), userId: syntheticId(901) })).toEqual([]);
   });
 
+  it("keeps the proposal and the block payload when a presentation read replaces the cached copy, so End it still queues (Codex r1 on #618)", async () => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.cacheReviewPresentation({ owner: { ...owner(data), backendId: "dayframe-staging" }, response: openPresentation(data, clash.id, HASH) });
+    const cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((item) => item.id === clash.id)!;
+    expect(cached.proposalHash).toBe(HASH);
+    expect(cached.rawPayload).toMatchObject(clash.rawPayload);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(155),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    expect(count("review_mutation_outbox")).toBe(1);
+    // A presentation copy of it carries the proposal too (a record recovered past the bootstrap's cap).
+    expect(store.mobileReviewItemFromPresentation({ ...openPresentation(data, clash.id, HASH).lookup.reviewItems[0] }).proposalHash).toBe(HASH);
+  });
+
   it("refuses End it for a proposal the iPhone no longer has", async () => {
     const { data, clash } = clashBootstrap();
     await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((item) => item.id === clash.id ? { ...item, proposalHash: "b".repeat(64) } : item) });

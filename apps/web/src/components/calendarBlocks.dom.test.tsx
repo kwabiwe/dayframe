@@ -381,7 +381,7 @@ describe("Calendar in Blocks", () => {
     const buttons = [...asked.querySelectorAll("button")].map((button) => button.textContent);
     expect(buttons).toEqual([`End it at ${new Date(local(10)).toTimeString().slice(0, 5)}`, "Keep it"]);
     await act(async () => { asked.querySelectorAll("button")[0].click(); });
-    expect(answer).toHaveBeenCalledWith(clash, true);
+    expect(answer).toHaveBeenCalledWith(clash, true, expect.stringMatching(/^Ended Deep work at /));
     await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).toBeNull());
   });
 
