@@ -1,4 +1,4 @@
-import { TIMER_TRIP_CLASH_EVENT_TYPE, TIMER_TRIP_CLASH_REVIEW_TYPE } from "@dayframe/shared";
+import { isTimerTripClashItem } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 export const REVIEW_COPY = {
@@ -39,15 +39,19 @@ export function isOpenReviewItem(item: Pick<MobileReviewItem, "status">) {
 }
 
 /**
- * Whether a Review item is one of the ordinary "?" (Calendar › List rows, Grid blocks, Today's ribbon, the badge,
- * the chips and the evening reminder). A timer that ran into a trip (`location_timer_trip_clash`) asks on its block
- * with its own End it / Keep it, which comes later (location v4 design §7), so until then no iPhone surface shows or
- * counts it as an ordinary question (step 15; the web does the same since #613).
+ * Whether a Review item asks on a block (location v4 design §7): "a block ran into your trip"
+ * (`location_timer_trip_clash`, by its Review type or its event's — the type is optional in an older bootstrap, and
+ * Review presentation records carry only the event's). It is one "?" like any other — counted by the badge, the
+ * List's "N to check", Today's chip and the evening reminder — but its dot and its question are on the block its
+ * payload names (`timeEntryId`), never a List row, a dashed Grid block or a hatched Today span of its own.
  */
-export function asksAsCheck(item: { type?: string | null; eventType?: string | null }) {
-  // By its Review type, or its event's (the type is optional in an older bootstrap, and Review presentation
-  // records carry only the event's).
-  return item.type !== TIMER_TRIP_CLASH_REVIEW_TYPE && item.eventType !== TIMER_TRIP_CLASH_EVENT_TYPE;
+export function asksOnItsBlock(item: { type?: string | null; eventType?: string | null }) {
+  return isTimerTripClashItem(item);
+}
+
+/** Whether a "?" is drawn as its own row or span (a List check row, a dashed Grid block, Today's hatched span). */
+export function drawsAsOwnCheck(item: { type?: string | null; eventType?: string | null }) {
+  return !asksOnItsBlock(item);
 }
 
 export function isOneOffLocationReviewItem(

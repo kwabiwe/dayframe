@@ -16,6 +16,8 @@ import {
   ReviewReconciliationResponseSchema,
   validReviewAcknowledgement,
   ReviewMutationSchema,
+  isTimerTripClashItem,
+  timerTripClashQuestion,
   type LocationReviewEvidenceDto,
   type ReviewPresentationSnapshot,
   type ReviewProposalPresentation,
@@ -1769,7 +1771,11 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
       // A learned name, offered in Location evidence's Name (Codex r1 on #481).
       ...(record.learnedName ? { nameSource: "learned" } : {})
     } : null,
-    createdAt: record.createdAt
+    createdAt: record.createdAt,
+    // "A block ran into your trip" (location v4 design §7): End it is sent with this proposal, so a presentation read
+    // replacing the cached copy keeps it (Codex r1 on #618). Its block payload is not in the record: the cache keeps
+    // the bootstrap's (same proposal), and a record known only from a presentation read never asks (clashStillAsksHere).
+    ...(isTimerTripClashItem(record) && record.status === "open" && record.proposalHash ? { proposalHash: record.proposalHash } : {})
   };
 }
 
@@ -2202,7 +2208,17 @@ export async function enqueueReviewMutation(input: {
     const expectedProposalHash = stored.mutation.action === "accept" || stored.mutation.action === "confirm"
       ? stored.mutation.expectedProposalHash
       : undefined;
-    if (expectedProposalHash) {
+    if (expectedProposalHash && isTimerTripClashItem(input.item)) {
+      // A block that ran into a trip is answered from the bootstrap's own copy (location v4 design §7): End it is
+      // sent with the proposal the block's sheet showed, which must still be the newest this iPhone has read.
+      const cachedClash = await transaction.getFirstAsync<{ snapshot_json: string }>(
+        "select snapshot_json from review_item_cache where account_key = ? and review_item_id = ?", key, input.item.id
+      );
+      const cachedHash = cachedClash ? (parseReviewSnapshot(cachedClash.snapshot_json)?.proposalHash ?? null) : null;
+      if (input.item.proposalHash !== expectedProposalHash || cachedHash !== expectedProposalHash) {
+        throw new Error("This question changed. Check it again.");
+      }
+    } else if (expectedProposalHash) {
       if (!input.presentation?.backendId) {
         throw new Error("Refresh Review before saving this confirmation.");
       }
@@ -2407,6 +2423,14 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         if(response.status===409&&responseBody?.code==="review_item_locked") await serialiseReviewMutation(()=>db.runAsync("update review_mutation_outbox set contention_count=contention_count+1 where client_mutation_id=? and account_key=?",row.client_mutation_id,account.account_key));
         if(reconcile) await attention("resolution_unknown",response.status);
         else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
+        continue;
+      }
+      // "A block ran into your trip" that changed before End it arrived (a correction moved the trip, the block was
+      // edited): nothing was saved, and the question stays to be asked again as the server has it now. The answer is
+      // let go (no Sync help issue) and the day is read again (location v4 design §7).
+      if(timerTripClashProposalChanged(response.status,responseBody,row)) {
+        await settleResolvedElsewhere(row,[],reviewResponseServerTime(response),isCurrent);
+        notifyTimerTripClashChanged(row.review_item_id);
         continue;
       }
       const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id),
@@ -2943,6 +2967,74 @@ function emitChange() {
   for (const listener of listeners) listener();
 }
 
+/** Whether a direct response refused a clash's End it because its question changed (409 `proposal_changed`). */
+export function timerTripClashProposalChanged(
+  status: number,
+  body: Record<string, unknown> | null,
+  row: Pick<MutationRow, "original_snapshot_json">
+) {
+  if (status !== 409 || body?.code !== "proposal_changed") return false;
+  try {
+    return isTimerTripClashItem(JSON.parse(row.original_snapshot_json) as MobileReviewItem);
+  } catch {
+    return false;
+  }
+}
+
+const clashChangedListeners = new Set<(reviewItemId: string) => void>();
+function notifyTimerTripClashChanged(reviewItemId: string) {
+  for (const listener of clashChangedListeners) listener(reviewItemId);
+}
+
+/** Called when a clash's End it was refused because its question changed: the day is then read again. */
+export function subscribeTimerTripClashChanged(listener: (reviewItemId: string) => void) {
+  clashChangedListeners.add(listener);
+  return () => {
+    clashChangedListeners.delete(listener);
+  };
+}
+
+/** An End it saved on this iPhone for a block that ran into a trip, and where it ends the block. */
+export type PendingTimerTripClashEnd = {
+  clientMutationId: string;
+  reviewItemId: string;
+  timeEntryId: string;
+  tripStartedAt: string;
+  acknowledged: boolean;
+  /** The acknowledgement says it stopped the running block. */
+  stoppedRunningTimer: boolean;
+};
+
+/**
+ * The account's End it answers still on this iPhone (location v4 design §7): waiting to be sent, or acknowledged and
+ * not yet retired. The Calendar shows their blocks ended at the trip's start until the server's own data does.
+ * Rejected ones (Sync help) are left out: their block is as the server has it.
+ */
+export async function readPendingTimerTripClashEnds(owner: { workspaceId: string; userId: string }): Promise<PendingTimerTripClashEnd[]> {
+  const db = await database();
+  const rows = await db.getAllAsync<{ client_mutation_id: string; review_item_id: string; original_snapshot_json: string; state: string;
+    acknowledgement_json: string | null }>(
+    `select client_mutation_id, review_item_id, original_snapshot_json, state, acknowledgement_json
+     from review_mutation_outbox
+     where account_key = ? and action_kind = 'accept' and state <> 'needs_attention'
+     order by created_at, client_mutation_id`,
+    accountKey(owner)
+  );
+  return rows.flatMap((row) => {
+    let question: ReturnType<typeof timerTripClashQuestion> = null;
+    try {
+      question = timerTripClashQuestion(JSON.parse(row.original_snapshot_json) as MobileReviewItem);
+    } catch {
+      question = null;
+    }
+    if (!question) return [];
+    const acknowledgement = row.acknowledgement_json ? parseAcknowledgement(row.acknowledgement_json) : null;
+    return [{ clientMutationId: row.client_mutation_id, reviewItemId: row.review_item_id, timeEntryId: question.timeEntryId,
+      tripStartedAt: question.tripStartedAt, acknowledged: row.state === "acknowledged",
+      stoppedRunningTimer: acknowledgement?.stoppedRunningTimer === true }];
+  });
+}
+
 function assertActionableReviewItem(item: MobileReviewItem) {
   if (!item.id || item.status !== "open") {
     throw new Error("This Review suggestion is no longer actionable.");
@@ -3008,7 +3100,14 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "nameSource",
     // One card per outing (PRD D19): an opaque outing id and the card's part in it.
     OUTING_KEY_PAYLOAD_KEY,
-    OUTING_ROLE_PAYLOAD_KEY
+    OUTING_ROLE_PAYLOAD_KEY,
+    // "A block ran into your trip" (location v4 design §7): the block it asks on and the trip's times (no
+    // coordinates), so a cached bootstrap still puts its "?" on its block.
+    "timeEntryId",
+    "tripId",
+    "tripStartedAt",
+    "tripStoppedAt",
+    "overlapSeconds"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

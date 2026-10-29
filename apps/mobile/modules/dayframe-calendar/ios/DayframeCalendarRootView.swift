@@ -636,7 +636,7 @@ private struct DayframeCalendarEntriesLayer: View {
           )
           .zIndex(Double(laidOut.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
-          .accessibilityHint(entry.isReview ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
+          .accessibilityHint(entry.isReview || entry.asking ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
         }
       }
@@ -756,7 +756,8 @@ private struct DayframeCalendarBlockView: View {
       }
     }
     .overlay(alignment: .topTrailing) {
-      if entry.isReview {
+      // A suggestion's dot, or a block's own "?" (location v4 design §7): the same amber dot.
+      if entry.isReview || entry.asking {
         Circle().fill(Color(dayframeCSS: theme.warning)).frame(width: 9, height: 9)
           .overlay(Circle().stroke(Color(dayframeCSS: theme.surface), lineWidth: 2))
           .padding(4)

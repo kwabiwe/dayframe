@@ -239,6 +239,11 @@ export type MobileReviewItem = {
   createdAt: string;
   /** Needs-review entries created from this suggestion (newer servers only). */
   linkedEntryIds?: string[];
+  /**
+   * "A block ran into your trip" only (location v4 design §7; newer servers): the proposal End it is sent with
+   * (`expectedProposalHash`).
+   */
+  proposalHash?: string;
 };
 
 /**

@@ -55,6 +55,9 @@ struct DayframeCalendarEntryRecord: Codable {
   /// never as a block. Absent from an older bundle (a block, as before).
   var isMoment: Bool?
   var isReview = false
+  /// Location v4 design §7: the block has a "?" of its own (a block that ran into a trip): the amber dot.
+  /// Absent from an older bundle (no dot).
+  var asking: Bool?
   var isUncategorized = false
   var laneCount = 1
   var laneIndex = 0

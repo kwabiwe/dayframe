@@ -61,6 +61,7 @@ type ListItem =
   | { kind: "location"; key: string; atMs: number; row: LocationListRow };
 
 export function CalendarListView({
+  blockChecks,
   checkGlyphs,
   checkKinds,
   checkQuestions,
@@ -95,6 +96,11 @@ export function CalendarListView({
 }: {
   /** Open suggestions ("?"), each on the row it is about (location v4 step 14, iPhone part 3a). */
   checks?: readonly ListCheck[];
+  /**
+   * The "?" asked on a block (location v4 design §7, "a block ran into your trip"), by block id: never a row of its
+   * own; the block's row has the dot (`entry.asking`) and opens the block's sheet with the question at its top.
+   */
+  blockChecks?: ReadonlyMap<string, string>;
   /**
    * What each "?" is about, from the suggestion itself (Codex r2 on #610): Apple Health's ("health") and one about
    * nothing the List can open ("none": a legacy location suggestion without a segment) ask under their row; a
@@ -184,6 +190,10 @@ export function CalendarListView({
   const [openLegs, setOpenLegs] = useState<ReadonlySet<string>>(() => new Set());
   // The day's blocks (Review suggestions stay on the Grid and Review for now).
   const blocks = useMemo(() => entries.filter((entry) => !entry.isReview), [entries]);
+  // A "?" asked on its block (location v4 design §7) is never a row of its own: its dot is on the block's row.
+  const blockCheckIds = useMemo(() => new Set(blockChecks ? [...blockChecks.values()] : []), [blockChecks]);
+  const rowChecks = useMemo(() => checks.filter((check) => !blockCheckIds.has(check.id) && checkKinds?.get(check.id) !== "block"),
+    [blockCheckIds, checkKinds, checks]);
   const trips = useMemo(() => tripsByBlockId(timeline), [timeline]);
   const items = useMemo<ListItem[]>(() => {
     const intervals = blocks.map((entry) => ({
@@ -191,15 +201,15 @@ export function CalendarListView({
       stoppedAt: entry.stoppedAtMs == null ? null : new Date(entry.stoppedAtMs).toISOString()
     }));
     // Without the day's places (not read yet, or the read failed), its checks still show on rows of their own.
-    const day = timeline ?? (checks.length ? emptyTimeline(dayStartMs, dayEndMs) : null);
+    const day = timeline ?? (rowChecks.length ? emptyTimeline(dayStartMs, dayEndMs) : null);
     // A place your blocks cover is never a row (owner, 28 Oct 2026, concern 2).
-    const rows = locationListRows(day, intervals, { nowMs, showAll, checks, hideCovered: true });
+    const rows = locationListRows(day, intervals, { nowMs, showAll, checks: rowChecks, hideCovered: true });
     // Oldest first, as the mock-up's day reads.
     return [
       ...blocks.map((entry): ListItem => ({ kind: "block", key: `block-${entry.entryId}`, atMs: entry.startedAtMs, entry })),
       ...rows.map((row): ListItem => ({ kind: "location", key: row.key, atMs: row.atMs, row }))
     ].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
-  }, [blocks, checks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
+  }, [blocks, rowChecks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
   // What each "?" is about comes from the caller (`checkKinds`, from the suggestion itself; Codex r2 on #610): Apple
@@ -213,8 +223,14 @@ export function CalendarListView({
   const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
   const segmentOf = new Map(checks.map((check) => [check.id, check.segmentId] as const));
   const kindOf = (id: string) => checkKinds?.get(id) ?? (segmentOf.get(id) ? "place" : "none");
+  const askingIds = new Set(checks.map((check) => check.id));
   const checkRows = items.flatMap((item) => {
-    if (item.kind !== "location") return [];
+    if (item.kind === "block") {
+      // A block's own "?": its row opens the block's sheet, the question at its top (location v4 design §7).
+      const id = blockChecks?.get(item.entry.entryId);
+      if (!id || !askingIds.has(id) || !item.entry.asking) return [];
+      return [{ key: item.key, id, inline: false, known: true, fallback: false, open: () => onOpenEntry(item.entry) }];
+    }
     const id = checkIdOf(item.row);
     if (!id) return [];
     const sheetless = kindOf(id) === "health" || kindOf(id) === "none";
@@ -462,8 +478,14 @@ export function CalendarListView({
             const trip = trips.get(item.entry.entryId);
             const open = openLegs.has(item.entry.entryId);
             return (
-              <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)}>
-                <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => onOpenEntry(item.entry)}
+              <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
+                ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}>
+                <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => {
+                  // A block with its own "?": "N to check" moves on from it.
+                  const asked = blockChecks?.get(item.entry.entryId);
+                  if (asked && item.entry.asking) lastOpenedCheckId.current = asked;
+                  onOpenEntry(item.entry);
+                }}
                   onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} time={time} />
                 {trip && open ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
@@ -508,7 +530,7 @@ export function CalendarListView({
 }
 
 /** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet. */
-export type CalendarCheckKind = "health" | "place" | "trip" | "none";
+export type CalendarCheckKind = "health" | "place" | "trip" | "block" | "none";
 
 /** How a place's or a trip's "?" opens its sheet: the place's sheet, the trip's (the caller routes it), or its screen. */
 function sheetOpener(row: LocationListRow, checkId: string, { checkQuestions, onOpenCheck, onOpenPlace, onOpenTripLeg }: {
@@ -552,7 +574,7 @@ function BlockRow({ entry, legs, legsOpen, nowMs, onOpen, onToggleLegs, route, t
   const detail = firstDetail && firstDetail.text.trim().toLowerCase() === entry.title.trim().toLowerCase() ? undefined : firstDetail;
   return (
     <View style={styles.row}>
-      <Pressable accessibilityHint="Opens the block" accessibilityLabel={[entry.accessibilityLabel, legs?.length ? modesLabel(legs, route) : null].filter(Boolean).join(". ")}
+      <Pressable accessibilityHint={entry.asking ? "Opens the block with its question" : "Opens the block"} accessibilityLabel={[entry.accessibilityLabel, legs?.length ? modesLabel(legs, route) : null].filter(Boolean).join(". ")}
         accessibilityRole="button" onPress={onOpen}
         style={({ pressed }) => [styles.rowMain, styles.blockRow, { opacity: pressed ? 0.7 : 1 }]}>
         {entry.isReview ? (
@@ -562,6 +584,8 @@ function BlockRow({ entry, legs, legsOpen, nowMs, onOpen, onToggleLegs, route, t
         ) : (
           <View style={[styles.blockMark, { height: markHeight, backgroundColor: entry.color }]}>
             <DayframeIcon color={entry.textColor} glyph={entry.glyph as DayframeGlyph} size={16} />
+            {/* Location v4 design §7: a block with a "?" of its own (it ran into a trip) has the one amber dot. */}
+            {entry.asking ? <View style={[styles.dot, { backgroundColor: theme.warning, borderColor: theme.surface }]} testID="calendar-list-block-asking" /> : null}
           </View>
         )}
         <View style={styles.text}>

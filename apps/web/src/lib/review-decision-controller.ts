@@ -56,6 +56,12 @@ export type ReviewDecisionState = {
 /** "gone": decided elsewhere; hidden until the data drops it, but not this visit's decision. */
 type Active = { decision: ReviewDecision; status: "saving" | "saved" | "gone" };
 
+/** What a decision's label is about: "Logged Lunch" → "Lunch"; "Ended Team sync at 09:42" → "Team sync". */
+function decisionSubject(label: string) {
+  if (/^Ended /.test(label)) return label.replace(/^Ended /, "").replace(/ at [^ ]+( [AP]M)?$/, "");
+  return label.replace(/^(Logged|Skipped|Kept) /, "");
+}
+
 export class ReviewDecisionController {
   private active = new Map<number, Active>();
   private error: string | null = null;
@@ -212,7 +218,7 @@ export class ReviewDecisionController {
           this.active.set(decision.token, { decision, status: "gone" });
         } else {
           this.active.delete(decision.token);
-          this.error = `“${decision.label.replace(/^(Logged|Skipped) /, "")}” changed, so it was not saved. Review it again.`;
+          this.error = `“${decisionSubject(decision.label)}” changed, so it was not saved. Review it again.`;
           this.markRestored(decision.itemId);
         }
         this.emit();

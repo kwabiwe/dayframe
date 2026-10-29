@@ -237,7 +237,20 @@ describe("native Calendar presentation boundary", () => {
       expect(state.model.entries.map((item) => item.entryId)).toEqual(["entry-own"]);
     });
 
-    it("never draws a timer that ran into a trip as a dashed \"?\", given to the Grid or not (step 15)", () => {
+    it("puts a block's own \"?\" on the block (the dot and \", Needs a look\"), never on another block (location v4 design §7)", () => {
+      const data = bootstrap([entry({ id: "team-sync" }), entry({ id: "other", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 11, 30)) })]);
+      const state = buildNativeCalendarBridgeState({ data, now, reduceMotion: false, reduceTransparency: false, refreshing: false,
+        askingEntryIds: new Set(["team-sync"]), selectedDayKey: "2026-07-10", theme: darkTheme(), transitionDirection: 1 });
+      const asking = state.model.entries.find((item) => item.entryId === "team-sync")!;
+      const other = state.model.entries.find((item) => item.entryId === "other")!;
+      expect(asking.asking).toBe(true);
+      expect(asking.accessibilityLabel.endsWith(", Needs a look")).toBe(true);
+      expect(asking.actionKind).toBe("completed");
+      expect(other.asking).toBeUndefined();
+      expect(other.accessibilityLabel).not.toContain("Needs a look");
+    });
+
+    it("never draws a block that ran into a trip as a dashed \"?\", given to the Grid or not", () => {
       const clash = { ...suggestion("clash", 9, 0, 60), type: "location_timer_trip_clash", eventType: "timer_trip_clash" };
       const byEvent = { ...suggestion("clash-event", 11, 0, 30), eventType: "timer_trip_clash" };
       const data = bootstrap([], { reviewItems: [clash, byEvent, suggestion("asking", 13, 0, 60)] });

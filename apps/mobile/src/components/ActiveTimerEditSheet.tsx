@@ -126,6 +126,7 @@ import {
   type TimeEntrySheetTagSessionEvent
 } from "@/lib/timeEntrySheetTagSession";
 import { formatLocaleDate } from "../lib/localeDateFormat";
+import { BlockQuestionCard, type BlockQuestion } from "@/components/calendar/BlockQuestionCard";
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
@@ -170,6 +171,11 @@ type ActiveTimerEditSheetProps = {
   onStartAgain?: (values: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames">) => void;
   onStop?: () => Promise<boolean>;
   presentation: TimeEntrySheetPresentation;
+  /**
+   * The block's own "?" (location v4 design §7, "a block ran into your trip"), asked at the top of its sheet in
+   * compact pills. Absent for every other block.
+   */
+  question?: BlockQuestion | null;
   reduceMotion: boolean;
   mode?: EditSheetMode;
   deleting?: boolean;
@@ -202,6 +208,7 @@ export function ActiveTimerEditSheet({
   onStop,
   presentation,
   previousEnd = null,
+  question = null,
   reduceMotion,
   deleting = false,
   saving,
@@ -2612,6 +2619,12 @@ export function ActiveTimerEditSheet({
                   title={headTitle}
                 />
               </Pressable>
+              {question ? (
+                // Unsaved edits first (Codex r1 on #618): the answers wait, and a tap asks to discard them, so an answer
+                // never closes the sheet over a draft.
+                <BlockQuestionCard locked={draftHasUnsavedChanges} onLocked={presentDiscardConfirmation} question={question}
+                  reduceMotion={reduceMotion} theme={theme} />
+              ) : null}
 
               <Pressable
                 accessible={false}

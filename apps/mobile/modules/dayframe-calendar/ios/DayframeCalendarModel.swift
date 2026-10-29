@@ -80,6 +80,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let isActive: Bool
   let isMoment: Bool
   let isReview: Bool
+  let asking: Bool
   let isUncategorized: Bool
   let laneCount: Int
   let laneIndex: Int
@@ -122,6 +123,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     isActive = record.isActive
     isMoment = record.isMoment ?? false
     isReview = record.isReview
+    asking = record.asking ?? false
     isUncategorized = record.isUncategorized
     laneCount = max(1, record.laneCount)
     laneIndex = max(0, record.laneIndex)

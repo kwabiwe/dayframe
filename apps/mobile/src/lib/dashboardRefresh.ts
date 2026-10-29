@@ -32,6 +32,11 @@ export async function reconcileDashboardRefreshCandidate<Snapshot>(input: {
   guard: DashboardRefreshGuard;
   reconcile: (candidate: Snapshot) => Promise<Snapshot>;
   timerMutationsInFlight: () => number;
+  /**
+   * Told once, only when the guard accepted the reconciled candidate (it is about to be published): what settles
+   * against applied server data waits for this, never for a read the guard discards (Codex r3 on #618).
+   */
+  onApplied?: (candidate: Snapshot) => void;
 }): Promise<
   | { action: "apply"; candidate: Snapshot }
   | { action: "refresh" }
@@ -39,6 +44,7 @@ export async function reconcileDashboardRefreshCandidate<Snapshot>(input: {
   if (!guardAllowsRefresh(input.guard, input)) return { action: "refresh" };
   const candidate = await input.reconcile(input.candidate);
   if (!guardAllowsRefresh(input.guard, input)) return { action: "refresh" };
+  input.onApplied?.(candidate);
   return { action: "apply", candidate };
 }
 

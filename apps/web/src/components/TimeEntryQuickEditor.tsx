@@ -51,8 +51,19 @@ export type TimeEntryQuickEditorMutationOutcome = { ok: true } | { ok: false; er
 
 type TimeEntryQuickEditorBusyAction = "delete" | "duplicate" | "save" | "split" | "start";
 
+/**
+ * A question the block asks at the top of its editor (a block that ran into a trip, location v4 design §7): one Yes
+ * ("End it at 09:42") and "Keep it", compact pills. `onAnswer` holds the answer for Undo (void) or saves it at once and
+ * resolves with why it was not saved (null: saved).
+ */
+export type TimeEntryQuickEditorQuestion = {
+  text: string; yesLabel: string | null; noLabel: string;
+  onAnswer: (yes: boolean) => void | Promise<string | null>;
+};
+
 type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
+  question?: TimeEntryQuickEditorQuestion | null;
   categories: CategoryRow[];
   isTimerBusy: boolean;
   onCreateCategory?: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
@@ -918,6 +929,11 @@ export function TimeEntryQuickEditorPanel({
         </div>
       </div>
 
+      {props.question && props.mode === "entry" ? (
+        <BlockQuestionCard disabled={controlsDisabled} hasUnsavedChanges={controller.hasUnsavedChanges} question={props.question}
+          onAnswered={() => props.onDismiss({ restoreFocus: true })} />
+      ) : null}
+
       {/* The split row's single transition owner: rows 0fr ↔ 1fr with opacity, entering from closed
           (@starting-style) and kept until its close has finished, so the fields below move, not jump. */}
       {splitShownAtMs != null && controller.splitBounds ? (
@@ -1163,6 +1179,51 @@ export function TimeEntryQuickEditorPanel({
         surfaceClassName="time-entry-quick-editor-nested-surface"
         title="Discard unsaved changes?"
       />
+    </div>
+  );
+}
+
+/**
+ * The block's question at the top of its editor (design §7), in the owner's compact pills (one Yes only, 44 px
+ * targets). It enters with the editor (the editor owns the motion; nothing of its own moves, so Reduce Motion needs no
+ * other path). An answer closes the editor; one saved at once keeps the editor and says why when it was refused. With
+ * unsaved changes it waits, so an answer never drops an edit.
+ */
+function BlockQuestionCard({ disabled, hasUnsavedChanges, onAnswered, question }: {
+  disabled: boolean; hasUnsavedChanges: boolean; onAnswered: () => void; question: TimeEntryQuickEditorQuestion;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const off = disabled || busy || hasUnsavedChanges;
+  async function answer(yes: boolean) {
+    const result = question.onAnswer(yes);
+    if (result) {
+      setBusy(true);
+      setError(null);
+      const failure = await result;
+      if (!alive.current) return;
+      setBusy(false);
+      if (failure) {
+        setError(failure);
+        return;
+      }
+    }
+    onAnswered();
+  }
+  return (
+    <div className="location-correction-question calendar-compact-question" role="group" aria-label={`${question.text}, Needs a look`}
+      aria-busy={busy || undefined}>
+      <b>{question.text}</b>
+      {hasUnsavedChanges ? <small>Save or discard your changes to answer.</small> : null}
+      <div className="location-correction-question-answers">
+        {question.yesLabel ? (
+          <button className="ui-button timeline-check-log is-compact" disabled={off} onClick={() => void answer(true)} type="button">{question.yesLabel}</button>
+        ) : null}
+        <button className="ui-button ui-button-secondary is-compact" disabled={off} onClick={() => void answer(false)} type="button">{question.noLabel}</button>
+      </div>
+      {error ? <p className="calendar-compact-question-error" role="alert">{error}</p> : null}
     </div>
   );
 }

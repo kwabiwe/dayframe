@@ -1021,6 +1021,23 @@ final class DayframeCalendarCoreTests: XCTestCase {
     )
   }
 
+  func testBlockAskingDecodesTolerantly() throws {
+    // Location v4 design §7: a block's own "?" (the amber dot). An older model has no key: no dot.
+    let entry = """
+      {"actionId":"e1","actionKind":"completed","accessibilityLabel":"Open time block: Team sync, Needs a look",
+       "color":"#FF6248","continuesIntoNextDay":false,"entryId":"e1","isActive":false,"isReview":false,
+       "isUncategorized":false,"laneCount":1,"laneIndex":0,"layoutMode":"full","meta":"","offsetFraction":0,
+       "overlapCount":0,"overlapSeconds":0,"startedAtMs":1000,"startsBeforeDay":false,"stoppedAtMs":2000,
+       "textColor":"#0B1020","textDensity":"full","title":"Team sync","warningOverlapCount":0,"widthFraction":1,"zIndex":0%@}
+      """
+    let asking = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000,
+      entriesJSON: "[\(entry.replacingOccurrences(of: "%@", with: ",\"asking\":true"))]")
+    let older = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000,
+      entriesJSON: "[\(entry.replacingOccurrences(of: "%@", with: ""))]")
+    XCTAssertEqual(asking.entries.first?.asking, true)
+    XCTAssertNil(older.entries.first?.asking)
+  }
+
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {
     let initial = try decodePresentation(
       selectedDayKey: "2026-07-19",
