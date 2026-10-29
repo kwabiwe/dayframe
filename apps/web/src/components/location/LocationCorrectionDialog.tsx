@@ -231,6 +231,8 @@ export function LocationCorrectionDialog({
     return onCorrected();
   };
   const [logAs, setLogAs] = useState<string | null>(null);
+  // The Logs as chips, so "Don't log" (which goes as it clears the pick) hands focus to the chip it cleared (Codex r5 on #620).
+  const logAsChips = useRef(new Map<string, HTMLButtonElement>());
   // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
   // dialog that is gone (Codex r1 on #609).
   const alive = useRef(true);
@@ -645,6 +647,7 @@ export function LocationCorrectionDialog({
             <div aria-labelledby="location-correction-logs-as" className="df-rchips location-correction-logs-as" role="radiogroup">
               {logActivities.map((activity) => (
                 <button aria-checked={logAs === activity.id} className={`df-rchip${logAs === activity.id ? " is-checked" : ""}`}
+                  ref={(element) => { if (element) logAsChips.current.set(activity.id, element); else logAsChips.current.delete(activity.id); }}
                   disabled={busy} key={activity.id} onClick={() => setLogAs(logAs === activity.id ? null : activity.id)} role="radio"
                   style={blockStyle(activity.color ?? null, activity.name)} type="button">
                   <ActivityChipFace activity={{ color: activity.color ?? activity.id, icon: activity.icon ?? null, name: activity.name }} checked={logAs === activity.id} />
@@ -654,7 +657,11 @@ export function LocationCorrectionDialog({
             <div className="location-correction-log-foot">
               <p className="location-correction-hint">{logAs ? "Fills only the time your own blocks don’t cover." : "Not logged. Pick one to fill the time your blocks don’t cover."}</p>
               {logAs ? (
-                <button className="location-correction-more" disabled={busy} onClick={() => setLogAs(null)} type="button">Don&apos;t log</button>
+                <button className="location-correction-more" disabled={busy} onClick={() => {
+                  const cleared = logAs;
+                  setLogAs(null);
+                  if (cleared) logAsChips.current.get(cleared)?.focus();
+                }} type="button">Don&apos;t log</button>
               ) : null}
             </div>
           </div>

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
 
 // The place sheet's Nearby and search (native Apple Maps search) is not part of these tests.
-vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: () => null }));
+vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: "SheetNearbySearch" }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -681,10 +681,29 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onLog).not.toHaveBeenCalled();
   });
 
-  it("offers no guess for an outing's stay, which can't keep one (Codex r2 on #620)", () => {
-    const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
-    const tree = sheetWith({ question: { ...ask, guess: venue, outing: true } });
-    expect(JSON.stringify(tree.root.findByProps({ testID: "location-correction-question" }).props.children)).not.toContain("Visited");
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-edit")).toHaveLength(0);
+  it("applies the sheet's own Nearby guess only to an unnamed visit, never over a name or to an outing (Codex r2, r5 on #620)", async () => {
+    const { nearbyProposalKey } = await import("../../lib/nearbyProposal");
+    const evidence = { segment: { kind: "stay", startedAt: place.startedAt, stoppedAt: place.stoppedAt, evidenceCount: 3 }, evidenceExpired: false,
+      map: { acceptedSamples: [], centre: { type: "Point", coordinates: [20, 10] }, nearbySavedPlaces: [], gaps: [] } } as never;
+    const venue = { name: "Apple Bakery", street: null, applePlaceId: "IAPPLE" };
+    const nearbyGuesses = (tree: ReturnType<typeof create>) => {
+      const nearby = tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
+      act(() => { nearby.props.onGuess(venue, nearbyProposalKey(nearby.props.centre, evidence)); });
+    };
+    const questionText = (tree: ReturnType<typeof create>) => JSON.stringify(tree.root.findByProps({ testID: "location-correction-question" }).props.children);
+    // A question already titled with a learned or saved name keeps it.
+    const named = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined),
+      question: { text: "Visited Bread run?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn(), guessable: false } });
+    nearbyGuesses(named);
+    expect(questionText(named)).toContain("Visited Bread run?");
+    expect(questionText(named)).not.toContain("Apple Bakery");
+    // An outing's stay (not guessable either): no guess.
+    const outing = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: false } });
+    nearbyGuesses(outing);
+    expect(questionText(outing)).not.toContain("Visited");
+    // An unnamed visit takes it.
+    const unnamed = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: true } });
+    nearbyGuesses(unnamed);
+    expect(questionText(unnamed)).toContain("Visited Apple Bakery?");
   });
 });

@@ -241,6 +241,22 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(onAnswer).toHaveBeenLastCalledWith(false);
   });
 
+  it("hands focus to the cleared activity chip when Don't log takes the pick away (Codex r5 on #620)", () => {
+    render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands", color: "teal" }]} clock="24h" onClose={vi.fn()}
+      onCorrected={vi.fn()} places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    const chip = screen.getByRole("radio", { name: "Errands" });
+    chip.focus();
+    fireEvent.click(chip);
+    const dontLog = screen.getByRole("button", { name: "Don't log" });
+    // Reached by keyboard and pressed: it goes, and focus lands on the chip it cleared, never on the page.
+    dontLog.focus();
+    expect(document.activeElement).toBe(dontLog);
+    fireEvent.click(dontLog);
+    expect(screen.queryByRole("button", { name: "Don't log" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Errands" }));
+    expect(screen.getByRole("radio", { name: "Errands" }).getAttribute("aria-checked")).toBe("false");
+  });
+
   it("logs a place with no \"?\" as an activity through log_place", async () => {
     const onClose = vi.fn();
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}

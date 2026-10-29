@@ -263,7 +263,7 @@ import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import { firstCheckReachingDay } from "@/lib/reviewLinks";
-import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
+import { useCheckVenueGuess, venueGuessEligible } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -2190,8 +2190,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
         // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
         guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
-        // An outing's stay keeps no venue (`confirm_outing`): the sheet offers no guess for it (Codex r2 on #620).
-        outing: calendarCheckBase.outings.has(check.id),
+        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule: never an outing's stay (it keeps
+        // no venue, Codex r2) nor a question already titled with a name (Codex r5 on #620).
+        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null,
+          calendarCheckBase.outings.has(check.id)),
         onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
           logAsCategoryId ? { logAsCategoryId } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone

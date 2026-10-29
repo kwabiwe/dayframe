@@ -128,10 +128,11 @@ export function LocationCorrectionSheet({
      */
     guess?: ReviewAnswerVenue | null;
     /**
-     * The stay is an outing's (with trips there and back): its answer can't keep a venue (`confirm_outing`), so no
-     * guess is offered for it, as the Calendar's own guess skips outings (Codex r2 on #620).
+     * Whether the sheet's own Nearby list may guess for this "?" (`venueGuessEligible`, Calendar's one rule; Codex r5 on
+     * #620): only an unnamed visit with its whole window, never an outing's stay (its `confirm_outing` keeps no venue,
+     * Codex r2) and never a question already titled with a name ("Visited Bread run?"), whose name is kept.
      */
-    outing?: boolean;
+    guessable?: boolean;
     /**
      * Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays.
      * `venue`: Yes to a guess, recorded there once (`record_poi_once`); `logAsCategoryId`: the activity picked under
@@ -447,8 +448,8 @@ export function LocationCorrectionSheet({
     && Date.parse(evidence.segment.startedAt) === Date.parse(target.place.startedAt)
     && Date.parse(evidence.segment.stoppedAt ?? "") === Date.parse(target.place.stoppedAt ?? "") ? nearbyGuess.venue : null;
   // The near guess the "?" asks about (PRD D23): only for a place whose "?" can be answered here, until Edit.
-  const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null && !question.outing
-    ? question.guess ?? nearbyGuessNow : null;
+  const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null
+    ? question.guess ?? (question.guessable ? nearbyGuessNow : null) : null;
   // "Save this place", asked under Nearby after a pick or in place in the corrections.
   const saveForm = (
     <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}

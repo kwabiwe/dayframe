@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { visitedGuess } from "@dayframe/shared";
 import type { MobileReviewItem } from "../../lib/api";
 import { useAppForeground } from "../../lib/appForeground";
 import { revalidateLocationReviewEvidence } from "../../lib/locationReviewEvidenceCache";
@@ -8,8 +7,8 @@ import {
   NearbyPointOfInterestController,
   venueStayFromEvidence
 } from "../../lib/placeSearch";
-import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "../../lib/review";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
+import { venueGuessEligible } from "../../lib/venueGuessEligibility";
 
 /**
  * Card B part 2 (owner feedback, 25 Oct 2026): the best guess for an unnamed visit's "?" when it opens in
@@ -57,11 +56,8 @@ export function streetOf(subtitle: string | null | undefined) {
   return street ? street : null;
 }
 
-/** Whether a question can take a guess from Apple Maps: an unnamed visit with its whole window, not an outing. */
-export function venueGuessEligible(item: MobileReviewItem | null | undefined, outing: boolean) {
-  return Boolean(item && !outing && isLocationReviewItem(item) && hasV2LocationEvidence(item) &&
-    item.eventType !== "commute_detected" && hasSuggestedTimeWindow(item) && visitedGuess(item.title) == null);
-}
+// The one eligibility rule, shared with the place sheet (Codex r5 on #620).
+export { venueGuessEligible };
 
 /**
  * `release` stops the search at once and holds it until the Calendar is back on screen: the editor's Nearby
