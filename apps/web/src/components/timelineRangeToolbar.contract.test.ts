@@ -189,7 +189,7 @@ describe("Calendar range and toolbar contract", () => {
   });
 
   it("uses one outer Timeline surface and direct per-view scrollers without duplicate titles", () => {
-    expect(shell).toContain('<PersistentTimerBar workspaceMode={isTimeline} />');
+    expect(shell).toContain('<PersistentTimerBar onToday={pathname === "/"} workspaceMode={isTimeline} />');
     expect(shell).toContain('className="swiss-timeline-surface"');
     expect(timeline).not.toContain('className="timeline-view-title-row"');
     expect(entries).not.toContain('className="timeline-view-title-row"');

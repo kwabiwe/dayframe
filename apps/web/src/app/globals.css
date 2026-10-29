@@ -7855,15 +7855,15 @@ dialog.ui-dialog.df-range-custom {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   grid-template-areas: "activity description time action secondary";
   align-items: center;
-  gap: 10px;
-  border-radius: 22px;
-  padding: 8px;
+  gap: 8px;
+  border-radius: 16px;
+  padding: 6px;
   background: var(--surface);
   box-shadow: var(--shadow-soft), inset 0 0 0 1px var(--border);
 }
 
 .df-cmd.is-live {
-  box-shadow: var(--shadow-soft), inset 0 0 0 2px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
+  box-shadow: var(--shadow-soft), inset 0 0 0 1.5px color-mix(in oklab, var(--block, var(--text-muted)) 60%, transparent);
 }
 
 .df-cmd-activity-field {
@@ -7872,11 +7872,11 @@ dialog.ui-dialog.df-range-custom {
 
 .df-cmd-activity {
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: var(--web-control-height);
+  height: var(--web-control-height);
   place-items: center;
   border: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface-inset);
   color: var(--text-secondary);
 }
@@ -7893,22 +7893,23 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .df-cmd-field .inline-tag-input-anchor {
-  min-height: 48px;
+  min-height: var(--web-control-height);
   border-color: transparent;
-  border-radius: 14px;
+  border-radius: 10px;
   background: transparent;
+  box-sizing: border-box;
 }
 
 .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
-  min-height: 44px;
+  min-height: calc(var(--web-control-height) - 2px);
   padding: 0 40px 0 6px;
-  font-size: 17px;
-  font-weight: var(--fw-medium);
+  font-size: 15px;
+  font-weight: var(--fw-regular);
 }
 
 .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input::placeholder {
   color: var(--text-muted);
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-regular);
 }
 
 .df-cmd-tags {
@@ -7924,16 +7925,16 @@ dialog.ui-dialog.df-range-custom {
   display: grid;
   justify-items: end;
   border: 0;
-  border-radius: 12px;
-  padding: 2px 8px;
+  border-radius: 10px;
+  padding: 0 8px;
   background: transparent;
   color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 30px;
-  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  line-height: 1.05;
+  letter-spacing: -0.01em;
+  line-height: 1;
 }
 
 button.df-cmd-clock:hover {
@@ -7945,8 +7946,9 @@ button.df-cmd-clock:hover {
   font-family: inherit;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   font-size: 11px;
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-regular);
   letter-spacing: 0;
+  line-height: 1.1;
 }
 
 .df-cmd-clock.is-idle {
@@ -8027,16 +8029,16 @@ button.df-cmd-clock:hover {
 
 .df-cmd-go {
   display: inline-flex;
-  height: 48px;
+  height: var(--web-control-height);
   grid-area: action;
   align-items: center;
   gap: 8px;
   border: 0;
   border-radius: 999px;
-  padding: 0 18px 0 16px;
+  padding: 0 14px 0 12px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: var(--fw-strong);
   white-space: nowrap;
 }
@@ -8066,7 +8068,7 @@ button.df-cmd-clock:hover {
 }
 
 .df-cmd-go.is-stop {
-  width: 48px;
+  width: var(--web-control-height);
   justify-content: center;
   padding: 0;
 }
@@ -8093,8 +8095,10 @@ button.df-cmd-clock:hover {
 }
 
 .df-cmd-icon.ui-icon-button {
-  width: 44px;
-  height: 44px;
+  min-width: var(--web-control-height);
+  min-height: var(--web-control-height);
+  width: var(--web-control-height);
+  height: var(--web-control-height);
   border-radius: 50%;
 }
 
@@ -8134,48 +8138,105 @@ button.df-cmd-clock:hover {
 .df-quick {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .df-quick-button {
   display: inline-flex;
-  min-height: 36px;
+  min-height: 28px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 0;
-  border-radius: 12px;
-  padding: 0 8px 0 12px;
+  border-radius: 8px;
+  padding: 0 10px 0 4px;
   font-size: 13px;
-  font-weight: var(--fw-strong);
-  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  font-weight: var(--fw-medium);
+  transition: background-color 140ms ease-out, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
 }
 
 .df-quick-button:hover {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
+  background: color-mix(in oklab, var(--block) 18%, var(--surface-muted));
 }
 
 .df-quick-button:active {
   transform: scale(0.95);
 }
 
-.df-quick-button.is-recording {
-  box-shadow: inset 0 0 0 2px var(--on-block);
+/* Recording: the activity's tint behind a ring in the text colour, visible on every activity
+   colour in both themes (Codex r1 on #629). */
+.df-quick-button.df-block.is-recording {
+  background: color-mix(in oklab, var(--block) 22%, var(--surface-muted));
+  box-shadow: inset 0 0 0 1.5px var(--text-primary);
 }
 
+/* The number's space is kept, so revealing it moves nothing (Codex r1 on #629); secondary text meets
+   4.5:1 on surfaceMuted in both themes. */
 .df-quick-button kbd {
   display: grid;
-  min-width: 18px;
-  height: 18px;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  min-width: 16px;
+  height: 16px;
   place-items: center;
   border: 0;
   border-radius: 5px;
   padding: 0 4px;
-  background: color-mix(in oklab, var(--on-block) 16%, transparent);
-  color: var(--on-block);
+  background: transparent;
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
-  font-weight: var(--fw-strong);
+  font-weight: var(--fw-medium);
+}
+
+/* Quick start (UI review, owner 29 Oct 2026, decision B): a quiet pill with the activity's own
+   colour tile and its name; the 1–9 shortcut numbers show while the pointer or focus is on the row. */
+.df-quick-button.df-block {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-quick-button.df-block:hover {
+  background: color-mix(in oklab, var(--block) 18%, var(--surface-muted));
+}
+
+.df-quick-button svg[data-glyph] {
+  box-sizing: content-box;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 30%;
+  padding: 4px;
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.df-quick:is(:hover, :focus-within) .df-quick-button kbd {
+  opacity: 1;
+}
+
+/* The Tags button sits inside the bar's field at the bar's control size. */
+.df-cmd-field .inline-tag-picker-trigger {
+  width: var(--web-control-height);
+  height: calc(var(--web-control-height) - 2px);
+  flex-basis: var(--web-control-height);
+}
+
+/* Touch screens at any width: 36 px quick-start pills, rows 8 apart, each with a 44 px hit area. */
+@media (any-pointer: coarse) {
+  .df-quick {
+    gap: 8px;
+  }
+
+  .df-quick-button {
+    min-height: 36px;
+  }
+
+  .df-quick-button::before {
+    position: absolute;
+    inset: -4px 0;
+    content: "";
+  }
 }
 
 @media (max-width: 860px) {
@@ -8192,11 +8253,11 @@ button.df-cmd-clock:hover {
   }
 
   .df-cmd-clock {
-    min-height: 44px;
+    min-height: var(--web-control-height);
     grid-auto-flow: column;
     align-items: center;
     gap: 8px;
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .df-cmd-time {
@@ -8233,7 +8294,7 @@ button.df-cmd-clock:hover {
   }
 
   .df-cmd-go {
-    width: 48px;
+    width: var(--web-control-height);
     justify-content: center;
     padding: 0;
   }
@@ -8246,7 +8307,7 @@ button.df-cmd-clock:hover {
   .df-quick-button {
     flex: 0 1 auto;
     min-width: 0;
-    min-height: 44px;
+    min-height: 36px;
   }
 
   .df-quick-button kbd {
@@ -8271,16 +8332,112 @@ button.df-cmd-clock:hover {
 
 /* Between phone and desktop the clock sits at the start of its own row, so its start-time
    editor opens from the left edge rather than hanging off it (phones use the bottom sheet). */
+@media (max-width: 860px) {
+  /* Phones and narrow windows (decision C): quick start only on Today. */
+  .df-cmd-wrap:not(.is-today) .df-quick {
+    display: none;
+  }
+
+  /* One row, idle and running, so Start and Stop never change the band's height (W5; Codex r1 on
+     #629): activity, description, time, Play/Stop, more. Idle, the time slot holds only the "From"
+     pill; the idle 0:00:00 is a label with nothing to do. */
+  .df-cmd-wrap .df-cmd {
+    grid-template-columns: auto minmax(56px, 1fr) minmax(0, auto) auto auto;
+    grid-template-areas: "activity description time action secondary";
+    gap: 6px;
+  }
+
+  .df-cmd-wrap .df-cmd-time {
+    justify-self: end;
+  }
+
+  .df-cmd-idle .df-cmd-clock.is-idle {
+    display: none;
+  }
+
+  /* The description keeps room to type: its track never goes under 56 px, the "From" pill shows
+     only its arrow and time and may shorten, and it steps aside while the description has focus
+     (Codex r2 on #629). */
+  .df-cmd-wrap .df-cmd-time,
+  .df-cmd-idle {
+    min-width: 0;
+  }
+
+  .df-cmd-wrap .df-cmd-from {
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--web-control-height);
+    overflow: hidden;
+  }
+
+  .df-cmd-from > span {
+    display: flex;
+    min-width: 0;
+    font-size: 0;
+  }
+
+  /* The ellipsis belongs to the visible 13 px time (Codex r3 on #629). */
+  .df-cmd-from > span > .tabular {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .df-cmd-wrap:has(.inline-tag-description-input:focus) .df-cmd-idle {
+    display: none;
+  }
+
+  .df-cmd-wrap.is-running .df-cmd-clock {
+    padding: 0 2px;
+    font-size: 17px;
+  }
+
+  .df-cmd-wrap.is-running .df-cmd-clock small {
+    display: none;
+  }
+
+  /* Quick start on a phone: 36 px pills, rows 8 apart, each with a 44 px hit area. */
+  .df-quick {
+    gap: 8px;
+  }
+
+  .df-quick-button::before {
+    position: absolute;
+    inset: -4px 0;
+    content: "";
+  }
+
+  .df-cmd-wrap .df-cmd-secondary {
+    justify-self: auto;
+  }
+
+  /* No room for the Tags button in the one row: typing # opens the same Tags list. */
+  .df-cmd-wrap .df-cmd-field .inline-tag-picker-trigger {
+    display: none;
+  }
+
+  .df-cmd-wrap .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
+    min-width: 0;
+    padding-right: 6px;
+    font-size: 14px;
+    text-overflow: ellipsis;
+  }
+}
+
 @media (min-width: 561px) and (max-width: 860px) {
+  /* The time sits at the row's right end on narrow screens (UI review, 29 Oct 2026; Codex r1 on #629). */
   .df-cmd-time .swiss-start-time-popover {
-    right: auto;
-    left: 0;
+    right: 0;
+    left: auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .df-odometer-strip,
-  .df-quick-button {
+  .df-quick-button,
+  .df-quick-button kbd {
     transition: none;
   }
 

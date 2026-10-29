@@ -67,7 +67,7 @@ export const COMMAND_PLACEHOLDER = "Try “Write report @work #client”";
 export const PREVIOUS_END_CHANGED_NOTICE = "Started now: an earlier block ends later than that, so the start wasn't moved.";
 export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
-export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
+export function PersistentTimerBar({ workspaceMode = false, onToday = false }: { workspaceMode?: boolean; onToday?: boolean }) {
   const clock = useClockFormat();
   // While typing, the start time shows exactly what was typed (Codex r2 on #446).
   const [startTimeTyping, setStartTimeTyping] = useState(false);
@@ -637,7 +637,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       className={[
         "df-cmd-wrap",
         active ? "is-running" : "is-idle",
-        workspaceMode ? "is-workspace" : ""
+        workspaceMode ? "is-workspace" : "",
+        // Phones show quick start on Today only (UI review decision C).
+        onToday ? "is-today" : ""
       ].filter(Boolean).join(" ")}
       data-testid="persistent-timer"
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}

@@ -109,6 +109,17 @@ export function InlineTagInput({
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Where focus goes back when the Tags list closes: the Tags button, or the field itself when a
+  // narrow timer bar hides the button (Codex r1 on #629).
+  const pickerReturnRef = useMemo<RefObject<HTMLElement | null>>(() => ({
+    get current() {
+      const trigger = pickerTriggerRef.current;
+      const shown = trigger && (typeof trigger.checkVisibility === "function"
+        ? trigger.checkVisibility()
+        : window.getComputedStyle(trigger).display !== "none");
+      return shown ? trigger : localInputRef.current;
+    }
+  }), []);
   const pickerPanelRef = useRef<HTMLDivElement | null>(null);
   const suggestionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(false);
@@ -272,9 +283,9 @@ export function InlineTagInput({
     if (!pickerScopeHandoff) return;
     const activeElement = document.activeElement;
     if (!activeElement || activeElement === document.body || pickerPanelRef.current?.contains(activeElement)) {
-      pickerTriggerRef.current?.focus();
+      pickerReturnRef.current?.focus();
     }
-  }, [pickerScopeHandoff]);
+  }, [pickerReturnRef, pickerScopeHandoff]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -309,14 +320,14 @@ export function InlineTagInput({
       // (non-focusable content, or a button WebKit does not focus), never the page (Codex r5).
       const hadFocus = Boolean(pickerPanelRef.current?.contains(document.activeElement));
       setPickerOpen(false);
-      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerTriggerRef.current), 0);
+      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerReturnRef.current), 0);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         pickerInputRef.current?.blur();
         setPickerOpen(false);
-        window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
+        window.setTimeout(() => pickerReturnRef.current?.focus(), 0);
       }
     }
     document.addEventListener("mousedown", closeOnOutside);
@@ -395,7 +406,7 @@ export function InlineTagInput({
   /** Closes the Tags button's list; Escape, Close and Tab put focus back on the button. */
   function closePicker(restoreFocus: boolean) {
     setPickerOpen(false);
-    if (restoreFocus) window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
+    if (restoreFocus) window.setTimeout(() => pickerReturnRef.current?.focus(), 0);
   }
 
   function pickPickerAction(action: (typeof pickerActions)[number] | undefined) {
@@ -739,7 +750,7 @@ export function InlineTagInput({
           multiselectable
           onClose={() => closePicker(true)}
           panelRef={pickerPanelRef}
-          returnFocusRef={pickerTriggerRef}
+          returnFocusRef={pickerReturnRef}
           search={(
             <FloatingListSearch
               activeDescendant={pickerActions.length ? `${tagPickerListId}-option-${activePickerIndex}` : undefined}
