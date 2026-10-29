@@ -371,8 +371,12 @@ function reviewCandidates(
   effects: readonly ReviewPresentationStoreEffect[]
 ) {
   const candidates = new Map<string, ReviewCandidate>();
+  // A timer that ran into a trip is no ordinary hatched block on Today (step 15): its own UI comes later. Left out
+  // from every source — the presentation's records and the outbox's own copies (a restored or refused decision) —
+  // and by id, so a copy can never bring back one the presentation left out (Codex r1 on #615).
+  const clashIds = new Set(response.records.filter((record) => record.kind === "review" && !asksAsCheck(record))
+    .map((record) => (record as { reviewItemId: string }).reviewItemId));
   for (const record of response.records) {
-    // A timer that ran into a trip is no ordinary hatched block on Today (step 15): its own UI comes later.
     if (record.kind !== "review" || record.status !== "open" || !asksAsCheck(record)) continue;
     candidates.set(record.reviewItemId, {
       record,
@@ -380,7 +384,7 @@ function reviewCandidates(
     });
   }
   for (const effect of effects) {
-    if (candidates.has(effect.reviewItemId) || !effect.source) continue;
+    if (candidates.has(effect.reviewItemId) || !effect.source || clashIds.has(effect.reviewItemId) || !asksAsCheck(effect.source)) continue;
     candidates.set(effect.reviewItemId, {
       record: {
         kind: "review",

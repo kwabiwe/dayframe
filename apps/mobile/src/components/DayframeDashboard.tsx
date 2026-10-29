@@ -258,6 +258,10 @@ import {
 import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { useCheckLinks } from "@/components/calendar/useCheckLinks";
+import { lookupReviewItemStart } from "@/lib/reviewLinkLookup";
+import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
+import { firstCheckReachingDay } from "@/lib/reviewLinks";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
@@ -2863,12 +2867,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
   // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
   const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
-  const openCheckOn = useCallback((checkId: string) => {
+  // `dayKey` keeps a given day selected (today, for a "?" that started yesterday; Codex r1 on #615), else its start day.
+  const openCheckOn = useCallback((checkId: string, dayKey?: string) => {
     const check = calendarChecks.checks.find((each) => each.id === checkId);
     const startedAtMs = check?.startedAt ? Date.parse(check.startedAt) : NaN;
     if (!Number.isFinite(startedAtMs)) return false;
     changeCalendarLayout("list");
-    selectCalendarDay(formatDateKey(new Date(startedAtMs)));
+    selectCalendarDay(dayKey ?? formatDateKey(new Date(startedAtMs)));
     calendarCheckRequests.current += 1;
     setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current, at: Date.now() });
     setCheckTimelineReads((count) => count + 1);
@@ -2884,31 +2889,44 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (askingChecks[0]) openCheckOn(askingChecks[0].id);
   }, [askingChecks, openCheckOn]);
   // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge opens the 7-day oldest.
+  // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
   const openTodayChecks = useCallback(() => {
-    const todayStart = dateFromKey(formatDateKey(new Date())).getTime();
-    const first = askingChecks.find((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStart);
-    if (first && openCheckOn(first.id)) return;
-    openChecksOn(formatDateKey(new Date()));
+    const today = formatDateKey(new Date());
+    const first = firstCheckReachingDay(askingChecks, dateFromKey(today).getTime());
+    if (first && openCheckOn(first.id, today)) return;
+    openChecksOn(today);
   }, [askingChecks, openCheckOn, openChecksOn]);
-  // Old Review links (step 15, `reviewLinks.ts`): the "?" a link names opens in Calendar › List once the bootstrap is in
-  // — on its day with its question or sheet open when it still asks, on the day it starts when it no longer does (or
-  // is a timer-into-trip question, whose block UI comes later), and today's first "?" when it names none or isn't
-  // known here.
-  const [checkLink, setCheckLink] = useState<{ check: string; request: number } | null>(null);
-  const checkLinkRequests = useRef(0);
-  const openCheckLink = useCallback((check: string) => {
-    checkLinkRequests.current += 1;
-    setCheckLink({ check, request: checkLinkRequests.current });
-  }, []);
+  // Apple Health's "?" brought up to date when Calendar › List is in front (step 15; Codex r1 on #615): the deck's
+  // forced reprocess on open, bounded per account (`calendarHealthReprocess.ts`), whether or not Health capture is on.
+  const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";
+  const healthReprocessOwnerRef = useRef(scopedOwnerKey);
+  healthReprocessOwnerRef.current = scopedOwnerKey;
   useEffect(() => {
-    if (!checkLink || authState !== "authenticated" || !data) return;
-    setCheckLink(null);
-    if (checkLink.check !== "first" && openCheckOn(checkLink.check)) return;
-    const item = checkLink.check === "first" ? undefined : data.reviewItems.find((each) => each.id === checkLink.check);
-    const startedAtMs = item?.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : NaN;
-    if (Number.isFinite(startedAtMs)) openChecksOn(formatDateKey(new Date(startedAtMs)));
-    else openTodayChecks();
-  }, [authState, checkLink, data, openCheckOn, openChecksOn, openTodayChecks]);
+    if (!calendarListInFront || !scopedOwnerKey) return;
+    const ownerKey = scopedOwnerKey;
+    void reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey })
+      .then((outcome) => { if (outcome === "changed") void loadRef.current({ silent: true }); })
+      .catch((error) => { if (error instanceof AuthRequiredError) transitionToSignedOut(); });
+  }, [calendarListInFront, scopedOwnerKey, transitionToSignedOut]);
+  // Old Review links and Today's ribbon (step 15, `reviewLinks.ts`): held until signed in with the bootstrap in, then
+  // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
+  const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
+    [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
+  const openCheckLink = useCheckLinks({
+    ready: authState === "authenticated" && data !== null,
+    owner: checkLinkOwner,
+    todayKey,
+    openCheck: openCheckOn,
+    openDay: openChecksOn,
+    openTodayFirst: openTodayChecks,
+    lookupStart: (owner, reviewItemId) => owner.backendId
+      ? lookupReviewItemStart({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC")
+      : Promise.resolve(null),
+    dayKeyOf: (instant) => {
+      const ms = Date.parse(instant);
+      return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;
+    }
+  });
   // Today's hatched ribbon blocks (step 15): their "?" in Calendar › List, as an old Review link opens it. Stable, so
   // the memoised ribbon is not re-rendered by the per-second header.
   const openTodayRibbonCheck = useCallback((reviewItemId: string | null) => openCheckLink(reviewItemId ?? "first"), [openCheckLink]);

@@ -1,4 +1,4 @@
-import { reviewLinkRedirect } from "@/lib/reviewLinks";
+import { reviewLinkRedirect } from "../src/lib/reviewLinks";
 
 /**
  * Links iOS opens the app with (location v4 step 15): the Review screen is gone, so an old `dayframe://review…`

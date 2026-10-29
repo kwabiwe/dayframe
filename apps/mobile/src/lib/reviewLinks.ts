@@ -45,3 +45,18 @@ function safeDecode(value: string) {
     return null;
   }
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Whether a link's "?" can be looked up on the server (the presentation lookup takes UUIDs only). */
+export function reviewLinkLookupable(check: string) {
+  return UUID.test(check);
+}
+
+/**
+ * Today's first "?" (Today's chip and `check=first`): the oldest still asking that reaches into the day starting at
+ * `dayStartMs` — an overnight one that started the day before included (Codex r1 on #615) — never an earlier day's.
+ */
+export function firstCheckReachingDay<T extends { startedAt: string | null; stoppedAt: string | null }>(checks: readonly T[], dayStartMs: number) {
+  return checks.find((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > dayStartMs);
+}

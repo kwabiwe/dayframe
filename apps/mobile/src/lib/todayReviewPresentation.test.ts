@@ -67,6 +67,29 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.awaitingReviewMs).toBe(30 * 60_000);
   });
 
+  it("never brings a timer that ran into a trip back from the outbox's own copy (a restored or refused decision; Codex r1 on #615)", () => {
+    const clash = { ...review("clash", "Team sync ran into your trip", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z"), eventType: "timer_trip_clash" };
+    const source = (id: string) => ({
+      reviewItemId: id, sourceKind: "generic" as const, title: "Team sync ran into your trip",
+      category: { id: null, name: null, color: null }, placeLabel: null,
+      interval: { start: clash.interval.start, end: clash.interval.end }, createdAt: clash.createdAt,
+      eventSource: "location", eventType: "timer_trip_clash"
+    });
+    const restored = (id: string) => ({ ...effect(id, "rejected"), localEffect: "restore" as const, source: source(id) });
+    for (const records of [[], [clash]]) {
+      const presentation = project({ response: response(records, 0, 0), effects: [restored("clash"), restored("clash-gone")] });
+      expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")).toHaveLength(0);
+      expect(presentation.donutSegments.map((segment) => segment.id)).not.toContain("review:clash");
+      expect(presentation.awaitingReviewMs).toBe(0);
+    }
+    // An ordinary restored decision still comes back.
+    const walk = review("walk", "Walk", "2026-09-12T13:00:00.000Z", "2026-09-12T13:30:00.000Z");
+    const ordinary = { ...restored("walk"), source: { ...source("walk"), title: "Walk", eventType: walk.eventType, eventSource: walk.eventSource,
+      interval: { start: walk.interval.start, end: walk.interval.end } } };
+    expect(project({ response: response([], 0, 0), effects: [ordinary] }).daySections[0].activities
+      .filter((activity) => activity.source.kind === "review")).toHaveLength(1);
+  });
+
   it("uses a linked canonical result once and removes the verified saved marker", () => {
     const work = entry("work", "Work", "2026-09-12T09:00:00.000Z", "2026-09-12T11:00:00.000Z");
     const walkResult = entry("walk-entry", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");

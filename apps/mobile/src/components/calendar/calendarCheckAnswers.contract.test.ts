@@ -156,16 +156,24 @@ describe("one guarded notifier for the answer, Logs as and recovery flows (Codex
 describe("no Review screen on the iPhone (location v4 step 15)", () => {
   const layout = source("../../../app/_layout.tsx");
   const intent = source("../../../app/+native-intent.tsx");
-  const calendarTab = source("../../../app/(tabs)/calendar.tsx");
   const ribbon = source("../today/TodayRibbon.tsx");
   it("has no Review route; an old Review link opens the Calendar tab with its check request", () => {
     expect(layout).not.toContain('name="review"');
     expect(intent).toContain("reviewLinkRedirect(path) ?? path");
-    expect(calendarTab).toContain("openCheckLink(check);");
-    expect(calendarTab).toContain("router.setParams({ check: undefined });");
     // Through the same check request the badge, the chips and the reminder use (#610), once the data is in.
-    expect(dashboard).toContain('if (checkLink.check !== "first" && openCheckOn(checkLink.check)) return;');
-    expect(dashboard).toContain("if (!checkLink || authState !== \"authenticated\" || !data) return;");
+    // Behaviour in useCheckLinks.test.tsx; here only that the Dashboard hands it the one check request, held until
+    // signed in with the bootstrap in, and today's chip opener, which keeps today selected (Codex r1 on #615).
+    expect(dashboard).toContain('ready: authState === "authenticated" && data !== null,');
+    expect(dashboard).toContain("openCheck: openCheckOn,");
+    expect(dashboard).toContain("openTodayFirst: openTodayChecks,");
+    expect(dashboard).toContain("if (first && openCheckOn(first.id, today)) return;");
+  });
+
+  it("reprocesses Apple Health's \"?\" when Calendar › List is in front, whether or not capture is on (Codex r1 on #615)", () => {
+    expect(dashboard).toContain('const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";');
+    const effect = dashboard.slice(dashboard.indexOf("if (!calendarListInFront || !scopedOwnerKey) return;"), dashboard.indexOf("}, [calendarListInFront, scopedOwnerKey"));
+    expect(effect).toContain("reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey })");
+    expect(effect).not.toContain("isHealthKitAutomaticSyncEnabled");
   });
 
   it("opens Today's hatched blocks in Calendar › List, never a pushed Review page", () => {

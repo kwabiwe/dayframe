@@ -534,7 +534,7 @@ export default function OnboardingScreen() {
           {content.lede ? (
             <Text {...mobileTextProps("body")} style={[styles.lede, { color: theme.textSecondary }]}>{content.lede}</Text>
           ) : null}
-          {step === "location" && answers.locationStage === "explain" && !answers.location ? <ReviewPreview theme={theme} /> : null}
+          {step === "location" && answers.locationStage === "explain" && !answers.location ? <CalendarPreview theme={theme} /> : null}
           {step === "motion" && !answers.motion ? <MotionPreview theme={theme} /> : null}
           {step === "health" && !answers.health ? <HealthPicks disabled={busy} onToggle={togglePick} pick={answers.healthPick} theme={theme} /> : null}
           {step === "reminders" && !answers.reminders ? <NotificationPreview theme={theme} /> : null}
@@ -952,7 +952,7 @@ function WelcomeBlock({ color, index, name, play, theme, weight }: { color: Dayf
 }
 
 /** What Location suggestions look like in Calendar (sample): hatched blocks, as on Today's ribbon (UIA-090). */
-function ReviewPreview({ theme }: { theme: MobileTheme }) {
+function CalendarPreview({ theme }: { theme: MobileTheme }) {
   const rows: [DayframePaletteKey, string, string, string][] = [
     ["graphite", "08:36", "Drive to School", "2 min · 0.8 km"],
     ["amber", "08:38", "School", "9 min"]

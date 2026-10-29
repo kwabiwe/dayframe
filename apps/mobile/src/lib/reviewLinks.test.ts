@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reviewLinkCheck, reviewLinkRedirect } from "./reviewLinks";
+import { firstCheckReachingDay, reviewLinkCheck, reviewLinkLookupable, reviewLinkRedirect } from "./reviewLinks";
 
 const ID = "30000000-0000-4000-8000-000000000001";
 
@@ -34,5 +34,22 @@ describe("old Review links open Calendar › List (step 15)", () => {
   it("redirects to the Calendar tab with the check request", () => {
     expect(reviewLinkRedirect(`dayframe://review/${ID}`)).toBe(`/calendar?check=${ID}`);
     expect(reviewLinkRedirect("dayframe://review")).toBe("/calendar?check=first");
+  });
+});
+
+describe("today's first \"?\" (Today's chip and check=first; Codex r1 on #615)", () => {
+  const today = Date.parse("2026-10-29T00:00:00.000Z");
+  it("is an overnight one that started yesterday when it reaches into today, never one that ended before", () => {
+    const ended = { id: "ended", startedAt: "2026-10-28T09:00:00.000Z", stoppedAt: "2026-10-28T10:00:00.000Z" };
+    const sleep = { id: "sleep", startedAt: "2026-10-28T23:10:00.000Z", stoppedAt: "2026-10-29T06:50:00.000Z" };
+    const later = { id: "later", startedAt: "2026-10-29T12:00:00.000Z", stoppedAt: "2026-10-29T13:00:00.000Z" };
+    expect(firstCheckReachingDay([ended, sleep, later], today)?.id).toBe("sleep");
+    expect(firstCheckReachingDay([ended], today)).toBeUndefined();
+  });
+
+  it("looks up only UUIDs", () => {
+    expect(reviewLinkLookupable(ID)).toBe(true);
+    expect(reviewLinkLookupable("first")).toBe(false);
+    expect(reviewLinkLookupable("not-an-id")).toBe(false);
   });
 });
