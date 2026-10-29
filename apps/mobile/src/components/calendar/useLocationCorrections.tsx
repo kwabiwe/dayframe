@@ -84,11 +84,18 @@ export function useLocationCorrections({
   // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet), with the span and account
   // it was read for.
   const [evidence, setEvidence] = useState<{ itemId: string; span: string; ownerKey: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
+  // The open sheet's own day (Codex r3 on #625): the timeline it was opened from, followed through that day's refreshes
+  // and projected corrections, and held while the List browses another day (the Calendar tab's tap goes to today), so
+  // the sheet's item, Logs as and Done never depend on the day being shown.
+  const [sheetDay, setSheetDay] = useState<{ id: number; timeline: LocationTimeline } | null>(null);
+  if (open && timeline && sheetDay?.timeline !== timeline
+    && (sheetDay?.id !== open.id || sheetDay.timeline.dayStart === timeline.dayStart)) setSheetDay({ id: open.id, timeline });
+  const sheetTimeline = open && sheetDay?.id === open.id ? sheetDay.timeline : timeline;
   const openItemId = open?.itemId ?? null;
   const openKind = open?.kind ?? null;
   // The item as the List has it now: a refresh that moves its times (replay turned a 25-minute stay into 90) reads
   // its map again, so the sheet's Nearby list and guess follow the stay as it is (Codex r2 on #620).
-  const liveItem = open ? timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind) ?? null : null;
+  const liveItem = open ? sheetTimeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind) ?? null : null;
   const liveSpan = liveItem ? `${liveItem.startedAt}|${liveItem.stoppedAt ?? ""}` : null;
   // The span the map is read for: the item's when the sheet opens (at once), then each new span once it has held for
   // EVIDENCE_REREAD_DELAY_MS (a burst of refreshes reads once).
@@ -136,17 +143,17 @@ export function useLocationCorrections({
 
   const target = useMemo<LocationCorrectionTarget | null>(() => {
     if (!open) return null;
-    const item = timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind);
+    const item = sheetTimeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind);
     if (item?.kind === "place" && open.kind === "place") {
-      return { kind: "place", place: item, label: open.label, notHere: canSayNotHere(item, timeline!.items) };
+      return { kind: "place", place: item, label: open.label, notHere: canSayNotHere(item, sheetTimeline!.items) };
     }
     if (item?.kind === "trip" && open.kind === "trip") {
-      const names = new Map(timeline!.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
+      const names = new Map(sheetTimeline!.items.flatMap((each) => each.kind === "place" ? [[each.id, each.name] as const] : []));
       return { kind: "trip", trip: { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` },
-        legIndex: open.legIndex, didntLeave: canSayDidntLeave(item, timeline!.items) };
+        legIndex: open.legIndex, didntLeave: canSayDidntLeave(item, sheetTimeline!.items) };
     }
     return null;
-  }, [open, timeline]);
+  }, [open, sheetTimeline]);
   // The item can leave the List while its sheet closes (a trip that wasn't one): it closes as it was. One that
   // leaves while the sheet is open shows as it was, with nothing to change (Codex r1 on #602).
   if (open && target && (held?.id !== open.id || held.target !== target)) setHeld({ id: open.id, target });

@@ -240,6 +240,11 @@ export type ContinuousListProps = {
   focusDayStartMs: number;
   /** A new value asks for the scroll again (the selected day's key). */
   focusRequest: string;
+  /**
+   * The day whose heading is at (or last passed) the top of the List, as it changes: the header's date follows it, so
+   * the two always agree however the List got there (scrolling, a "?" link, the chip; owner bug, 29 Oct 2026).
+   */
+  onVisibleDay?: (dayStartMs: number | null) => void;
 };
 
 /** How far ahead of either end the List starts loading the next week. */
@@ -354,6 +359,8 @@ export function EntriesTable({
   const columnShown = wide && placesColumn && localTimeReady;
   // The day at the top of the List, whose places the column shows.
   const [columnDayStartMs, setColumnDayStartMs] = useState<number | null>(null);
+  // The day the header names: the top heading's, or the selected day when the top is where it would be (see trackColumnDay).
+  const [topDayStartMs, setTopDayStartMs] = useState<number | null>(null);
   const setShowEveryPlace = (update: (current: boolean) => boolean) => setShowEveryPlaceState((current) => {
     const next = update(current);
     storeFlag(SHOW_ALL_PLACES_STORAGE_KEY, next);
@@ -521,17 +528,101 @@ export function EntriesTable({
       : null;
   };
   const anchorFrameRef = useRef<number | null>(null);
-  /** Card F: the column follows the day whose heading is at (or last passed) the top of the List. */
-  const trackColumnDay = () => {
-    const root = listScrollRef.current;
-    if (!root) return;
-    const top = root.getBoundingClientRect().top + 48;
-    const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
-    const passed = headings.filter((heading) => heading.getBoundingClientRect().top <= top);
-    const heading = passed[passed.length - 1] ?? headings[0];
-    const dayStart = heading ? Number(heading.dataset.dayStartMs) : NaN;
-    if (Number.isFinite(dayStart)) setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
+  // Each day heading's offset within the List's content, in top order (Codex r1 on #625): measured once per layout
+  // change (rows added, removed or resized; see the observers below), so a scroll only binary-searches them and the
+  // work per frame stays the same however much history is loaded.
+  const headingOffsetsRef = useRef<Array<{ dayStart: number; top: number }> | null>(null);
+  const measureHeadingOffsets = (root: HTMLElement) => {
+    const rootTop = root.getBoundingClientRect().top;
+    const offsets = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")]
+      .map((heading) => ({ dayStart: Number(heading.dataset.dayStartMs), top: heading.getBoundingClientRect().top - rootTop + root.scrollTop }))
+      .filter((heading) => Number.isFinite(heading.dayStart));
+    headingOffsetsRef.current = offsets;
+    return offsets;
   };
+  // Only while the List (or its places column) is shown.
+  const tracksTopDay = Boolean(continuous) || columnShown;
+  /**
+   * Card F: the column, and the header's date, follow the day whose heading is at (or last passed) the top of the List.
+   * `remeasure` after a layout change; a scroll uses the cached offsets.
+   */
+  const trackColumnDay = (remeasure = false) => {
+    const root = listScrollRef.current;
+    if (!root || !tracksTopDay) return;
+    const offsets = (remeasure ? null : headingOffsetsRef.current) ?? measureHeadingOffsets(root);
+    if (!offsets.length) {
+      // No day listed: no top day to name, so the header falls back to the requested day (Codex r3 on #625).
+      setColumnDayStartMs(null);
+      setTopDayStartMs(null);
+      return;
+    }
+    const line = root.scrollTop + 48;
+    let low = 0;
+    let high = offsets.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (offsets[mid].top <= line) low = mid + 1;
+      else high = mid;
+    }
+    const index = Math.max(0, low - 1);
+    const dayStart = offsets[index].dayStart;
+    setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
+    // Today with nothing listed yet is named while the List's top is where today would be (between its nearest earlier
+    // heading and the one above it, newest first). Only today: an earlier selected day that lost its last row names the
+    // day really at the top (Codex r5 on #625).
+    const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
+    const emptyToday = focusDayStartMs !== null && focusDayStartMs === todayStartMs;
+    const shown = emptyToday && dayStart <= focusDayStartMs && focusDayStartMs < newerStart ? focusDayStartMs : dayStart;
+    setTopDayStartMs((current) => current === shown ? current : shown);
+  };
+  const trackColumnDayRef = useRef(trackColumnDay);
+  useLayoutEffect(() => {
+    trackColumnDayRef.current = trackColumnDay;
+  });
+  // A layout change re-measures and re-reads the top day, also when nothing scrolls (Codex r1 and r2 on #625): rows
+  // added or removed (a MutationObserver), and anything in the List's content changing size — the table, and what sits
+  // above it (the "N to check" chip, the places filter, "Loading later days…") — or coming and going, which moves every
+  // heading (a ResizeObserver on each of the List's own children). At most once a frame.
+  useEffect(() => {
+    const root = listScrollRef.current;
+    if (!root || !tracksTopDay) return;
+    let frame: number | null = null;
+    const observed = new Set<Element>();
+    const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => schedule());
+    const observeContent = () => {
+      if (!resize) return;
+      const children = new Set(root.children);
+      for (const element of observed) {
+        if (children.has(element)) continue;
+        resize.unobserve(element);
+        observed.delete(element);
+      }
+      for (const element of children) {
+        if (observed.has(element)) continue;
+        resize.observe(element);
+        observed.add(element);
+      }
+    };
+    const schedule = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        observeContent();
+        trackColumnDayRef.current(true);
+      });
+    };
+    const rowNode = (node: Node) => node.nodeName === "TR" || node.nodeName === "TBODY" || node.nodeName === "TABLE";
+    const mutations = typeof MutationObserver === "undefined" ? null : new MutationObserver((records) => {
+      if (records.some((record) => record.target === root || [...record.addedNodes, ...record.removedNodes].some(rowNode))) schedule();
+    });
+    mutations?.observe(root, { childList: true, subtree: true });
+    observeContent();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      mutations?.disconnect();
+      resize?.disconnect();
+    };
+  }, [tracksTopDay]);
   useEffect(() => () => {
     if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current);
   }, []);
@@ -565,7 +656,11 @@ export function EntriesTable({
     const root = listScrollRef.current;
     if (!root || focusRequest === null || focusDayStartMs === null || focusDoneRef.current === focusRequest || !localTimeReady) return;
     const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
-    if (!headings.length) return;
+    if (!headings.length) {
+      // Nothing listed for this request (yet): the day an earlier request reported is no longer the top day.
+      trackColumnDay(true);
+      return;
+    }
     const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
     if (!target) {
       // Every shown day is later than the selected one: rest at the bottom, where earlier weeks load,
@@ -580,7 +675,13 @@ export function EntriesTable({
       if (Math.abs(off) < 1 || !focusCanGrow) focusDoneRef.current = focusRequest;
     }
     recordScrollAnchor();
+    // A programmatic scroll that moves nothing (already there, or clamped) fires no scroll event: report the day now.
+    trackColumnDay(true);
   });
+  const onVisibleDay = continuous?.onVisibleDay;
+  useEffect(() => {
+    onVisibleDay?.(topDayStartMs);
+  }, [topDayStartMs, onVisibleDay]);
   /** The open suggestion a location row's "?" is about, if any. */
   const checkOf = (row: LocationListRow) => {
     const id = row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
@@ -1404,7 +1505,7 @@ export function EntriesTable({
             anchorFrameRef.current = requestAnimationFrame(() => {
               anchorFrameRef.current = null;
               recordScrollAnchor();
-              if (columnShown) trackColumnDay();
+              trackColumnDay();
             });
           }
           onScroll(event);
