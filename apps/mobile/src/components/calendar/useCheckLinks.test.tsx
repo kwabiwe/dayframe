@@ -1,6 +1,6 @@
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
-import { useCheckLinks, type CheckLinkOwner } from "./useCheckLinks";
+import { CHECK_LINK_WAIT_MS, useCheckLinks, type CheckLinkItem, type CheckLinkOwner } from "./useCheckLinks";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -19,32 +19,42 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed?: string[]; lookup?: (owner: CheckLinkOwner, id: string) => Promise<string | null> } = {}) {
+type Found = CheckLinkItem | string | null;
+/** Whether any openCheck call actually opened its "?". */
+const opened = (fn: { mock: { results: { value: unknown }[] } }) => fn.mock.results.some((result) => result.value === true);
+const asFound = (found: Found): CheckLinkItem | null => typeof found === "string" ? { startedAt: found, asks: false } : found;
+
+function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed?: string[]; lookup?: (owner: CheckLinkOwner, id: string) => Promise<Found>;
+  selectedDayKey?: string; now?: number } = {}) {
   const calls = {
     openCheck: vi.fn((id: string, _dayKey?: string) => props.listed.includes(id)),
-    openDay: vi.fn(),
+    openDay: vi.fn((dayKey: string) => { props.selectedDayKey = dayKey; }),
     openTodayFirst: vi.fn(),
-    lookupStart: vi.fn((owner: CheckLinkOwner, id: string) => props.lookup(owner, id))
+    lookupStart: vi.fn((owner: CheckLinkOwner, id: string) => props.lookup(owner, id).then(asFound))
   };
   let props = {
     ready: initial.ready ?? true,
     owner: initial.owner === undefined ? A : initial.owner,
     listed: initial.listed ?? [],
-    lookup: initial.lookup ?? (async () => null as string | null)
+    lookup: initial.lookup ?? (async () => null as Found),
+    selectedDayKey: initial.selectedDayKey ?? "2026-10-29",
+    loadMarker: {} as object,
+    now: initial.now ?? 1_000
   };
   const result: { open: (check: string) => void } = { open: () => undefined };
   function Harness(current: typeof props) {
     result.open = useCheckLinks({
-      ready: current.ready, owner: current.owner, todayKey: "2026-10-29",
+      ready: current.ready, owner: current.owner, todayKey: "2026-10-29", selectedDayKey: props.selectedDayKey, loadMarker: current.loadMarker,
       openCheck: calls.openCheck, openDay: calls.openDay, openTodayFirst: calls.openTodayFirst,
-      lookupStart: calls.lookupStart, dayKeyOf: (instant) => instant.slice(0, 10)
+      lookupItem: calls.lookupStart, dayKeyOf: (instant) => instant.slice(0, 10), now: () => props.now
     });
     return null;
   }
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<Harness {...props} />); });
   const update = (next: Partial<typeof props>) => act(() => { props = { ...props, ...next }; tree.update(<Harness {...props} />); });
-  return { calls, update, link: (check: string) => act(() => result.open(check)) };
+  return { calls, update, link: (check: string) => act(() => result.open(check)), load: (next: Partial<typeof props> = {}) => update({ ...next, loadMarker: {} }),
+    props: () => props };
 }
 
 describe("old Review links in Calendar › List (step 15; Codex r1 on #615)", () => {
@@ -154,5 +164,58 @@ describe("old Review links in Calendar › List (step 15; Codex r1 on #615)", ()
     expect(calls.openCheck).not.toHaveBeenCalledWith(OTHER, expect.anything());
     expect(calls.openDay).toHaveBeenCalledWith("2026-10-27");
     expect(calls.openTodayFirst).not.toHaveBeenCalled();
+  });
+
+  it("keeps a named \"?\" the server says still asks waiting on its day, and opens it when a load brings it (Codex r4 on #615)", async () => {
+    const { calls, link, load } = mount({ lookup: async () => ({ startedAt: "2026-10-27T08:00:00.000Z", asks: true }) });
+    link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // Its day opens unselected while the List doesn't have it yet.
+    expect(calls.openDay).toHaveBeenCalledWith("2026-10-27");
+    // The day's load brings it: its own request opens, by its id.
+    calls.openCheck.mockClear();
+    load({ listed: [ID] });
+    expect(calls.openCheck).toHaveBeenCalledWith(ID, "2026-10-27");
+    // Opened once: later loads don't ask again.
+    calls.openCheck.mockClear();
+    load();
+    expect(calls.openCheck).not.toHaveBeenCalled();
+  });
+
+  it("stops waiting after its loads or its time run out, or once another day is shown (Codex r4 on #615)", async () => {
+    const asking = async () => ({ startedAt: "2026-10-27T08:00:00.000Z", asks: true });
+    const loads = mount({ lookup: asking });
+    loads.link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    loads.calls.openCheck.mockClear();
+    loads.load();
+    loads.load();
+    loads.load({ listed: [ID] });
+    expect(opened(loads.calls.openCheck)).toBe(false);
+
+    const timed = mount({ lookup: asking });
+    timed.link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    timed.calls.openCheck.mockClear();
+    timed.load({ now: 1_000 + CHECK_LINK_WAIT_MS + 1, listed: [ID] });
+    expect(opened(timed.calls.openCheck)).toBe(false);
+
+    const moved = mount({ lookup: asking });
+    moved.link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    moved.calls.openCheck.mockClear();
+    moved.update({ selectedDayKey: "2026-10-28" });
+    moved.load({ listed: [ID] });
+    expect(opened(moved.calls.openCheck)).toBe(false);
+  });
+
+  it("doesn't wait for a named item that no longer asks: its day stays unselected (Codex r4 on #615)", async () => {
+    const { calls, link, load } = mount({ lookup: async () => ({ startedAt: "2026-10-27T08:00:00.000Z", asks: false }) });
+    link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.openDay).toHaveBeenCalledWith("2026-10-27");
+    calls.openCheck.mockClear();
+    load({ listed: [ID] });
+    expect(calls.openCheck).not.toHaveBeenCalled();
   });
 });

@@ -259,7 +259,7 @@ import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntr
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks } from "@/components/calendar/useCheckLinks";
-import { lookupReviewItemStart } from "@/lib/reviewLinkLookup";
+import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import { firstCheckReachingDay } from "@/lib/reviewLinks";
@@ -2943,6 +2943,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
   const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
     [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
+  // A new value whenever the Calendar's data loads (the bootstrap and its answers, the day's places): a named "?" an
+  // old link waits for is tried again on each (Codex r4 on #615).
+  const checkLinkLoadMarker = useMemo(() => ({}), [shownCalendarData, calendarTimeline]);
   const openCheckLink = useCheckLinks({
     ready: authState === "authenticated" && data !== null,
     owner: checkLinkOwner,
@@ -2951,9 +2954,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),
     openDay: openListDay,
     openTodayFirst: openTodayChecks,
-    lookupStart: (owner, reviewItemId) => owner.backendId
-      ? lookupReviewItemStart({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC")
-      : Promise.resolve(null),
+    // Whether it still asks: open on the server, an ordinary question, and within the List's 7 days (Codex r4 on #615).
+    lookupItem: async (owner, reviewItemId) => {
+      if (!owner.backendId) return null;
+      const item = await lookupReviewLinkItem({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC");
+      if (!item) return null;
+      const asks = item.open && Boolean(item.startedAt) && checkStillAsks(
+        { startedAt: item.startedAt, stoppedAt: item.stoppedAt },
+        checkAskingStartMs(dateFromKey(formatDateKey(new Date())).getTime()));
+      return { startedAt: item.startedAt, asks };
+    },
+    selectedDayKey,
+    loadMarker: checkLinkLoadMarker,
     dayKeyOf: (instant) => {
       const ms = Date.parse(instant);
       return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;

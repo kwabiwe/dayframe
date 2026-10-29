@@ -281,16 +281,26 @@ export function CalendarListView({
   const [handledCheckRequest, setHandledCheckRequest] = useState(0);
   // A tap on a "?" not known yet waits the same way, as a request of the List's own (negative numbers).
   // It stands until the caller makes a new request after it.
-  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number } | null>(null);
+  // `clear`: the clear generation it was made in; a later clear makes it stale.
+  const [tapRequest, setTapRequest] = useState<{ id: string; request: number; after: number; at?: number; clear: number } | null>(null);
   const tapRequests = useRef(0);
+  // A clear (Codex r3 and r4 on #615) takes effect in the render it arrives in: every tap request made before it, and
+  // the caller's request it arrived with or any earlier one, are ignored from then on, whatever else changed in that
+  // render (the day's places arriving, say), so nothing waiting can reopen a question or a sheet.
   const [clearedFor, setClearedFor] = useState(clearSelectionRequest);
-  if (clearedFor !== clearSelectionRequest) {
+  const [ignoredUpTo, setIgnoredUpTo] = useState<number | null>(null);
+  const clearing = clearedFor !== clearSelectionRequest;
+  const ignoreUpTo = clearing ? Math.max(ignoredUpTo ?? -Infinity, openCheckRequest?.request ?? -Infinity) : ignoredUpTo;
+  if (clearing) {
     setClearedFor(clearSelectionRequest);
+    setIgnoredUpTo(Number.isFinite(ignoreUpTo) ? ignoreUpTo : null);
     setOpenCheckId(null);
     setTapRequest(null);
     pendingScroll.current = null;
   }
-  const request = tapRequest && tapRequest.after === (openCheckRequest?.request ?? 0) ? tapRequest : openCheckRequest;
+  const liveTap = tapRequest && tapRequest.clear === clearSelectionRequest ? tapRequest : null;
+  const liveCheckRequest = openCheckRequest && (ignoreUpTo == null || openCheckRequest.request > ignoreUpTo) ? openCheckRequest : null;
+  const request = liveTap && liveTap.after === (openCheckRequest?.request ?? 0) ? liveTap : liveCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
     || (timelineReadAt ?? 0) >= request.at;
   const requestedRow = request && request.request !== handledCheckRequest
@@ -314,7 +324,7 @@ export function CalendarListView({
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
   // Only once every "?" here is known, so the first is the real first and opens the right way (Codex r1 on #610).
   const firstCheckRow = checkRows.every((row) => row.known) ? checkRows[0] : undefined;
-  if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
+  if (!clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
     && (firstCheckRow.inline ? onAnswerCheck : firstCheckRow.open)) {
     setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckRow.id });
     if (firstCheckRow.inline) setOpenCheckId(firstCheckRow.id);
@@ -345,7 +355,7 @@ export function CalendarListView({
       // Timestamped, with a fresh read asked for: a response already in flight from before the tap that lacks its
       // item never opens it under its row (Codex r5 on #610).
       tapRequests.current -= 1;
-      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at: Date.now() });
+      setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at: Date.now(), clear: clearSelectionRequest });
       onRequestFreshRead?.();
       return;
     }
@@ -359,7 +369,7 @@ export function CalendarListView({
       const at = Date.now();
       if (timelineReadAt == null || timelineReadAt < at) {
         tapRequests.current -= 1;
-        setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at });
+        setTapRequest({ id, request: tapRequests.current, after: openCheckRequest?.request ?? 0, at, clear: clearSelectionRequest });
         onRequestFreshRead?.();
         return;
       }

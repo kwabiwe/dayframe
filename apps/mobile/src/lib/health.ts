@@ -792,12 +792,18 @@ export async function reprocessExistingHealthReviewItems(
 
   const guards: HealthReprocessGuard[] = guard ? [guard] : [];
   healthReprocessGuards = guards;
+  // The live set (Codex r4 on #615): a caller joining while another guard is awaited is checked too, and every abort
+  // signal is read again after the last await, immediately before the batch is sent.
+  let checkedGuards = 0;
   const everyGuardWants = async () => {
-    for (const each of [...guards]) {
+    const count = guards.length;
+    for (let index = 0; index < count; index += 1) {
+      const each = guards[index];
       if (each.signal?.aborted) return false;
       if (each.beforeRequest && !(await each.beforeRequest().catch(() => false))) return false;
     }
-    return true;
+    checkedGuards = count;
+    return !guards.some((each) => each.signal?.aborted);
   };
   healthReprocessInFlight = (async () => {
     try {
@@ -805,7 +811,8 @@ export async function reprocessExistingHealthReviewItems(
         preferences ?? (await getHealthImportPreferences()),
         options.mappings ?? (await getHealthAutoLogMappings()),
         options.force === true,
-        { ...options, beforeRequest: everyGuardWants, isAborted: () => guards.some((each) => each.signal?.aborted) },
+        { ...options, beforeRequest: everyGuardWants, isAborted: () => guards.some((each) => each.signal?.aborted),
+          guardsPending: () => checkedGuards < guards.length },
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -826,7 +833,15 @@ async function reprocessHealthReviewItemBatches(
   preferences: HealthImportPreferences,
   mappings: HealthAutoLogMappings,
   force: boolean,
-  options: { signal?: AbortSignal; deadlineAt?: number; beforeRequest?: () => Promise<boolean>; isAborted?: () => boolean } = {},
+  options: {
+    signal?: AbortSignal;
+    deadlineAt?: number;
+    beforeRequest?: () => Promise<boolean>;
+    /** Read synchronously right before each request: any caller's abort stops it. */
+    isAborted?: () => boolean;
+    /** A caller joined after the last check: its guards are checked before the request goes. */
+    guardsPending?: () => boolean;
+  } = {},
 ) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
@@ -837,7 +852,15 @@ async function reprocessHealthReviewItemBatches(
   );
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
-    if (options.beforeRequest && !(await options.beforeRequest().catch(() => false))) {
+    let wanted = true;
+    if (options.beforeRequest) {
+      wanted = await options.beforeRequest().catch(() => false);
+      // Every caller that joined meanwhile is checked as well (Codex r4 on #615).
+      while (wanted && options.guardsPending?.()) wanted = await options.beforeRequest().catch(() => false);
+    }
+    // And, with no await left before the request, every abort signal once more.
+    if (wanted && options.isAborted?.()) wanted = false;
+    if (!wanted) {
       if (combined) {
         combined.partial = true;
         combined.hasMore = true;

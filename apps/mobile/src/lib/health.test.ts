@@ -23,6 +23,10 @@ afterAll(()=>captureDb.close());
 afterEach(()=>vi.useRealTimers());
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
+const MORE_HEALTH_WORK = {
+  ok: true, checkedCount: 25, confirmedCount: 25, ignoredCount: 0, leftInReviewCount: 0, skippedCount: 0, failedCount: 0,
+  updatedCategoryCount: 25, remainingReviewCount: 88, batchSize: 25, partial: true, hasMore: true, nextCursor: "next", errorSummary: []
+};
 const apiMocks = vi.hoisted(() => ({
   enqueueEvent: vi.fn(),
   reprocessHealthReviewItems: vi.fn()
@@ -919,6 +923,56 @@ describe("HealthKit mapping", () => {
     });
     await expect(calendar).resolves.toBe("interrupted");
     await expect(automatic).resolves.toMatchObject({ partial: true, hasMore: true });
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
+    apiMocks.reprocessHealthReviewItems.mockReset();
+  });
+
+  it("checks a caller that joins while another guard is awaited before the next batch (Codex r4 on #615)", async () => {
+    const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+    resetCalendarHealthReprocessForTests();
+    apiMocks.reprocessHealthReviewItems.mockReset();
+    apiMocks.reprocessHealthReviewItems.mockResolvedValue(MORE_HEALTH_WORK);
+    // The starter's own guard: the second batch's preflight waits on it.
+    let releaseGuard!: (value: boolean) => void;
+    let calls = 0;
+    const starter = reprocessExistingHealthReviewItems(undefined, {
+      force: true,
+      beforeRequest: () => { calls += 1; return calls === 2 ? new Promise<boolean>((resolve) => { releaseGuard = resolve; }) : Promise.resolve(true); }
+    });
+    await vi.waitFor(() => expect(calls).toBe(2));
+    // Calendar › List joins during that preflight, then the app leaves the front (no abort reaches it).
+    let inFront = true;
+    const calendar = reprocessHealthOnCalendarFront({ ownerKey: "joins-in-preflight", isCurrentOwner: () => true, isInFront: () => inFront });
+    inFront = false;
+    releaseGuard(true);
+    await expect(calendar).resolves.toBe("interrupted");
+    await expect(starter).resolves.toMatchObject({ partial: true, hasMore: true });
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
+    apiMocks.reprocessHealthReviewItems.mockReset();
+  });
+
+  it("sends nothing when an abort fires while another caller's guard is awaited (Codex r4 on #615)", async () => {
+    const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+    resetCalendarHealthReprocessForTests();
+    apiMocks.reprocessHealthReviewItems.mockReset();
+    let releaseFirst!: (value: unknown) => void;
+    apiMocks.reprocessHealthReviewItems.mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }));
+    apiMocks.reprocessHealthReviewItems.mockResolvedValue(MORE_HEALTH_WORK);
+    const automatic = reprocessExistingHealthReviewItems(undefined, { force: true });
+    await vi.waitFor(() => expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1));
+    // Calendar joins (in front), then a slow caller joins after it.
+    const controller = new AbortController();
+    const calendar = reprocessHealthOnCalendarFront({ ownerKey: "abort-in-guard", isCurrentOwner: () => true, isInFront: () => true, signal: controller.signal });
+    let releaseSlow!: (value: boolean) => void;
+    let slowAsked = false;
+    void reprocessExistingHealthReviewItems(undefined, { force: true, beforeRequest: () => { slowAsked = true; return new Promise<boolean>((resolve) => { releaseSlow = resolve; }); } });
+    releaseFirst(MORE_HEALTH_WORK);
+    await vi.waitFor(() => expect(slowAsked).toBe(true));
+    // While the slow caller's guard is awaited, Calendar's abort fires.
+    controller.abort();
+    releaseSlow(true);
+    await expect(calendar).resolves.toBe("interrupted");
+    await automatic;
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
     apiMocks.reprocessHealthReviewItems.mockReset();
   });

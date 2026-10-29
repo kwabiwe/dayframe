@@ -459,6 +459,35 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(questions(tree)).toHaveLength(1);
   });
 
+  it("lets a clear arriving with the day's fresh places drop a waiting tap and request in that same render (Codex r4 on #615)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onOpenPlace = vi.fn();
+    const props = { checks: [missing, sleepCheck], checkKinds: new Map([["c-missing", "place" as const], ["c-sleep", "health" as const]]),
+      checkTitles: new Map([["c-missing", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace, onRequestFreshRead: vi.fn() };
+    const view = (next: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...next} />
+    );
+    // A tap waits for a read newer than it.
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(questions(tree)).toHaveLength(0);
+    // The fresh read lands in the same render as a clear: nothing opens, now or after.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 1_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A caller's request the clear arrived with is dropped too, even while it is still passed in.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 7 }, clearSelectionRequest: 2 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A request made after the clear opens as usual.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 8 }, clearSelectionRequest: 2 })); });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
   it("timestamps a tap while the day loads: a stale response lacking its item never opens it; a fresh one does (Codex r5 on #610)", () => {
     const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
     const onRequestFreshRead = vi.fn();
