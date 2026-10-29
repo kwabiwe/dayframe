@@ -618,7 +618,7 @@ export function LocationCorrectionDialog({
               ...shownPlaces.map((option) => ({ key: `saved:${option.id}`, name: option.name,
                 note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
                 glyph: option.role === "home" ? DAYFRAME_APP_ICONS.placeHome : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places })),
-              { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: "Keeps it as an unknown place until you name it" }
+              { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: "Keeps its “?” until you name it" }
             ].map((option) => (
               // Native radios: one tab stop, arrow keys move the choice. The chosen row shows a neutral check, as on the iPhone.
               <label className="location-correction-option" data-checked={picked === option.key} key={option.key}>

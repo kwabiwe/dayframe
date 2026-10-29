@@ -14217,11 +14217,9 @@ button.timeline-location-hit:focus-visible {
   font-weight: 650;
 }
 
+/* A plain divider list (owner, 29 Oct 2026): the saved places and "Leave as unknown" alike, never a card. */
 .location-correction-options {
   display: grid;
-  overflow: hidden;
-  border-radius: 14px;
-  background: var(--surface-muted);
 }
 
 .location-correction-option {
@@ -14232,7 +14230,7 @@ button.timeline-location-hit:focus-visible {
   align-items: center;
   min-height: 52px;
   border: 0;
-  padding: 8px 14px;
+  padding: 8px 2px;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
@@ -14241,7 +14239,8 @@ button.timeline-location-hit:focus-visible {
 }
 
 .location-correction-option + .location-correction-option::before {
-  --divider-inset: 14px;
+  --divider-inset: 2px;
+  --divider-inset-start: 36px;
   position: absolute;
   top: 0;
   inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);

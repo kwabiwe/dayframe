@@ -634,11 +634,50 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-yes" && typeof node.props.onPress === "function")).toHaveLength(1);
     expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-no")).toHaveLength(0);
     act(() => { tree.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
-    expect(onAnswer).toHaveBeenCalledWith(true, venue);
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null);
     const edit = sheetWith({ question: { ...ask, guess: venue, onAnswer: vi.fn() } });
     act(() => { edit.root.findByProps({ testID: "location-correction-question-edit" }).props.onPress(); });
     expect(JSON.stringify(edit.root.findByProps({ testID: "location-correction-question" }).props.children)).toContain("Where were you?");
     expect(edit.root.findAll((node) => node.props.testID === "location-correction-question-yes")).toHaveLength(0);
     expect(edit.root.findAll((node) => node.props.testID === "location-correction-question-no").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a guessed venue when Yes follows a time change or a Logs as pick (Codex r1 on #620)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+    const queued = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[], generation: number) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"], 1);
+      waiting?.start();
+    });
+    const waiting = () => ({ start: vi.fn(), cancel: vi.fn(async () => undefined) });
+    // (a) A time moved, then Yes: the answer waits for the change and carries the venue.
+    const answerAfter = vi.fn(async () => waiting());
+    const onAnswer = vi.fn();
+    const timed = sheetWith({ onQueue: queued as never, question: { ...ask, guess: venue, onAnswer, answerAfter } });
+    act(() => { timed.root.findByProps({ testID: "location-correction-start" }).props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
+    act(() => { timed.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, null);
+    expect(onAnswer).not.toHaveBeenCalled();
+    // (b) Logs as picked, nothing else changed: one answer with the venue and the activity, never log_place.
+    const onLog = vi.fn();
+    const picked = sheetWith({ logAs: { activities: logs.activities, onLog }, question: { ...ask, guess: venue, onAnswer } });
+    act(() => { picked.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { picked.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, "cat-errands");
+    expect(onLog).not.toHaveBeenCalled();
+    // (b) Logs as picked with a place change: the answer waits for it, venue and activity with it; no Logs as of its own.
+    const answerAfterToo = vi.fn(async () => waiting());
+    const onLogAfter = vi.fn();
+    const both = sheetWith({ onQueue: queued as never, logAs: { activities: logs.activities, onLog, onLogAfter },
+      question: { ...ask, guess: venue, onAnswer: vi.fn(), answerAfter: answerAfterToo } });
+    act(() => { both.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { both.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { both.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(answerAfterToo).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, "cat-errands");
+    expect(onLogAfter).not.toHaveBeenCalled();
+    expect(onLog).not.toHaveBeenCalled();
   });
 });

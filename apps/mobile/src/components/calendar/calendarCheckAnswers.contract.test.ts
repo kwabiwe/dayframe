@@ -58,7 +58,9 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
     // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
     // Yes to a near guess carries its venue (PRD D23); otherwise the List's own guess, as before.
-    expect(dashboard).toContain("onAnswer: (yes, venue) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null)),");
+    expect(dashboard).toContain("onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
+    // An answer after the sheet's changes keeps its guessed venue, and a Logs as pick with it (Codex r1 on #620).
+    expect(dashboard).toContain("action: { kind: \"answer\", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");

@@ -113,6 +113,21 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     expect(seen?.venue?.applePlaceId).toMatch(/^I[123]$/);
   });
 
+  it("finds the guess even when the five rows shown leave it out (Codex r1 on #620)", async () => {
+    // A 40-minute stay; five gyms 60–64 m away fill the rows, a shop at 10 m is the only place within 50 m.
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({
+      requestId, areasOfInterest: [],
+      places: [...Array.from({ length: 5 }, (_, index) => ({ id: `g${index}`, requestId, title: `Gym ${index}`, subtitle: null,
+        distanceMeters: 60 + index, category: "MKPOICategoryFitnessCenter", offsetEastMeters: 60 + index, offsetNorthMeters: 0, source: "nearby" })),
+      { id: "s", requestId, title: "Corner Shop", subtitle: "1 High Street, Exampleton", distanceMeters: 10, category: "MKPOICategoryStore",
+        offsetEastMeters: 0, offsetNorthMeters: 10, source: "nearby", placeId: "ISHOP" }]
+    }));
+    await act(async () => { create(<Probe item={stay} />); });
+    await settle();
+    expect(seen?.venue).toEqual({ name: "Corner Shop", street: "1 High Street", applePlaceId: "ISHOP" });
+  });
+
   it("guesses nothing when the ranker isn't sure, and searches again after a failure", async () => {
     mocks.readEvidence.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({ requestId, areasOfInterest: [], places: [] }));

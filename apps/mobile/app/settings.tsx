@@ -2887,6 +2887,14 @@ export default function SettingsScreen() {
                   title="Share location details"
                 />
                 <SettingsBlockRow
+                  // The per-place readings and silences the place sheets no longer show (Codex r1 on #620).
+                  onPress={() => router.push("./location-details")}
+                  subtitle="Today's places and trips: readings and the times with none"
+                  testID="sync-help-location-details"
+                  theme={theme}
+                  title="Location details"
+                />
+                <SettingsBlockRow
                   disabled={appleMaps.checking}
                   onPress={appleMaps.start}
                   subtitle={appleMaps.checking ? "Checking… about a minute" : appleMaps.note ?? "Counts only, without places or points"}

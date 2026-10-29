@@ -17,6 +17,7 @@ import { mobileTextProps } from "../../lib/mobileTypography";
 import { InsetDivider } from "../InsetDivider";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { streetOf } from "./useCheckVenueGuess";
+import { nearbyProposalKey } from "../../lib/nearbyProposal";
 
 /**
  * Step 15 (the place sheet takes over the Review details screen): under the map, the Apple
@@ -29,9 +30,10 @@ export function SheetNearbySearch({ centre, evidence = null, onGuess, onPick, th
   centre: { latitude: number; longitude: number } | null;
   /**
    * The near guess for the sheet's "?" (PRD D23): the ranker's suggestion, else its top destination within 50 m,
-   * or null; said once per list, the same rule as the Calendar's own guess (`useCheckVenueGuess`).
+   * or null; said once per list, the same rule as the Calendar's own guess (`useCheckVenueGuess`). `proposal` is
+   * the visit (`nearbyProposalKey`) the list was ranked for, so a guess for older times is never used (Codex r1 on #620).
    */
-  onGuess?: (venue: ReviewAnswerVenue | null) => void;
+  onGuess?: (venue: ReviewAnswerVenue | null, proposal: string) => void;
   /** The name picked, and its Apple Place ID when it has one (a nearby place; a search suggestion has none). */
   onPick: (name: string, applePlaceId: string | null) => void;
   /** The visit's evidence: its times, accuracy, spread and past picks rank the list (`venueStayFromEvidence`). */
@@ -43,7 +45,10 @@ export function SheetNearbySearch({ centre, evidence = null, onGuess, onPick, th
   evidenceRef.current = evidence;
   const nearbyProvider = useMemo(() => createNativeNearbyPointOfInterestProvider(), []);
   const searchProvider = useMemo(() => createNativePlaceSearchProvider(), []);
-  const [nearby, setNearby] = useState<NearbyPointOfInterestState | null>(null);
+  // The list with the visit it was ranked for: new times or a new centre rank it again (Codex r1 on #620).
+  const proposal = nearbyProposalKey(centre, evidence ?? null);
+  const [ranked, setRanked] = useState<{ proposal: string; state: NearbyPointOfInterestState } | null>(null);
+  const nearby = ranked && ranked.proposal === proposal ? ranked.state : null;
   const [search, setSearch] = useState<PlaceSearchState | null>(null);
   const [query, setQuery] = useState("");
   const [searchController, setSearchController] = useState<PlaceSearchController | null>(null);
@@ -51,25 +56,27 @@ export function SheetNearbySearch({ centre, evidence = null, onGuess, onPick, th
   const longitude = centre?.longitude ?? null;
   useEffect(() => {
     if (!nearbyProvider || latitude === null || longitude === null) return;
-    const controller = new NearbyPointOfInterestController(nearbyProvider, setNearby, () => [],
+    const forProposal = proposal;
+    const controller = new NearbyPointOfInterestController(nearbyProvider, (state) => setRanked({ proposal: forProposal, state }), () => [],
       () => evidenceRef.current ? venueStayFromEvidence(evidenceRef.current) : null);
     void controller.load({ latitude, longitude });
     return () => controller.dispose();
-  }, [latitude, longitude, nearbyProvider]);
+  }, [latitude, longitude, nearbyProvider, proposal]);
   useEffect(() => {
     if (!searchProvider) return;
     const controller = new PlaceSearchController(searchProvider, setSearch);
     setSearchController(controller);
     return () => controller.dispose();
   }, [searchProvider]);
-  const guessed = nearby?.status === "results"
-    ? nearby.places.find((place) => place.suggested) ?? nearby.places.find((place) => place.guessed) ?? null : null;
+  // The ranking's own pick, not the visible rows (Codex r1 on #620).
+  const guessed = nearby?.status === "results" || nearby?.status === "no-results" ? nearby.guess ?? null : null;
   const onGuessRef = useRef(onGuess);
   onGuessRef.current = onGuess;
-  const guessKey = guessed ? `${nearby?.requestId}:${guessed.id}` : null;
+  const guessKey = `${proposal}#${guessed ? `${nearby?.requestId}:${guessed.id}` : ""}`;
   useEffect(() => {
-    onGuessRef.current?.(guessed ? { name: guessed.title.trim(), street: streetOf(guessed.subtitle), applePlaceId: guessed.placeId ?? null } : null);
-    // One report per list and pick.
+    onGuessRef.current?.(guessed ? { name: guessed.title.trim(), street: streetOf(guessed.subtitle), applePlaceId: guessed.placeId ?? null } : null,
+      proposal);
+    // One report per list, pick and visit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guessKey]);
   if (!nearbyProvider && !searchProvider) {
@@ -78,8 +85,9 @@ export function SheetNearbySearch({ centre, evidence = null, onGuess, onPick, th
   const typed = query.trim().length > 0;
   const rows = typed
     ? (search?.suggestions ?? []).slice(0, 6).map((suggestion) => ({ key: suggestion.id, title: suggestion.title, detail: suggestion.subtitle, placeId: null }))
-    : (nearby?.places ?? []).slice(0, 5).map((place) => ({ key: place.id, title: place.title, detail: formatPlaceDistance(place.distanceMeters),
-      placeId: place.placeId ?? null }));
+    // Nearest first, as the saved places are (owner, 29 Oct 2026); the guess still comes from the ranking.
+    : [...(nearby?.places ?? []).slice(0, 5)].sort((a, b) => a.distanceMeters - b.distanceMeters).map((place) => ({ key: place.id,
+      title: place.title, detail: formatPlaceDistance(place.distanceMeters), placeId: place.placeId ?? null }));
   const status = typed ? search?.status : nearby?.status;
   return (
     <View style={styles.wrap} testID="location-correction-nearby">

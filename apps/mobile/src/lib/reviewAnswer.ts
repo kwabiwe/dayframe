@@ -21,14 +21,19 @@ export type ReviewAnswerVenue = { name: string; street: string | null; applePlac
 export function reviewAnswerMutation(
   item: MobileReviewItem,
   logged: boolean,
-  options: { edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null } = {}
+  options: {
+    edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null;
+    /** Yes to a guessed venue with an activity picked under Logs as (Codex r1 on #620): recorded there once, as that activity. */
+    logAsCategoryId?: string | null;
+  } = {}
 ): ReviewMutation {
   const edit = logged ? options.edit ?? null : null;
   if (options.outingMemberIds?.length) return reviewDeckOutingMutation(options.outingMemberIds, logged, edit);
   // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
   // a one-time place, never a saved place or a rule (card B part 2).
   if (logged && options.venue && hasV2LocationEvidence(item)) {
-    return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}) };
+    return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}),
+      ...(options.logAsCategoryId ? { edit: { categoryId: options.logAsCategoryId } } : {}) };
   }
   if (edit) return { action: "edit_and_confirm", edit };
   if (logged) return hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" };

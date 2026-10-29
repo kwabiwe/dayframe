@@ -26,7 +26,7 @@ type Props = {
   visitOnly?: boolean;
   /**
    * The place and trip sheets' one line in place of the readings summary (owner feedback, 29 Oct 2026):
-   * `evidenceSheetCaption`, null for none. The gaps and stops stay in the diagnostic map only.
+   * `evidenceSheetCaption`, null for none. The gaps and stops are in Settings › Location details (`app/location-details.tsx`).
    */
   caption?: string | null;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */

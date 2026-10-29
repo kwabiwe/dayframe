@@ -67,7 +67,9 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
     const ownerKey = `${workspaceId}:${userId}`;
     let live = true;
     const viaReviewOutbox: AnswerAfterCorrectionsRelease = async (record) => {
-      if (record.log) {
+      // A Yes to a guessed venue keeps its venue (and a Logs as pick with it) as one review answer (Codex r1 on #620).
+      const venueAnswer = Boolean(record.venue && record.reviewItemId && record.logged);
+      if (record.log && !venueAnswer) {
         // A Logs as (Codex r4 on #610): its corrections are acknowledged, so `log_place` goes now, under the record's
         // own id (a repeat after a crash is answered once, #597); the server closes the place's "?" with it (#609).
         await enqueueTimelineCorrections(who, [{ request: { kind: "log_place", subject: "place", itemId: record.log.itemId,
@@ -87,7 +89,10 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       // Decided meanwhile on this phone (the deck): not this answer's to save.
       if ((await reviewAnswersDecided(bootstrap, [item.id, ...(record.outingMemberIds ?? [])])).size) return "gone";
       await enqueueReviewMutation({ bootstrap, item, clientMutationId: record.id,
-        mutation: reviewAnswerMutation(item, record.logged, record.outingMemberIds?.length ? { outingMemberIds: record.outingMemberIds } : {}),
+        mutation: reviewAnswerMutation(item, record.logged, {
+          ...(record.outingMemberIds?.length ? { outingMemberIds: record.outingMemberIds } : {}),
+          ...(venueAnswer ? { venue: record.venue, logAsCategoryId: record.log?.categoryId ?? null } : {})
+        }),
         ...(members.length ? { affectedItems: [item, ...members.map((member) => member!)] } : {}) });
       void synchroniseReviewMutations().catch(() => undefined);
       return "released";

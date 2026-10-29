@@ -281,15 +281,18 @@ describe("rankVenues: the near guess (PRD D23, owner 29 Oct 2026)", () => {
     expect(ranking.guess).toBe(ranking.suggestion);
   });
 
-  it("breaks a tie by distance, then by how often it was picked here, then by how well its usual length fits", () => {
+  it("breaks a tie by distance, then by a past pick here, then by how well its usual length fits", () => {
     // Two of the same kind, equally scored: the nearer one.
     const nearer = place("Alder Gifts", "Store", 6, 0);
     const farther = place("Birch Gifts", "Store", 0, 9);
     expect(rankVenues([farther, nearer], stay(10, 12)).guess?.candidate.title).toBe("Alder Gifts");
-    // Same distance and score: the one picked here more often.
+    // Same distance: the one picked here before (its score is raised too, so it leads outright).
     const a = place("Cedar Gifts", "Store", 10, 0, { placeId: "I.cedar" });
     const b = place("Dock Gifts", "Store", 0, 10, { placeId: "I.dock" });
-    const counts: Record<string, number> = { "I.cedar": 1, "I.dock": 3 };
-    expect(rankVenues([a, b], stay(10, 12, { pickCount: (candidate) => counts[candidate.placeId ?? ""] ?? 0 })).guess?.candidate.title).toBe("Dock Gifts");
+    expect(rankVenues([a, b], stay(10, 12, { pickedBefore: (candidate) => candidate.placeId === "I.dock" })).guess?.candidate.title).toBe("Dock Gifts");
+    // Same distance, neither picked, equal share: the one whose usual length fits a 70-minute stay (a gym over a shop).
+    const gym = place("Elm Fitness", "FitnessCenter", 10, 0);
+    const shop = place("Fern Gifts", "Store", 0, 10);
+    expect(rankVenues([shop, gym], stay(70, 12)).guess?.candidate.title).toBe("Elm Fitness");
   });
 });

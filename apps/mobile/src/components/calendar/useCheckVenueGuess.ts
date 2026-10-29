@@ -130,7 +130,8 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
           if (state.status === "error") finish(null, false);
           if (state.status !== "results" && state.status !== "no-results") return;
           // The strict suggestion, else the near guess (PRD D23): a destination within 50 m of the visit.
-          const pick = state.places.find((place) => place.suggested) ?? state.places.find((place) => place.guessed);
+          // Read from the ranking itself, never the five visible rows (Codex r1 on #620).
+          const pick = state.guess ?? null;
           finish(pick ? { name: pick.title.trim(), street: streetOf(pick.subtitle), applePlaceId: pick.placeId ?? null } : null, true);
         }, () => [], () => venueStayFromEvidence(evidence));
         await nearby.load({ latitude: centre.coordinates[1], longitude: centre.coordinates[0] });

@@ -40,8 +40,6 @@ export type VenueStay = {
   areasOfInterest?: readonly string[];
   /** A venue you picked or saved near here before counts four times (design §6.1). */
   pickedBefore?: (candidate: VenueCandidate) => boolean;
-  /** How many times you picked this venue near here before (the near guess's tie-break); `pickedBefore` as 1 or 0 when absent. */
-  pickCount?: (candidate: VenueCandidate) => number;
 };
 
 export type VenueKind =
@@ -192,8 +190,8 @@ export type VenueRanking = {
   /**
    * The near guess (PRD D23, owner 29 Oct 2026): the strict suggestion when there is one; otherwise the ranker's
    * top destination within `VENUE_GUESS_RADIUS_METERS` of the stay's centre, with no lead needed. Near-equal
-   * scores go to the nearest, then the one picked here most often, then the one whose usual length fits the
-   * stay best. Null when no destination is that close. The iPhone asks "Visited {name}?" with it.
+   * scores go to the nearest, then one picked here before (`pickedBefore`, all the server supplies; counts would
+   * need a server change), then the one whose usual length fits the stay best. Null when no destination is that close. The iPhone asks "Visited {name}?" with it.
    */
   guess: RankedVenue | null;
 };
@@ -303,10 +301,7 @@ function nearGuess(venues: readonly RankedVenue[], stay: VenueStay, dwellFit: Re
     venue.candidate.distanceMeters <= VENUE_GUESS_RADIUS_METERS);
   if (!near.length) return null;
   const best = Math.max(...near.map((venue) => venue.share));
-  const picks = (venue: RankedVenue) => {
-    const count = stay.pickCount?.(venue.candidate);
-    return typeof count === "number" && Number.isFinite(count) ? count : stay.pickedBefore?.(venue.candidate) ? 1 : 0;
-  };
+  const picks = (venue: RankedVenue) => stay.pickedBefore?.(venue.candidate) ? 1 : 0;
   return near
     .filter((venue) => venue.share >= best * (1 - VENUE_GUESS_TIE_FRACTION))
     .sort((a, b) => a.candidate.distanceMeters - b.candidate.distanceMeters || picks(b) - picks(a) ||

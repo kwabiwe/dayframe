@@ -2190,13 +2190,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
         // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
         guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
-        onAnswer: (yes, venue) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null)),
+        onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
+          logAsCategoryId ? { logAsCategoryId } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
-        // to the Review outbox only once the server has every one of them. No Apple place with it: the corrections say
-        // where it was.
+        // to the Review outbox only once the server has every one of them. A guessed venue goes with it (Codex r1 on
+        // #620); otherwise the corrections say where it was.
         // `generation`: the tap's account lifetime, carried from before its first await (Codex r17 on #610).
-        answerAfter: async (yes, ids, generation) => {
+        answerAfter: async (yes, ids, generation, venue, logAsCategoryId) => {
           if (!correctionOwner || !check.segmentId) throw new Error("No account.");
           const id = createReviewClientMutationId();
           // The account it is registered for: its start checks it is still this one (Codex r14 on #610), and every write
@@ -2208,7 +2209,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           // its question and nothing is queued (Codex r16 on #610).
           if (!checkAnswers.canAnswer(check.id)) throw new Error("This can't be answered here now.");
           const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
-            action: { kind: "answer", reviewItemId: check.id, logged: yes } });
+            // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
+            action: { kind: "answer", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {

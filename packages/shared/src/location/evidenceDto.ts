@@ -147,7 +147,7 @@ export function evidencePlainSummary(
 
 /**
  * The map's one line on the place and trip sheets (owner feedback, 29 Oct 2026): never the silences or stops,
- * which stay in the diagnostic map (`evidencePlainSummary`). A saved or named place says nothing, and an
+ * which are in the iPhone's Settings › Location details (`evidencePlainSummary`). A saved or named place says nothing, and an
  * unknown place or a trip at most "Based on 14 readings"; no readings, or readings already deleted, say nothing.
  */
 export function evidenceSheetCaption(

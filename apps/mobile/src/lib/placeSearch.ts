@@ -158,6 +158,11 @@ export type NearbyPointOfInterestState = {
   status: "idle" | "loading" | "results" | "no-results" | "error";
   places: NearbyVenue[];
   message: string | null;
+  /**
+   * The ranking's own pick, whatever the five rows show (Codex r1 on #620): the strict suggestion, else the near
+   * guess (PRD D23). Only with results; read by the "?"'s guess and the sheet, never from the visible rows.
+   */
+  guess?: NearbyVenue | null;
 };
 
 export type PlaceSearchState = {
@@ -390,10 +395,12 @@ export class NearbyPointOfInterestController {
         this.stay()
       );
       const places = visibleNearbyPlaces(ranked, this.hiddenNames());
+      const guess = ranked.find((place) => place.suggested) ?? ranked.find((place) => place.guessed) ?? null;
       this.onStateChange({
         requestId,
         status: places.length > 0 ? "results" : "no-results",
         places,
+        guess,
         message: places.length > 0 ? null : "Nothing found nearby. Search for the place instead."
       });
     } catch (error) {

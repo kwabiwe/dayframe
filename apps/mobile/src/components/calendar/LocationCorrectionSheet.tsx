@@ -30,6 +30,7 @@ import { mobileTextProps } from "../../lib/mobileTypography";
 import { SheetNearbySearch } from "./SheetNearbySearch";
 import { ActivityChip, activityChipStyles } from "../ActivityChips";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
+import { nearbyProposalKey } from "../../lib/nearbyProposal";
 import { InsetDivider } from "../InsetDivider";
 import { COMPACT_PILL_HIT_SLOP, compactPillStyles } from "../compactPill";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
@@ -128,15 +129,17 @@ export function LocationCorrectionSheet({
     guess?: ReviewAnswerVenue | null;
     /**
      * Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays.
-     * `venue`: Yes to a guess, recorded there once (`record_poi_once`).
+     * `venue`: Yes to a guess, recorded there once (`record_poi_once`); `logAsCategoryId`: the activity picked under
+     * Logs as with it, recorded as that activity (Codex r1 on #620).
      */
-    onAnswer: (yes: boolean, venue?: ReviewAnswerVenue | null) => boolean | void;
+    onAnswer: (yes: boolean, venue?: ReviewAnswerVenue | null, logAsCategoryId?: string | null) => boolean | void;
     /**
      * Answers after the sheet's own changes (Codex r2 on #610): kept on the phone first, waiting for the corrections
      * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
      * removes it if they can't be.
      */
-    answerAfter?: (yes: boolean, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
+    answerAfter?: (yes: boolean, ids: readonly string[], generation: number, venue?: ReviewAnswerVenue | null,
+      logAsCategoryId?: string | null) => ReturnType<LocationCorrectionBeforeEnqueue>;
   } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
@@ -330,7 +333,8 @@ export function LocationCorrectionSheet({
   // The Apple place picked from Nearby, kept with its name while the name is still that pick's.
   const [nearbyPick, setNearbyPick] = useState<{ name: string; placeId: string | null } | null>(null);
   // The near guess from the sheet's own nearby list (PRD D23), and whether Edit set the guess aside.
-  const [nearbyGuess, setNearbyGuess] = useState<ReviewAnswerVenue | null>(null);
+  // Kept with the visit it was ranked for (`nearbyProposalKey`; Codex r1 on #620).
+  const [nearbyGuess, setNearbyGuess] = useState<{ venue: ReviewAnswerVenue | null; proposal: string } | null>(null);
   const [guessSetAside, setGuessSetAside] = useState(false);
   // The activity picked under Logs as; none is "Don't log", as the place is now.
   const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
@@ -370,10 +374,13 @@ export function LocationCorrectionSheet({
    */
   function answerFromSheet(yes: boolean, venue: ReviewAnswerVenue | null = null) {
     if (!question || frozen() || stale) return;
-    if (yes && logCategoryId && logAs) {
+    // Yes to a guessed venue keeps the venue on every path (Codex r1 on #620): with Logs as picked, the venue is
+    // recorded once as that activity (one `record_poi_once` answer, after the sheet's corrections), never `log_place`.
+    if (yes && logCategoryId && logAs && !venue) {
       commitRef.current?.();
       return;
     }
+    const logAsCategoryId = yes && venue && logCategoryId ? logCategoryId : null;
     if (!yes && logCategoryId) setLogCategoryId(null);
     if (confirming) {
       setSaveError("Finish the change above first, then answer.");
@@ -388,7 +395,7 @@ export function LocationCorrectionSheet({
       : tripCorrections(target.trip, { times });
     if (!corrections.length) {
       // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
-      if ((venue ? question.onAnswer(yes, venue) : question.onAnswer(yes)) === false) {
+      if ((venue ? question.onAnswer(yes, venue, logAsCategoryId) : question.onAnswer(yes)) === false) {
         setSaveError("This can't be answered here right now.");
         return;
       }
@@ -401,7 +408,8 @@ export function LocationCorrectionSheet({
       setSaveError("Save your changes with Done; the question updates after.");
       return;
     }
-    keep(corrections, "close", (ids, generation) => answerAfter(yes, ids, generation));
+    keep(corrections, "close", (ids, generation) => venue
+      ? answerAfter(yes, ids, generation, venue, logAsCategoryId) : answerAfter(yes, ids, generation));
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;
@@ -427,9 +435,15 @@ export function LocationCorrectionSheet({
   const nearbyCentre = target.kind === "place" && onSavePlace && !stale && !target.place.placeId
     && evidence && evidence !== "unavailable" && evidence.map.centre
     ? { latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] } : null;
+  // The sheet's own guess only for the visit as it is now: the same centre and times, and evidence that describes
+  // this place's times (as the Calendar's guess requires; Codex r1 on #620).
+  const nearbyGuessNow = nearbyGuess && evidence && evidence !== "unavailable" && target.kind === "place"
+    && nearbyGuess.proposal === nearbyProposalKey(nearbyCentre, evidence)
+    && Date.parse(evidence.segment.startedAt) === Date.parse(target.place.startedAt)
+    && Date.parse(evidence.segment.stoppedAt ?? "") === Date.parse(target.place.stoppedAt ?? "") ? nearbyGuess.venue : null;
   // The near guess the "?" asks about (PRD D23): only for a place whose "?" can be answered here, until Edit.
   const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null
-    ? question.guess ?? nearbyGuess : null;
+    ? question.guess ?? nearbyGuessNow : null;
   // "Save this place", asked under Nearby after a pick or in place in the corrections.
   const saveForm = (
     <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}
@@ -548,7 +562,7 @@ export function LocationCorrectionSheet({
             label={question && !guess && (guessSetAside || question.text === "Where were you?") ? null : "Where were you?"}
             nearby={nearbyCentre ? (
               <SheetNearbySearch centre={nearbyCentre} evidence={evidence && evidence !== "unavailable" ? evidence : null}
-                onGuess={setNearbyGuess}
+                onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })}
                 onPick={(name, applePlaceId) => {
                   if (frozen()) return;
                   setPlaceName(name);
@@ -769,7 +783,9 @@ function PlaceView({ after, choice, correctableItem, distances, label, nearby, o
       {nearby}
       {after}
       {correctableItem ? (
-        <View accessibilityRole="radiogroup" accessibilityLabel="Place" style={[styles.group, { backgroundColor: theme.surfaceMuted }]}>
+        // A plain divider list, as the Nearby rows above it: the saved places and "Leave as unknown" alike, with a tick
+        // on the one chosen, never a card (owner, 29 Oct 2026).
+        <View accessibilityRole="radiogroup" accessibilityLabel="Place" style={styles.group}>
           {options.map((option, index) => {
             const checked = option.key === "unknown" ? selected === null : selected === option.key;
             return (
@@ -777,14 +793,14 @@ function PlaceView({ after, choice, correctableItem, distances, label, nearby, o
                 accessibilityState={{ checked }} onPress={() => onChoose(option.pick)}
                 style={({ pressed }) => [styles.option, { opacity: pressed ? 0.7 : 1 }]}
                 testID={`location-correction-place-${option.key}`}>
-                {/* Past the 18-point icon (14 + 18 + 12) and the group's 14 of padding. */}
+                {/* Past the 18-point icon (18 + 12), as the Nearby rows. */}
                 <DayframeIcon color={theme.textSecondary} glyph={option.glyph} size={18} />
                 <View style={styles.optionText}>
                   <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.optionTitle, { color: theme.textPrimary }]}>{option.title}</Text>
                   <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: theme.textSecondary }]}>{option.detail}</Text>
                 </View>
                 {checked ? <DayframeIcon color={theme.textPrimary} glyph="check" size={16} /> : <View style={styles.tickSpace} />}
-                {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={44} /> : null}
+                {index > 0 || nearby ? <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={30} /> : null}
               </Pressable>
             );
           })}
@@ -935,8 +951,8 @@ const styles = StyleSheet.create({
   quietText: { fontSize: 15, fontWeight: "600" },
   corrections: { gap: 14 },
   hint: { fontSize: 13, lineHeight: 18 },
-  group: { borderRadius: 14, overflow: "hidden" },
-  option: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 8 },
+  group: {},
+  option: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
   optionText: { flex: 1, gap: 1 },
   optionTitle: { fontSize: 16, fontWeight: "600", lineHeight: 21 },
   tickSpace: { width: 16 },
