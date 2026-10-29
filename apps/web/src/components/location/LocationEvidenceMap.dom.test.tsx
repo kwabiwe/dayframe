@@ -123,14 +123,14 @@ describe("LocationEvidenceMap", () => {
     mocks.clientFetch.mockResolvedValue(styleResponse());
     render(<LocationEvidenceMap evidence={evidence()} />);
 
-    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    await waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
     const map = mocks.maps[0]!;
-    const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
-    for (let tile = 0; tile < 6; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
-    map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") });
+    const tiles = [0, 1, 2, 3, 4, 5];
+    act(() => { for (const x of tiles) map.emit("sourcedataloading", tileEvent(x)); });
+    act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
+    act(() => { for (const x of tiles.slice(1)) map.emit("sourcedata", tileEvent(x)); });
     expect(screen.getByText("Loading map background…")).not.toBeNull();
     act(() => map.emit("load"));
-    await waitFor(() => expect(screen.queryByText("Loading map background…")).toBeNull());
 
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Endpoint estimate")).not.toBeNull();
@@ -141,16 +141,16 @@ describe("LocationEvidenceMap", () => {
     mocks.clientFetch.mockResolvedValue(styleResponse());
     render(<LocationEvidenceMap evidence={evidence()} />);
 
-    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    await waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
     const map = mocks.maps[0]!;
-    const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
-    for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
-    for (let tile = 0; tile < 3; tile += 1) map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") });
+    act(() => { for (const x of [0, 1, 2, 3]) map.emit("sourcedataloading", tileEvent(x)); });
+    act(() => { for (const x of [0, 1, 2]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
+    act(() => map.emit("sourcedata", tileEvent(3)));
     // An evidence source's error is never a tile failure.
-    map.emit("error", { sourceId: "route", error: new Error("bad data") });
+    act(() => map.emit("error", { sourceId: "route", error: new Error("bad data") }));
     act(() => map.emit("load"));
 
-    const note = await screen.findByText("Some of the map background didn’t load. Evidence remains visible.");
+    const note = screen.getByText("Some of the map background didn’t load. Evidence remains visible.");
     expect(note.className).toContain("is-degraded");
     expect(note.className).not.toContain("is-error");
     expect(screen.getByText("Endpoint estimate")).not.toBeNull();
@@ -320,47 +320,66 @@ describe("LocationEvidenceMap", () => {
     }
   });
 
-  it("counts late failures of the first window's tiles: four pending, three fail after 10 s (Codex r3 on #626)", async () => {
+  /** A map whose style has loaded, with tiles 0–3 of the first view admitted, under fake timers. */
+  async function mapWithFourPendingTiles() {
     mocks.autoLoad = false;
     mocks.clientFetch.mockResolvedValue(styleResponse());
+    render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    await vi.waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
+    const map = mocks.maps[0]!;
+    act(() => { for (const x of [0, 1, 2, 3]) map.emit("sourcedataloading", tileEvent(x)); });
+    return map;
+  }
+
+  it("never lets new tiles' successes settle the first window's: three of the four originals failing late shows the note (Codex r3, r4 on #626)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
-      await vi.waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
-      const map = mocks.maps[0]!;
-      const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
-      for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+      const map = await mapWithFourPendingTiles();
       act(() => { vi.advanceTimersByTime(10_000); });
-      // The window has closed: a request started now is not counted, and nothing is decided yet.
-      transform("https://dayframe.test/api/map-tiles/15/9/1", "Tile");
+      // Four new tiles after the window: not admitted, and their successes settle nothing.
+      act(() => { for (const x of [10, 11, 12, 13]) { map.emit("sourcedataloading", tileEvent(x)); map.emit("sourcedata", tileEvent(x)); } });
       expect(screen.getByText("Loading map background…")).not.toBeNull();
-      act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
-      for (let tile = 0; tile < 3; tile += 1) act(() => map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") }));
+      act(() => { for (const x of [0, 1, 2]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      act(() => map.emit("sourcedata", tileEvent(3)));
       expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("is ready once the first window's tiles settle after the timeout with only one failure", async () => {
-    mocks.autoLoad = false;
-    mocks.clientFetch.mockResolvedValue(styleResponse());
+  it("ignores new tiles' failures: the originals all loading ends ready (Codex r4 on #626)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
-      await vi.waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
-      const map = mocks.maps[0]!;
-      const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
-      for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+      const map = await mapWithFourPendingTiles();
       act(() => { vi.advanceTimersByTime(10_000); });
-      act(() => map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") }));
-      for (let tile = 0; tile < 2; tile += 1) act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
-      act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
+      act(() => { for (const x of [10, 11, 12]) { map.emit("sourcedataloading", tileEvent(x)); map.emit("error", { ...tileEvent(x), error: new Error("502") }); } });
+      act(() => { for (const x of [0, 1, 2, 3]) map.emit("sourcedata", tileEvent(x)); });
       expect(screen.queryByRole("status")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("decides only when the window has closed: one failure then three successes inside it ends ready (Codex r4 on #626)", async () => {
+    const map = await mapWithFourPendingTiles();
+    act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
+    act(() => { for (const x of [1, 2, 3]) map.emit("sourcedata", tileEvent(x)); });
+    // Everything has settled, but the window is still open: no verdict yet, no early warning.
+    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    act(() => map.emit("load"));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("waits for a tile still loading when the window closes", async () => {
+    const map = await mapWithFourPendingTiles();
+    act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
+    act(() => map.emit("load"));
+    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    // A repeated outcome for a settled tile changes nothing; the last one decides.
+    act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
+    act(() => map.emit("sourcedata", tileEvent(3)));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("jumps to new bounds at once under Reduce Motion", async () => {
@@ -409,6 +428,11 @@ describe("LocationEvidenceMap", () => {
     expect(mocks.maps).toHaveLength(0);
   });
 });
+
+/** A base-map tile's MapLibre event: its source and canonical tile id. */
+function tileEvent(x: number) {
+  return { sourceId: "base", dataType: "source", tile: { tileID: { canonical: { x, y: 1, z: 15 } } } };
+}
 
 function styleResponse() {
   return new Response(JSON.stringify({

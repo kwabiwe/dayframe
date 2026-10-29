@@ -110,8 +110,6 @@ export function LocationEvidenceMap({
       const { evidence: firstEvidence, visitOnly: firstVisitOnly } = latest.current;
       // The first tiles load at the fitted view (glitch fix 2): no centre-and-zoom-15 first, then a jump.
       const bounds = evidenceBounds(firstEvidence, firstVisitOnly);
-      let tileRequests = 0;
-      let tileErrors = 0;
       let firstLoadWindowOpen = true;
       map = new maplibregl.Map({
         container,
@@ -120,8 +118,7 @@ export function LocationEvidenceMap({
           : { center: fallbackCentre(firstEvidence), zoom: 11 }),
         attributionControl: baseMap.available ? { compact: true } : false,
         style: baseMap.style,
-        transformRequest: (url, resourceType) => {
-          if (firstLoadWindowOpen && resourceType === "Tile") tileRequests += 1;
+        transformRequest: (url) => {
           return {
             url,
             ...(url.startsWith(window.location.origin) ? { credentials: "same-origin" as const } : {})
@@ -131,24 +128,28 @@ export function LocationEvidenceMap({
       const created = map;
       mapRef.current = created;
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is. The first
-      // load window counts the tile requests started in it (until MapLibre's `load`, or 10 s); those requests are
-      // followed until they settle, however late, and the majority rule decides then. "Ready" needs the style
-      // loaded; the timeout only stops counting new requests (Codex r3 on #626).
+      // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is. Each tile
+      // MapLibre starts loading inside the first load window (until its `load`, or 10 s) is admitted by its source
+      // and tile id and settled once, by its own success or failure; the verdict comes only when the window has
+      // closed and every admitted tile has settled, and "ready" needs the style loaded (Codex r3, r4 on #626).
       let styleFailed = !baseMap.available;
       let sourceFailed = false;
       let styleLoaded = false;
-      let mapLoaded = false;
-      let tileLoads = 0;
       let decided = false;
-      const windowTilesPending = () => tileLoads + tileErrors < tileRequests;
+      const admitted = new Map<string, "pending" | "loaded" | "failed">();
       const decide = () => {
-        if (decided || cancelled || styleFailed || sourceFailed || !styleLoaded) return;
-        const majorityFailed = tileRequests > 0 && tileErrors * 2 > tileRequests;
-        const settled = mapLoaded || (!firstLoadWindowOpen && tileRequests > 0 && !windowTilesPending());
-        if (!majorityFailed && !settled) return;
+        if (decided || cancelled || styleFailed || sourceFailed || !styleLoaded || firstLoadWindowOpen) return;
+        const outcomes = [...admitted.values()];
+        if (outcomes.includes("pending")) return;
         decided = true;
-        setBaseMapState(majorityFailed ? "degraded" : "ready");
+        const failed = outcomes.filter((outcome) => outcome === "failed").length;
+        setBaseMapState(failed * 2 > outcomes.length ? "degraded" : "ready");
+      };
+      const settle = (event: unknown, outcome: "loaded" | "failed") => {
+        const key = baseTileKey(event);
+        if (!key || admitted.get(key) !== "pending") return;
+        admitted.set(key, outcome);
+        decide();
       };
       const closeFirstLoadWindow = () => {
         if (!firstLoadWindowOpen) return;
@@ -157,7 +158,12 @@ export function LocationEvidenceMap({
         windowTimer = null;
         decide();
       };
-      windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
+      // The window's 10 s run from the style loading: no tile is asked for before it, so a slow style never
+      // closes the window empty.
+      const startFirstLoadWindowTimer = () => {
+        if (windowTimer || !firstLoadWindowOpen) return;
+        windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
+      };
       // The evidence is drawn as soon as the style is there, not after the tiles, from the newest content: a leg
       // opened before the style loaded is drawn and fitted at once (Codex r1 on #626).
       const drawFirst = () => {
@@ -195,27 +201,23 @@ export function LocationEvidenceMap({
           sourceFailed = true;
           return;
         }
-        if (windowTilesPending()) tileErrors += 1;
-        decide();
+        settle(event, "failed");
       });
-      created.on("sourcedata", (event) => {
-        const detail = event as unknown as { sourceId?: string; tile?: unknown };
-        if (!detail.tile || (detail.sourceId && EVIDENCE_SOURCE_IDS.has(detail.sourceId))) return;
-        if (windowTilesPending()) tileLoads += 1;
-        decide();
+      created.on("sourcedataloading", (event) => {
+        const key = baseTileKey(event);
+        if (key && firstLoadWindowOpen && !admitted.has(key)) admitted.set(key, "pending");
       });
-      created.on("load", () => {
-        mapLoaded = true;
-        closeFirstLoadWindow();
-        decide();
-      });
+      created.on("sourcedata", (event) => settle(event, "loaded"));
+      created.on("load", closeFirstLoadWindow);
       created.on("style.load", () => {
         styleLoaded = true;
+        startFirstLoadWindowTimer();
         drawFirst();
         decide();
       });
       if (created.isStyleLoaded?.()) {
         styleLoaded = true;
+        startFirstLoadWindowTimer();
         drawFirst();
       }
       created.on("click", (event) => latest.current.onSelectPoint?.({
@@ -480,6 +482,14 @@ export function evidenceBounds(
     north = Math.max(north, latitude);
   }
   return Number.isFinite(west) ? [[west, south], [east, north]] : null;
+}
+
+/** A base-map tile's identity in a MapLibre event: its source and canonical z/x/y; null for anything else. */
+function baseTileKey(event: unknown) {
+  const detail = event as { sourceId?: string; tile?: { tileID?: { canonical?: { x: number; y: number; z: number } } } };
+  const canonical = detail.tile?.tileID?.canonical;
+  if (!detail.sourceId || EVIDENCE_SOURCE_IDS.has(detail.sourceId) || !canonical) return null;
+  return `${detail.sourceId}/${canonical.z}/${canonical.x}/${canonical.y}`;
 }
 
 function sameBounds(left: [[number, number], [number, number]], right: [[number, number], [number, number]] | null) {
