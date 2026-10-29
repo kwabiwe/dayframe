@@ -1,7 +1,7 @@
 // Location v4 step 14, iPhone part 3b: a suggestion is answered where it sits, on its row in Calendar ›
 // List, with exactly the effects the Review deck's "Log it" and "Skip" have. Both call the one rule here,
 // so a choice saves the same mutation wherever it is made.
-import { formatClockTime, placeQuestion, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
+import { formatClockTime, placeQuestion, timerTripClashQuestion, timerTripClashWords, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
 import type { MobileReviewItem } from "./api";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "./review";
 import { reviewDeckOutingMutation } from "./reviewDeckOutings";
@@ -27,6 +27,14 @@ export function reviewAnswerMutation(
     logAsCategoryId?: string | null;
   } = {}
 ): ReviewMutation {
+  // "A block ran into your trip" (location v4 design §7): End it accepts the proposal as it was shown (its hash), so
+  // a question that changed meanwhile is refused (409 `proposal_changed`); Keep it ignores it once, for good.
+  if (timerTripClashQuestion(item)) {
+    if (!logged) return { action: "ignore_once" };
+    const hash = timerTripClashProposalHash(item);
+    if (!hash) throw new Error("This question can't be answered on this iPhone yet. Refresh and try again.");
+    return { action: "accept", expectedProposalHash: hash };
+  }
   const edit = logged ? options.edit ?? null : null;
   if (options.outingMemberIds?.length) return reviewDeckOutingMutation(options.outingMemberIds, logged, edit);
   // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
@@ -52,11 +60,26 @@ export type ReviewAnswerQuestion = {
   skipLabel: string | null;
 };
 
+/** A clash item's proposal hash as the server sent it (bootstrap `proposalHash`), when it is a valid one. */
+export function timerTripClashProposalHash(item: Pick<MobileReviewItem, "proposalHash">) {
+  return typeof item.proposalHash === "string" && /^[a-f0-9]{64}$/.test(item.proposalHash) ? item.proposalHash : null;
+}
+
 export function reviewAnswerQuestion(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
   options: { outing?: boolean; pendingChange?: boolean; venue?: ReviewAnswerVenue | null } = {}
 ): ReviewAnswerQuestion {
+  const clash = timerTripClashQuestion(item);
+  if (clash) {
+    // On its block's sheet: the one Yes is End it (only with the proposal it is sent with: an older server's item has
+    // none, so it offers Keep it alone), and Keep it. Never "timer" in the words.
+    const words = timerTripClashWords(item, clash, null, clockFormat);
+    if (options.pendingChange) {
+      return { question: words.question, detail: "A change to it is waiting or wasn't accepted, so it can't be answered yet.", logLabel: null, skipLabel: null };
+    }
+    return { question: words.question, detail: null, logLabel: timerTripClashProposalHash(item) ? words.endLabel : null, skipLabel: words.keepLabel };
+  }
   const question = reviewAnswerWords(item, clockFormat, options);
   // A waiting or rejected change of its own: the deck locked the card (Codex r10 on #582); it can't be answered yet.
   if (options.pendingChange) {

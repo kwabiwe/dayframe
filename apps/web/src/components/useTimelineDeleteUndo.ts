@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useReportDeletedBlocks } from "@/components/location/ListChecks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   TimelineDeleteUndoController,
@@ -52,6 +53,9 @@ export function useTimelineDeleteUndo({
   useEffect(() => {
     controller.reconcileEntryIds(entryIds);
   }, [controller, entryIds]);
+
+  // Deleted here and held for Undo: their "block ran into your trip" stops asking at once (Codex r1 on #618).
+  useReportDeletedBlocks(state.hiddenEntryIds);
 
   const requestDelete = useCallback((request: TimelineDeleteRequest) => {
     controller.requestDelete(request);

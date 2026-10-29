@@ -38,7 +38,8 @@ describe("Calendar range and toolbar contract", () => {
     expect(runtime).toContain("dateDataCacheRef.current.get(dateDataCacheKey(workspaceId, date))");
     expect(runtime).toContain("DATE_DATA_CACHE_LIMIT = 8");
     expect(runtime).toContain("withCurrentSharedBootstrap(cached, dataRef.current)");
-    expect(runtime).toContain("shellData: data");
+    // The shell copy is the End it projection of the data (location v4 design §7, Codex r1 on #618).
+    expect(runtime).toContain("shellData: shownData");
     expect(runtime).toContain("data: selectedData");
     expect(source("./PersistentTimerBar.tsx")).toContain("shellData: data");
     // Timesheet left Calendar (owner, 11 Oct): views restore the preferred scope, nothing is forced.

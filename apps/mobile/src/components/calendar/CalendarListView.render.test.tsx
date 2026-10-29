@@ -820,3 +820,33 @@ describe("CalendarListView's open question (card B part 2)", () => {
     expect(onOpenCheckChange).toHaveBeenLastCalledWith("c-place");
   });
 });
+
+// Location v4 design §7: "a block ran into your trip" asks on the block, never on a row of its own.
+describe("a block's own \"?\" in Calendar › List", () => {
+  const asking = { ...(block("work", "Work", 9, 12) as object), asking: true, accessibilityLabel: "Work, Needs a look" } as never;
+  const check = { id: "clash-1", segmentId: null, startedAt: iso(9), stoppedAt: iso(10, 42) };
+
+  it("puts the one amber dot on the block's row, reads \"Needs a look\", and shows no row of its own", () => {
+    const { tree } = render({ entries: [block("commute", "Commute", 8, 9), asking], checks: [check], checkTotal: 1,
+      blockChecks: new Map([["work", "clash-1"]]), checkKinds: new Map([["clash-1", "block"]]), checkTitles: new Map([["clash-1", "Work ran 18m into your trip"]]) });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-block-asking" })).toHaveLength(1);
+    expect(labels(tree)).toContain("Work, Needs a look");
+    expect(textOf(tree)).not.toContain("ran 18m into your trip");
+    expect(tree.root.findByProps({ accessibilityLabel: "Work, Needs a look" }).props.accessibilityHint).toBe("Opens the block with its question");
+  });
+
+  it("opens the block's sheet for \"N to check\" and a request by id, and steps on from it", () => {
+    const onNextCheck = vi.fn();
+    const props = { entries: [asking], checks: [check], checkTotal: 1, onNextCheck,
+      blockChecks: new Map([["work", "clash-1"]]), checkKinds: new Map([["clash-1", "block" as const]]) };
+    const { tree, onOpenEntry } = render({ ...props, openCheckRequest: { id: "clash-1", request: 1 } });
+    expect(onOpenEntry).toHaveBeenCalledWith(expect.objectContaining({ entryId: "work" }));
+    act(() => { tree.root.findByProps({ testID: "calendar-list-checks-chip" }).props.onPress(); });
+    expect(onNextCheck).toHaveBeenCalledWith("clash-1");
+  });
+
+  it("keeps the dot off a block whose question no longer asks (answered, or its block changed)", () => {
+    const { tree } = render({ entries: [block("work", "Work", 9, 12)], checks: [], blockChecks: new Map() });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-block-asking" })).toHaveLength(0);
+  });
+});

@@ -69,7 +69,7 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { getReviewItemSyncStates, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
+import { getReviewItemSyncStates, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -117,7 +117,7 @@ import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
 import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
-import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, timerTripClashQuestion, timerTripClashWords, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
 import { withPlacesAndLegs } from "@/lib/calendarGridPlaces";
 import {
   ActivityNameTakenError,
@@ -216,9 +216,12 @@ import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
   enqueueTimeEntryUpdate,
   isTimeEntryCommandRejected,
+  readPendingTimeEntryCommands,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
   type TimeEntryCommandHoldLease,
+  subscribeDeliveredTimeEntryDeletes,
+  subscribeTimeEntryOutbox,
   synchroniseTimeEntryCommands
 } from "@/lib/timeEntryOutbox";
 import {
@@ -255,7 +258,9 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
+import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
@@ -507,6 +512,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
+  // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
+  // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
+  const appliedServerDataListeners = useRef(new Set<(startedAtMs: number, server: MobileBootstrap) => void>());
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
@@ -1041,6 +1049,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
+      const readStartedAt = Date.now();
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1075,7 +1084,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         currentRevision: () => dashboardMutationRevision.current,
         guard: refreshGuard,
         reconcile: reconcileDashboardDeletionState,
-        timerMutationsInFlight: () => timerMutationCount.current
+        timerMutationsInFlight: () => timerMutationCount.current,
+        // Only once the guard accepted it, just before it is published: a discarded read settles nothing.
+        onApplied: () => {
+          const applied = serverBootstrap;
+          for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);
+        }
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
@@ -1602,7 +1616,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
   );
-  const activeEntryForDisplay = data?.activeEntry ?? null;
+  // "A block ran into your trip" (location v4 design §7): End it held for Undo or waiting on this iPhone shows the
+  // running block ended at the trip's start on every timer surface — Today, its timer card and the Play orb — as in
+  // the Calendar; Undo or a refusal takes it out of `timerClashEnds`, so the block runs again. The server's running
+  // block is unchanged until the answer arrives: a Play tap meanwhile starts a new block (the server then ends the old
+  // one, and End it still ends it at the trip's start).
+  const [timerClashEnds, setTimerClashEnds] = useState<ReadonlyMap<string, string>>(NO_CLASH_ENDS);
+  const timerShownData = useMemo(() => projectTimerTripClashEnds(data, timerClashEnds), [data, timerClashEnds]);
+  const clashEndedActiveId = data?.activeEntry && !timerShownData?.activeEntry ? data.activeEntry.id : null;
+  const clashEndedActiveRef = useRef(clashEndedActiveId);
+  clashEndedActiveRef.current = clashEndedActiveId;
+  const activeEntryForDisplay = timerShownData?.activeEntry ?? null;
   const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
   const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
 
@@ -1713,17 +1737,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
   const historySourceEntries = useMemo(() => {
-    if (!data) return [];
+    const shown = timerShownData;
+    if (!shown) return [];
     return mergeActiveEntry(
       dedupeEntriesById([
-        ...(data.historyEntries ?? data.entries ?? []),
-        ...(data.entries ?? []),
-        ...(data.weekEntries ?? []),
-        ...(data.dayEntries ?? [])
+        ...(shown.historyEntries ?? shown.entries ?? []),
+        ...(shown.entries ?? []),
+        ...(shown.weekEntries ?? []),
+        ...(shown.dayEntries ?? [])
       ]),
-      data.activeEntry
+      shown.activeEntry
     );
-  }, [data]);
+  }, [timerShownData]);
   // Whole-minute consumers (history, day cards, native Calendar) rebuild once a minute, but never
   // fall behind a start or stop already shown, so a block from this minute is never clipped away.
   const newestShownMs = useMemo(
@@ -1864,8 +1889,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ? stopFlight.presentation.elapsedSeconds
       : undefined;
   const recentStoppedAt = useMemo(
-    () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
-    [data?.activeEntry, data?.entries]
+    () => recentStoppedEntryTime(timerShownData?.entries ?? [], timerShownData?.activeEntry ?? null),
+    [timerShownData?.activeEntry, timerShownData?.entries]
   );
   // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
   // today's last finished block ended, when that was 1 min–4 h before the block started.
@@ -1978,7 +2003,111 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
-  const shownCalendarData = checkAnswers.data;
+  // "A block ran into your trip" (location v4 design §7): an End it held for Undo, saving, or waiting on this iPhone
+  // shows its block ended at the trip's start in the Calendar until the server's data does; Undo or a refused answer
+  // puts it back. Acknowledged ones count only against the data they were acknowledged over: the next read is the
+  // server's own.
+  const [pendingClashEnds, setPendingClashEnds] = useState<{ owner: string; ends: readonly PendingTimerTripClashEnd[]; version: number } | null>(null);
+  // Acknowledged ends stay shown until applied server data confirms them (Codex r3 on #618), for this account.
+  const clashEndLedger = useRef({ owner: null as string | null, ledger: createAcknowledgedEndLedger() });
+  useEffect(() => {
+    if (!scopedOwner || !scopedOwnerKey) return;
+    let current = true;
+    let sequence = 0;
+    if (clashEndLedger.current.owner !== scopedOwnerKey) clashEndLedger.current = { owner: scopedOwnerKey, ledger: createAcknowledgedEndLedger() };
+    const own = clashEndLedger.current;
+    const read = () => {
+      const mine = ++sequence;
+      readPendingTimerTripClashEnds(scopedOwner).then((ends) => {
+        if (!current || mine !== sequence || clashEndLedger.current !== own) return;
+        own.ledger.observe(ends, Date.now());
+        setPendingClashEnds((now) => ({ owner: scopedOwnerKey, ends, version: (now?.version ?? 0) + 1 }));
+      }).catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeReviewSync(read);
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || clashEndLedger.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.ledger.applied(startedAtMs, server)) setPendingClashEnds((now) => now && { ...now, version: now.version + 1 });
+    };
+    appliedServerDataListeners.current.add(applied);
+    return () => {
+      current = false;
+      unsubscribe();
+      appliedServerDataListeners.current.delete(applied);
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedOwnerKey]);
+  const clashEnds = useMemo(() => {
+    const ends = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? pendingClashEnds.ends : [];
+    // `version` changes when the ledger retires one (it is read here, not stored).
+    const live = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? clashEndLedger.current.ledger.live(ends) : [];
+    return clashEndsFor(checkAnswers.data?.reviewItems ?? [], checkAnswers.answeredYesIds, live);
+  }, [checkAnswers.answeredYesIds, checkAnswers.data, pendingClashEnds, scopedOwnerKey]);
+  // An acknowledged End it (the server ended the block, and stopped it if it was running): the day is read again, once.
+  const reloadedForClash = useRef(new Set<string>());
+  useEffect(() => {
+    const ends = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? pendingClashEnds.ends : [];
+    const fresh = ends.filter((end) => end.acknowledged && !reloadedForClash.current.has(end.clientMutationId));
+    if (!fresh.length) return;
+    for (const end of fresh) reloadedForClash.current.add(end.clientMutationId);
+    void loadRef.current({ silent: true });
+  }, [pendingClashEnds, scopedOwnerKey]);
+  // An End it refused because its question changed (409 `proposal_changed`): the question stays, read again as the
+  // server has it now.
+  useEffect(() => subscribeTimerTripClashChanged(() => { void loadRef.current({ silent: true }); }), []);
+  const shownCalendarData = useMemo(() => projectTimerTripClashEnds(checkAnswers.data, clashEnds), [checkAnswers.data, clashEnds]);
+  // The same ends for the timer surfaces (above), before paint, so Today and the orb never show it running a frame.
+  useLayoutEffect(() => {
+    setTimerClashEnds((current) => sameClashEnds(current, clashEnds) ? current : clashEnds);
+  }, [clashEnds]);
+  // Blocks deleted on this iPhone and not yet gone from the server (held for Undo, or queued): a block that ran into a
+  // trip whose block is known deleted stops asking at once, apart from one only not loaded here (Codex r1 on #618).
+  const [queuedDeletes, setQueuedDeletes] = useState<{ owner: string; ids: ReadonlySet<string> } | null>(null);
+  // Queued deletes, and delivered ones until an authoritative read settles them (Codex r2 on #618), for this account.
+  const deleteTombstones = useRef({ owner: null as string | null, tombstones: createDeleteTombstones() });
+  useEffect(() => {
+    if (!scopedOwner || !scopedOwnerKey) return;
+    let current = true;
+    let sequence = 0;
+    if (deleteTombstones.current.owner !== scopedOwnerKey) deleteTombstones.current = { owner: scopedOwnerKey, tombstones: createDeleteTombstones() };
+    const own = deleteTombstones.current;
+    const read = () => {
+      const mine = ++sequence;
+      readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then((commands) => {
+        if (!current || mine !== sequence || deleteTombstones.current !== own) return;
+        own.tombstones.observe(commands);
+        setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+      }).catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeTimeEntryOutbox(read);
+    // Only an acknowledged delivery holds a tombstone past its command; Undo or Discard removes it with the command.
+    const unsubscribeDelivered = subscribeDeliveredTimeEntryDeletes((command) => {
+      if (!current || deleteTombstones.current !== own || command.userId !== scopedOwner.userId || command.workspaceId !== scopedOwner.workspaceId) return;
+      own.tombstones.delivered(command, Date.now());
+      setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    });
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || deleteTombstones.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.tombstones.applied(startedAtMs)) setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    };
+    appliedServerDataListeners.current.add(applied);
+    return () => {
+      current = false;
+      unsubscribe();
+      unsubscribeDelivered();
+      appliedServerDataListeners.current.delete(applied);
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedOwnerKey]);
+  const pendingDeletionKey = (pendingDeletion?.entryIds ?? []).join(",");
+  const locallyDeletedIds = useMemo<ReadonlySet<string>>(() => new Set([
+    ...(queuedDeletes && queuedDeletes.owner === scopedOwnerKey ? queuedDeletes.ids : []),
+    ...(pendingDeletionKey ? pendingDeletionKey.split(",") : [])
+  ]), [pendingDeletionKey, queuedDeletes, scopedOwnerKey]);
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
@@ -1994,14 +2123,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const resolvedByCorrections = useMemo(() => reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged),
     [correctionQueue.acknowledged]);
   // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do answers held
-  // for Undo or saving (part 3b), waiting for corrections, or resolved by one (settledCheckBase). A timer that ran
-  // into a trip (`location_timer_trip_clash`) is no ordinary "?" — not a List row, a Grid block, the badge, a chip or
-  // the reminder's count — until its block UI ships (step 15, as the web since #613; asksAsCheck, inside
-  // settledCheckBase). Today's Earlier this week chips count from this same projection (Codex r1 on #617).
-  const calendarCheckBase = useMemo(() => settledCheckBase(shownCalendarData?.reviewItems ?? [], {
-    decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
-    waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds
-  }), [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
+  // for Undo or saving (part 3b), waiting for corrections, or resolved by one (settledCheckBase). "A block ran into
+  // your trip" (location v4 design §7) is one "?" like any other — counted by the badge, the List's "N to check",
+  // Today's chip, the reminder and Earlier this week's chips — asked on its block, and only while it can be put on
+  // its block and that block, as this iPhone has it now (a queued edit, Stop, delete or End it), still runs into the
+  // trip (clashStillAsksHere). Today's Earlier this week chips count from this same projection (Codex r1 on #617, #618).
+  const calendarCheckBase = useMemo(() => {
+    const blocks = bootstrapBlocksById(shownCalendarData);
+    return settledCheckBase(shownCalendarData?.reviewItems ?? [], {
+      decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
+      waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds,
+      stillAsks: (item) => clashStillAsksHere(item, shownCalendarData, minuteNow, blocks, locallyDeletedIds)
+    });
+  }, [shownCalendarData, minuteNow, locallyDeletedIds, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
     answersAfterCorrections.waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
@@ -2035,6 +2169,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       // place or trip by its segment; anything else (a legacy location suggestion from before location v2, which
       // has no segment) "none", asked under its row.
       kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),
+      // A block that ran into a trip: its "?" is on the block (its row and its Grid block), by block id.
+      blockChecks: clashChecksByBlock(items),
       // Owner, 28 Oct 2026 (concern 1): each "?" row's own icon — a trip's route, Apple Health's heart, a place's pin.
       glyphs: new Map(items.map((item) => [item.id, (item.eventType === "commute_detected" ? DAYFRAME_APP_ICONS.openTrip
         : item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_") ? DAYFRAME_APP_ICONS.sourceHealth
@@ -2084,11 +2220,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Owner, 28 Oct 2026: the Grid draws only the "?" that still ask, outings folded, as the List does, so an expired
   // or folded suggestion is never a dashed block there; onOpenReview's lookup (calendarChecks) covers every one drawn.
   const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);
+  // The blocks with a "?" of their own that still asks (location v4 design §7): the Grid's amber dot, and their sheet's question.
+  const askingBlockChecks = useMemo(() => {
+    const asking = new Set(askingChecks.map((check) => check.id));
+    return new Map([...calendarChecks.blockChecks].filter(([, checkId]) => asking.has(checkId)));
+  }, [askingChecks, calendarChecks.blockChecks]);
+  const askingBlockIds = useMemo(() => new Set(askingBlockChecks.keys()), [askingBlockChecks]);
+  // The held answer's words when it is a block that ran into a trip: its Undo toast says what it did to the block.
+  const heldClashWords = useMemo(() => {
+    const item = checkAnswers.held ? shownCalendarData?.reviewItems.find((candidate) => candidate.id === checkAnswers.held!.itemId) : undefined;
+    const question = item ? timerTripClashQuestion(item) : null;
+    return item && question ? timerTripClashWords(item, question, null, clockFormat) : null;
+  }, [checkAnswers.held, clockFormat, shownCalendarData]);
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       clockFormat,
       data: shownCalendarData,
       reviewItemIds: gridReviewItemIds,
+      askingEntryIds: askingBlockIds,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -2103,6 +2252,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       calendarTransitionDirection,
       shownCalendarData,
       gridReviewItemIds,
+      askingBlockIds,
       clockFormat,
       hapticsEnabled,
       minuteNow,
@@ -2239,11 +2389,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
     const isBlankStart = !categoryId && !description.trim();
     if (isBlankStart && blankTimerStartGate.current.current()) return false;
-    if (
-      latestData.current?.activeEntry &&
-      !isActiveEntryPendingDeletion() &&
-      isBlankStart
-    ) {
+    if (runningForStartNow() && isBlankStart) {
       presentActiveEditor("existing_active_timer");
       return false;
     }
@@ -2299,7 +2445,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A start that replaces a running block says so ("Switched to …", no Undo: there is no un-switch
   // contract); a start of exactly what is recording does nothing but say "Already recording".
   function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
-    const running = isActiveEntryPendingDeletion() ? null : latestData.current?.activeEntry ?? null;
+    const running = runningForStartNow();
     if (running && startMatchesRunning(running, { categoryId, description, tagNames })) {
       showTodayNotice(alreadyRecordingToastMessage(running), toastSwatchColor(running, theme.mode));
       return;
@@ -2387,7 +2533,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The Play orb (step 3): tap starts a bare block (which opens it) or stops the running one; on
   // Today the Stop flies the live block into its row, elsewhere it stops in place.
   function tapPlayOrb() {
-    const entryId = latestData.current?.activeEntry?.id;
+    // A block End it has ended here (location v4 design §7) is not running on this iPhone: a tap starts one.
+    const entryId = runningForStartNow()?.id;
     if (!entryId) {
       startFromToday(null);
       return;
@@ -2399,7 +2546,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A bloom pick starts that activity, or switches to it; the running activity opens its editor
   // instead of starting a duplicate, as its mosaic tile does.
   function chooseFromPlayOrb(activityId: string) {
-    const active = latestData.current?.activeEntry;
+    const active = runningForStartNow();
     if (active && active.categoryId === activityId) {
       presentActiveEditor("existing_active_timer");
       return;
@@ -3366,6 +3513,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
+  /** The block Start guards treat as running: the canonical one, unless being deleted or ended by End it here. */
+  function runningForStartNow() {
+    return runningForStart(latestData.current?.activeEntry ?? null, {
+      pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current
+    });
+  }
+
   function isActiveEntryPendingDeletion() {
     const pending = deletionCoordinator.current?.current();
     const deletedActiveId = pending?.snapshot?.activeEntry?.id;
@@ -3762,7 +3916,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
-                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, data?.activeEntry ?? null))}
+                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, activeEntryForDisplay))}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -3822,6 +3976,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       </SafeAreaView>
       </TodayReviewPresentationProvider>
     );
+  }
+
+  /**
+   * A block's own "?" for its sheet (location v4 design §7): "Team sync ran 18m into your trip · End it at 09:42 ·
+   * Keep it", answered through the one gate (held for Undo, then the outbox); the sheet closes once it is taken.
+   */
+  function blockQuestionFor(entryId: string | null | undefined, dismiss: () => void): BlockQuestion | null {
+    const checkId = entryId ? askingBlockChecks.get(entryId) : undefined;
+    const words = checkId ? calendarChecks.questions.get(checkId) : undefined;
+    if (!checkId || !words || !words.skipLabel) return null;
+    return {
+      text: words.question,
+      endLabel: scopedOwnerKey ? words.logLabel : null,
+      keepLabel: words.skipLabel,
+      onAnswer: (end) => {
+        if (!scopedOwnerKey) return;
+        if (checkAnswers.answer(checkId, end)) dismiss();
+      }
+    };
   }
 
   /**
@@ -3918,6 +4091,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  blockChecks={askingBlockChecks}
                   checkGlyphs={calendarChecks.glyphs}
                   checkKinds={calendarChecks.kinds}
                   checkQuestions={calendarChecks.questions}
@@ -4041,10 +4215,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           // its token re-mounts the toast, so a second answer replaces it (the first is saved).
           <BlocksToast
             key={`check-${checkAnswers.held.token}`}
-            actionAccessibilityLabel={`Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
+            actionAccessibilityLabel={heldClashWords
+              ? `Undo ${checkAnswers.held.logged ? "ending" : "keeping"} ${checkAnswers.held.title}`
+              : `Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
             actionLabel="Undo"
             actionTestID="calendar-check-undo"
-            message={`${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
+            message={heldClashWords
+              ? checkAnswers.held.logged ? `Ended at ${heldClashWords.endsAt}` : "Kept as it was"
+              : `${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
             onAction={() => {
               checkAnswers.undo();
               playHaptic("undoRestore");
@@ -4123,7 +4301,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           onClose={() => setSwitchSheetRecents(null)}
           onPick={switchToRecent}
           recents={switchSheetRecents}
-          running={Boolean(data?.activeEntry)}
+          running={Boolean(activeEntryForDisplay)}
           reduceMotion={reduceMotion}
           styles={styles}
           theme={theme}
@@ -4167,6 +4345,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
         presentation={activeEditPresentation}
+        question={blockQuestionFor(retainedActiveEntryForSheet?.id, () => setActiveEditDismissRequestId(activeEditPresentation.id))}
         reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
@@ -4195,6 +4374,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           pendingStartAgain.current = values;
         }}
         presentation={calendarEditPresentation}
+        question={blockQuestionFor(calendarEditEntry?.id, () => setCalendarEditDismissRequestId(calendarEditPresentation.id))}
         reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
@@ -4463,7 +4643,16 @@ function pad2(value: number) {
 }
 
 /** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet in Calendar › List. */
-function calendarCheckKind(item: MobileReviewItem): "health" | "place" | "trip" | "none" {
+const NO_CLASH_ENDS: ReadonlyMap<string, string> = new Map();
+
+/** Whether two End it projections end the same blocks at the same times. */
+function sameClashEnds(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>) {
+  return left.size === right.size && [...left].every(([id, at]) => right.get(id) === at);
+}
+
+function calendarCheckKind(item: MobileReviewItem): "health" | "place" | "trip" | "block" | "none" {
+  // Asked on its block, whose sheet asks it (location v4 design §7).
+  if (asksOnItsBlock(item)) return "block";
   if (item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_")) return "health";
   const segmentId = typeof item.rawPayload?.clientSegmentId === "string" ? item.rawPayload.clientSegmentId : null;
   if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";

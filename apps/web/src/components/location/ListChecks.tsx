@@ -1,11 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, placeQuestion, timerTripClashQuestion, timerTripClashWords, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
-import { asksAsCheck } from "@/lib/calendar-checks";
+import { clashStillAsks, type ClashBlocks } from "@/lib/calendar-checks";
 import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
@@ -43,6 +43,13 @@ function workspaceOf(owner: string) {
 type CheckDecisionsInput = {
   /** The List's transition, which owns every change a "?" makes, restores included. Stable. */
   applyTransition: (update: () => void) => void;
+  /**
+   * The blocks loaded here, so a "block ran into your trip" stops asking at once when its block no longer runs into
+   * the trip (a local edit, a Stop or a delete), before the server says (location v4 design §7).
+   */
+  blocks?: ClashBlocks;
+  /** A saved answer's acknowledgement (End it that stopped the running block refreshes the timer). Stable. */
+  onAcknowledged?: (body: Record<string, unknown>) => void;
   categories: readonly CategoryRow[];
   /** Whose decisions (workspace and user): another owner starts afresh, and the previous one's late results are dropped. */
   owner: string;
@@ -56,7 +63,7 @@ type CheckDecisionsInput = {
  * so the List, the sidebar badge and Today's chip read one state that outlives the List: an answer still saving
  * stays away when the List is left and opened again, and a saved one until the data no longer lists it open.
  */
-function useCheckDecisionsState({ applyTransition, categories, owner, refresh, reviewItems }: CheckDecisionsInput) {
+function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowledged, owner, refresh, reviewItems }: CheckDecisionsInput) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
   // As the deck (Codex r1/r2 on #568): a refused outing's canonical statuses, so only its open cards
   // return; and cards the server says are decided stay away until newer data lists them open.
@@ -72,7 +79,7 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     const over = openItemsAtConflict.current;
     if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
-  const { state, decide, undo, clearError, settleResolved: settleDecisions } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner);
+  const { state, decide, undo, clearError, settleResolved: settleDecisions } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition, owner, onAcknowledged);
   // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
   // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
@@ -152,11 +159,13 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
       .flatMap(([, members]) => members.map((member) => member.id))
   ]), [closedByServer, heldOutings, outings, state.hiddenIds]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
-  // A timer that ran into a trip is never an ordinary "?" row: it asks on its block with its own UI later (step 15).
-  const checks = useMemo<ListCheck[]>(() => items
-    .filter((item) => asksAsCheck(item) && !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
-    .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
-  [closedByServer, items, memberIds, state.hiddenIds]);
+  // A block that ran into a trip is one "?" like any other, asked on its block (design §7), while its block as
+  // loaded here still runs into the trip.
+  const checks = useMemo<ListCheck[]>(() => {
+    return items
+      .filter((item) => clashStillAsks(item, blocks) && !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
+      .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt }));
+  }, [blocks, closedByServer, items, memberIds, state.hiddenIds]);
 
   // What the badge and Today's chip count: the open items as the List shows them — held, saving, saved (until the
   // data no longer lists them) and server-decided ones away, with the same held outing members as `memberIds` and
@@ -165,12 +174,38 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     const hidden = new Set([...state.hiddenIds, ...closedByServer.keys(),
       ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
         .flatMap(([, members]) => members.map((member) => member.id))]);
-    return items.filter((item) => !hidden.has(item.id));
-  }, [closedByServer, heldOutings, items, state.hiddenIds]);
+    return items.filter((item) => !hidden.has(item.id) && clashStillAsks(item, blocks));
+  }, [blocks, closedByServer, heldOutings, items, state.hiddenIds]);
 
-  const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
+  // End it held, saving or saved here: its block shows ended at the trip's start, the running block too (design §7);
+  // Undo or a refused save puts it back. The projection retires once canonical data confirms it (Codex r1 on #618):
+  // the question has left fresh data (the controller then settles the decision, so it is no longer hidden here), or
+  // the block's own end in the data is the trip's start. A retired projection never returns, so a later edit that
+  // extends the block shows as it is.
+  const [confirmedEnds, setConfirmedEnds] = useState<ReadonlySet<string>>(() => new Set());
+  const endCandidates = useMemo(() => state.decided.flatMap((decision) => {
+    if (decision.kind !== "log" || !state.hiddenIds.has(decision.itemId) || confirmedEnds.has(decision.clientMutationId)) return [];
+    const item = itemsById.get(decision.itemId) ?? snapshots.get(decision.itemId);
+    const question = item ? timerTripClashQuestion(item) : null;
+    return question ? [{ mutationId: decision.clientMutationId, blockId: question.timeEntryId, endsAt: question.tripStartedAt }] : [];
+  }), [confirmedEnds, itemsById, snapshots, state.decided, state.hiddenIds]);
+  const newlyConfirmed = endCandidates.filter((candidate) => {
+    const stoppedAt = blocks?.get(candidate.blockId)?.stoppedAt;
+    return stoppedAt != null && Math.abs(Date.parse(stoppedAt) - Date.parse(candidate.endsAt)) < 1_000;
+  });
+  if (newlyConfirmed.length) setConfirmedEnds((current) => new Set([...current, ...newlyConfirmed.map((candidate) => candidate.mutationId)]));
+  const endedBlocks = useMemo(() => new Map(endCandidates
+    .filter((candidate) => !newlyConfirmed.some((confirmed) => confirmed.mutationId === candidate.mutationId))
+    .map((candidate) => [candidate.blockId, candidate.endsAt] as const)) as ReadonlyMap<string, string>,
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- newlyConfirmed is derived from endCandidates and blocks
+  [blocks, endCandidates]);
+
+  /** Answers a "?" (held for Undo). `label` names a block's answer ("Ended Team sync at 09:42", "Kept Team sync"). */
+  const answer = useCallback((itemId: string, kind: ReviewDecisionKind, label?: string) => {
     const item = itemsById.get(itemId);
     if (!item || (kind === "log" && !reviewWindow(item))) return;
+    // End it is sent with the proposal it was shown; without one it is never offered (design §7).
+    if (kind === "log" && timerTripClashQuestion(item) && !item.proposalHash) return;
     const outing = outings.get(item.id);
     const span = reviewWindow(item);
     const category = reviewCardCategory(item, undefined, categories);
@@ -185,7 +220,7 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
       kind,
       mutation: outing ? outingMutationFor(outing, kind, undefined) : reviewMutationFor(item, kind, undefined),
       signature: reviewProposalSignature(item),
-      label: kind === "log" ? `Logged ${reviewDefaultName(item)}` : `Skipped ${reviewTitle(item)}`,
+      label: label ?? (kind === "log" ? `Logged ${reviewDefaultName(item)}` : `Skipped ${reviewTitle(item)}`),
       durationMs: (span ? span.stopMs - span.startMs : 0) + outingMs,
       color: category?.color ?? null,
       colorName: category?.name ?? ""
@@ -237,19 +272,22 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     void Promise.resolve().then(() => refreshNow.current()).catch(() => undefined);
   }, [owner]);
 
-  return { answer, checks, clearError, itemsById, outings, projectedItems, refreshAfterReceipt, settleResolved, state, undo };
+  return { answer, checks, clearError, endedBlocks, itemsById, outings, projectedItems, refreshAfterReceipt, settleResolved, state, undo };
 }
 
 type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
 type SharedCheckDecisions = CheckDecisions & {
   /** The List, while it is shown, lends its transition and its refresh (which also reloads its weeks). */
   register: (applyTransition: (update: () => void) => void, refresh: () => Promise<unknown>) => () => void;
+  /** A surface's deletes held for Undo (its ids, by its own key): known-deleted blocks. */
+  reportDeleted: (source: object, ids: ReadonlySet<string>) => void;
 };
 const CheckDecisionsContext = createContext<SharedCheckDecisions | null>(null);
 
 /** The one owner of "?" decisions for the signed-in workspace and user, above the List, the badge and Today. */
-export function CheckDecisionsProvider({ categories, children, owner, refresh, reviewItems }: {
-  categories: readonly CategoryRow[]; children: ReactNode; owner: string; refresh: () => Promise<unknown>; reviewItems: readonly ReviewItemRow[];
+export function CheckDecisionsProvider({ blocks, categories, children, owner, refresh, reviewItems }: {
+  blocks?: ClashBlocks; categories: readonly CategoryRow[]; children: ReactNode; owner: string; refresh: () => Promise<unknown>;
+  reviewItems: readonly ReviewItemRow[];
 }) {
   const lent = useRef<{ transition: ((update: () => void) => void) | null; refresh: (() => Promise<unknown>) | null }>({ transition: null, refresh: null });
   const shellRefresh = useRef(refresh);
@@ -258,15 +296,53 @@ export function CheckDecisionsProvider({ categories, children, owner, refresh, r
   });
   const applyTransition = useCallback((update: () => void) => (lent.current.transition ?? ((run: () => void) => run()))(update), []);
   const refreshAll = useCallback(() => (lent.current.refresh ?? shellRefresh.current)(), []);
-  const decisions = useCheckDecisionsState({ applyTransition, categories, owner, refresh: refreshAll, reviewItems });
+  // End it that stopped the running block: the shell (its timer) reads again too, not only the List.
+  const onAcknowledged = useCallback((body: Record<string, unknown>) => {
+    if (body.stoppedRunningTimer === true && lent.current.refresh) void shellRefresh.current().catch(() => undefined);
+  }, []);
+  // Blocks deleted here and held for Undo (the List's, the Grid's and Today's deletes): known gone, so their "block ran
+  // into your trip" stops asking, unlike a block that is only not loaded (Codex r1 on #618).
+  const [deletedBySource, setDeletedBySource] = useState<ReadonlyMap<object, ReadonlySet<string>>>(() => new Map());
+  const reportDeleted = useCallback((source: object, ids: ReadonlySet<string>) => setDeletedBySource((current) => {
+    if (current.get(source) === ids || (!ids.size && !current.has(source))) return current;
+    const next = new Map(current);
+    if (ids.size) next.set(source, ids);
+    else next.delete(source);
+    return next;
+  }), []);
+  const knownBlocks = useMemo(() => {
+    if (!deletedBySource.size) return blocks;
+    const merged = new Map(blocks ?? []);
+    for (const ids of deletedBySource.values()) for (const id of ids) merged.set(id, null);
+    return merged as ClashBlocks;
+  }, [blocks, deletedBySource]);
+  const decisions = useCheckDecisionsState({ applyTransition, blocks: knownBlocks, categories, onAcknowledged, owner, refresh: refreshAll, reviewItems });
   const register = useCallback((transition: (update: () => void) => void, listRefresh: () => Promise<unknown>) => {
     lent.current = { transition, refresh: listRefresh };
     return () => {
       if (lent.current.transition === transition) lent.current = { transition: null, refresh: null };
     };
   }, []);
-  const value = useMemo(() => ({ ...decisions, register }), [decisions, register]);
+  const value = useMemo(() => ({ ...decisions, register, reportDeleted }), [decisions, register, reportDeleted]);
   return <CheckDecisionsContext.Provider value={value}>{children}</CheckDecisionsContext.Provider>;
+}
+
+/** Reports a surface's deletes held for Undo, so a deleted block's "?" stops asking at once (Codex r1 on #618). */
+export function useReportDeletedBlocks(ids: ReadonlySet<string>) {
+  const report = useContext(CheckDecisionsContext)?.reportDeleted;
+  const [source] = useState(() => ({}));
+  useEffect(() => {
+    report?.(source, ids);
+  }, [ids, report, source]);
+  useEffect(() => () => report?.(source, new Set()), [report, source]);
+}
+
+/**
+ * The shared "?" decisions, when a provider owns them (the Grid answers a block's "?" through them, held for Undo,
+ * hidden everywhere and sent once; Codex r1 on #618); null without one.
+ */
+export function useSharedCheckDecisions() {
+  return useContext(CheckDecisionsContext);
 }
 
 const NO_SETTLE = () => undefined;
@@ -286,15 +362,21 @@ export function useProjectedReviewItems(reviewItems: readonly ReviewItemRow[]) {
   return useContext(CheckDecisionsContext)?.projectedItems ?? reviewItems;
 }
 
+const NO_ENDED: ReadonlyMap<string, string> = new Map();
+/** Blocks an End it held, saving or saved here ends at its trip's start (by block id), for the List, Grid and timer. */
+export function useEndedBlocks(): ReadonlyMap<string, string> {
+  return useContext(CheckDecisionsContext)?.endedBlocks ?? NO_ENDED;
+}
+
 const NO_ITEMS: readonly ReviewItemRow[] = [];
 
 /**
  * Calendar › List's "?" decisions: the AppShell provider's, with the List lending its transition and refresh while
  * shown; without a provider (a List on its own), its own.
  */
-export function useListChecks({ applyTransition, categories, refresh, reviewItems }: Omit<CheckDecisionsInput, "owner">) {
+export function useListChecks({ applyTransition, blocks, categories, refresh, reviewItems }: Omit<CheckDecisionsInput, "owner" | "onAcknowledged">) {
   const shared = useContext(CheckDecisionsContext);
-  const local = useCheckDecisionsState({ applyTransition, categories, owner: "local", refresh, reviewItems: shared ? NO_ITEMS : reviewItems });
+  const local = useCheckDecisionsState({ applyTransition, blocks, categories, owner: "local", refresh, reviewItems: shared ? NO_ITEMS : reviewItems });
   const register = shared?.register;
   useLayoutEffect(() => register?.(applyTransition, refresh), [applyTransition, refresh, register]);
   return shared ?? local;
@@ -384,6 +466,22 @@ export function checkQuestionWords(item: ReviewItemRow, clock: ClockFormat) {
   const question = visited ? visited.question : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
   const yesLabel = !span ? null : trip || visited?.guess ? "Yes" : visited ? null : `Log ${reviewDefaultName(item)}`;
   return { question, yesLabel, confident: Boolean(span && (trip || visited?.guess)) };
+}
+
+/**
+ * A block's "?" (a block that ran into a trip, location v4 design §7): what it asks at the top of the block's editor,
+ * its one Yes ("End it at 09:42", offered only with the proposal to send) and "Keep it", and the Undo toast's words.
+ */
+export function blockQuestionWords(item: ReviewItemRow, blockName: string, clock: ClockFormat) {
+  const question = timerTripClashQuestion(item);
+  const words = question ? timerTripClashWords(item, question, blockName, clock) : null;
+  return {
+    question: words?.question ?? reviewTitle(item),
+    yesLabel: words && item.proposalHash ? words.endLabel : null,
+    noLabel: words?.keepLabel ?? "Keep it",
+    endedLabel: `Ended ${blockName} at ${words?.endsAt ?? ""}`.trim(),
+    keptLabel: `Kept ${blockName}`
+  };
 }
 
 /** A "?" with no place row: a trip not yet in a block, Apple Health, or another suggestion, at its time. */

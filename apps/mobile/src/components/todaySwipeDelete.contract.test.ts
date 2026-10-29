@@ -62,7 +62,8 @@ describe("Today rows swipe-to-delete contract", () => {
     // A named pattern (location v3 PR 14) is the one row without Start again.
     expect(rowsSource).toContain("const replayable = startAgain && !live && canStartAgain(entry)");
     expect(rowsSource).toContain("startAgain={!named}");
-    expect(dashboardSource).toContain("!isActiveEntryPendingDeletion()");
+    // A running block being deleted is not running for Start (runningForStart, with End it's projected end too).
+    expect(dashboardSource).toContain("pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current");
   });
 
   it("allows immediate grouped deletion with a temporary undo action", () => {

@@ -100,7 +100,10 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
       onCorrected={async () => { answered.current = true; await refresh(); }} onReceiptAfterClose={refreshAfterReceipt} onResolved={settleResolved} places={places} question={question}
       target={current.target} />
   ) : null;
-  return { askingBySegment, dialog, open };
+  // A block's "?" (a block that ran into a trip, design §7), answered from its editor: saved at once, as here.
+  const answerBlock = useCallback((item: ReviewItemRow, yes: boolean) => answerReview(item, undefined, yes, refresh, settleResolved),
+    [refresh, settleResolved]);
+  return { answerBlock, askingBySegment, dialog, open };
 }
 
 /** A dialog's target from the timeline's copy of the item: a place with its label, a trip with its route. */
@@ -139,6 +142,12 @@ async function answerReview(review: ReviewItemRow, outing: ReturnType<typeof rev
     if (statuses) settleResolved(Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id));
     if (statuses && statuses[review.id] !== undefined && statuses[review.id] !== "open") return null;
     return "Part of this outing was decided elsewhere, so nothing was saved. Answer it again.";
+  }
+  // The question changed before it was answered (a block's or trip's change): nothing saved; the day is read again
+  // and the question stays, as it is now (design §7).
+  if (response.status === 409 && body.code === "proposal_changed") {
+    await refresh().catch(() => undefined);
+    return "This changed before it could be saved. Look at it again.";
   }
   // Decided elsewhere (another device or tab): nothing left to ask.
   if (response.status === 404 || (response.status === 409 && body.code === "resolution_conflict") || (response.ok && body.alreadyResolved === true)) {

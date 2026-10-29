@@ -9227,6 +9227,16 @@ dialog.ui-dialog.df-palette {
   transform: translateX(-50%);
 }
 
+/* Two toasts with their own actions (a "?" answer's Undo above a delete's Undo; Codex r2 on #618): the second sits
+   above the first, 8 px apart, so both stay reachable. */
+.df-toast-host.is-stacked {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 56px);
+}
+
+.df-toast-host.is-stacked-tall {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 104px);
+}
+
 .df-toast {
   display: flex;
   min-height: 48px;
@@ -9432,6 +9442,14 @@ dialog.ui-dialog.df-palette {
 
   .df-toast-host {
     bottom: calc(var(--df-tabbar-space) + 8px);
+  }
+
+  .df-toast-host.is-stacked {
+    bottom: calc(var(--df-tabbar-space) + 64px);
+  }
+
+  .df-toast-host.is-stacked-tall {
+    bottom: calc(var(--df-tabbar-space) + 112px);
   }
 }
 
@@ -14667,6 +14685,67 @@ button.timeline-location-hit:focus-visible {
   /* Rows 12 px apart: each 32 px pill's 44 px hit area reaches 6 px past it, so wrapped answers'
      targets meet without overlapping (Codex r2 on #614). */
   gap: 12px 8px;
+}
+
+/* A block that ran into a trip (location v4 design §7): its one "?" on its own mark, which opens its editor with
+   the question at the top. The mark stays 36 px; its target reaches 44 px. */
+.timeline-task-block.is-asking {
+  position: relative;
+}
+
+.timeline-block-ask {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  align-self: center;
+  padding: 0;
+  border: 0;
+  border-radius: calc(36px * 0.3);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.timeline-block-ask::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.timeline-block-ask:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+/* The Grid's block that ran into a trip: the same amber dot, at its top right (design §7). */
+.calendar-block-ask-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+
+.calendar-compact-question {
+  margin: 0 16px 12px;
+}
+
+.calendar-compact-question small {
+  color: var(--text-secondary);
+}
+
+.calendar-compact-question-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 14px;
 }
 
 /* Calendar (owner items B, D, E, H, K). */
