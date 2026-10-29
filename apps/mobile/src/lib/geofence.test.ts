@@ -1192,7 +1192,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
   });
 
-  it("a stale lifetime's timer never restores or stops anyone's capture (Codex r4 on #619)", async () => {
+  it("a stale lifetime's timer never restores anyone's capture, and stops only its own best accuracy left running (Codex r4, r13 on #619)", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     await maybeStartAccuracyBurst("departure", await capture());
@@ -1201,7 +1201,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     try {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
-      expect(locationMocks.stopLocationUpdatesAsync).not.toHaveBeenCalled();
+      // No newer capture set the options since, so the best accuracy left running is this lifetime's own: stopped.
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
     } finally {
       captureState.current = true;
     }
@@ -1512,5 +1513,51 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await maybeEndAccuracyBurst(await capture()).catch(() => undefined);
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
     expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+  });
+
+  it("a burst started while a refresh's restore is in flight keeps its guard (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    let release!: () => void;
+    locationMocks.startLocationUpdatesAsync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await refreshing;
+    await expect(starting).resolves.toBe(true);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("a refresh whose restore fails leaves the guard to retry and stop the inherited options (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await expect(refreshGeofencesForPlaces([place])).rejects.toBeTruthy();
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+  });
+
+  it("a teardown whose stop fails keeps stopping its own best accuracy once its lifetime is gone (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
   });
 });

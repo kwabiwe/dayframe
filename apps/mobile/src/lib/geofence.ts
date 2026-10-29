@@ -13,6 +13,7 @@ import {
   type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
+import { createSerialMutationQueue } from "./location/mutationQueue";
 import { ACCURACY_BURST_DURATION_MS, ACCURACY_BURST_FORCE_STOP_MS, accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
   withTrialProgress, type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
@@ -864,18 +865,32 @@ async function startLocationLearningUnsafe(
   // past its 3 minutes ends here.
   // Best accuracy runs only under a live lease this process took (Codex r12 on #619): a burst is never resumed from
   // storage, whatever the clock says, so after a relaunch the stored burst simply ends here at normal capture.
-  const held = liveAccuracyBurstLease(capture);
+  // The options first, before any storage (Codex r13 on #619); the lease a normal start ends is bound right there.
+  const applied = await withNativeLocationOptions(async () => {
+    const held = liveAccuracyBurstLease(capture);
+    try {
+      await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(held)));
+    } catch (error) {
+      return { error, held: null, ended: null };
+    }
+    nativeLocationMode = held ? "burst" : "normal";
+    nativeOptionsOwner = capture.binding?.id ?? null;
+    return { error: null, held, ended: held ? null : endHeldLeaseAtNormal() };
+  });
+  if (applied.error) {
+    // Inherited (or a burst's) options may still be in place: the guard retries and stops them 5 minutes on.
+    if (!accuracyBurstLease) takeAccuracyBurstLease(capture, UNKNOWN_BURST, Date.now(), Date.now() + ACCURACY_BURST_FORCE_STOP_MS);
+    throw applied.error;
+  }
   await withAccuracyBurstState(async (state) => {
     const now = new Date();
     const next = state ?? startAccuracyBurstTrial(now);
     return { state: next === UNREADABLE_ACCURACY_TRIAL ? next : withTrialProgress(next, now), result: undefined };
   }).catch(() => undefined);
-  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(held)));
-  nativeLocationMode = held ? "burst" : "normal";
-  if (held) {
-    if (!accuracyBurstTimer) scheduleAccuracyBurstGuard(held, ACCURACY_BURST_RETRY_MS);
+  if (applied.held) {
+    if (!accuracyBurstTimer) scheduleAccuracyBurstGuard(applied.held, ACCURACY_BURST_RETRY_MS);
   } else {
-    await normalCaptureConfirmed();
+    await settleAfterNormalCapture(applied.ended);
   }
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
@@ -1643,23 +1658,27 @@ export async function stopGeofencesIfStarted() {
 export async function stopLocationLearningIfStarted() {
   // An unknown native state is not a stopped one: stop anyway, and end a burst only once updates have really
   // stopped, so sign-out or location off never leaves best accuracy running untracked (Codex r2 on #619).
-  const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
-  if (started !== false) {
-    await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(async (error) => {
-      // A stop that failed while the state was unknown is fine only if updates turn out not to run; otherwise the
-      // failure is the caller's, so teardown never reports success with updates maybe running (Codex r3 on #619).
-      if (started === null && await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null) === false) return;
-      throw error;
-    });
-  }
-  clearAccuracyBurstTimer();
-  nativeLocationMode = "normal";
-  noteNativeBurstEnd();
-  const lease = accuracyBurstLease;
-  accuracyBurstLease = null;
+  const lease = await withNativeLocationOptions(async () => {
+    const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
+    if (started !== false) {
+      await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(async (error) => {
+        // A stop that failed while the state was unknown is fine only if updates turn out not to run; otherwise the
+        // failure is the caller's, so teardown never reports success with updates maybe running (Codex r3 on #619).
+        if (started === null && await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null) === false) return;
+        throw error;
+      });
+    }
+    clearAccuracyBurstTimer();
+    nativeLocationMode = "normal";
+    nativeOptionsOwner = null;
+    noteNativeBurstEnd();
+    const held = accuracyBurstLease;
+    accuracyBurstLease = null;
+    return held;
+  });
   // Capture stopped (sign-out, an account change, location off), so best accuracy did too: its end is confirmed
   // now, kept until storage takes it, and the burst counted for what it ran (Codex r8 on #619).
-  if (lease) {
+  if (lease && lease.startedAt !== UNKNOWN_BURST) {
     confirmLeaseDone(lease);
     pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
   }
@@ -1765,14 +1784,19 @@ export async function maybeStartAccuracyBurst(
   });
   if (!started) return false;
   const stopBy = Date.parse(started.stopBy ?? started.endsAt);
-  const ok = isLocationCaptureSnapshotCurrent(capture) &&
-    await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
-  if (ok) {
+  const ok = await withNativeLocationOptions(async () => {
+    if (!isLocationCaptureSnapshotCurrent(capture)) return false;
+    const done = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
+    if (!done) return false;
     nativeLocationMode = "burst";
+    nativeOptionsOwner = captureId;
     // A new burst starts only with none recorded, so no earlier note can govern anything any more.
     earliestNativeBurstEndAt = null;
     earliestNativeBurstEndMono = null;
-  }
+    // The lease is taken with the options, in the same step, so nothing between them can end it (Codex r13 on #619).
+    takeAccuracyBurstLease(capture, started.startedAt, Date.parse(started.endsAt), stopBy);
+    return true;
+  });
   if (!ok) {
     // Best accuracy never started: this burst (and only this one) ends at once, having run for no time.
     await withAccuracyBurstState(async (state) => ({
@@ -1780,11 +1804,6 @@ export async function maybeStartAccuracyBurst(
       result: undefined
     }));
     return false;
-  }
-  // The lease (in memory, no storage read) drives the safety timer; only a lifetime still current takes it, so a
-  // late start never replaces the timer of a burst started since (Codex r3–r4 on #619).
-  if (isLocationCaptureSnapshotCurrent(capture)) {
-    takeAccuracyBurstLease(capture, started.startedAt, Date.parse(started.endsAt), stopBy);
   }
   return true;
 }
@@ -1873,6 +1892,7 @@ export function __resetAccuracyBurstForTests() {
   accuracyBurstSettlementTimer = null;
   accuracyBurstLease = null;
   nativeLocationMode = "unknown";
+  nativeOptionsOwner = null;
   pendingAccuracyBurstSettlements.clear();
   earliestNativeBurstEndAt = null;
   earliestNativeBurstEndMono = null;
@@ -1904,6 +1924,14 @@ function settlePendingAccuracyBursts() {
 let accuracyBurstLease: AccuracyBurstLease | null = null;
 /** What this process last set the location task to; unknown until it does (a relaunch may inherit a burst's options). */
 let nativeLocationMode: "unknown" | "normal" | "burst" = "unknown";
+/**
+ * Every change to the location task's options (a burst's start, a restore, a refresh, a forced stop, a teardown)
+ * runs here one at a time, with the lease change that goes with it, so a completion is always the one operation's
+ * own (Codex r13 on #619). Never entered from inside itself.
+ */
+const withNativeLocationOptions = createSerialMutationQueue();
+/** The capture lifetime whose call last set the options (null once stopped): a stale guard stops only its own. */
+let nativeOptionsOwner: string | null = null;
 
 /** Elapsed time that a clock set back or forward never changes. */
 const monotonicNow = () => typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -1951,19 +1979,39 @@ function scheduleAccuracyBurstGuard(lease: AccuracyBurstLease, delayMs: number) 
 /** One step of the guard; true while there is more to do. */
 async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
   if (accuracyBurstLease !== lease) return false;
-  // A lifetime that ended has its own teardown, which stops updates and ends the burst.
+  // A lifetime that ended has its own teardown, which stops updates and ends the burst. If that teardown failed and
+  // its options are still the last ones set (no newer capture has set its own), the guard keeps stopping them; a
+  // newer capture's start has replaced them, so there is nothing of this lease's left to stop (Codex r13 on #619).
   if (!isLocationCaptureSnapshotCurrent(lease.capture)) {
-    accuracyBurstLease = null;
+    const stopped = await withNativeLocationOptions(async () => {
+      if (nativeOptionsOwner !== lease.capture.binding?.id || nativeLocationMode !== "burst") return true;
+      const done = await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
+      if (done) {
+        nativeLocationMode = "normal";
+        nativeOptionsOwner = null;
+      }
+      return done;
+    });
+    if (!stopped) return true;
+    confirmLeaseDone(lease);
+    pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
+    if (accuracyBurstLease === lease) accuracyBurstLease = null;
+    settlePendingAccuracyBursts();
     return false;
   }
   const elapsed = monotonicNow() - lease.takenAt;
   if (lease.nativeDoneAt == null && elapsed >= lease.endsInMs) {
     const pastStopBy = elapsed >= lease.stopInMs;
-    const done = await withLocationCaptureLifecycle(async () => {
+    const done = await withNativeLocationOptions(async () => {
       if (accuracyBurstLease !== lease || !isLocationCaptureSnapshotCurrent(lease.capture)) return false;
-      if (await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) return true;
+      if (await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
+        nativeOptionsOwner = lease.capture.binding?.id ?? null;
+        return true;
+      }
       if (!pastStopBy) return false;
-      return Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
+      const stopped = await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
+      if (stopped) nativeOptionsOwner = null;
+      return stopped;
     });
     if (done) {
       confirmLeaseDone(lease);
@@ -2000,14 +2048,20 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
   // A process's first wake (a headless relaunch too) without a live lease of its own puts normal capture back before
   // anything else, storage readable or not: Expo may have kept a burst's options (Codex r12 on #619).
   if (nativeLocationMode === "unknown" && !liveAccuracyBurstLease(capture)) {
-    const restored = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
-    if (!restored) {
+    const first = await withNativeLocationOptions(async () => {
+      if (nativeLocationMode !== "unknown" || liveAccuracyBurstLease(capture) || !isLocationCaptureSnapshotCurrent(capture)) return { done: true, ended: null };
+      const restored = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
+      if (!restored) return { done: false, ended: null };
+      nativeLocationMode = "normal";
+      nativeOptionsOwner = capture.binding?.id ?? null;
+      return { done: true, ended: endHeldLeaseAtNormal() };
+    });
+    if (!first.done) {
       // The guard keeps trying, and stops updates 5 minutes on, whether or not a burst is recorded.
       if (!accuracyBurstLease) takeAccuracyBurstLease(capture, UNKNOWN_BURST, Date.now(), Date.now() + ACCURACY_BURST_FORCE_STOP_MS);
       return false;
     }
-    nativeLocationMode = "normal";
-    await normalCaptureConfirmed();
+    await settleAfterNormalCapture(first.ended);
   }
   const due = await withAccuracyBurstState(async (state) => {
     const now = new Date();
@@ -2021,11 +2075,17 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
   if (!due) return false;
   const lease = accuracyBurstLease?.startedAt === due ? accuracyBurstLease : null;
   if (lease && lease.nativeDoneAt == null) {
-    const restored = isLocationCaptureSnapshotCurrent(capture) &&
-      await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
+    const restored = await withNativeLocationOptions(async () => {
+      if (!isLocationCaptureSnapshotCurrent(capture) || accuracyBurstLease !== lease) return lease.nativeDoneAt != null;
+      const done = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
+      if (done) {
+        nativeLocationMode = "normal";
+        nativeOptionsOwner = capture.binding?.id ?? null;
+        confirmLeaseDone(lease);
+      }
+      return done;
+    });
     if (!restored) return false;
-    nativeLocationMode = "normal";
-    confirmLeaseDone(lease);
   }
   const ended = await withAccuracyBurstState(async (state) => {
     if (!state?.active || state.active.startedAt !== due) return { state, result: false };
@@ -2049,19 +2109,24 @@ function liveAccuracyBurstLease(capture: LocationCaptureSnapshot) {
 }
 
 /**
- * Normal capture is confirmed in place with no live lease: any burst this process still held is over now, and any
- * stored burst started before now is too; both are settled when storage takes them, retried until it does.
+ * Called in the native options queue right after normal options were set with no live lease: the lease still held
+ * (a burst past its 3 minutes, or the guard's), if any, is over now, and any stored burst started before now is too.
  */
-async function normalCaptureConfirmed() {
+function endHeldLeaseAtNormal() {
   const lease = accuracyBurstLease;
   if (lease) {
     confirmLeaseDone(lease);
-    pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
-    if (accuracyBurstLease === lease) accuracyBurstLease = null;
+    if (lease.startedAt !== UNKNOWN_BURST) pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
+    accuracyBurstLease = null;
     clearAccuracyBurstTimer();
   }
   noteNativeBurstEnd();
-  await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, lease) : state, result: undefined }))
+  return lease && lease.startedAt !== UNKNOWN_BURST ? lease : null;
+}
+
+/** Settles what a normal start ended, once storage takes it, retried until it does. */
+async function settleAfterNormalCapture(ended: AccuracyBurstLease | null) {
+  await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, ended) : state, result: undefined }))
     .catch(() => undefined);
   settlePendingAccuracyBursts();
 }
