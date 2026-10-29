@@ -34,6 +34,14 @@ const waiting = vi.hoisted(() => {
     // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
     settleOutcome: null as null | "committed" | "committing" | "abandoned",
     // The store's shared withdraw, as its deletion goes.
+    // The store's one completion path, over the mocked settle and withdraw.
+    finishWaitingStart: (id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void mock.withdrawAnswerAfterCorrections(id); return "withdrawn"; }
+      if (!checks.present()) { void mock.settleAnswerAfterCorrections(id, { inFront: false }); return "settled"; }
+      if (checks.start()) return "started";
+      void mock.withdrawAnswerAfterCorrections(id);
+      return "withdrawn";
+    },
     withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
     settleAnswerAfterCorrections: vi.fn(async (id: string, _options: { inFront: boolean }) => {
       try {

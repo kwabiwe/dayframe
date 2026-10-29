@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
-import { mobileAccountKey, mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
+import { mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
 import type { ReviewAnswerVenue } from "./reviewAnswer";
 
 /**
@@ -55,6 +55,16 @@ export type AnswerAfterCorrections = MobileAccountOwner & {
 
 /** This run of the app: a held record from another run lost its Undo window with it. */
 let run = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+/**
+ * The one scope predicate (Codex r14 on #610): a record belongs to an account when it was made against this backend
+ * (a record from before backends were written counts as this one's) for that workspace and user. Read, release,
+ * acknowledgement, refusal, logout, settle, withdraw and recovery all use it.
+ */
+export function inScope(record: Pick<AnswerAfterCorrections, "backendId" | "userId" | "workspaceId">, owner: MobileAccountOwner) {
+  return (!record.backendId || record.backendId === (DAYFRAME_BACKEND_ID ?? undefined)) && mobileAccountOwnersEqual(record, owner);
+}
+const ownerOf = (record: AnswerAfterCorrections): MobileAccountOwner => ({ userId: record.userId, workspaceId: record.workspaceId });
 
 const listeners = new Set<() => void>();
 let tail: Promise<void> = Promise.resolve();
@@ -131,7 +141,7 @@ async function update(change: (items: AnswerAfterCorrections[]) => AnswerAfterCo
 
 /** This owner's waiting answers. */
 export async function readAnswersAfterCorrections(owner: MobileAccountOwner) {
-  return (await serialised(readAll)).filter((item) => mobileAccountOwnersEqual(item, owner) && sameBackend(item));
+  return (await serialised(readAll)).filter((item) => inScope(item, owner));
 }
 
 /**
@@ -209,23 +219,22 @@ export async function cancelAnswerAfterCorrections(id: string) {
 
 /** Called by the correction outbox before it lets go of an acknowledged correction. */
 export async function noteTimelineCorrectionAcknowledged(owner: MobileAccountOwner, clientCorrectionId: string) {
-  await update((items) => items.map((item) => mobileAccountOwnersEqual(item, owner) && item.waitsFor.includes(clientCorrectionId)
+  await update((items) => items.map((item) => inScope(item, owner) && item.waitsFor.includes(clientCorrectionId)
     && !item.acknowledged.includes(clientCorrectionId) ? { ...item, acknowledged: [...item.acknowledged, clientCorrectionId] } : item));
 }
 
 /** Called by the correction outbox when a correction is refused for good. */
 export async function noteTimelineCorrectionRefused(owner: MobileAccountOwner, clientCorrectionId: string) {
-  await update((items) => items.map((item) => mobileAccountOwnersEqual(item, owner) && item.waitsFor.includes(clientCorrectionId)
+  await update((items) => items.map((item) => inScope(item, owner) && item.waitsFor.includes(clientCorrectionId)
     ? { ...item, refused: true } : item));
 }
 
 /** Logout: this account's waiting answers leave with its corrections. */
 export async function clearAnswersAfterCorrectionsForOwner(owner: MobileAccountOwner) {
-  const scope = scopeOf(owner);
   const theirs = new Set((await serialised(readAll).catch(() => [] as AnswerAfterCorrections[]))
-    .filter((item) => mobileAccountOwnersEqual(item, owner)).map((item) => item.id));
-  for (const [id, pending] of [...recovery]) if (pending.scope === scope || theirs.has(id)) recovery.delete(id);
-  await update((items) => items.filter((item) => !mobileAccountOwnersEqual(item, owner)));
+    .filter((item) => inScope(item, owner)).map((item) => item.id));
+  for (const id of [...recovery.keys()]) if (theirs.has(id)) recovery.delete(id);
+  await update((items) => items.filter((item) => !inScope(item, owner)));
 }
 
 /** Puts one answer into the Review outbox under its own id: "gone" when its "?" is no longer open, "wait" when it can't yet. */
@@ -256,7 +265,8 @@ export async function releaseAnswersAfterCorrections(input: {
     const items = await readAll();
     const keep: AnswerAfterCorrections[] = [];
     for (const item of items) {
-      if (!mobileAccountOwnersEqual(item, input.owner)) {
+      // Another account's, or another backend's: never released here (Codex r14 on #610).
+      if (!inScope(item, input.owner)) {
         keep.push(item);
         continue;
       }
@@ -303,17 +313,12 @@ export type AnswerAfterCorrectionsState = "held" | "committing" | "committed" | 
 
 /**
  * The recovery runner's work, kept by the module (never by a hook), so a Dashboard that goes away and comes back,
- * or Dayframe returning to the front, carries on with it. Each piece of work runs in its record's own scope (its
- * backend, workspace and user; Codex r13 on #610): `scope` is read from the record when the work is set, or, when the
- * record can't be read then, when the runner next finds it. Within one run of the app: a relaunch drops a still-held
- * record anyway, as a held answer.
+ * or Dayframe returning to the front, carries on with it. Each piece of work is done only for its record's own
+ * account (`inScope`, read from the record itself when the runner runs; Codex r13 and r14 on #610). Within one run of
+ * the app: a relaunch drops a still-held record anyway, as a held answer.
  */
-type Recovery = { scope?: string; op: "commit" | "abandon"; attempts: number };
+type Recovery = { op: "commit" | "abandon"; attempts: number };
 const recovery = new Map<string, Recovery>();
-const sameBackend = (record: AnswerAfterCorrections) => !record.backendId || record.backendId === (DAYFRAME_BACKEND_ID ?? undefined);
-const scopeOf = (owner: MobileAccountOwner) => `${DAYFRAME_BACKEND_ID ?? ""}|${mobileAccountKey(owner)}`;
-const recordScope = (record: AnswerAfterCorrections) =>
-  `${record.backendId ?? DAYFRAME_BACKEND_ID ?? ""}|${mobileAccountKey({ userId: record.userId, workspaceId: record.workspaceId })}`;
 
 /** This owner's waiting records with their state, for hiding (and showing again) their "?". */
 export async function readAnswersAfterCorrectionsWithState(owner: MobileAccountOwner) {
@@ -331,12 +336,6 @@ export function answeredReviewItemIds(record: AnswerAfterCorrections) {
   return [...(record.reviewItemId ? [record.reviewItemId] : []), ...(record.outingMemberIds ?? [])];
 }
 
-/** A record's own scope, read from the store; undefined when it can't be read now (the runner finds it later). */
-async function scopeOfRecord(id: string) {
-  const record = (await serialised(readAll).catch(() => null))?.find((item) => item.id === id);
-  return record ? recordScope(record) : undefined;
-}
-
 /**
  * Takes a waiting answer or Logs as back (Undo, another account, a hold that couldn't start or was torn down; Codex
  * r12 and r13 on #610). The one way callers delete a record, by its id alone: if the deletion fails, the record is
@@ -344,12 +343,11 @@ async function scopeOfRecord(id: string) {
  * scope. Never throws.
  */
 export async function withdrawAnswerAfterCorrections(id: string) {
-  const scope = await scopeOfRecord(id);
   try {
     await cancelAnswerAfterCorrections(id);
     recovery.delete(id);
   } catch {
-    recovery.set(id, { ...(scope ? { scope } : {}), op: "abandon", attempts: 0 });
+    recovery.set(id, { op: "abandon", attempts: 0 });
     notify();
   }
 }
@@ -361,18 +359,46 @@ export async function withdrawAnswerAfterCorrections(id: string) {
  * throws.
  */
 export async function settleAnswerAfterCorrections(id: string, options: { inFront: boolean }) {
-  const scope = await scopeOfRecord(id);
   try {
     await commitAnswerAfterCorrections(id);
     recovery.delete(id);
     notify();
     return "committed" as const;
   } catch {
-    recovery.set(id, { ...(scope ? { scope } : {}), op: "commit", attempts: 1 });
+    recovery.set(id, { op: "commit", attempts: 1 });
     notify();
-    if (!options.inFront || !scope) return "committing" as const;
-    return (await recoverScope(scope)).abandoned.includes(id) ? "abandoned" as const : "committing" as const;
+    if (!options.inFront) return "committing" as const;
+    // Tried again at once, for the record's own account.
+    const record = (await serialised(readAll).catch(() => null))?.find((item) => item.id === id);
+    if (!record) return "committing" as const;
+    return (await recoverAnswersAfterCorrections(ownerOf(record))).abandoned.includes(id) ? "abandoned" as const : "committing" as const;
   }
+}
+
+/**
+ * The one completion path for a waiting record whose start comes late (Codex r14 on #610): an answer or a Logs as
+ * after its registration, or after its corrections are queued. Exactly one of three always happens, so no record is
+ * ever left held:
+ * - the account changed (`sameAccount` false): it is withdrawn;
+ * - the screen went away or Dayframe left the front (`present` false): it is settled at once, quietly;
+ * - otherwise its Undo hold starts (`start`); a hold that can't start withdraws it.
+ */
+export function finishWaitingStart(id: string, checks: {
+  sameAccount: () => boolean; present: () => boolean; start: () => boolean;
+  /** Whether it may still go at all (its "?" open and unchanged since the tap); false withdraws it. */
+  valid?: () => boolean;
+}) {
+  if (!checks.sameAccount() || (checks.valid && !checks.valid())) {
+    void withdrawAnswerAfterCorrections(id);
+    return "withdrawn" as const;
+  }
+  if (!checks.present()) {
+    void settleAnswerAfterCorrections(id, { inFront: false });
+    return "settled" as const;
+  }
+  if (checks.start()) return "started" as const;
+  void withdrawAnswerAfterCorrections(id);
+  return "withdrawn" as const;
 }
 
 /**
@@ -382,32 +408,28 @@ export async function settleAnswerAfterCorrections(id: string, options: { inFron
  * records say; Codex r13) is done. `abandoned` lists those given up now.
  */
 export async function recoverAnswersAfterCorrections(owner: MobileAccountOwner) {
-  return recoverScope(scopeOf(owner));
-}
-
-async function recoverScope(scope: string) {
   const abandoned: string[] = [];
   if (!recovery.size) return { abandoned, abandonedReviewItemIds: [] as string[] };
   // Read first: it gives work without a scope its record's, and one given up and deleted here still says which "?"
   // to show again.
+  // Its record says whose it is; unread, nothing is done this time.
   const records = await serialised(readAll).catch(() => null);
-  if (records) {
-    for (const [id, pending] of [...recovery]) {
-      const record = records.find((item) => item.id === id);
-      // Its record is gone (deleted, or cleared at logout): nothing is left to do.
-      if (!record) recovery.delete(id);
-      else if (!pending.scope) recovery.set(id, { ...pending, scope: recordScope(record) });
-    }
-  }
+  if (!records) return { abandoned, abandonedReviewItemIds: [] as string[] };
   for (const [id, pending] of [...recovery]) {
-    if (pending.scope !== scope) continue;
+    const record = records.find((item) => item.id === id);
+    // Its record is gone (deleted, or cleared at logout): nothing is left to do.
+    if (!record) {
+      recovery.delete(id);
+      continue;
+    }
+    if (!inScope(record, owner)) continue;
     if (pending.op === "commit") {
       try {
         await commitAnswerAfterCorrections(id);
         recovery.delete(id);
         continue;
       } catch {
-        recovery.set(id, { scope, op: "abandon", attempts: 0 });
+        recovery.set(id, { op: "abandon", attempts: 0 });
         abandoned.push(id);
       }
     }
@@ -420,7 +442,7 @@ async function recoverScope(scope: string) {
     }
   }
   notify();
-  return { abandoned, abandonedReviewItemIds: (records ?? []).filter((record) => abandoned.includes(record.id)).flatMap(answeredReviewItemIds) };
+  return { abandoned, abandonedReviewItemIds: records.filter((record) => abandoned.includes(record.id)).flatMap(answeredReviewItemIds) };
 }
 
 export function __resetAnswersAfterCorrectionsForTests(options: { newRun?: boolean } = {}) {

@@ -47,7 +47,15 @@ const waiting = vi.hoisted(() => ({
     await waiting.commitAnswerAfterCorrections(id);
     return waiting.settleOutcome;
   }),
-  withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await waiting.cancelAnswerAfterCorrections(id); })
+  // The store's one completion path, over the mocked settle and withdraw.
+    finishWaitingStart: (id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void waiting.withdrawAnswerAfterCorrections(id); return "withdrawn"; }
+      if (!checks.present()) { void waiting.settleAnswerAfterCorrections(id, { inFront: false }); return "settled"; }
+      if (checks.start()) return "started";
+      void waiting.withdrawAnswerAfterCorrections(id);
+      return "withdrawn";
+    },
+    withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await waiting.cancelAnswerAfterCorrections(id); })
 }));
 vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
 // The shared registration (afterCorrections.ts), as the queue in `mocks.queued` would answer it.
@@ -458,6 +466,32 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       waiting.settleOutcome = "committed";
       vi.useRealTimers();
     }
+  });
+
+  it("ends every late Logs as start in one way: gone → settled quietly, another account → withdrawn, never held (Codex r14 on #610)", async () => {
+    waiting.settleAnswerAfterCorrections.mockClear();
+    waiting.withdrawAnswerAfterCorrections.mockClear();
+    // The place sheets go away between its registration and its start (after the corrections are queued).
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    let logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+    let handle!: { start: () => void };
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+    await act(async () => { tree.unmount(); });
+    act(() => { handle.start(); });
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.any(String), { inFront: false });
+    expect(api!.heldLog).toBeNull();
+    // Another account signs in between its registration and its start.
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    logAs = sheetOf(tree)!.props.logAs as typeof logAs;
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"]); });
+    const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
+    await act(async () => { tree.update(<Probe data={account("b")} />); });
+    act(() => { handle.start(); });
+    expect(waiting.withdrawAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+    expect(api!.heldLog).toBeNull();
   });
 
   it("keeps the Logs as hold through Dashboard renders, and keeps it on the phone when the app leaves (Codex r1 on #606)", async () => {

@@ -21,7 +21,7 @@ import {
   type AcknowledgedTimelineCorrection,
   type PendingTimelineCorrection
 } from "../../lib/timelineCorrectionOutbox";
-import { settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { finishWaitingStart, settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 import { LocationCorrectionSheet, type LocationCorrectionBeforeEnqueue, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
@@ -295,9 +295,10 @@ export function useLocationCorrections({
   // A hold for an account no longer signed in (a sheet's Done that finished after a switch) is never held, and
   // never replaces this account's (Codex r2 on #606).
   const holdLog = (next: NonNullable<typeof heldLog>) => {
-    if (next.ownerKey !== currentOwner.current) return;
+    if (next.ownerKey !== currentOwner.current) return false;
     if (heldNow.current) commitLogRef.current(heldNow.current, true);
     setHeldLog(next);
+    return true;
   };
   const undoLog = useCallback(() => {
     if (heldNow.current) {
@@ -333,10 +334,18 @@ export function useLocationCorrections({
     const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId } });
     if (!record) return null;
     return {
+      // The one completion path (Codex r14 on #610): another account withdraws it, the place sheets gone or Dayframe
+      // away settles it at once, quietly, otherwise its Undo hold starts — never left held.
       start: () => {
-        logTokens.current += 1;
-        holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
-          request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
+        finishWaitingStart(id, {
+          sameAccount: () => sheetOwnerKey === currentOwner.current,
+          present: () => mounted.current && appInFront(),
+          start: () => {
+            logTokens.current += 1;
+            return holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
+              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
+          }
+        });
       },
       cancel: () => withdrawAnswerAfterCorrections(id)
     };
@@ -396,17 +405,19 @@ export function useLocationCorrections({
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
           void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, []).then((waiting) => {
-            if (currentOwner.current !== sheetOwner) {
-              void waiting?.cancel().catch(() => undefined);
-              return;
-            }
+            // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
               waiting.start();
               return;
             }
+            // A plain one, by the same rule: another account drops it; the place sheets gone or Dayframe away keeps
+            // it on the phone at once, quietly; otherwise its Undo hold starts.
+            if (currentOwner.current !== sheetOwner) return;
             logTokens.current += 1;
-            holdLog({ token: logTokens.current, ownerKey: sheetOwner, title,
-              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId } });
+            const log = { token: logTokens.current, ownerKey: sheetOwner, title,
+              request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId } };
+            if (!mounted.current || !appInFront()) commitLogRef.current(log, false);
+            else holdLog(log);
           }, () => showNotice("That place wasn't logged. Try again."));
         },
         onLogAfter: async (categoryId, ids) => {

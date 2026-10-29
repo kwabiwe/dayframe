@@ -241,6 +241,24 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
     expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
   });
 
+  it("one scope predicate: release, read and recovery skip a record made against another backend (Codex r14 on #610)", async () => {
+    await answers.holdAnswerAfterCorrections(OWNER_A, { id: "m-here", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    // The same account's record, made against another backend (another build's server).
+    const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
+    storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify([...stored,
+      { ...stored[0], id: "m-there", reviewItemId: "ri-2", backendId: "https://elsewhere.example", held: undefined, acknowledged: [C1] }]));
+    await answers.commitAnswerAfterCorrections("m-here");
+    await answers.noteTimelineCorrectionAcknowledged(OWNER_A, C1);
+    const release = vi.fn(async (_record: { id: string }): Promise<Outcome> => "released");
+    await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [], release });
+    expect(release.mock.calls.map(([record]) => record.id)).toEqual(["m-here"]);
+    // Never read as this account's here, and still kept for its own backend.
+    expect(await answers.readAnswersAfterCorrections(OWNER_A)).toEqual([]);
+    expect((JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<{ id: string }>).map((each) => each.id)).toEqual(["m-there"]);
+    expect(answers.inScope({ userId: OWNER_A.userId, workspaceId: OWNER_A.workspaceId, backendId: "https://elsewhere.example" }, OWNER_A)).toBe(false);
+    expect(answers.inScope({ userId: OWNER_A.userId, workspaceId: OWNER_A.workspaceId }, OWNER_A)).toBe(true);
+  });
+
   it("recovers a Logs as whose Undo-end write failed, or gives it back (Codex r12 on #610)", async () => {
     const register = (id: string) => answers.registerAfterCorrections(OWNER_A, { id, reviewItemId: "", logged: true,
       log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, newIds: [C1], itemIds: ["seg-a"] },

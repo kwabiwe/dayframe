@@ -10,7 +10,7 @@ import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAn
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
-import { settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { finishWaitingStart, settleAnswerAfterCorrections, withdrawAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 
 /** A held answer, with the account that gave it. */
@@ -431,6 +431,30 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])) };
   };
+  /**
+   * Starts an answer whose waiting record is already registered (the gate's, or an edited sheet's) through the store's
+   * one completion path (Codex r14 on #610): another account than the one it was registered for withdraws it; the List
+   * gone or Dayframe away settles it at once, quietly; otherwise its Undo hold starts. A "?" that's no longer open, or
+   * changed since the tap (`expected`), withdraws it.
+   */
+  const startWaitingAnswer = (itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
+    options: { expected?: AnswerSet; outing?: boolean } = {}) => finishWaitingStart(recordId, {
+    sameAccount: () => ownerRef.current !== null && ownerRef.current === registeredFor,
+    present: () => alive.current && inFront.current,
+    valid: () => {
+      const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
+      if (!listed || !isOpen(listed)) return false;
+      if (!options.expected) return true;
+      if (reviewDeckProposalSignature(listed) !== options.expected.proposal) return false;
+      if (!options.outing) return true;
+      const members = answerSetOf(listed).members;
+      return members.size === options.expected.members.size
+        && [...members].every(([id, signature]) => options.expected!.members.get(id) === signature);
+    },
+    start: () => holdAnswer(itemId, logged, null, { afterCorrections: recordId, ...options })
+  });
+  const startWaitingAnswerRef = useRef(startWaitingAnswer);
+  startWaitingAnswerRef.current = startWaitingAnswer;
   // Answers being registered (the gate's store read): a repeat tap on the same "?" meanwhile does nothing.
   const registering = useRef(new Set<string>());
   /**
@@ -442,7 +466,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    */
   const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
     options: { afterCorrections?: string } = {}): boolean => {
-    if (options.afterCorrections) return holdAnswer(itemId, logged, venue, options);
+    if (options.afterCorrections) return startWaitingAnswer(itemId, logged, options.afterCorrections, ownerRef.current) === "started";
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
@@ -464,16 +488,13 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       ...(memberItemIds.length ? { memberItemIds } : {}),
       action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } }).then((record) => {
       registering.current.delete(itemId);
-      if (ownerRef.current !== owner) {
-        if (record) void withdrawAnswerAfterCorrections(id);
+      if (!record) {
+        if (ownerRef.current === owner) holdAnswer(itemId, logged, venue, { expected });
         return;
       }
-      // Waiting for a correction: no Apple place with it (the correction says where it was). The lifecycle is read
-      // where it settles (holdAnswer).
-      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id, expected, outing: memberIds.length > 0 })) {
-        void withdrawAnswerAfterCorrections(id);
-      }
-      if (!record) holdAnswer(itemId, logged, venue, { expected });
+      // Waiting for a correction: no Apple place with it (the correction says where it was). The one completion path
+      // (Codex r14 on #610): withdrawn, settled quietly, or held for Undo — never left held.
+      startWaitingAnswer(itemId, logged, id, owner, { expected, outing: memberIds.length > 0 });
     }, () => {
       registering.current.delete(itemId);
       if (ownerRef.current === owner && alive.current) Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
@@ -521,5 +542,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
-  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
+  /** An edited sheet's answer, registered for `registeredFor`, started through the one completion path. */
+  const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null) =>
+    startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor), []);
+  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
 }
