@@ -2063,7 +2063,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setTimerClashEnds((current) => sameClashEnds(current, clashEnds) ? current : clashEnds);
   }, [clashEnds]);
   // Blocks deleted on this iPhone and not yet gone from the server (held for Undo, or queued): a block that ran into a
-  // trip whose block is known deleted stops asking at once, apart from one only not loaded here (Codex r1 on #618).
+  // trip whose block is known deleted stops asking at once (Codex r1 on #618); one not loaded never asks (r1 on #622).
   const [queuedDeletes, setQueuedDeletes] = useState<{ owner: string; ids: ReadonlySet<string> } | null>(null);
   // Queued deletes, and delivered ones until an authoritative read settles them (Codex r2 on #618), for this account.
   const deleteTombstones = useRef({ owner: null as string | null, tombstones: createDeleteTombstones() });

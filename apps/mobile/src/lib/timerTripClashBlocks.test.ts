@@ -28,11 +28,11 @@ const now = Date.parse(at(29, 18));
 const checkOf = (item: MobileReviewItem): ListCheck => ({ id: item.id, segmentId: null, startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt });
 
 describe("a block that ran into a trip, on its block (location v4 design §7)", () => {
-  it("attaches to the block its payload names, whether or not the block is loaded", () => {
+  it("attaches to the block its payload names, and asks only while that block is loaded (Codex r1 on #622)", () => {
     expect(clashChecksByBlock([clash(), { ...clash(), id: "clash-0" }, { id: "stay", type: "activity_suggestion", eventType: "unknown_stay", rawPayload: null }]))
       .toEqual(new Map([["block-1", "clash-0"]]));
-    // Not loaded here (an older day): the server's question stands.
-    expect(clashStillAsksHere(clash(), data([]), now)).toBe(true);
+    // Not loaded here (outside the bootstrap's entries): no block to ask on, so it doesn't ask until it arrives.
+    expect(clashStillAsksHere(clash(), data([]), now)).toBe(false);
     expect(clashStillAsksHere(clash(), data([block()]), now)).toBe(true);
     // Not a clash: not this rule's.
     expect(clashStillAsksHere({ ...clash(), type: "activity_suggestion", eventType: "unknown_stay" }, data([]), now)).toBe(true);
@@ -53,15 +53,16 @@ describe("a block that ran into a trip, on its block (location v4 design §7)", 
     expect(clashStillAsksHere(clash(), null, now)).toBe(false);
   });
 
-  it("stops asking for a block deleted here (held for Undo or queued), apart from one only not loaded (Codex r1 on #618)", () => {
+  it("stops asking for a block deleted here (held for Undo or queued), loaded or not (Codex r1 on #618, #622)", () => {
     const deleted = locallyDeletedBlockIds(["held-1"], [
       { operation: "delete", targetEntryId: "block-1" }, { operation: "delete", optimisticEntryId: "local-1" },
       { operation: "update", targetEntryId: "edited" }, { operation: "delete", targetEntryId: "refused", failureKind: "permanent" }
     ]);
     expect([...deleted].sort()).toEqual(["block-1", "held-1", "local-1"]);
-    // Gone from the projected data and known deleted: no longer asks. Not loaded and not deleted: still asks.
+    // Known deleted: no longer asks, even with a stale copy of the block still loaded.
     expect(clashStillAsksHere(clash(), data([]), now, undefined, deleted)).toBe(false);
-    expect(clashStillAsksHere(clash(), data([]), now, undefined, new Set())).toBe(true);
+    expect(clashStillAsksHere(clash(), data([block()]), now, undefined, deleted)).toBe(false);
+    expect(clashStillAsksHere(clash(), data([block()]), now, undefined, new Set())).toBe(true);
   });
 
   it("counts once, in the badge's 7 days, Today's chip on its day, oldest first with the others", () => {

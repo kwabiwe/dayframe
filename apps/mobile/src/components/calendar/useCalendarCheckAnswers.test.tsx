@@ -845,3 +845,35 @@ describe("the settled \"?\" the Calendar and Today's Earlier this week chips cou
     expect(chip(gone)).toBe(1);
   });
 });
+
+// Codex r1 on #622: a clash counts and asks only on a block the Calendar can open — count and surface agree.
+describe("a block that ran into a trip counts only with its block to answer on", () => {
+  it("counts 0 with no surface while its block isn't loaded, and 1 with its dot once the block arrives", async () => {
+    const { clashChecksByBlock, clashStillAsksHere, bootstrapBlocksById } = await import("../../lib/timerTripClashBlocks");
+    const { buildNativeCalendarBridgeState } = await import("../../lib/nativeCalendarPresentation");
+    const { DAYFRAME_THEME } = await import("@dayframe/shared");
+    const day = (hour: number, minute = 0) => new Date(2026, 9, 22, hour, minute).toISOString();
+    const clash = suggestion("clash", { type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Team sync ran 18m into your trip",
+      suggestedStartedAt: day(9), suggestedStoppedAt: day(10, 42), proposalHash: "f".repeat(64),
+      rawPayload: { timeEntryId: "block-1", tripId: "trip-1", tripStartedAt: day(10, 42), tripStoppedAt: day(11, 10), overlapSeconds: 1080 } });
+    const block = { id: "block-1", projectId: null, projectName: null, projectColor: null, clientName: null, categoryId: null, categoryName: null,
+      placeName: null, source: "mobile_app", confidence: "high", reviewStatus: "confirmed", description: "Team sync",
+      startedAt: day(9), stoppedAt: day(11), durationSeconds: 7_200 };
+    const none = { decided: NONE, answering: NONE, resolved: NONE, waitingIds: NONE, waitingSegments: NONE, syncStateIds: NONE };
+    const now = Date.parse(day(18));
+    // The Dashboard's pipeline: the one filter → the count; its blocks → the Grid's dots and the List's rows.
+    const surfaces = (data: MobileBootstrap) => {
+      const blocks = bootstrapBlocksById(data);
+      const base = settledCheckBase(data.reviewItems, { ...none, stillAsks: (item) => clashStillAsksHere(item, data, now, blocks) });
+      const asking = clashChecksByBlock(base.open);
+      const grid = buildNativeCalendarBridgeState({ data, now, askingEntryIds: new Set(asking.keys()), reduceMotion: false, reduceTransparency: false,
+        refreshing: false, selectedDayKey: "2026-10-22", theme: { ...DAYFRAME_THEME.dark, mode: "dark", pressed: DAYFRAME_THEME.dark.accentPressed } as never,
+        transitionDirection: 1 });
+      return { count: base.open.length, dots: grid.model.entries.filter((entry) => entry.asking).map((entry) => entry.entryId) };
+    };
+    const base = { user: { id: "u", name: "U", email: "u@example.test" }, workspace: { id: "w", name: "W" }, categories: [], projects: [],
+      places: [], activeEntry: null, reviewItems: [clash] };
+    expect(surfaces({ ...base, entries: [] } as unknown as MobileBootstrap)).toEqual({ count: 0, dots: [] });
+    expect(surfaces({ ...base, entries: [block] } as unknown as MobileBootstrap)).toEqual({ count: 1, dots: ["block-1"] });
+  });
+});
