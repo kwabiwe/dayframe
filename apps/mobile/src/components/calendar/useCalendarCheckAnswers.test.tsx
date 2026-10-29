@@ -262,6 +262,69 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       act(() => { appState.listener?.("active"); });
     });
 
+    it("gates an outing on its trips' queued corrections too, and its record answers the trips with it (Codex r10 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      gate.waitForItemCorrections.mockClear();
+      const segments = (items: MobileReviewItem[]) => items.map((item) => ({ ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: `segment-${item.id}` } }));
+      // The inbound trip was corrected offline: the gate makes the outing wait.
+      gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+      const { result } = mount(withAccount(segments(outing())));
+      await act(async () => { result.current.answer("stay", true); await Promise.resolve(); await Promise.resolve(); });
+      expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" }, expect.objectContaining({
+        itemId: "segment-stay", memberItemIds: ["segment-there", "segment-back"],
+        action: { kind: "answer", reviewItemId: "stay", logged: true, outingMemberIds: ["there", "back"] }
+      }));
+      expect(result.current.held).toMatchObject({ itemId: "stay", afterCorrections: "client-id", outing: { key: "outing:a" } });
+      expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Only its record lets confirm_outing go, once every correction is accepted; never the Review outbox now.
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    });
+
+    it("never leaves a waiting answer hidden when its record can't be let go: tried again, then given up (Codex r10 on #610)", async () => {
+      const flush = () => act(async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); });
+      // A failure, then success: tried again at once, and stays answered.
+      waiting.commitAnswerAfterCorrections.mockReset();
+      waiting.commitAnswerAfterCorrections.mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
+      const retried = mount(withAccount([suggestion("a")]));
+      act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(2);
+      expect(retried.result.current.hiddenIds.has("a")).toBe(true);
+      expect(Alert.alert).not.toHaveBeenCalled();
+      // Failing twice in front: given up — its record goes, its "?" comes back, the not-saved words are said.
+      waiting.commitAnswerAfterCorrections.mockReset();
+      waiting.commitAnswerAfterCorrections.mockRejectedValue(new Error("disk full"));
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      const given = mount(withAccount([suggestion("b")]));
+      act(() => { given.result.current.answer("b", true, null, { afterCorrections: "m-2" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("m-2");
+      expect(given.result.current.held).toBeNull();
+      expect(given.result.current.hiddenIds.has("b")).toBe(false);
+      expect(given.result.current.abandonedIds.has("b")).toBe(true);
+      expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
+      // Away: quiet, and tried again on the next return to the front.
+      vi.mocked(Alert.alert).mockClear();
+      waiting.commitAnswerAfterCorrections.mockReset();
+      waiting.commitAnswerAfterCorrections.mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
+      const away = mount(withAccount([suggestion("c")]));
+      act(() => { away.result.current.answer("c", true, null, { afterCorrections: "m-3" }); });
+      act(() => { appState.listener?.("background"); });
+      await flush();
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(away.result.current.hiddenIds.has("c")).toBe(true);
+      act(() => { appState.listener?.("active"); });
+      await flush();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(2);
+      expect(Alert.alert).not.toHaveBeenCalled();
+      waiting.commitAnswerAfterCorrections.mockReset();
+      waiting.commitAnswerAfterCorrections.mockResolvedValue(undefined);
+    });
+
     it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {
       waiting.commitAnswerAfterCorrections.mockClear();
       const finish = deferGate();

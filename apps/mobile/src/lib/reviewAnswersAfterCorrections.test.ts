@@ -156,6 +156,21 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
       action: { kind: "answer", reviewItemId: "ri-2", logged: false } })).toBeNull();
   });
 
+  it("an outing's answer waits for a correction of one of its trips saved offline; its refusal keeps the \"?\" (Codex r10 on #610)", async () => {
+    // The inbound trip corrected offline.
+    await outbox.enqueueTimelineCorrections(OWNER_A, [{ request: { kind: "delete", subject: "trip", itemId: "trip-in", clientCorrectionId: C1 } }]);
+    const record = await shared.waitForItemCorrections(OWNER_A, { id: "m-out", itemId: "stay-seg", memberItemIds: ["trip-in", "trip-out"], newIds: [],
+      action: { kind: "answer", reviewItemId: "ri-stay", logged: true, outingMemberIds: ["ri-in", "ri-out"] } });
+    expect(record).toMatchObject({ waitsFor: [C1], outingMemberIds: ["ri-in", "ri-out"] });
+    await answers.commitAnswerAfterCorrections("m-out");
+    expect((await releaseWith()).release).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", vi.fn(async () => json(409, { error: "This trip is already in a block." })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    const { release, dropped } = await releaseWith();
+    expect(release).not.toHaveBeenCalled();
+    expect(dropped.map((item) => item.reviewItemId)).toEqual(["ri-stay"]);
+  });
+
   it("registers atomically: an acknowledgement arriving during registration is never lost, and the log still goes (Codex r6 on #610)", async () => {
     let acknowledging: Promise<void> | null = null;
     const queue = {

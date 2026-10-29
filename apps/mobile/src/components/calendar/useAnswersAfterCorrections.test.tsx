@@ -111,6 +111,32 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.unmount(); });
   });
 
+  it("releases a waiting outing answer as one confirm_outing with its trips (Codex r10 on #610)", async () => {
+    storage.clear();
+    review.enqueueReviewMutation.mockClear();
+    outbox.pending = [];
+    const trip = (id: string) => ({ ...item, id, eventType: "commute_detected", rawPayload: { clientSegmentId: `seg-${id}` } });
+    const outingData = { ...data, reviewItems: [item, trip("ri-in"), trip("ri-out")] } as unknown as MobileBootstrap;
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-out", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    // The record as the gate writes it for an outing.
+    const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
+    storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify(stored.map((record) => ({ ...record, outingMemberIds: ["ri-in", "ri-out"], acknowledged: [C1] }))));
+    await answers.commitAnswerAfterCorrections("m-out");
+    function OutingProbe() {
+      useAnswersAfterCorrections({ data: outingData, owner: OWNER });
+      return null;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<OutingProbe />); });
+    await flush();
+    expect(review.enqueueReviewMutation).toHaveBeenCalledOnce();
+    expect(review.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ clientMutationId: "m-out",
+      mutation: { action: "confirm_outing", memberReviewItemIds: ["ri-in", "ri-out"] } });
+    expect((review.enqueueReviewMutation.mock.calls[0][0] as { affectedItems: Array<{ id: string }> }).affectedItems.map((each) => each.id))
+      .toEqual(["ri-1", "ri-in", "ri-out"]);
+    act(() => { tree.unmount(); });
+  });
+
   it("says at once which \"?\" to show again when its change is refused (Codex r3 on #610)", async () => {
     storage.clear();
     dropped.mockClear();

@@ -1982,10 +1982,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
     // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
     const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id) && !answersAfterCorrections.waitingIds.has(item.id) && !resolvedByCorrections.has(item.id)
+      && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
+      // A waiting answer given up (its record couldn't be let go) shows its "?" again even while the record lingers.
+      && !(answersAfterCorrections.waitingIds.has(item.id) && !checkAnswers.abandonedIds.has(item.id))
       && !(typeof item.rawPayload?.clientSegmentId === "string" && answersAfterCorrections.waitingSegments.has(item.rawPayload.clientSegmentId)));
     return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds, answersAfterCorrections.waitingSegments,
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, checkAnswers.abandonedIds, answersAfterCorrections.waitingIds,
+    answersAfterCorrections.waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
   const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);

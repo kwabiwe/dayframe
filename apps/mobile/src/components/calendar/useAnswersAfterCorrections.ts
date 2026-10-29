@@ -74,9 +74,15 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       const item = bootstrap.reviewItems.find((each) => each.id === record.reviewItemId);
       if (!item) return "wait";
       if (!isOpenReviewItem(item)) return "gone";
+      // An outing answered with its trips (Codex r10 on #610): every trip as the server has it now.
+      const members = (record.outingMemberIds ?? []).map((id) => bootstrap.reviewItems.find((each) => each.id === id));
+      if (members.some((member) => !member)) return "wait";
+      if (members.some((member) => !isOpenReviewItem(member!))) return "gone";
       // Decided meanwhile on this phone (the deck): not this answer's to save.
-      if ((await reviewAnswersDecided(bootstrap, [item.id])).size) return "gone";
-      await enqueueReviewMutation({ bootstrap, item, mutation: reviewAnswerMutation(item, record.logged), clientMutationId: record.id });
+      if ((await reviewAnswersDecided(bootstrap, [item.id, ...(record.outingMemberIds ?? [])])).size) return "gone";
+      await enqueueReviewMutation({ bootstrap, item, clientMutationId: record.id,
+        mutation: reviewAnswerMutation(item, record.logged, record.outingMemberIds?.length ? { outingMemberIds: record.outingMemberIds } : {}),
+        ...(members.length ? { affectedItems: [item, ...members.map((member) => member!)] } : {}) });
       void synchroniseReviewMutations().catch(() => undefined);
       return "released";
     };

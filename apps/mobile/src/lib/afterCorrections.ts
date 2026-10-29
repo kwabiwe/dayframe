@@ -20,8 +20,11 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
   id: string;
   /** The place or trip the answer or log is about. */
   itemId: string;
+  /** An outing's trips (their segments): their queued corrections are waited for too (Codex r10 on #610). */
+  memberItemIds?: readonly string[];
   newIds: readonly string[];
-  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null } | { kind: "log"; categoryId: string };
+  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; outingMemberIds?: readonly string[] }
+    | { kind: "log"; categoryId: string };
 }) {
   return registerAfterCorrections(owner, {
     id: input.id,
@@ -29,7 +32,8 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
     logged: input.action.kind === "answer" ? input.action.logged : true,
     ...(input.action.kind === "answer" && input.action.venue ? { venue: input.action.venue } : {}),
     ...(input.action.kind === "log" ? { log: { itemId: input.itemId, categoryId: input.action.categoryId } } : {}),
+    ...(input.action.kind === "answer" && input.action.outingMemberIds?.length ? { outingMemberIds: input.action.outingMemberIds } : {}),
     newIds: input.newIds,
-    itemIds: [input.itemId]
+    itemIds: [input.itemId, ...(input.memberItemIds ?? [])]
   }, TIMELINE_CORRECTION_QUEUE);
 }

@@ -26,6 +26,7 @@ type HeldAnswer = ReviewDeckHeldDecision & {
   /** Settled while the app was away or the List gone: saved at once, with nothing said (Codex r8 and r9 on #610). */
   quiet?: boolean;
 };
+const NO_IDS: ReadonlySet<string> = new Set();
 /** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
 type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
@@ -155,7 +156,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       setSaving((now) => now?.owner === owner
         ? { ...now, ids: new Set([...now.ids, ...heldIds]), awaiting: new Set([...now.awaiting, ...heldIds]) }
         : { owner, ids: new Set(heldIds), awaiting: new Set(heldIds) });
-      void commitAnswerAfterCorrections(decision.afterCorrections).catch(() => undefined);
+      commitWaitingRef.current(decision.afterCorrections, owner, heldIds, decision.title, Boolean(decision.quiet), 0);
       return;
     }
     const unhide = (ids: readonly string[]) => {
@@ -263,6 +264,43 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       notSaved(error);
     });
   };
+  /**
+   * Lets a waiting answer's record go once its Undo ends (Codex r10 on #610). A failed write is never swallowed: in
+   * front it is tried once more at once; away (or gone) it waits quietly for Dayframe's next return to the front.
+   * One that still can't be written gives the answer up: its record goes (tried again on return if that fails too),
+   * its "?" comes back at once — never left hidden behind a record nothing will release — and, in front, the deck's
+   * not-saved words are said.
+   */
+  const retryCommits = useRef(new Map<string, { owner: string | null; heldIds: readonly string[]; title: string }>());
+  const [abandoned, setAbandoned] = useState<{ owner: string | null; ids: ReadonlySet<string> } | null>(null);
+  const commitWaiting = (id: string, owner: string | null, heldIds: readonly string[], title: string, quiet: boolean, attempt: number) => {
+    void commitAnswerAfterCorrections(id).then(() => {
+      retryCommits.current.delete(id);
+    }, () => {
+      if (ownerRef.current !== owner) return;
+      const here = alive.current && inFront.current;
+      if (!here) {
+        retryCommits.current.set(id, { owner, heldIds, title });
+        return;
+      }
+      if (attempt === 0) {
+        commitWaitingRef.current(id, owner, heldIds, title, quiet, 1);
+        return;
+      }
+      retryCommits.current.delete(id);
+      void cancelAnswerAfterCorrections(id).catch(() => undefined);
+      setAbandoned((now) => ({ owner, ids: new Set([...(now && now.owner === owner ? now.ids : []), ...heldIds]) }));
+      setSaving((now) => now && now.owner === owner
+        ? { ...now, ids: new Set([...now.ids].filter((each) => !heldIds.includes(each))), awaiting: new Set([...now.awaiting].filter((each) => !heldIds.includes(each))) }
+        : now);
+      restore(owner, heldIds);
+      if (quiet) return;
+      AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+      Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+    });
+  };
+  const commitWaitingRef = useRef(commitWaiting);
+  commitWaitingRef.current = commitWaiting;
   const saveRef = useRef(save);
   // The latest values for the hold's later callbacks (never written during render).
   useLayoutEffect(() => {
@@ -316,6 +354,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const subscription = AppState.addEventListener("change", (state) => {
       inFront.current = state === "active";
       if (state !== "active") hold.flush();
+      // Back in front: a waiting answer whose record couldn't be let go while away is tried again (Codex r10 on #610).
+      if (state === "active") {
+        for (const [id, retry] of [...retryCommits.current]) commitWaitingRef.current(id, retry.owner, retry.heldIds, retry.title, false, 1);
+      }
     });
     return () => {
       subscription.remove();
@@ -334,7 +376,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // registered changes): the lifecycle is read here, so an answer settling while the app is away or the List is gone
   // is saved at once, with no Undo hold, no haptic and nothing said, through its save too.
   const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string; expected?: AnswerSet } = {}): boolean => {
+    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
     const quiet = !alive.current || !inFront.current;
@@ -364,17 +406,22 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
       && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id));
     // An answer after corrections is the "?" alone: its corrections reshape it, so an outing is not folded in.
-    const members = options.afterCorrections ? [] : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
+    // A gated outing (`outing`) keeps its trips: its record waits for theirs too (Codex r10 on #610).
+    const members = options.afterCorrections && !options.outing ? []
+      : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
     // The whole answer set as tapped (Codex r9 on #610): an outing's membership and every member's proposal. An
     // answer after corrections is the "?" alone, so only its own proposal counts there.
-    if (options.expected && !options.afterCorrections && (members.length !== options.expected.members.size
+    if (options.expected && (!options.afterCorrections || options.outing) && (members.length !== options.expected.members.size
       || members.some((member) => options.expected!.members.get(member.id) !== reviewDeckProposalSignature(member)))) return changed();
     const outingKey = members.length ? outingKeyOf(listed) : null;
     known.current.set(listed.id, listed);
     for (const member of members) known.current.set(member.id, member);
     token.current += 1;
+    // Answered again: no longer given up.
+    setAbandoned((now) => now && [listed.id, ...members.map((member) => member.id)].some((id) => now.ids.has(id))
+      ? { ...now, ids: new Set([...now.ids].filter((id) => id !== listed.id && !members.some((member) => member.id === id))) } : now);
     const title = listed.title?.trim() || "Suggestion";
     const decision: HeldAnswer = {
       kind: "single",
@@ -444,8 +491,15 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     registering.current.add(itemId);
     const owner = ownerRef.current;
     const id = createReviewClientMutationId();
+    // An outing waits for its trips' queued corrections too, and its record answers them with it (Codex r10 on #610).
+    const memberIds = [...expected.members.keys()];
+    const memberItemIds = memberIds.flatMap((memberId) => {
+      const member = data.reviewItems.find((candidate) => candidate.id === memberId);
+      return typeof member?.rawPayload?.clientSegmentId === "string" ? [member.rawPayload.clientSegmentId] : [];
+    });
     void waitForItemCorrections({ userId: data.user.id, workspaceId: data.workspace.id }, { id, itemId: segmentId, newIds: [],
-      action: { kind: "answer", reviewItemId: itemId, logged } }).then((record) => {
+      ...(memberItemIds.length ? { memberItemIds } : {}),
+      action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } }).then((record) => {
       registering.current.delete(itemId);
       if (ownerRef.current !== owner) {
         if (record) void cancelAnswerAfterCorrections(id).catch(() => undefined);
@@ -453,7 +507,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       }
       // Waiting for a correction: no Apple place with it (the correction says where it was). The lifecycle is read
       // where it settles (holdAnswer).
-      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id, expected })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id, expected, outing: memberIds.length > 0 })) {
+        void cancelAnswerAfterCorrections(id).catch(() => undefined);
+      }
       if (!record) holdAnswer(itemId, logged, venue, { expected });
     }, () => {
       registering.current.delete(itemId);
@@ -502,5 +558,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
-  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
+  /** "?" whose waiting answer had to be given up (Codex r10 on #610): shown again even while its record lingers. */
+  const abandonedIds = abandoned && abandoned.owner === ownerKey ? abandoned.ids : NO_IDS;
+  return { abandonedIds, answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
 }

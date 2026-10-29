@@ -36,6 +36,8 @@ export type AnswerAfterCorrections = MobileAccountOwner & {
    * once the sheet's corrections are acknowledged; its `id` is the log's own `clientCorrectionId`.
    */
   log?: { itemId: string; categoryId: string };
+  /** An outing's trips answered with its stay (`confirm_outing` / `ignore_outing`; Codex r10 on #610). */
+  outingMemberIds?: string[];
   /** The corrections it waits for, and those the server has acknowledged. */
   waitsFor: string[];
   acknowledged: string[];
@@ -82,9 +84,11 @@ function parse(value: unknown): AnswerAfterCorrections | null {
   const rawLog = item.log as { itemId?: unknown; categoryId?: unknown } | undefined;
   const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && typeof rawLog.categoryId === "string"
     ? { itemId: rawLog.itemId, categoryId: rawLog.categoryId } : undefined;
+  const outingMemberIds = strings(item.outingMemberIds);
   return {
     userId: item.userId, workspaceId: item.workspaceId, id: item.id, reviewItemId: item.reviewItemId, logged: item.logged,
-    ...(venue ? { venue } : {}), ...(log ? { log } : {}), waitsFor, acknowledged, ...(item.refused === true ? { refused: true } : {}),
+    ...(venue ? { venue } : {}), ...(log ? { log } : {}), ...(outingMemberIds?.length ? { outingMemberIds } : {}),
+    waitsFor, acknowledged, ...(item.refused === true ? { refused: true } : {}),
     ...(held ? { held } : {}), createdAt: item.createdAt
   };
 }
@@ -156,7 +160,7 @@ export type AfterCorrectionsQueue = {
  */
 export async function registerAfterCorrections(owner: MobileAccountOwner,
   answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: { itemId: string; categoryId: string };
-    newIds: readonly string[]; itemIds: readonly string[] },
+    outingMemberIds?: readonly string[]; newIds: readonly string[]; itemIds: readonly string[] },
   queue: AfterCorrectionsQueue, now = new Date()) {
   const record = await serialised(async () => {
     const pending = await queue.readPending(owner);
@@ -168,7 +172,8 @@ export async function registerAfterCorrections(owner: MobileAccountOwner,
     const acknowledgedNow = new Set(queue.readAcknowledged(owner).map((item) => item.clientCorrectionId));
     const next: AnswerAfterCorrections = {
       userId: owner.userId, workspaceId: owner.workspaceId, id: answer.id, reviewItemId: answer.reviewItemId, logged: answer.logged,
-      ...(answer.venue ? { venue: answer.venue } : {}), ...(answer.log ? { log: answer.log } : {}), waitsFor,
+      ...(answer.venue ? { venue: answer.venue } : {}), ...(answer.log ? { log: answer.log } : {}),
+      ...(answer.outingMemberIds?.length ? { outingMemberIds: [...answer.outingMemberIds] } : {}), waitsFor,
       acknowledged: waitsFor.filter((id) => acknowledgedNow.has(id)), held: { run }, createdAt: now.toISOString()
     };
     const items = await readAll();
