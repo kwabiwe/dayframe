@@ -152,5 +152,14 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(accuracyBurstDecision(ended, day(2, 12))).toEqual({ start: false, reason: "daily_time" });
     expect(accuracyBurstDecision(ended, day(3, 12))).toEqual({ start: true });
   });
+
+  it("rounds each burst's seconds up, so fractions never add up past the day's allowance (Codex r26 on #619)", () => {
+    let state: AccuracyBurstState = trial;
+    for (let i = 0; i < 5; i += 1) {
+      const at = day(3, 8 + i);
+      state = endAccuracyBurst(startAccuracyBurst(state, "departure", at), new Date(at.getTime() + 179_400), 179_400, at.getTime());
+    }
+    expect(state.days["2026-11-04"].seconds).toBeGreaterThanOrEqual(897);
+  });
 });
 

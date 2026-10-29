@@ -290,6 +290,8 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
 }
 
 export function syncLocationIntelligenceOnForeground(options: LocationSyncOptions = {}) {
+  // Before any await, as every capture admission does (card K, Codex r26 on #619).
+  armLocationAdmissionGuard();
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
     await drainNativeLocationSignalsInBatches();
@@ -329,6 +331,7 @@ export async function getNativeLocationIntelligenceStatus() {
 }
 
 export function drainNativeLocationSignals(limit = 100) {
+  armLocationAdmissionGuard();
   // Snapshot before waiting for the lifecycle lane; queued work cannot adopt B.
   const capture = captureLocationOwnership();
   return withJsTask("location-drain", () =>
@@ -413,6 +416,7 @@ function nativePositionSignals(evidence: LocationEvidence[]) {
 }
 
 export function drainNativeLocationSignalsInBatches() {
+  armLocationAdmissionGuard();
   const capture = captureLocationOwnership();
   return withLocationCaptureLifecycle(() => drainNativeLocationSignalsInBatchesUnsafe(capture));
 }

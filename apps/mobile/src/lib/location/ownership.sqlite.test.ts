@@ -1449,5 +1449,26 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a foreground sync held in its journal drain has inherited options lowered (Codex r26 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    const held = deferred();
+    h.nativeSignals = [visit("visit-held", Date.now() - 20 * 60_000, Date.now() - 60_000)];
+    h.beforeInsert = () => held.promise;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const syncing = runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+      held.resolve();
+      h.beforeInsert = null;
+      await syncing;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

@@ -229,7 +229,9 @@ export function endAccuracyBurst(
   const startKnown = (nativeStartMs != null && Number.isFinite(nativeStartMs)) || Number.isFinite(storedNative);
   for (const part of dayParts(started, ended, offsetMinutes)) {
     const day = days[part.key] ?? { count: 0, seconds: 0 };
-    const seconds = Math.round(part.seconds);
+    // Rounded up, never to the nearest: fractions lost per burst would add up past the day's allowance (Codex r26 on
+    // #619).
+    const seconds = Math.ceil(part.seconds - 1e-9);
     const counted = !startKnown && part.key !== recordedDay ? 1 : 0;
     const byTrigger = trigger ? {
       ...day.byTrigger,
