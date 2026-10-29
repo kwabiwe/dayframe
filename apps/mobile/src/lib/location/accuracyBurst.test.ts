@@ -51,7 +51,8 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
   });
 
   it("charges each local day its own part of a burst across midnight (Codex r1 on #619)", () => {
-    const ended = endAccuracyBurst(startAccuracyBurst(trial, "departure", day(2, 23, 59)), day(3, 0, 2));
+    // Best accuracy started with the recording (the lease says so).
+    const ended = endAccuracyBurst(startAccuracyBurst(trial, "departure", day(2, 23, 59)), day(3, 0, 2), undefined, day(2, 23, 59).getTime());
     expect(ended.days["2026-11-03"]).toMatchObject({ count: 1, seconds: 60 });
     expect(ended.days["2026-11-04"]).toMatchObject({ count: 0, seconds: 120 });
     // The next day's cap counts the spill: 5 full bursts more leave no room for a sixth's whole 3 minutes.
@@ -67,9 +68,12 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     const startedAt = Date.parse("2026-11-03T00:59:00.000Z");
     const elsewhere: AccuracyBurstState = { ...started, days: { "2026-11-02": { count: 1, seconds: 0 } },
       active: { ...started.active!, startedAt: new Date(startedAt).toISOString(), endsAt: new Date(startedAt + 180_000).toISOString(), offsetMinutes: 60 } };
-    const ended = endAccuracyBurst(elsewhere, new Date(startedAt + 180_000));
+    const ended = endAccuracyBurst(elsewhere, new Date(startedAt + 180_000), undefined, startedAt);
     expect(ended.days["2026-11-02"]).toMatchObject({ count: 1, seconds: 60 });
     expect(ended.days["2026-11-03"]).toMatchObject({ count: 0, seconds: 120 });
+    // With no evidence of when best accuracy started, the next day counts it too: its cap is met early, never passed
+    // (Codex r17 on #619).
+    expect(endAccuracyBurst(elsewhere, new Date(startedAt + 180_000)).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 120 });
   });
 
   it("caps a day at 6 bursts and 18 minutes, under the 20-minute best-accuracy budget", () => {

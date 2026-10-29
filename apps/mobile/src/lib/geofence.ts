@@ -14,7 +14,7 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { createSerialMutationQueue } from "./location/mutationQueue";
-import { ACCURACY_BURST_DURATION_MS, ACCURACY_BURST_FORCE_STOP_MS, accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
+import { ACCURACY_BURST_DURATION_MS, ACCURACY_BURST_FORCE_STOP_MS, accuracyBurstArm, accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
   withTrialProgress, type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
 import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
@@ -207,18 +207,26 @@ const SAVED_PLACE_MIN_EFFECTIVE_RADIUS_METERS = 75;
 const SAVED_PLACE_LEARNING_SUPPRESSION_METERS = 150;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** The consent read an admitted wake needs; when it fails, inherited options are guarded first (Codex r16 on #619). */
-async function learningEnabledOrGuard(capture: LocationCaptureSnapshot) {
-  return getLocationLearningEnabled().catch((error) => {
-    guardInheritedAccuracyOptions(capture);
+/** The consent read an admitted wake needs; when it fails, inherited options are put back first (Codex r16 on #619). */
+async function learningEnabledOrGuard() {
+  return getLocationLearningEnabled().catch(async (error) => {
+    await protectInheritedAccuracyOptions();
+    throw error;
+  });
+}
+
+/** A task's owner, read first; when it can't be read, inherited options are put back first (Codex r17 on #619). */
+async function admittedCapture(captured: Promise<LocationCaptureSnapshot>) {
+  return captured.then(hydrateLegacyCapture).catch(async (error) => {
+    await protectInheritedAccuracyOptions();
     throw error;
   });
 }
 
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   const captured = captureLocationOwnership();
-  const capture = await hydrateLegacyCapture(await captured);
-  if (!isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard(capture) || !isLocationCaptureSnapshotCurrent(capture)) {
+  const capture = await admittedCapture(captured);
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard() || !isLocationCaptureSnapshotCurrent(capture)) {
     await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1);
     await stopUnownedLocationCapture(capture);
     return;
@@ -275,14 +283,14 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
 
 TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) => {
   const captured = captureLocationOwnership();
-  const capture = await hydrateLegacyCapture(await captured);
+  const capture = await admittedCapture(captured);
   if (!isLocationCaptureSnapshotCurrent(capture)) {
     const count = (data as {locations?: unknown[]} | undefined)?.locations?.length ?? 0;
     if (count) await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", count);
     await stopUnownedLocationCapture(capture);
     return;
   }
-  const enabled = await learningEnabledOrGuard(capture);
+  const enabled = await learningEnabledOrGuard();
   if (!enabled) {
     await stopUnownedLocationCapture(capture);
     return;
@@ -567,8 +575,15 @@ export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofe
   void readBackgroundLocationPermission().catch(() => undefined);
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
-    const capture = await refreshCaptureCatalogue(places, owner, await captured);
-    return refreshGeofencesForPlacesUnsafe(places, capture);
+    try {
+      const capture = await refreshCaptureCatalogue(places, owner, await captured);
+      return await refreshGeofencesForPlacesUnsafe(places, capture);
+    } catch (error) {
+      // A refresh that failed before it set the options (an owner, consent or permission read) still puts inherited
+      // best accuracy back (Codex r17 on #619).
+      await protectInheritedAccuracyOptions();
+      throw error;
+    }
   });
 }
 
@@ -1787,25 +1802,27 @@ export async function maybeStartAccuracyBurst(
 ) {
   const trigger = accuracyBurstTrigger(kind, source);
   const captureId = capture.binding?.id;
-  if (!captureId || !isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard(capture)) return false;
+  if (!captureId || !isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard()) return false;
   const running = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
   // An unknown native status may still hide inherited options: they're put back (or guarded) before giving up
   // (Codex r16 on #619).
-  if (running === null) await maybeEndAccuracyBurst(capture).catch(() => guardInheritedAccuracyOptions(capture));
+  if (running === null) await maybeEndAccuracyBurst(capture).catch(() => protectInheritedAccuracyOptions());
   if (!running) return false;
   await maybeEndAccuracyBurst(capture);
   // Ownership is checked inside the change, so a stale lifetime's callback never starts one (Codex r1 on #619).
-  const started = await withAccuracyBurstState(async (state) => {
+  const reserved = await withAccuracyBurstState(async (state) => {
     const now = new Date();
     if (!state || !isLocationCaptureSnapshotCurrent(capture) || !accuracyBurstDecision(state, now, trigger).start) return { state, result: null };
     const next = startAccuracyBurst(state, kind, now, trigger, captureId);
     reservingAccuracyBursts.add(next.active!.startedAt);
-    return { state: next, result: next.active! };
+    return { state: next, result: next };
   });
-  if (!started) return false;
+  if (!reserved) return false;
+  const started = reserved.active!;
   const stopBy = Date.parse(started.stopBy ?? started.endsAt);
   const ok = await withNativeLocationOptions(async () => {
-    if (!isLocationCaptureSnapshotCurrent(capture)) return false;
+    // A recording that took long enough to reach an off day never starts best accuracy (Codex r17 on #619).
+    if (!isLocationCaptureSnapshotCurrent(capture) || accuracyBurstArm(reserved, new Date()) !== "on") return false;
     const done = await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
     if (!done) return false;
     nativeLocationMode = "burst";
@@ -2159,10 +2176,33 @@ const UNKNOWN_BURST = "";
 /**
  * When this process hasn't set the options yet and holds no lease, the guard takes options a relaunch may have
  * inherited: it restores normal capture while `capture` is current, and otherwise stops updates while no capture in
- * this process has set them (Codex r13–r16 on #619).
+ * this process has set them (Codex r13–r16 on #619). Called inside the native options queue.
  */
 function guardInheritedAccuracyOptions(capture: LocationCaptureSnapshot) {
   if (!accuracyBurstLease && nativeLocationMode === "unknown") takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+}
+
+/**
+ * For a wake or refresh that failed before it could tell whose capture this is (an owner, consent, permission or
+ * status read): options this process never set are put back to normal capture when updates are running, which only
+ * ever lowers accuracy and never starts capture; if that can't be done, the guard stops updates outright until a
+ * capture in this process sets the options (Codex r17 on #619). Never called inside the native options queue.
+ */
+async function protectInheritedAccuracyOptions() {
+  if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
+  await withNativeLocationOptions(async () => {
+    if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
+    const running = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
+    if (running === false) return;
+    if (running && await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
+      nativeLocationMode = "normal";
+      nativeOptionsOwner = null;
+      noteNativeBurstEnd();
+      return;
+    }
+    guardInheritedAccuracyOptions(STOPPED_CAPTURE);
+  }).catch(() => undefined);
+  settlePendingAccuracyBursts();
 }
 /** No capture lifetime at all (a teardown's): never current, so a guard holding it only ever stops updates. */
 const STOPPED_CAPTURE: LocationCaptureSnapshot = { revision: -1, binding: null, context: null };

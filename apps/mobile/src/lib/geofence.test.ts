@@ -1695,4 +1695,26 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
       expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
   });
+
+  it("a recording slow enough to reach the trial's first off day never starts best accuracy (Codex r17 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 8, 23, 59));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: "2026-11-02", days: {} }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    await maybeEndAccuracyBurst(await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(false);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
 });
+

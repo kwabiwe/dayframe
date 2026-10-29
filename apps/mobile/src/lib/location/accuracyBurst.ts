@@ -206,14 +206,18 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs
     days[recordedDay] = moveCount(days[recordedDay], -1);
     days[nativeDay] = moveCount(days[nativeDay] ?? { count: 0, seconds: 0 }, 1);
   }
+  // Without evidence of when best accuracy started, every later day it may have run on counts it too: a day's cap
+  // can be met early, never passed (Codex r17 on #619).
+  const startKnown = (nativeStartMs != null && Number.isFinite(nativeStartMs)) || Number.isFinite(storedNative);
   for (const part of dayParts(started, ended, offsetMinutes)) {
     const day = days[part.key] ?? { count: 0, seconds: 0 };
     const seconds = Math.round(part.seconds);
+    const counted = !startKnown && part.key !== recordedDay ? 1 : 0;
     const byTrigger = trigger ? {
       ...day.byTrigger,
-      [trigger]: { count: day.byTrigger?.[trigger]?.count ?? 0, seconds: (day.byTrigger?.[trigger]?.seconds ?? 0) + seconds }
+      [trigger]: { count: (day.byTrigger?.[trigger]?.count ?? 0) + counted, seconds: (day.byTrigger?.[trigger]?.seconds ?? 0) + seconds }
     } : day.byTrigger;
-    days[part.key] = { ...day, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}) };
+    days[part.key] = { ...day, count: day.count + counted, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}) };
   }
   const { active: _active, ...rest } = withTrialProgress(state, now);
   return { ...rest, lastEndedAt: new Date(elapsedMs != null ? now.getTime() : ended).toISOString(), days };

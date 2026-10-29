@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   clearAll: vi.fn(),
   stopExpo: vi.fn(),
   beforeInsert: null as (() => Promise<void>) | null,
+  failRead: null as ((args: unknown[]) => boolean) | null,
   motionStatus: "authorized",
   motionRecords: [] as Array<{ startMs: number; activity: "stationary" | "walking" | "automotive"; confidence: "high" }>,
   queryActivities: vi.fn()
@@ -98,7 +99,10 @@ let geofence: typeof import("../geofence");
 function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
-    getFirstAsync: async (sql: string, ...args: never[]) => db.prepare(sql).get(...args) ?? null,
+    getFirstAsync: async (sql: string, ...args: never[]) => {
+      if (h.failRead?.(args)) throw new Error("read failed");
+      return db.prepare(sql).get(...args) ?? null;
+    },
     getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => { if (sql.includes("insert or ignore into location_evidence_journal") && h.beforeInsert) await h.beforeInsert(); return db.prepare(sql).run(...args); },
     withExclusiveTransactionAsync: async (fn: (t: unknown) => Promise<void>) => {
@@ -121,7 +125,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
   vi.stubGlobal("fetch", h.fetch); h.fetch.mockRejectedValue(new TypeError("Network request failed")); // offline
   db = new DatabaseSync(":memory:"); h.open.mockResolvedValue(adapter());
-  h.beforeInsert = null;
+  h.beforeInsert = null; h.failRead = null;
   h.drain.mockImplementation(async (limit: number) => h.nativeSignals.slice(0, limit));
   h.motionStatus = "authorized"; h.motionRecords = [];
   h.queryActivities.mockReset();
@@ -1181,4 +1185,32 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it.each([["location", learningTask], ["geofence", geofenceTask]] as const)("a %s wake whose owner can't be read still puts inherited options back (Codex r17 on #619)", async (_name, task) => {
+    const start = await relaunchedDuringBurst();
+    const capture = await store.captureLocationOwnership();
+    const data = task === learningTask ? { locations: [fix(Date.now())] }
+      : { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } };
+    h.failRead = (args) => args.includes("capture_binding_v1");
+    await expect(task()({ data, error: null })).rejects.toThrow("read failed");
+    h.failRead = null;
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  it("a capture refresh whose consent read fails still puts inherited options back (Codex r17 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    storage.getItem.mockImplementation(async (k: string) => {
+      if (k.startsWith("dayframe.location.learning.enabled")) throw new Error("locked");
+      return read(k);
+    });
+    try {
+      await expect(geofence.refreshGeofencesForPlaces([place])).rejects.toThrow("locked");
+    } finally {
+      storage.getItem.mockImplementation(read);
+    }
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
 });
+
