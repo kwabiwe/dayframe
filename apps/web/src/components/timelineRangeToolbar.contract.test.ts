@@ -15,6 +15,16 @@ const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
 describe("Calendar range and toolbar contract", () => {
+  it("puts every date load that moves the Calendar behind the nav tap's generation (Codex r3 and r4 on #625)", () => {
+    // The two places that load a period before moving the URL: the view's navigate (strip, picker, ‹ ›, Today, midnight)
+    // and the shell's Alt+← / Alt+→.
+    for (const file of [timeline, shell]) {
+      expect(file.match(/await loadDate\(/g)).toHaveLength(1);
+      expect(file).toMatch(/const generation = calendarNavigationGeneration\(\);\s*const outcome = await loadDate\(/);
+      expect(file).toContain("if (generation !== calendarNavigationGeneration()) {");
+    }
+  });
+
   it("names the List's top day in the header, not only the URL's date (owner bug, 29 Oct 2026)", () => {
     expect(timeline).toContain("onVisibleDay: reportListTopDay");
     expect(timeline).toContain('formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey)');

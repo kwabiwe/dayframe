@@ -110,7 +110,7 @@ import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useLocationTimelines } from "@/components/location/LocationListRows";
 import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
-import { subscribeToCalendarToday } from "@/lib/calendar-today-request";
+import { calendarNavigationGeneration, subscribeToCalendarToday } from "@/lib/calendar-today-request";
 
 type CalendarHoursMode = "fullDay";
 
@@ -247,8 +247,6 @@ export function TimeReviewViews({
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineStateRef = useRef(state);
-  // Each Calendar nav tap starts a new generation; a day choice that began in an older one is dropped.
-  const navigationGeneration = useRef(0);
   const navigateRef = useRef<(overrides: Partial<TimelineState>, options?: { replace?: boolean }) => Promise<void>>(async () => undefined);
   const todayKeyRef = useRef(toTimelineDateKey(new Date()));
   const initialTodayKeyRef = useRef(initialTodayKey);
@@ -332,9 +330,10 @@ export function TimeReviewViews({
       return;
     }
 
-    const generation = navigationGeneration.current;
+    // Each Calendar nav tap starts a new generation; a day choice that began in an older one is dropped.
+    const generation = calendarNavigationGeneration();
     const outcome = await loadDate(nextState.date);
-    if (generation !== navigationGeneration.current) {
+    if (generation !== calendarNavigationGeneration()) {
       // Calendar was tapped while this loaded: the URL stays on today, and the shell's data goes back to it.
       if (outcome.ok) void refresh();
       return;
@@ -438,7 +437,6 @@ export function TimeReviewViews({
   // change (Codex r2 on #625): the List positions itself again (on the URL's day, which the link makes today).
   // It also ends any day choice still loading (Codex r3 on #625): a read that finishes after the tap never moves the URL.
   useEffect(() => subscribeToCalendarToday(() => {
-    navigationGeneration.current += 1;
     if (timelineStateRef.current.view === "list") setListFocusToken((token) => token + 1);
   }), []);
   const listTopRequest = state.date;

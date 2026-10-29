@@ -20,6 +20,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, clashBlocksFrom } from "@/lib/calendar-checks";
+import { calendarNavigationGeneration } from "@/lib/calendar-today-request";
 import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useClashesBeyondCap } from "@/components/location/useClashesBeyondCap";
 import { withClashItems } from "@/lib/clash-presentation";
@@ -238,7 +239,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
     if (pathname !== "/timeline" || timelineState.view === "list") return;
     const nextState = shiftTimelineState(timelineState, direction);
     const originSearch = searchParams.toString();
+    // A Calendar nav tap while this loads wins (Codex r4 on #625): the URL stays on today, and the data goes back to it.
+    const generation = calendarNavigationGeneration();
     const outcome = await loadDate(nextState.date);
+    if (generation !== calendarNavigationGeneration()) {
+      if (outcome.ok) void refresh();
+      return;
+    }
     if (outcome.ok && window.location.search.slice(1) === originSearch) {
       window.history.pushState(
         null,
@@ -246,7 +253,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         timelineHref(searchParams.toString(), nextState)
       );
     }
-  }, [loadDate, pathname, searchParams, timelineState]);
+  }, [loadDate, pathname, refresh, searchParams, timelineState]);
 
   useEffect(() => {
     const openShortcuts = () => setOverlay("help");
