@@ -3030,6 +3030,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // or scroll (so a List mounting from the Grid has nothing to replay), and an open sheet.
   const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
   const [calendarSelectionClear, setCalendarSelectionClear] = useState(0);
+  // Bumped by the Calendar tab's tap: cancels every old link still being answered (`useCheckLinks`' cancelRequest).
+  const [calendarLinkCancel, setCalendarLinkCancel] = useState(0);
   const closeCorrectionSheet = locationCorrections.closeSheet;
   const openListDay = useCallback((dayKey: string) => {
     setCalendarCheckTarget(null);
@@ -3063,9 +3065,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [askingChecks, openCheckOn]);
   // The Calendar tab's tap: today, in the layout the person left, with no earlier "?" or scroll request carried over
   // (owner bug, 29 Oct 2026: it kept landing on the oldest question's day, 6 days back).
+  // Every presentation request still waiting is cancelled too (Codex r1 on #625): an old link's read still out (its
+  // late answer opens nothing, `cancelRequest`) and a List tap waiting for fresh places (the selection clear). An open
+  // sheet's draft and answers already given (held, saving or saved) are kept.
   const openCalendarToday = useCallback(() => {
+    setCalendarLinkCancel((count) => count + 1);
     setCalendarCheckTarget(null);
     setCalendarCheckScroll(0);
+    setCalendarSelectionClear((count) => count + 1);
     selectCalendarDay(formatDateKey(new Date()));
   }, [selectCalendarDay]);
   // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge is a count only.
@@ -3132,6 +3139,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     },
     selectedDayKey,
     loads: checkLinkLoads,
+    cancelRequest: calendarLinkCancel,
     dayKeyOf: (instant) => {
       const ms = Date.parse(instant);
       return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;

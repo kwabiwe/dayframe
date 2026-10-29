@@ -45,6 +45,11 @@ export function useCheckLinks(input: {
   lookupItem: (owner: CheckLinkOwner, reviewItemId: string) => Promise<CheckLinkItem | null>;
   dayKeyOf: (instant: string) => string | null;
   now?: () => number;
+  /**
+   * A new value cancels every link still being answered (the Calendar tab's tap, which opens today; owner bug, 29 Oct
+   * 2026): one held until ready, a read still out (its late answer opens nothing) and a "?" waiting on its day.
+   */
+  cancelRequest?: number;
 }) {
   const [pending, setPending] = useState<Request | null>(null);
   const [waiting, setWaiting] = useState<Waiting | null>(null);
@@ -55,6 +60,15 @@ export function useCheckLinks(input: {
   const ownerKeyRef = useRef(ownerKey);
   ownerKeyRef.current = ownerKey;
   const clock = () => (latest.current.now ?? Date.now)();
+
+  const cancelled = useRef(input.cancelRequest ?? 0);
+  if (cancelled.current !== (input.cancelRequest ?? 0)) {
+    // In the render it arrives in, so a read answering in the same tick already sees the newer generation.
+    cancelled.current = input.cancelRequest ?? 0;
+    requests.current += 1;
+    if (pending) setPending(null);
+    if (waiting) setWaiting(null);
+  }
 
   const openCheckLink = useCallback((check: string) => {
     requests.current += 1;

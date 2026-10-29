@@ -28,6 +28,14 @@ describe("the Calendar tab opens today (owner bug, 29 Oct 2026)", () => {
     expect(openToday).toContain("selectCalendarDay(formatDateKey(new Date()));");
     expect(openToday).toContain("setCalendarCheckTarget(null);");
     expect(openToday).toContain("setCalendarCheckScroll(0);");
+    // Every waiting presentation request is cancelled (Codex r1 on #625; behaviour in useCheckLinks.test.tsx and
+    // CalendarListView.render.test.tsx): an old link's read still out, and a List tap waiting for its places.
+    expect(openToday).toContain("setCalendarLinkCancel((count) => count + 1);");
+    expect(openToday).toContain("setCalendarSelectionClear((count) => count + 1);");
+    expect(dashboard).toContain("cancelRequest: calendarLinkCancel,");
+    expect(dashboard).toContain("clearSelectionRequest={calendarSelectionClear}");
+    // An open sheet (its draft) stays open.
+    expect(openToday).not.toContain("closeCorrectionSheet");
     // It never picks a question's day, nor a stored one.
     expect(openToday).not.toMatch(/askingChecks|openCheckOn|AsyncStorage/);
     expect(dashboard).toContain("checkCount: checkCounts.week, openCalendarToday, openCheckLink }}");

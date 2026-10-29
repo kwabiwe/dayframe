@@ -530,6 +530,40 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     await waitFor(() => expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime()));
   });
 
+  it("re-reads the top day after a layout change with no scroll: the shown day's last row removed (Codex r1 on #625)", async () => {
+    const report = vi.fn();
+    const { rerender } = render(list(days(7, 20), { onVisibleDay: report }));
+    expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    // The person scrolls on to the 12th (a heading and a block a day, 100 px each, newest first).
+    const root = document.querySelector(".timeline-list-scroll")!;
+    fireEvent.wheel(root);
+    root.scrollTop = (20 - 12) * 2 * ROW;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 12).getTime()));
+    const scrolled = root.scrollTop;
+    // The 12th's only block is deleted elsewhere (a refresh): the 11th now sits at the top, nothing scrolled.
+    rerender(list(days(7, 20).filter((row) => row.id !== "d12"), { onVisibleDay: report }));
+    expect(root.scrollTop).toBe(scrolled);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 11).getTime()));
+  });
+
+  it("finds the top day on a scroll without measuring every day heading (Codex r1 on #625)", async () => {
+    const report = vi.fn();
+    // 30 days loaded, newest first.
+    render(list(days(1, 30), { focusDayStartMs: new Date(2026, 9, 30).getTime(), focusRequest: "2026-10-30", onVisibleDay: report }));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    const headingsMeasured = () => measure.mock.contexts.filter((element) => (element as HTMLElement).dataset?.dayStartMs).length;
+    fireEvent.wheel(root);
+    root.scrollTop = 1_000;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 25).getTime()));
+    // The scroll anchor's binary search may touch a few rows; the day lookup itself uses the cached offsets.
+    expect(headingsMeasured()).toBeLessThanOrEqual(Math.ceil(Math.log2(60)) + 1);
+    expect(headingsMeasured()).toBeLessThan(30);
+    measure.mockRestore();
+  });
+
   it("stops at the person's own scrolling, and when no earlier week can come", () => {
     const first = render(list(days(14, 20)));
     fireEvent.wheel(document.querySelector(".timeline-list-scroll")!);

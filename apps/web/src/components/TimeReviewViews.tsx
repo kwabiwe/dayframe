@@ -301,7 +301,13 @@ export function TimeReviewViews({
     container.scrollTop = position.top;
   }, [state.date, state.scope, state.view]);
 
-  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean } = {}) {
+  // A reselection of the URL's day asks the List to position itself again (see `navigate`).
+  const [listFocusToken, setListFocusToken] = useState(0);
+  /**
+   * `reposition`: a deliberate choice of a day (the week strip, the picker; mouse or keyboard). Choosing the day the URL
+   * already names brings Calendar › List back to it, with a fresh positioning request (Codex r1 on #625).
+   */
+  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean; reposition?: boolean } = {}) {
     const nextState = { ...state, ...overrides };
     const href = timelineHref(searchParams.toString(), state, nextState);
     const originSearch = searchParams.toString();
@@ -312,6 +318,7 @@ export function TimeReviewViews({
       nextState.view === state.view
     ) {
       clearDateLoadError();
+      if (options.reposition && state.view === "list") setListFocusToken((token) => token + 1);
       return;
     }
 
@@ -516,17 +523,25 @@ export function TimeReviewViews({
   const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
-  const weekReportFrom = toTimelineDateKey(ranges.week.start);
-  const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
+  // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
+  // link are that week's, from the List's loaded weeks.
+  const headerWeekMoved = headerRanges.week.start.getTime() !== ranges.week.start.getTime();
+  const headWeekEntries = headerWeekMoved ? clipTimelineEntries(listEntries, headerRanges.week, capturedNow) : visibleWeekEntries;
+  const headWeekSeconds = headerWeekMoved
+    ? analyzeTimeIntervals(headWeekEntries.map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt })),
+      { range: headerRanges.week, now: capturedNow }).totalLoggedSeconds
+    : weekAnalysis.totalLoggedSeconds;
+  const weekReportFrom = toTimelineDateKey(headerRanges.week.start);
+  const weekReportTo = toTimelineDateKey(addDays(headerRanges.week.end, -1));
 
   const headModel = calendarHeadModel({
-    entries: visibleWeekEntries,
+    entries: headWeekEntries,
     hydrated,
     nowMs: capturedNow.getTime(),
     selectedDay: headerRanges.day.start,
     todayKeyHint: initialTodayKey,
-    weekDays: ranges.weekDays,
-    weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
+    weekDays: headerRanges.weekDays,
+    weekLoggedSeconds: headWeekSeconds
   });
 
   return (
@@ -558,7 +573,7 @@ export function TimeReviewViews({
             disabled={isDateLoading}
             label={periodLabel}
             unavailable={isList ? "Not used in List" : undefined}
-            onChange={(date) => void navigate({ date })}
+            onChange={(date) => void navigate({ date }, { reposition: true })}
             portal
             portalAlign="center"
             today={todayKey ?? state.date}
@@ -593,7 +608,7 @@ export function TimeReviewViews({
         <CalendarHead
           disabled={isDateLoading}
           model={headModel}
-          onSelectDay={(date) => void navigate({ date })}
+          onSelectDay={(date) => void navigate({ date }, { reposition: true })}
           weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
         />
 
@@ -674,7 +689,7 @@ export function TimeReviewViews({
             continuous={{
               error: listWeeks.error,
               focusDayStartMs: ranges.day.start.getTime(),
-              focusRequest: state.date,
+              focusRequest: `${state.date}#${listFocusToken}`,
               loading: listWeeks.loading,
               onVisibleDay: reportListTopDay,
               onLoad: listWeeks.load,

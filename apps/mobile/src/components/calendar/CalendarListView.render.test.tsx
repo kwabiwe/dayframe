@@ -362,6 +362,32 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(questions(waiting.tree)).toHaveLength(0);
   });
 
+  // Owner bug (29 Oct 2026; Codex r1 on #625): the Calendar tab's tap advances the selection clear, so a "?" row tapped
+  // while its places were still loading never opens once they arrive.
+  it("never opens a row tap still waiting for its places after the Calendar tab's tap", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenCheck = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace, openCheckRequest: null };
+    const view = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={null} {...props} {...extra} />
+    );
+    const { tree } = render({ ...props, timeline: null });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    // The tab's tap (the clear), then the places arrive, read after the tap.
+    act(() => { tree.update(view({ clearSelectionRequest: 1 })); });
+    act(() => { tree.update(view({ clearSelectionRequest: 1, timeline, timelineReadAt: Date.now() + 1_000 })); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(0);
+    // A tap after it opens as usual.
+    act(() => { tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" }).props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+  });
+
   it("replays nothing when it mounts from the Grid after a cleared selection (Codex r3 on #615)", () => {
     const onOpenPlace = vi.fn();
     const props = {
