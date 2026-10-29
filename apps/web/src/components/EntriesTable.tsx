@@ -24,6 +24,7 @@ import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
+import { oldestCheckHref, todaysChecks } from "@/lib/calendar-checks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { duplicateTimeEntry, splitTimeEntry } from "@/lib/time-entry-split";
 import { timeEntryTitle } from "@/lib/display";
@@ -595,8 +596,20 @@ export function EntriesTable({
     router.push(`/timeline?view=list&scope=day&date=${key}&check=${encodeURIComponent(next.id)}`);
     return next.id;
   };
-  /** "N to check": the next "?", oldest first across days, opens and comes into view. Returns its id. */
-  const nextCheck = () => nextAskingCheck();
+  /**
+   * `check=first` (Today's chip, an old /review?check=first): today's first "?" in the viewer's own day, never an
+   * earlier day's (Codex r1 on #613). On another loaded day it goes to the day the "?" starts, by its id.
+   */
+  const firstTodayCheck = () => {
+    if (todayStartMs === null) return null;
+    const first = todaysChecks(askingOrder, todayStartMs)[0];
+    if (!first) return null;
+    const row = checkRows.find((other) => checkOf(other)?.id === first.id);
+    if (row) return openCheckRow(row);
+    router.replace(oldestCheckHref([first]));
+    return null;
+  };
+  /** "N to check": the next "?", oldest first across days, opens and comes into view. */
   const pressChip = () => nextAskingCheck(true);
   /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
   const openPlaceDialog = (place: TimelinePlace, checkId: string | null) => {
@@ -698,8 +711,8 @@ export function EntriesTable({
     pendingFocus.current = undefined;
     (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
   });
-  // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
-  // (location v4 step 14), once per visit.
+  // Today's "N to check today" links here with `check=first`: today's first "?" opens once the day's rows are in
+  // (location v4 step 14), once per visit — never an earlier day's (Codex r1 on #613).
   const checkParam = searchParams.get("check");
   const openFirstCheck = checkParam === "first";
   // The badge and the chip link to one "?" by its id (owner concern 4); it opens once its row is in.
@@ -734,7 +747,7 @@ export function EntriesTable({
       // (Codex r10 on #609).
       chipSteps.current.links.delete(checkParam);
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
-      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : nextCheck();
+      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : firstTodayCheck();
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;

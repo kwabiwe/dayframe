@@ -18,7 +18,8 @@ import {
   buildCategoryUsageRanks,
   buildHistoricalSuggestionCandidates,
   buildRecentActivitySuggestions,
-  LOCATION_ENGINE_V2_CONFIG
+  LOCATION_ENGINE_V2_CONFIG,
+  TIMER_TRIP_CLASH_REVIEW_TYPE
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -1486,6 +1487,8 @@ async function getDashboardStats(
            and ri.suggested_started_at is not null
            and ri.suggested_started_at < $7::timestamptz
            and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $8::timestamptz
+           -- A timer that ran into a trip asks on its block with its own UI, which comes later (step 15).
+           and ri.type <> '${TIMER_TRIP_CLASH_REVIEW_TYPE}'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "checkCount",
         (select count(*)::int
          from review_items ri
@@ -1494,6 +1497,7 @@ async function getDashboardStats(
            and ri.suggested_started_at is not null
            and ri.suggested_started_at < $3::timestamptz
            and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $2::timestamptz
+           and ri.type <> '${TIMER_TRIP_CLASH_REVIEW_TYPE}'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "dayCheckCount"
      from time_entries
       where workspace_id = $1

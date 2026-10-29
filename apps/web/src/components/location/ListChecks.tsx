@@ -5,6 +5,7 @@ import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, ty
 import { LocationMark, LocationRowButton, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
+import { asksAsCheck } from "@/lib/calendar-checks";
 import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
@@ -151,8 +152,9 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
       .flatMap(([, members]) => members.map((member) => member.id))
   ]), [closedByServer, heldOutings, outings, state.hiddenIds]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  // A timer that ran into a trip is never an ordinary "?" row: it asks on its block with its own UI later (step 15).
   const checks = useMemo<ListCheck[]>(() => items
-    .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
+    .filter((item) => asksAsCheck(item) && !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
   [closedByServer, items, memberIds, state.hiddenIds]);
 

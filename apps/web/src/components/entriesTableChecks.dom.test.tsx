@@ -6,7 +6,7 @@ import type { LocationTimeline } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 const search = vi.hoisted(() => ({ params: "" }));
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
   useSearchParams: () => new URLSearchParams(search.params)
@@ -579,6 +579,46 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     }
   });
 
+  it("opens today's first question from `check=first`, never yesterday's still-asking one (Codex r1 on #613)", async () => {
+    search.params = "check=first";
+    router.push.mockReset();
+    router.replace.mockReset();
+    try {
+      const yesterdayStart = new Date(Date.UTC(2026, 7, 10, 9)).toISOString();
+      const yesterdayStop = new Date(Date.UTC(2026, 7, 10, 10)).toISOString();
+      const yesterday = suggestion("00000000-0000-4000-8000-0000000000d1", { title: "Errand", eventSource: "health_workout",
+        eventType: "health_workout_import_suggestion", suggestedStartedAt: yesterdayStart, suggestedStoppedAt: yesterdayStop });
+      // Yesterday's "?" is the oldest still asking; today's (the 11th, the List's day) is Office.
+      render(<EntriesTable {...baseProps()} reviewItems={[yesterday, reviewItems[0]]} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      expect(router.push).not.toHaveBeenCalled();
+      expect(router.replace).not.toHaveBeenCalled();
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("goes to today's first question by its id when the List shows another day (Codex r1 on #613)", async () => {
+    search.params = "check=first";
+    router.push.mockReset();
+    router.replace.mockReset();
+    // The viewer's today is the 12th; the List shows the 11th. The 11th's own "?" are not today's.
+    const twelfth = new Date(Date.UTC(2026, 7, 12, 12)).toISOString();
+    clock.todayStartMs = localDayStart(twelfth);
+    try {
+      const today = suggestion("00000000-0000-4000-8000-0000000000d2", { title: "Run", eventSource: "health_workout",
+        eventType: "health_workout_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 12, 8)).toISOString(),
+        suggestedStoppedAt: new Date(Date.UTC(2026, 7, 12, 9)).toISOString() });
+      render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], today]} />);
+      await waitFor(() => expect(router.replace).toHaveBeenCalledTimes(1));
+      expect(router.replace.mock.calls[0][0]).toMatch(new RegExp(`&check=${today.id}$`));
+      expect(router.push).not.toHaveBeenCalled();
+      expect(dialog()).toBeNull();
+    } finally {
+      search.params = "";
+    }
+  });
+
   it("opens the \"?\" a link names by its id, once (owner concern 4)", async () => {
     search.params = `view=list&check=${TRIP}`;
     try {
@@ -1064,5 +1104,29 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     } finally {
       search.params = "";
     }
+  });
+});
+
+// Location v4 step 15: the List is where every "?" is answered, but a timer that ran into a trip asks on its block
+// with its own UI later, so it is never one of the List's ordinary checks nor counted by the badge until then.
+describe("a timer that ran into a trip in Calendar › List (location v4 step 15)", () => {
+  beforeEach(() => {
+    clock.todayStartMs = localDayStart(at(12));
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("is not listed as an ordinary \"?\" and the badge leaves it out", () => {
+    const sleep = reviewItems[2];
+    const clash: ReviewItemRow = { ...sleep, id: "00000000-0000-4000-8000-0000000000c1", type: "location_timer_trip_clash",
+      eventType: "timer_trip_clash", rawPayload: { timeEntryId: "e1" } };
+    function Probe() {
+      const checks = useListChecks({ applyTransition: (update) => update(), categories: [], refresh: async () => undefined, reviewItems: [] });
+      return <output data-testid="checks">{checks.checks.map((check) => check.id).join(",")}</output>;
+    }
+    render(<Shell items={[sleep, clash]}><Probe /></Shell>);
+    expect(screen.getByTestId("checks").textContent).toBe(SLEEP);
+    expect(badge()).toBe(1);
   });
 });

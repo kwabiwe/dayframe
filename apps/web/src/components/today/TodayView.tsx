@@ -14,7 +14,7 @@ import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
-import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { askingChecks, oldestCheckHref, todaysChecks } from "@/lib/calendar-checks";
 import { useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { deletedToastLabel } from "@/lib/blocks-toast-copy";
@@ -170,8 +170,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const todayStartMs = useLocalDayStartMs();
   const projectedItems = useProjectedReviewItems(data.reviewItems);
   const todayChecks = useMemo(() => todayStartMs !== null
-    ? askingChecks(projectedItems, todayStartMs)
-      .filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs)
+    ? todaysChecks(askingChecks(projectedItems, todayStartMs), todayStartMs)
     : null, [projectedItems, todayStartMs]);
   const liveCheckCount = todayChecks ? todayChecks.length : data.stats.dayCheckCount ?? 0;
   const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);

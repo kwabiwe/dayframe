@@ -31,7 +31,7 @@ const PRIMARY = /\b(?:df-rbtn--live|df-rbtn--primary|ui-button-primary|industria
 // item like a block (owner, 28 Oct 2026).
 const NOT_A_TEXT_BUTTON = /\b(?:timeline-checks-chip|location-correction-option|location-correction-mode|location-correction-leg|location-correction-back|timeline-places-column-leg|calendar-places-item|df-report-filter-button|df-cmd-from|df-nav|df-tabbar|df-brand|df-side-search|df-profile-pop-rows|df-rchip|df-fchip|df-quick-button|df-lnew|swiss-category-trigger|timeline-period-trigger|df-range-trigger|dayframe-date-time-trigger|swiss-timer-actions-menu|fill-list-action|swiss-task-suggestions-list|calendar-entry-primary)\b/;
 // SignOutControl draws its icon only when the profile menu's row asks for it (showIcon).
-const EXEMPT_FILES = new Set(["src/components/review/ReviewDeck.tsx", "src/components/SignOutControl.tsx"]);
+const EXEMPT_FILES = new Set(["src/components/SignOutControl.tsx"]);
 const CANDIDATES = new Set(["button", "a", "Link", "Button", "summary"]);
 
 function attribute(element: ts.JsxOpeningLikeElement, name: string) {
