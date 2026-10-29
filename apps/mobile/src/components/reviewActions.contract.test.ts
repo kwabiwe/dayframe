@@ -33,8 +33,10 @@ describe("mobile Review action contracts", () => {
     expect(evidenceMapSource).toContain('title="End"');
     expect(evidenceMapSource).toContain("Approximate route · detailed path unavailable");
     // Time away is an absence: no commute map wording (the server sends no route line for it).
-    expect(evidenceMapSource).toContain('? "Map of readings while you were away."');
-    expect(evidenceMapSource).toContain("showDetails ? evidence.map.anchors.map");
+    expect(evidenceMapSource).toContain(': "Map of readings while you were away."');
+    // Anchors only on the diagnostic map, never the sheets' visit-only one (Codex r6 on #620).
+    expect(evidenceMapSource).toContain("const details = showDetails && !visitOnly;");
+    expect(evidenceMapSource).toContain("details ? evidence.map.anchors.map");
   });
 
   it("focuses the entry sheet's description once the modal has shown", () => {
