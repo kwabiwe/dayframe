@@ -41,6 +41,7 @@ import {
   readActiveMobileAccount,
   type MobileAccountOwner
 } from "../mobileAccount";
+import { armLocationAdmissionGuard } from "./admissionGuard";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { readLocationCaptureConsent } from "./captureConsent";
 import { fetchLocationSync, locationResponseDiagnostics, LocationHttpResponseError } from "./network";
@@ -125,7 +126,10 @@ let captureRevision = 0;
 let captureAdmissionSuspended = false;
 export function invalidateLocationCaptureOwnership() {
   captureAdmissionSuspended = true;
-  return ++captureRevision;
+  const revision = ++captureRevision;
+  // The accuracy trial (card K): a burst whose capture this ends is stopped at once, storage or not (Codex r28 on #619).
+  armLocationAdmissionGuard();
+  return revision;
 }
 export function locationCaptureRevision() { return captureRevision; }
 export function isLocationCaptureAdmissionSuspended() { return captureAdmissionSuspended; }

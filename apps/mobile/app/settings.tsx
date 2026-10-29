@@ -114,10 +114,12 @@ import {
   locationAccessNeedsIosSettings,
   requestLocationAccess,
   refreshGeofencesForPlaces,
+  readAccuracyBurstState,
   setLocationLearningEnabled,
   startGeofences,
   type LocationVisitDiagnostics
 } from "@/lib/geofence";
+import { accuracyBurstDiagnostics, accuracyBurstStopped, accuracyBurstSummaryLine, type AccuracyBurstState } from "@/lib/location/accuracyBurst";
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
@@ -1238,12 +1240,19 @@ export default function SettingsScreen() {
   // Sync help › Pauses and crashes: a light overview (no payloads), read on each visit once the
   // opening transition has finished (kept on this iPhone until shared).
   const [freezeSnapshot, setFreezeSnapshot] = useState<NativeDiagnosticsSnapshot | null>(null);
+  // Sync help › Accuracy trial (card K): this iPhone's departure and arrival bursts, read with the overview.
+  const [accuracyTrial, setAccuracyTrial] = useState<AccuracyBurstState | null>(null);
   useFocusEffect(useCallback(() => {
     if (!transitionReady) return undefined;
     let current = true;
-    const read = () => void readFreezeOverview().then((snapshot) => {
-      if (current) setFreezeSnapshot(snapshot);
-    });
+    const read = () => {
+      void readFreezeOverview().then((snapshot) => {
+        if (current) setFreezeSnapshot(snapshot);
+      });
+      void readAccuracyBurstState().then((state) => {
+        if (current) setAccuracyTrial(state);
+      }).catch(() => undefined);
+    };
     read();
     // Also on a return to the foreground while Settings stays open (Codex r2 on #525).
     const appState = AppState.addEventListener("change", (state) => {
@@ -1664,6 +1673,8 @@ export default function SettingsScreen() {
         readFreezeDiagnostics(),
         getStorageQuarantineDiagnostics().catch(() => null)
       ]);
+      // Read before the owner is checked again, so the share never waits after that check (Codex r1 on #619).
+      const accuracyTrialState = await readAccuracyBurstState().catch(() => null);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (freezes) setFreezeSnapshot(freezes);
       const snapshot = {
@@ -1714,6 +1725,10 @@ export default function SettingsScreen() {
         // Pauses of 3 s or more (thread, times, fixed task labels) and MetricKit hang/crash reports.
         freezes: supportFreezeDiagnostics(freezes),
         locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays),
+        // The accuracy trial's days: arm, burst count and seconds only (card K).
+        accuracyTrial: accuracyBurstDiagnostics(accuracyTrialState, new Date()),
+        // Whether the kill switch turned it off, and why: reason and local day only.
+        accuracyTrialStopped: accuracyBurstStopped(accuracyTrialState),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2931,6 +2946,13 @@ export default function SettingsScreen() {
                   testID="sync-help-location-energy"
                   theme={theme}
                   title="Location energy"
+                />
+                <SettingsBlockRow
+                  // Departure and arrival bursts (card K): 7 days on, 7 off, compared with the energy above.
+                  subtitle={accuracyBurstSummaryLine(accuracyTrial, new Date())}
+                  testID="sync-help-accuracy-trial"
+                  theme={theme}
+                  title="Accuracy trial"
                 />
               </SettingsBlockGroup>
             </View>

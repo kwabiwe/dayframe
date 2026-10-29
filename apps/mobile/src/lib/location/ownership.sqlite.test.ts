@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   clearAll: vi.fn(),
   stopExpo: vi.fn(),
   beforeInsert: null as (() => Promise<void>) | null,
+  failRead: null as ((args: unknown[], sql: string) => boolean | Promise<void>) | null,
   motionStatus: "authorized",
   motionRecords: [] as Array<{ startMs: number; activity: "stationary" | "walking" | "automotive"; confidence: "high" }>,
   queryActivities: vi.fn()
@@ -98,7 +99,12 @@ let geofence: typeof import("../geofence");
 function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
-    getFirstAsync: async (sql: string, ...args: never[]) => db.prepare(sql).get(...args) ?? null,
+    getFirstAsync: async (sql: string, ...args: never[]) => {
+      const hook = h.failRead?.(args, sql);
+      if (hook instanceof Promise) await hook;
+      else if (hook) throw new Error("read failed");
+      return db.prepare(sql).get(...args) ?? null;
+    },
     getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => { if (sql.includes("insert or ignore into location_evidence_journal") && h.beforeInsert) await h.beforeInsert(); return db.prepare(sql).run(...args); },
     withExclusiveTransactionAsync: async (fn: (t: unknown) => Promise<void>) => {
@@ -121,7 +127,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
   vi.stubGlobal("fetch", h.fetch); h.fetch.mockRejectedValue(new TypeError("Network request failed")); // offline
   db = new DatabaseSync(":memory:"); h.open.mockResolvedValue(adapter());
-  h.beforeInsert = null;
+  h.beforeInsert = null; h.failRead = null;
   h.drain.mockImplementation(async (limit: number) => h.nativeSignals.slice(0, limit));
   h.motionStatus = "authorized"; h.motionRecords = [];
   h.queryActivities.mockReset();
@@ -1132,3 +1138,384 @@ describe("nearest-place geofences on task wakes (location v3 PR 16b)", () => {
     expect(registrations()).toHaveLength(count);
   });
 });
+
+describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)", () => {
+  const normal = expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) });
+  async function relaunchedDuringBurst() {
+    await signIn(A, [place]);
+    vi.setSystemTime(T0 + 60_000);
+    expect(await geofence.maybeStartAccuracyBurst("departure", await store.captureLocationOwnership())).toBe(true);
+    geofence.__resetAccuracyBurstForTests(); // the process is gone; Expo may have kept the burst's options
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear();
+    return start;
+  }
+
+  it("a location wake that reports an error puts normal capture back first", async () => {
+    const start = await relaunchedDuringBurst();
+    await learningTask()({ data: undefined, error: new Error("location unavailable") });
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  it("a geofence wake whose evidence can't be stored puts normal capture back first", async () => {
+    const start = await relaunchedDuringBurst();
+    const capture = await store.captureLocationOwnership();
+    h.beforeInsert = async () => { throw new Error("disk full"); };
+    await geofenceTask()({ data: { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } }, error: null });
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  it.each([["location", learningTask], ["geofence", geofenceTask]] as const)("a %s wake whose consent read fails still guards inherited options (Codex r16 on #619)", async (_name, task) => {
+    const start = await relaunchedDuringBurst();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+      const read = storage.getItem.getMockImplementation()!;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled")) throw new Error("locked");
+        return read(k);
+      });
+      const capture = await store.captureLocationOwnership();
+      const data = task === learningTask ? { locations: [fix(Date.now())] }
+        : { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } };
+      await expect(task()({ data, error: null })).rejects.toThrow("locked");
+      storage.getItem.mockImplementation(read);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it.each([["location", learningTask], ["geofence", geofenceTask]] as const)("a %s wake whose owner can't be read still puts inherited options back (Codex r17 on #619)", async (_name, task) => {
+    const start = await relaunchedDuringBurst();
+    const capture = await store.captureLocationOwnership();
+    const data = task === learningTask ? { locations: [fix(Date.now())] }
+      : { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } };
+    h.failRead = (args) => args.includes("capture_binding_v1");
+    await expect(task()({ data, error: null })).rejects.toThrow("read failed");
+    h.failRead = null;
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  it("a capture refresh whose consent read fails still puts inherited options back (Codex r17 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    storage.getItem.mockImplementation(async (k: string) => {
+      if (k.startsWith("dayframe.location.learning.enabled")) throw new Error("locked");
+      return read(k);
+    });
+    try {
+      await expect(geofence.refreshGeofencesForPlaces([place])).rejects.toThrow("locked");
+    } finally {
+      storage.getItem.mockImplementation(read);
+    }
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  async function relaunchedAfterOptOut() {
+    await relaunchedDuringBurst();
+    await geofence.setLocationLearningEnabled(false, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched again: what was stopped is unknown to this process
+    h.stopExpo.mockClear();
+  }
+
+  it("a rejected wake whose discard diagnostics can't be written still stops capture (Codex r18 on #619)", async () => {
+    await relaunchedAfterOptOut();
+    h.failRead = (_args, sql) => sql.includes("capture_rejections");
+    await learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+    h.failRead = null;
+    expect(h.stopExpo).toHaveBeenCalled();
+  });
+
+  it("a rejected wake whose cleanup can't read the binding leaves a guard that stops updates (Codex r18 on #619)", async () => {
+    await relaunchedAfterOptOut();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let reads = 0;
+      h.failRead = (args) => args.includes("capture_binding_v1") && ++reads > 1;
+      await expect(learningTask()({ data: { locations: [fix(Date.now())] }, error: null })).rejects.toThrow("read failed");
+      h.failRead = null;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.stopExpo).toHaveBeenCalled();
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a wake made stale during admission, whose cleanup does nothing, still has inherited options lowered (Codex r19, r24 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      h.stopExpo.mockClear();
+      const wake = learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+      store.invalidateLocationCaptureOwnership(); // signed out while the wake was being admitted
+      await wake;
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("an admission slower than its guard still leaves a consenting owner's capture running (Codex r20 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched with normal capture running
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    try {
+      let delayed = false;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && !delayed) {
+          delayed = true;
+          await new Promise((resolve) => setTimeout(resolve, 31_000));
+        }
+        return read(k);
+      });
+      const wake = learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+      await vi.advanceTimersByTimeAsync(32_000);
+      await wake;
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a foreground refresh held in admission still has inherited options lowered (Codex r21, r24 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    const held = deferred();
+    try {
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled")) await held.promise;
+        return read(k);
+      });
+      const refreshing = geofence.refreshGeofencesForPlaces([place]).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
+      held.resolve();
+      await refreshing;
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a bootstrap held in admission has inherited options lowered, and its owner keeps normal capture (Codex r22, r24 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    const held = deferred();
+    try {
+      let first = true;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && first) {
+          first = false;
+          await held.promise;
+        }
+        return read(k);
+      });
+      const configuring = runtime.configureLocationIntelligence(bootstrap(A, [place]));
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
+      held.resolve();
+      await configuring;
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("geofence registration after a relaunch puts normal capture in place and never lets the guard stop it (Codex r22 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched with capture running, options unknown
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      await geofence.startGeofences([place], A);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a failed geofence registration after a relaunch still leaves a consenting owner's capture running (Codex r23 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    let failed = false;
+    storage.getItem.mockImplementation(async (k: string) => {
+      if (k.startsWith("dayframe.location.learning.enabled") && !failed) {
+        failed = true;
+        throw new Error("registration failed");
+      }
+      return read(k);
+    });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      await expect(geofence.startGeofences([place], A)).rejects.toThrow("registration failed");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("an admission that fails after its guard fired never strands a consenting owner's capture stopped (Codex r24 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let first = true;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && first) {
+          first = false;
+          await new Promise((resolve) => setTimeout(resolve, 31_000));
+          throw new Error("consent unreadable");
+        }
+        return read(k);
+      });
+      const registering = expect(geofence.startGeofences([place], A)).rejects.toThrow("consent unreadable");
+      await vi.advanceTimersByTimeAsync(32_000);
+      await registering;
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a lowering that fails once after a failed admission keeps trying, never stopping a consenting owner's capture (Codex r25 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    start.mockRejectedValueOnce(new Error("busy"));
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let failures = 2;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && failures > 0) {
+          failures -= 1;
+          throw new Error("consent unreadable");
+        }
+        return read(k);
+      });
+      await expect(geofence.startGeofences([place], A)).rejects.toThrow("consent unreadable");
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("a foreground sync held in its journal drain has inherited options lowered (Codex r26 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    const held = deferred();
+    h.nativeSignals = [visit("visit-held", Date.now() - 20 * 60_000, Date.now() - 60_000)];
+    h.beforeInsert = () => held.promise;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const syncing = runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+      held.resolve();
+      h.beforeInsert = null;
+      await syncing;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("an account binding held in its first read still has inherited options lowered (Codex r27 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    const held = deferred();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      h.failRead = (args) => args.includes("capture_binding_v1") ? held.promise : false;
+      const binding = runtime.bindLocationCaptureOwner(A).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      h.failRead = null;
+      held.resolve();
+      await binding;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("capture a guard had to stop is started again for a current, consenting owner (Codex r27 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    start.mockRejectedValue(new Error("busy"));
+    const held = deferred();
+    h.nativeSignals = [visit("visit-held", Date.now() - 20 * 60_000, Date.now() - 60_000)];
+    h.beforeInsert = () => held.promise;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const syncing = runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.stopExpo).toHaveBeenCalledTimes(1); // inherited options it couldn't lower are stopped at once
+      start.mockReset();
+      start.mockImplementation(async () => { h.nativeCalls.push("expo:startLocationUpdates"); });
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      held.resolve();
+      h.beforeInsert = null;
+      await syncing;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+});
+
