@@ -30,6 +30,11 @@ export type AccuracyBurstDay = {
   /** Seconds at best accuracy on this local day, as they really ran (a late end counts in full). */
   seconds: number;
   byTrigger?: Partial<Record<AccuracyBurstTrigger, { count: number; seconds: number }>>;
+  /**
+   * A burst no lease measured (a relaunch lost it) ran on this day: how long can't be bounded, so the day's
+   * allowance counts as used and no further burst starts (Codex r22 on #619).
+   */
+  unmeasured?: boolean;
 };
 
 export type AccuracyBurstState = {
@@ -125,6 +130,7 @@ export function accuracyBurstDecision(
   const lastEnded = state.lastEndedAt ? Date.parse(state.lastEndedAt) : NaN;
   if (Number.isFinite(lastEnded) && now.getTime() - lastEnded < ACCURACY_BURST_COOLDOWN_MS) return { start: false, reason: "cooldown" };
   const today = state.days[localDayKey(now)] ?? { count: 0, seconds: 0 };
+  if (today.unmeasured) return { start: false, reason: "daily_time" };
   const reserved = trigger === "visit_departure" || trigger === "visit_arrival" ? 1 : 0;
   if (today.count + reserved >= ACCURACY_BURST_MAX_PER_DAY) return { start: false, reason: "daily_count" };
   // Room for a whole burst (and, for a Visit, one more after it), so the day never passes its cap.
@@ -229,7 +235,15 @@ export function endAccuracyBurst(
       ...day.byTrigger,
       [trigger]: { count: (day.byTrigger?.[trigger]?.count ?? 0) + counted, seconds: (day.byTrigger?.[trigger]?.seconds ?? 0) + seconds }
     } : day.byTrigger;
-    days[part.key] = { ...day, count: day.count + counted, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}) };
+    days[part.key] = { ...day, count: day.count + counted, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}),
+      ...(unmeasured ? { unmeasured: true } : {}) };
+  }
+  if (unmeasured) {
+    // Every day it may have run on, through the day it was settled: none starts another burst.
+    const nowDay = dayKeyAtOffset(Math.max(now.getTime(), ended), offsetMinutes);
+    days[nowDay] = { ...(days[nowDay] ?? { count: 0, seconds: 0 }), unmeasured: true };
+    const localNow = localDayKey(now);
+    days[localNow] = { ...(days[localNow] ?? { count: 0, seconds: 0 }), unmeasured: true };
   }
   const { active: _active, ...rest } = withTrialProgress(state, now);
   return { ...rest, lastEndedAt: new Date(elapsedMs != null ? now.getTime() : ended).toISOString(), days };
@@ -264,7 +278,8 @@ export function accuracyBurstDiagnostics(state: AccuracyBurstState | null | unde
       arm: armForTrialDay(dayNumber(day) - first),
       count: value.count,
       seconds: value.seconds,
-      ...(value.byTrigger ? { byTrigger: value.byTrigger } : {})
+      ...(value.byTrigger ? { byTrigger: value.byTrigger } : {}),
+      ...(value.unmeasured ? { unmeasured: true } : {})
     };
   });
 }

@@ -1312,5 +1312,51 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a bootstrap held in admission has inherited options stopped, then gives a consenting owner normal capture back (Codex r22 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    const held = deferred();
+    try {
+      let first = true;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && first) {
+          first = false;
+          await held.promise;
+        }
+        return read(k);
+      });
+      const configuring = runtime.configureLocationIntelligence(bootstrap(A, [place]));
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(h.stopExpo).toHaveBeenCalled();
+      held.resolve();
+      await configuring;
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("geofence registration after a relaunch puts normal capture in place and never lets the guard stop it (Codex r22 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched with capture running, options unknown
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      await geofence.startGeofences([place], A);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

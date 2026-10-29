@@ -36,6 +36,7 @@ import {
   type LocationSyncOptions
 } from "./store";
 import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
+import { armLocationAdmissionGuard } from "./admissionGuard";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 import { withJsTask } from "../jsTasks";
@@ -244,6 +245,8 @@ export function locationCaptureSessionSignedOut() {
 }
 
 export async function configureLocationIntelligence(bootstrap: MobileBootstrap) {
+  // Before any await: options a relaunch may have inherited are guarded while this admission waits (card K).
+  armLocationAdmissionGuard();
   const owner = { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id };
   const revision = locationCaptureRevision();
   await readActiveMobileAccount();
@@ -264,6 +267,8 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
       }])
     }, rolloutMode, Boolean(capture.binding?.enabled && await geofence.getLocationLearningEnabled()), revision);
     if (!ownerIsCurrent(owner, revision)) return;
+    // A consenting capture gets normal capture back here (and the admission guard ends), refresh or not (card K).
+    await geofence.reconcileLearningOptionsAfterAdmission(capture);
     if (rolloutMode === "v1") {
       await stopNativeLocationIntelligence();
       await clearNativeLocationSignals();

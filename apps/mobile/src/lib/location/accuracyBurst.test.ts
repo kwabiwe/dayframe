@@ -144,5 +144,13 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(endAccuracyBurst(started, day(2, 8, 3), undefined, undefined, true).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
     expect(endAccuracyBurst(started, day(2, 8, 20), undefined, undefined, true).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 20 * 60 });
   });
+
+  it("a day an unmeasured burst ran on starts no further burst (Codex r22 on #619)", () => {
+    const started = startAccuracyBurst(trial, "departure", day(2, 8, 0));
+    const ended = endAccuracyBurst(started, day(2, 8, 3), undefined, undefined, true);
+    expect(ended.days["2026-11-03"].unmeasured).toBe(true);
+    expect(accuracyBurstDecision(ended, day(2, 12))).toEqual({ start: false, reason: "daily_time" });
+    expect(accuracyBurstDecision(ended, day(3, 12))).toEqual({ start: true });
+  });
 });
 

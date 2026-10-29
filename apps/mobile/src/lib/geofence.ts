@@ -13,6 +13,7 @@ import {
   type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
+import { registerLocationAdmissionGuard } from "./location/admissionGuard";
 import { createSerialMutationQueue } from "./location/mutationQueue";
 import { ACCURACY_BURST_DURATION_MS, ACCURACY_BURST_FORCE_STOP_MS, accuracyBurstArm, accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
   withTrialProgress, type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
@@ -582,7 +583,10 @@ export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
     const capture = await refreshCaptureCatalogue(places, owner, await captured);
-    return startGeofencesUnsafe(places, capture);
+    const started = await startGeofencesUnsafe(places, capture);
+    // Registration sets no learning options of its own: a consenting capture gets normal capture back here.
+    await reconcileLearningOptionsAfterAdmission(capture);
+    return started;
   });
 }
 export function startLocationLearning(places: Parameters<typeof startLocationLearningUnsafe>[0] = []) {
@@ -2240,6 +2244,21 @@ const heldGuardLease = () => isAdmissionGuard(accuracyBurstLease) ? null : accur
 function guardWakeAdmission() {
   if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
   takeAccuracyBurstLease(STOPPED_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, WAKE_ADMISSION_GUARD_MS);
+}
+registerLocationAdmissionGuard(guardWakeAdmission);
+
+/**
+ * An admission that ends without setting the learning task's options itself (geofence registration, a bootstrap):
+ * for a capture still current and consenting, normal capture is put in place, as an admitted wake does, which also
+ * ends the admission guard (Codex r22 on #619). Never throws.
+ */
+export async function reconcileLearningOptionsAfterAdmission(capture: LocationCaptureSnapshot) {
+  try {
+    if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return;
+    await maybeEndAccuracyBurst(capture);
+  } catch {
+    await protectInheritedAccuracyOptions();
+  }
 }
 
 /**
