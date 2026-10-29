@@ -7223,6 +7223,11 @@ dialog.ui-dialog.df-range-custom {
   align-items: center;
 }
 
+/* List has no arrows: its greyed date takes the navigation's one column (Codex r3 on #632). */
+.timeline-range-navigation[data-unused-in-list] {
+  grid-template-columns: minmax(120px, auto);
+}
+
 /* The Week grid shows only the week's total: it follows the date range instead of floating mid-row (E). */
 .df-cal-week:not(:has(.df-cal-days)) {
   justify-content: flex-start;
@@ -7306,6 +7311,15 @@ dialog.ui-dialog.df-range-custom {
 
   .timeline-list-actions:is([data-running], [data-grouped]) [data-tip="Edit"] {
     display: none;
+  }
+
+  /* Long words in narrow columns wrap instead of spilling into the next cell (Codex r3 on #632). */
+  .timeline-list-table .timeline-group-time-summary,
+  .timeline-list-table .timeline-location-note {
+    font-size: 11px;
+    line-height: 1.25;
+    text-align: right;
+    white-space: normal;
   }
 
   /* A trip's legs toggle sits under its duration (Codex r2 on #632). */
