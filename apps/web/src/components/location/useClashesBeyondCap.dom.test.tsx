@@ -44,7 +44,10 @@ function Probe({ items, owner, version, fetcher }: { items: readonly ReviewItemR
 const found = () => screen.getByTestId("found").textContent;
 
 describe("useClashesBeyondCap", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it("reads only when the bootstrap reached its cap, at most once a minute on refreshes", async () => {
     const fetcher = vi.fn(async () => page([record(1)]));
@@ -57,27 +60,50 @@ describe("useClashesBeyondCap", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("100 → 99 → 100 within a minute: the complete bootstrap clears the cache and a read from before it restores nothing", async () => {
+  it("100 → 99 → 100 within a minute: the complete bootstrap clears the cache, a read from before it restores nothing, and the next read waits for the minute", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { fetcher, pending } = heldFetcher([[record(1)], [record(1)], []]);
     const view = render(<Probe fetcher={fetcher} items={full} owner="w1:u1" version={1} />);
     await act(async () => pending[0].release());
     expect(found()).toBe(id(1_001));
     // A refresh a minute later starts a read; before it answers, a complete bootstrap (99 items) arrives.
-    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    await act(async () => { vi.advanceTimersByTime(61_000); });
     await act(async () => view.rerender(<Probe fetcher={fetcher} items={full} owner="w1:u1" version={2} />));
     expect(fetcher).toHaveBeenCalledTimes(2);
     await act(async () => view.rerender(<Probe fetcher={fetcher} items={full.slice(0, 99)} owner="w1:u1" version={3} />));
     expect(found()).toBe("");
     expect(pending[1].aborted()).toBe(true);
-    // Back at 100: the old cache does not return, and the old read (had it answered) applies nowhere; a fresh read runs.
+    // Back at 100 within the minute: the old cache does not return, the old read applies nowhere, and no read yet.
     await act(async () => view.rerender(<Probe fetcher={fetcher} items={full} owner="w1:u1" version={4} />));
     expect(found()).toBe("");
     await act(async () => pending[1].release());
     expect(found()).toBe("");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    // Once the minute since the last read is up, it reads.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
     expect(fetcher).toHaveBeenCalledTimes(3);
     await act(async () => pending[2].release());
     expect(found()).toBe("");
-    vi.restoreAllMocks();
+  });
+
+  it("crossing the cap again and again within a minute reads once; after the minute it reads again (Codex r3 on #623)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetcher = vi.fn(async () => page([record(4)]));
+    const view = render(<Probe fetcher={fetcher} items={full} owner="w1:u1" version={1} />);
+    await act(async () => undefined);
+    let version = 1;
+    for (let crossing = 0; crossing < 4; crossing += 1) {
+      await act(async () => view.rerender(<Probe fetcher={fetcher} items={full.slice(0, 99)} owner="w1:u1" version={++version} />));
+      await act(async () => view.rerender(<Probe fetcher={fetcher} items={full} owner="w1:u1" version={++version} />));
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    // The minute since that read passes: the cap crossed meanwhile is read once more, and no further reads follow.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(found()).toBe(id(1_004));
+    await act(async () => { vi.advanceTimersByTime(180_000); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("A → B → A with B's read unfinished: A's old cache is not shown, and B's late reply applies nowhere", async () => {
