@@ -244,7 +244,7 @@ export type ContinuousListProps = {
    * The day whose heading is at (or last passed) the top of the List, as it changes: the header's date follows it, so
    * the two always agree however the List got there (scrolling, a "?" link, the chip; owner bug, 29 Oct 2026).
    */
-  onVisibleDay?: (dayStartMs: number) => void;
+  onVisibleDay?: (dayStartMs: number | null) => void;
 };
 
 /** How far ahead of either end the List starts loading the next week. */
@@ -550,7 +550,12 @@ export function EntriesTable({
     const root = listScrollRef.current;
     if (!root || !tracksTopDay) return;
     const offsets = (remeasure ? null : headingOffsetsRef.current) ?? measureHeadingOffsets(root);
-    if (!offsets.length) return;
+    if (!offsets.length) {
+      // No day listed: no top day to name, so the header falls back to the requested day (Codex r3 on #625).
+      setColumnDayStartMs(null);
+      setTopDayStartMs(null);
+      return;
+    }
     const line = root.scrollTop + 48;
     let low = 0;
     let high = offsets.length;
@@ -649,7 +654,11 @@ export function EntriesTable({
     const root = listScrollRef.current;
     if (!root || focusRequest === null || focusDayStartMs === null || focusDoneRef.current === focusRequest || !localTimeReady) return;
     const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
-    if (!headings.length) return;
+    if (!headings.length) {
+      // Nothing listed for this request (yet): the day an earlier request reported is no longer the top day.
+      trackColumnDay(true);
+      return;
+    }
     const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
     if (!target) {
       // Every shown day is later than the selected one: rest at the bottom, where earlier weeks load,
@@ -669,7 +678,7 @@ export function EntriesTable({
   });
   const onVisibleDay = continuous?.onVisibleDay;
   useEffect(() => {
-    if (topDayStartMs !== null) onVisibleDay?.(topDayStartMs);
+    onVisibleDay?.(topDayStartMs);
   }, [topDayStartMs, onVisibleDay]);
   /** The open suggestion a location row's "?" is about, if any. */
   const checkOf = (row: LocationListRow) => {

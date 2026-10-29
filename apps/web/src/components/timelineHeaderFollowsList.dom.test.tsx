@@ -180,4 +180,43 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
       document.removeEventListener("click", stay);
     }
   });
+
+  it("drops a day choice still loading when Calendar is tapped: the URL stays on today (Codex r3 on #625)", async () => {
+    navigation.search = "date=2026-10-18&scope=day&view=list";
+    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    let finish: (outcome: { ok: true }) => void = () => undefined;
+    const loadDate = vi.fn(() => new Promise<{ ok: true }>((resolve) => { finish = resolve; }));
+    const refresh = vi.fn(async () => undefined);
+    const values = runtime as unknown as Record<string, unknown>;
+    const [savedLoad, savedRefresh] = [values.loadDate, values.refresh];
+    values.loadDate = loadDate;
+    values.refresh = refresh;
+    try {
+      const { ShellSidebarNav } = await import("./blocks/ShellNav");
+      const { TimeReviewViews } = await import("./TimeReviewViews");
+      const { getByRole } = render(
+        <>
+          <ShellSidebarNav activeId="calendar" />
+          <TimeReviewViews initialData={bootstrap()} initialPreference={null} initialTodayKey="2026-10-18" renderedAt={local(18, 12).toISOString()} />
+        </>
+      );
+      await act(async () => undefined);
+      const stay = (event: Event) => event.preventDefault();
+      document.addEventListener("click", stay);
+      const user = userEvent.setup({ advanceTimers: () => undefined });
+      // Choose the 16th: its period starts loading.
+      await user.click(getByRole("button", { name: /16 Oct/ }));
+      expect(loadDate).toHaveBeenCalledWith("2026-10-16");
+      // Calendar is tapped while it loads, then the read finishes.
+      await user.click(getByRole("link", { name: /^Calendar/ }));
+      document.removeEventListener("click", stay);
+      await act(async () => { finish({ ok: true }); await Promise.resolve(); });
+      expect(new URLSearchParams(window.location.search).get("date")).toBe("2026-10-18");
+      // The shell's data goes back to the URL's day.
+      expect(refresh).toHaveBeenCalled();
+    } finally {
+      values.loadDate = savedLoad;
+      values.refresh = savedRefresh;
+    }
+  });
 });

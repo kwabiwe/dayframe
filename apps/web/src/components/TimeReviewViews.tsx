@@ -247,6 +247,8 @@ export function TimeReviewViews({
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineStateRef = useRef(state);
+  // Each Calendar nav tap starts a new generation; a day choice that began in an older one is dropped.
+  const navigationGeneration = useRef(0);
   const navigateRef = useRef<(overrides: Partial<TimelineState>, options?: { replace?: boolean }) => Promise<void>>(async () => undefined);
   const todayKeyRef = useRef(toTimelineDateKey(new Date()));
   const initialTodayKeyRef = useRef(initialTodayKey);
@@ -330,7 +332,13 @@ export function TimeReviewViews({
       return;
     }
 
+    const generation = navigationGeneration.current;
     const outcome = await loadDate(nextState.date);
+    if (generation !== navigationGeneration.current) {
+      // Calendar was tapped while this loaded: the URL stays on today, and the shell's data goes back to it.
+      if (outcome.ok) void refresh();
+      return;
+    }
     if (!outcome.ok) return;
     if (window.location.search.slice(1) !== originSearch) return;
     if (options.replace) window.history.replaceState(null, "", href);
@@ -428,13 +436,15 @@ export function TimeReviewViews({
   const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
   // The Calendar nav's tap asks for today every time, also when the URL already names today and the route doesn't
   // change (Codex r2 on #625): the List positions itself again (on the URL's day, which the link makes today).
-  useEffect(() => {
-    if (!isList) return undefined;
-    return subscribeToCalendarToday(() => setListFocusToken((token) => token + 1));
-  }, [isList]);
+  // It also ends any day choice still loading (Codex r3 on #625): a read that finishes after the tap never moves the URL.
+  useEffect(() => subscribeToCalendarToday(() => {
+    navigationGeneration.current += 1;
+    if (timelineStateRef.current.view === "list") setListFocusToken((token) => token + 1);
+  }), []);
   const listTopRequest = state.date;
-  const reportListTopDay = useCallback((dayStartMs: number) => setListTop((current) =>
-    current?.request === listTopRequest && current.dayStartMs === dayStartMs ? current : { request: listTopRequest, dayStartMs }), [listTopRequest]);
+  const reportListTopDay = useCallback((dayStartMs: number | null) => setListTop((current) => dayStartMs === null
+    ? null
+    : current?.request === listTopRequest && current.dayStartMs === dayStartMs ? current : { request: listTopRequest, dayStartMs }), [listTopRequest]);
   const listTopDayMs = isList && listTop?.request === listTopRequest ? listTop.dayStartMs : null;
   // Leaving List forgets it: a List opened again positions itself afresh and reports again (adjusted while rendering).
   if (!isList && listTop !== null) setListTop(null);
