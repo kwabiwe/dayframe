@@ -415,6 +415,15 @@ export function TimeReviewViews({
     refreshToken: listRefreshToken
   });
   const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
+  // The day at the top of Calendar › List, as the List reports it for the current date request (until it has, the
+  // URL's date stands in, so an earlier visit's day never shows).
+  const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
+  const listTopRequest = state.date;
+  const reportListTopDay = useCallback((dayStartMs: number) => setListTop((current) =>
+    current?.request === listTopRequest && current.dayStartMs === dayStartMs ? current : { request: listTopRequest, dayStartMs }), [listTopRequest]);
+  const listTopDayMs = isList && listTop?.request === listTopRequest ? listTop.dayStartMs : null;
+  // Leaving List forgets it: a List opened again positions itself afresh and reports again (adjusted while rendering).
+  if (!isList && listTop !== null) setListTop(null);
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
@@ -500,7 +509,11 @@ export function TimeReviewViews({
   // Which day is today depends on the browser's time zone. The server render and the hydration
   // pass use the server's guess for the viewer's zone (null: none), then the browser's clock.
   const todayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
-  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, todayKey);
+  // In List the header names the day at the top of the List, never only the URL's date: a "?" link, the chip or
+  // scrolling can leave the List on another day, and the two must agree (owner bug, 29 Oct 2026).
+  const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
+  const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
@@ -510,7 +523,7 @@ export function TimeReviewViews({
     entries: visibleWeekEntries,
     hydrated,
     nowMs: capturedNow.getTime(),
-    selectedDay: ranges.day.start,
+    selectedDay: headerRanges.day.start,
     todayKeyHint: initialTodayKey,
     weekDays: ranges.weekDays,
     weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
@@ -549,7 +562,7 @@ export function TimeReviewViews({
             portal
             portalAlign="center"
             today={todayKey ?? state.date}
-            value={state.date}
+            value={headerDayKey}
           />
           <IconButton
             aria-describedby={isList ? "timeline-period-not-used" : undefined}
@@ -663,6 +676,7 @@ export function TimeReviewViews({
               focusDayStartMs: ranges.day.start.getTime(),
               focusRequest: state.date,
               loading: listWeeks.loading,
+              onVisibleDay: reportListTopDay,
               onLoad: listWeeks.load,
               reachedEarliest: listWeeks.reachedEarliest,
               reachedLatest: listWeeks.reachedLatest

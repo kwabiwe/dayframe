@@ -491,6 +491,45 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     expect(headingTop(20)).toBe(0);
   });
 
+  // Owner bug (29 Oct 2026): the header read "Fri, 23 Oct" while the List's top was Thu 29 Oct. The List reports the
+  // day at its top and the header shows that day, so the two agree however the List got there.
+  it("reports the day at its top: the selected day once it lands, the clamped top when it can't, and as it scrolls", async () => {
+    const landed = vi.fn();
+    render(list(days(7, 20), { onVisibleDay: landed }));
+    expect(headingTop(14)).toBe(0);
+    expect(landed).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    cleanup();
+
+    // Too little below the selected day to bring it up, and no earlier week can come: the top day is reported.
+    const clamped = vi.fn();
+    render(list(days(14, 20), { onVisibleDay: clamped, reachedEarliest: true }));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    const topDay = [20, 19, 18, 17, 16, 15, 14].filter((day) => headingTop(day) <= 48).at(-1)!;
+    expect(clamped).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime());
+    expect(topDay).not.toBe(14);
+
+    // The person scrolls back to the top: the List says the 20th, newest first.
+    fireEvent.wheel(root);
+    root.scrollTop = 0;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(clamped).toHaveBeenLastCalledWith(new Date(2026, 9, 20).getTime()));
+  });
+
+  it("names the selected day while the top is where it would be: today with nothing listed yet, not the day before", async () => {
+    // Today is the 21st with no block; the List's newest heading is the 20th.
+    const today = vi.fn();
+    render(list(days(7, 20), { focusDayStartMs: new Date(2026, 9, 21).getTime(), focusRequest: "2026-10-21", onVisibleDay: today }));
+    expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, 21).getTime());
+    // Scrolled down to an earlier day's heading: that day.
+    const root = document.querySelector(".timeline-list-scroll")!;
+    fireEvent.wheel(root);
+    root.scrollTop = 600;
+    fireEvent.scroll(root);
+    const topDay = [20, 19, 18, 17, 16, 15, 14, 13].filter((day) => headingTop(day) <= 48).at(-1)!;
+    expect(topDay).toBeLessThan(20);
+    await waitFor(() => expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime()));
+  });
+
   it("stops at the person's own scrolling, and when no earlier week can come", () => {
     const first = render(list(days(14, 20)));
     fireEvent.wheel(document.querySelector(".timeline-list-scroll")!);

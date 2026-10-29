@@ -366,8 +366,11 @@ type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
   /** Things to check today and the 7 days before: the Calendar tab's badge (location v4 step 14). */
   checkCount: number;
-  /** Owner item A (28 Oct 2026): opens the oldest question that still asks (the Calendar tab's badge). */
-  openOldestCheck: () => void;
+  /**
+   * The Calendar tab's tap (owner bug, 29 Oct 2026): Calendar opens on today, badge or not. The badge is a count only;
+   * "N to check", the reminder and a link to one "?" step to a question's day.
+   */
+  openCalendarToday: () => void;
   /** An old Review link (step 15): opens the "?" it names, or today's first ("first"), once the data is in. */
   openCheckLink: (check: string) => void;
 };
@@ -3038,7 +3041,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
-  // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
+  // open. Used by "N to check" (the next one, oldest first), Today's chip, the reminder and the Grid's "?" — never the
+  // Calendar tab, which opens today.
   // `dayKey` keeps a given day selected (today, for a "?" that started yesterday; Codex r1 on #615), else its start day.
   const openCheckOn = useCallback((checkId: string, dayKey?: string) => {
     const check = calendarChecks.checks.find((each) => each.id === checkId);
@@ -3057,10 +3061,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const at = currentId ? askingChecks.findIndex((check) => check.id === currentId) : -1;
     openCheckOn(askingChecks[(at + 1) % askingChecks.length].id);
   }, [askingChecks, openCheckOn]);
-  const openOldestCheck = useCallback(() => {
-    if (askingChecks[0]) openCheckOn(askingChecks[0].id);
-  }, [askingChecks, openCheckOn]);
-  // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge opens the 7-day oldest.
+  // The Calendar tab's tap: today, in the layout the person left, with no earlier "?" or scroll request carried over
+  // (owner bug, 29 Oct 2026: it kept landing on the oldest question's day, 6 days back).
+  const openCalendarToday = useCallback(() => {
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    selectCalendarDay(formatDateKey(new Date()));
+  }, [selectCalendarDay]);
+  // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge is a count only.
   // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
   const openTodayChecks = useCallback(() => {
     const today = formatDateKey(new Date());
@@ -4203,7 +4211,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck, openCheckLink }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openCalendarToday, openCheckLink }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -4411,9 +4419,9 @@ export function useDashboardCheckCount() {
   return useContext(DashboardContext)?.checkCount ?? 0;
 }
 
-/** Owner, 28 Oct 2026 (concern 4): the Calendar tab's badge opens the oldest question that still asks (concern 4). */
-export function useDashboardOpenOldestCheck() {
-  return useContext(DashboardContext)?.openOldestCheck;
+/** The Calendar tab's tap opens today, badge or not (owner bug, 29 Oct 2026). */
+export function useDashboardOpenCalendarToday() {
+  return useContext(DashboardContext)?.openCalendarToday;
 }
 
 /** Step 15: opens the "?" an old Review link names (the Calendar tab reads the link's `check`). */

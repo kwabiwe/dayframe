@@ -88,7 +88,10 @@ export function todaysChecks(checks: readonly ListCheck[], todayStartMs: number)
   return checks.filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs);
 }
 
-/** Where the badge and Today's chip send you: Calendar › List at the oldest question that still asks. */
+/**
+ * Calendar › List at the oldest of the given questions (Today's chip, `check=first`). Never the Calendar nav or its
+ * badge, which open today (owner bug, 29 Oct 2026).
+ */
 export function oldestCheckHref(checks: readonly ListCheck[]) {
   const oldest = checks[0];
   if (!oldest?.startedAt) return "/timeline?view=list&scope=day";

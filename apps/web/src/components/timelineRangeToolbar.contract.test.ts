@@ -15,6 +15,16 @@ const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
 describe("Calendar range and toolbar contract", () => {
+  it("names the List's top day in the header, not only the URL's date (owner bug, 29 Oct 2026)", () => {
+    expect(timeline).toContain("onVisibleDay: reportListTopDay");
+    expect(timeline).toContain('formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey)');
+    expect(timeline).toContain("selectedDay: headerRanges.day.start");
+    expect(timeline).toContain("value={headerDayKey}");
+    // Reported whether or not the places column shows, and after a positioning that fires no scroll event.
+    expect(entries).toContain("onVisibleDay?.(topDayStartMs)");
+    expect(entries).not.toContain("if (columnShown) trackColumnDay();");
+  });
+
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
     expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
@@ -56,7 +66,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");
-    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, todayKey)");
+    expect(timeline).toContain('formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey)');
   });
 
   it("gives all views the same clipped period data", () => {
