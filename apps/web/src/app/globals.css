@@ -8471,6 +8471,8 @@ dialog.ui-dialog.df-palette {
    a 44 px hit area, a short fade in; it leaves at once and nothing around it moves. */
 .df-today-check-link {
   position: relative;
+  display: inline-block;
+  white-space: nowrap;
   color: var(--warning-text);
   font-weight: var(--fw-medium);
   text-decoration: none;
@@ -8479,7 +8481,11 @@ dialog.ui-dialog.df-palette {
 
 .df-today-check-link::after {
   position: absolute;
-  inset: -12px -4px;
+  top: 50%;
+  right: -4px;
+  left: -4px;
+  height: 44px;
+  transform: translateY(-50%);
   content: "";
 }
 
@@ -8944,7 +8950,7 @@ dialog.ui-dialog.df-palette {
   min-height: 46px;
   border: 0;
   border-radius: 10px;
-  padding: 4px 8px;
+  padding: 1px 8px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -9101,7 +9107,7 @@ dialog.ui-dialog.df-palette {
 .df-erow-group + .df-erow::before,
 .df-erow-group + .df-erow-group > .df-erow::before {
   --divider-inset: 10px;
-  --divider-inset-start: 60px;
+  --divider-inset-start: 48px;
   position: absolute;
   top: 0;
   inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
