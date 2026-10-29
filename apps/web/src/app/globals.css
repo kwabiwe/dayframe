@@ -13399,6 +13399,18 @@ dialog.ui-dialog.df-palette {
   background-size: calc(100% - var(--divider-inset)) 1px;
 }
 
+/* Right to left the first cell is the rightmost and the last the leftmost, so each line keeps its gap
+   at the row's outer edge: the start gap moves to the first cell's right, the end gap to the last
+   cell's left. A `[dir="rtl"]` ancestor, not `:dir(rtl)`: the CSS build rewrites `:dir()` into a
+   `:lang()` list, which ignores the dir attribute. */
+[dir="rtl"] .timeline-list-row + .timeline-list-row > td:first-child {
+  background-position: 0 0;
+}
+
+[dir="rtl"] .timeline-list-row + .timeline-list-row > td:last-child {
+  background-position: var(--divider-inset) 0;
+}
+
 .timeline-list-row > td:first-child {
   border-radius: 14px 0 0 14px;
 }
@@ -15375,6 +15387,63 @@ button.timeline-location-hit:focus-visible {
   height: max(100%, 44px);
   content: "";
   transform: translate(-50%, -50%);
+}
+
+/* Row dividers in forced colours (Codex r1 on #614): a forced palette repaints backgrounds with the
+   system Canvas and drops gradient images, which would erase every shared hairline. There each one is a
+   system-coloured border instead, at the same inset; the Calendar List's background line becomes a
+   cell pseudo-element inset logically, so it also holds right to left. */
+@media (forced-colors: active) {
+  .ui-settings-row + .ui-settings-row::before,
+  .df-divider-top::before,
+  .settings-section-feedback::before,
+  .ui-dialog-header::after,
+  .ui-dialog-actions::before,
+  .landing-preview-topline::after,
+  .places-list-section > header::after,
+  .place-list-row + .place-list-row::before,
+  .place-search-option + .place-search-option::before,
+  .category-picker-create-option::before,
+  .swiss-timeline-surface .timeline-range-toolbar::after,
+  .df-erow + .df-erow::before,
+  .df-erow + .df-erow-group > .df-erow::before,
+  .df-erow-group + .df-erow::before,
+  .df-erow-group + .df-erow-group > .df-erow::before,
+  .df-revidence::before,
+  .location-correction-option + .location-correction-option::before,
+  .location-correction-leg + .location-correction-leg::before {
+    height: 0;
+    border-top: 1px solid CanvasText;
+    background: none;
+  }
+
+  .timeline-list-row + .timeline-list-row > td {
+    position: relative;
+  }
+
+  .timeline-list-row + .timeline-list-row > td::before {
+    position: absolute;
+    top: 0;
+    inset-inline: 0;
+    border-top: 1px solid CanvasText;
+    content: "";
+    pointer-events: none;
+  }
+
+  .timeline-list-row + .timeline-list-row > td:first-child::before {
+    inset-inline-start: 60px;
+  }
+
+  .timeline-list-row + .timeline-list-row > td:last-child::before {
+    inset-inline-end: 10px;
+  }
+
+  .timeline-list-row:hover > td::before,
+  .timeline-list-row:has(:focus-visible) > td::before,
+  .timeline-list-row:hover + .timeline-list-row > td::before,
+  .timeline-list-row:has(:focus-visible) + .timeline-list-row > td::before {
+    border-top-color: transparent;
+  }
 }
 
 @media (any-pointer: coarse) {
