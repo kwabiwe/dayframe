@@ -96,6 +96,23 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     expect(mocks.search.mock.calls[0][0]).toMatchObject({ latitude: 10, longitude: 20 });
   });
 
+  it("guesses the top destination within 50 m when the ranker isn't sure enough to suggest one (PRD D23)", async () => {
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    // The owner's case (29 Oct 2026): two shops 10 m away and one 30 m away, none clear.
+    const shop = (id: string, title: string, east: number, north: number, category: string) => ({ id, requestId: "", title,
+      subtitle: `${id} High Street, Exampleton`, distanceMeters: Math.round(Math.hypot(east, north)), category, offsetEastMeters: east,
+      offsetNorthMeters: north, source: "nearby", placeId: `I${id}` });
+    mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({
+      requestId, areasOfInterest: [],
+      places: [shop("1", "Holland & Barrett", 8, 6, "MKPOICategoryStore"), shop("2", "Transylvania Sweet", -6, 8, "MKPOICategoryBakery"),
+        shop("3", "Hotel Chocolat", 18, -24, "MKPOICategoryStore")].map((place) => ({ ...place, requestId }))
+    }));
+    await act(async () => { create(<Probe item={stay} />); });
+    await settle();
+    expect(["Holland & Barrett", "Transylvania Sweet", "Hotel Chocolat"]).toContain(seen?.venue?.name);
+    expect(seen?.venue?.applePlaceId).toMatch(/^I[123]$/);
+  });
+
   it("guesses nothing when the ranker isn't sure, and searches again after a failure", async () => {
     mocks.readEvidence.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({ requestId, areasOfInterest: [], places: [] }));

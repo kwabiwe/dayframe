@@ -2187,7 +2187,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         noLabel: question.skipLabel ?? null,
         // No changes in the sheet: checkAnswers.answer is the one gated entry point, so it never goes ahead of a
         // correction queued for its place or trip from an earlier Done (Codex r6 and r7 on #610).
-        onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null),
+        // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
+        // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
+        guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
+        onAnswer: (yes, venue) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null)),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
         // to the Review outbox only once the server has every one of them. No Apple place with it: the corrections say

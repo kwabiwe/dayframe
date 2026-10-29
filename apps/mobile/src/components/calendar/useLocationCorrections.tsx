@@ -379,7 +379,8 @@ export function useLocationCorrections({
   const activities = useMemo(() => [...(data?.categories ?? [])]
     .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
     .slice(0, 8)
-    .map((category) => ({ id: category.id, name: category.name })), [data?.categories]);
+    // Each with its colour and icon, for the compact activity chips (owner feedback, 29 Oct 2026).
+    .map((category) => ({ id: category.id, name: category.name, color: category.color ?? null, icon: category.icon ?? null })), [data?.categories]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
@@ -456,6 +457,9 @@ export function useLocationCorrections({
           return waiting;
         }
       } : undefined}
+      // The sheet hands over a Nearby pick's Apple Place ID (PRD D23), but a saved place and a timeline correction
+      // have no field for it yet (that needs a server change), so it is not sent: only the "?"'s Yes to a guess
+      // (`record_poi_once`) adds to the venue history today.
       onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
         ? (name, rest, beforeEnqueue) => savePlace(open.id, open.ownerKey, shown.place, name, rest, beforeEnqueue) : undefined}
       places={places}

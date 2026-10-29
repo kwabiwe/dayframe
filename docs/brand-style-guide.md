@@ -387,6 +387,20 @@ Calendar follows Apple Calendar's structure in Dayframe's palette (`calendar-v3-
 - **Compact pills for inline answers:** answers that sit on a row or at the top of a sheet (Yes, Edit, Not now) use the compact pill, the size of the Calendar row's Yes pill (owner rule, 28 October 2026): 32 pt tall, 16 pt horizontal padding on iPhone, 14 pt bold, full pill radius, with at least a 44 pt touch target around it. On iPhone it is `compactPillStyles.pill` with `COMPACT_PILL_HIT_SLOP` (`apps/mobile/src/components/compactPill.ts`), and wrapped rows of pills sit 12 pt apart so their targets never overlap. On the web it is `.ui-button.is-compact` at 32 px with 14 px sides (`.timeline-row-yes`); the List's question answers and the correction dialog's question answers share that rule and its 44 px hit area. A confident answer is the neutral dark pill; coral stays for Play, Stop and live recording.
 - **Quiet filters:** "All places" / "Fewer places" is quiet text by the day heading, never a filled pill that reads as the screen's main action. A sheet's Done stays secondary until something changed.
 
+### Place and trip sheet (owner feedback, 29 October 2026)
+
+The iPhone's place and trip sheets and the web's correction dialogs share one layout, whatever the item (an unknown place, a saved place such as Home, or a trip). A sheet shows only the sections that apply, always in this order (`SHEET_SECTION_ORDER` on iPhone, `DIALOG_SECTION_ORDER` on the web):
+
+1. **Title and times.**
+2. **The question**, if the item asks one, in its muted card with compact pills and one Yes at most. A near guess asks "Visited {name}?" with Yes and Edit; Edit sets the guess aside for the plain "Where were you?".
+3. **The map:** only the visit's own area, or the trip's route; no saved places, anchors, rejected samples or gap lines. Its one line is at most "Based on N readings" for an unknown place or a trip, and nothing for a saved or named place. The list of silences and stops ("No readings 19:44–19:59") is diagnostics only and never appears on a sheet.
+4. **"Where were you?"** (places only): on iPhone Apple's nearby places and search first, then the saved places nearest first; "Show all saved places" as quiet text for the rest. The title is left out when the question above already asks it.
+5. **"Logs as":** compact activity chips — the shared chip face (the activity's glyph on its colour tile, the name; the chosen one with a neutral ring and check), 32 pt / px tall with a 44 pt target and rows 12 apart. No activity picked means "don't log": "Don't log" is never a selected or filled pill, only quiet text to clear a pick.
+6. **Times.**
+7. **Corrections**, untitled: "Not listed? Save this place" and "I wasn't here" for a place; a trip's legs, "I didn't leave" and "This wasn't a trip". Each is a compact pill; confirmations ask in place.
+
+Titles are sentence case and sparing ("Where were you?", "Logs as", "Legs"); no all-caps labels and no developer words ("Fix the shape", "More places (24)"). Done stays secondary until something changed.
+
 ### Motion
 
 Motion is short, purposeful, and consistent across a complete interaction: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing and provide a reduced-motion path that removes nonessential transitions without hiding state changes.

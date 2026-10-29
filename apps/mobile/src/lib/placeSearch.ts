@@ -42,6 +42,8 @@ export type NearbyVenue = NearbyPointOfInterest & {
   share: number;
   /** The ranker is confident the visit was here (design §6.3). */
   suggested: boolean;
+  /** The ranker's near guess (PRD D23): the suggestion, or the top destination within 50 m when none is clear. */
+  guessed: boolean;
   /** Named like an area of interest the visit lies in: listed however far Apple's pin for it is. */
   inArea: boolean;
   /** The ranker's kind of place ("station", "supermarket", …); the transit guess reads it. */
@@ -74,6 +76,7 @@ export function rankedNearbyPlaces(
     inside: venue.children.map((child) => child.title),
     share: venue.share,
     suggested: ranking.suggestion?.candidate.id === venue.candidate.id,
+    guessed: ranking.guess?.candidate.id === venue.candidate.id,
     inArea: venue.insideArea,
     kind: venue.kind
   }));

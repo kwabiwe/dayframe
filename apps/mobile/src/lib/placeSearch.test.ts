@@ -228,7 +228,7 @@ describe("nearby point of interest controller", () => {
     expect(states.at(-1)?.places.map((place) => place.title)).toEqual(["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]);
     // Only opaque ids, titles, address lines, distances and the ranking reach the screen: no coordinates.
     for (const place of states.at(-1)?.places ?? []) {
-      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "inArea", "inside", "kind", "requestId", "share", "subtitle", "suggested", "title"]);
+      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "guessed", "id", "inArea", "inside", "kind", "requestId", "share", "subtitle", "suggested", "title"]);
     }
     controller.dispose();
   });

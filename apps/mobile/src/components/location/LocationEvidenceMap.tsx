@@ -24,6 +24,11 @@ type Props = {
    * editor keeps the full map.
    */
   visitOnly?: boolean;
+  /**
+   * The place and trip sheets' one line in place of the readings summary (owner feedback, 29 Oct 2026):
+   * `evidenceSheetCaption`, null for none. The gaps and stops stay in the diagnostic map only.
+   */
+  caption?: string | null;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
   reduceMotion?: boolean;
   /** Changes once per place chosen from a list; each change shows `selectedPoint` with the stay. */
@@ -45,6 +50,7 @@ export function LocationEvidenceMap({
   selectedSavedPlaceId,
   showDetails = true,
   visitOnly = false,
+  caption,
   reduceMotion = false,
   revealChoiceToken,
   onSelectPoint,
@@ -55,7 +61,7 @@ export function LocationEvidenceMap({
   const handledRevealRef = useRef(revealChoiceToken);
   const samples = evidence.map.acceptedSamples;
   // Plain words, not the server's diagnostic summary (owner feedback, 27 Oct 2026).
-  const summary = evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
+  const summary = caption !== undefined ? caption ?? "" : evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
   const shouldShowSavedPlaces = !visitOnly && (showDetails || evidence.segment.kind === "stay");
   // Time away has no route line, so its readings are the evidence to inspect.
   const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
@@ -121,8 +127,8 @@ export function LocationEvidenceMap({
   if (!centre || !initialRegion) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
-        <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
-        <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
+        {summary ? <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text> : null}
+        <Text style={[styles.fallbackText, { color: textColor }]}>{visitOnly ? "There's no map for this one." : "Mapped evidence has expired or is unavailable."}</Text>
       </View>
     );
   }
@@ -148,7 +154,7 @@ export function LocationEvidenceMap({
             ? "Map of readings while you were away."
             : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
-            : "Map showing the detected visit location."} ${summary}`}
+            : "Map showing the detected visit location."}${summary ? ` ${summary}` : ""}`}
         initialRegion={initialRegion}
         ref={mapRef}
         userInterfaceStyle={appearance}
@@ -274,9 +280,11 @@ export function LocationEvidenceMap({
         <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
       ) : null}
       {/* The map's plain words, always (owner feedback, 27 Oct 2026; Codex r1 on #599); the map already says them. */}
-      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
-        style={[styles.routeCaption, { color: textColor }, visitOnly ? [styles.insideCaption, { backgroundColor: surfaceColor }] : null]}
-        testID="location-evidence-summary">{summary}</Text>
+      {summary ? (
+        <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden numberOfLines={visitOnly ? 1 : undefined}
+          style={[styles.routeCaption, { color: textColor }, visitOnly ? [styles.insideCaption, { backgroundColor: surfaceColor }] : null]}
+          testID="location-evidence-summary">{summary}</Text>
+      ) : null}
       {showDetails ? (
         <>
           <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
