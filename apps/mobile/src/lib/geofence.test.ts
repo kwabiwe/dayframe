@@ -1560,4 +1560,44 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
       captureState.current = true;
     }
   });
+
+  it("a refresh never settles a burst that was only reserved when its normal start ran (Codex r14 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release!: () => void;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await refreshing;
+    await expect(starting).resolves.toBe(true);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("the guard for inherited options keeps stopping them after a failed teardown (Codex r14 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await expect(refreshGeofencesForPlaces([place])).rejects.toBeTruthy();
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
+  });
 });
