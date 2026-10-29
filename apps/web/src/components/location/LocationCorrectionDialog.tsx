@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DAYFRAME_APP_ICONS,
@@ -24,7 +24,12 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
 
 // The map is client-only (MapLibre), loaded when a dialog opens with the map first (step 15: the map first on every sheet).
-const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap), { ssr: false });
+// While its chunk loads, an empty frame of the map's own size holds the sheet still (Codex r1 on #626).
+export function EvidenceMapChunkLoading() {
+  return <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" />;
+}
+const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
+  { loading: EvidenceMapChunkLoading, ssr: false });
 
 /**
  * Correcting the location timeline on the web (location v4 step 13, mock-up #web-list inspector):
@@ -84,15 +89,51 @@ function useItemEvidence(item: { id: string; kind: "place" | "trip"; startedAt: 
   return evidence && evidence.key === key ? evidence.value : null;
 }
 
-function EvidenceMap({ evidence, knownPlace }: { evidence: TimelineItemEvidenceDto | "unavailable" | null; knownPlace: boolean }) {
+/**
+ * A trip's leg on the trip's map (glitch fix 5): the trip's readings within the leg's times, as its route, so the
+ * one map swaps to the leg in place. A leg with fewer than two readings (underground, no signal) shows the trip.
+ */
+export function legEvidence(evidence: TimelineItemEvidenceDto, leg: Pick<TripLeg, "startedAt" | "stoppedAt">): TimelineItemEvidenceDto {
+  const from = Date.parse(leg.startedAt);
+  const to = Date.parse(leg.stoppedAt);
+  const samples = evidence.map.acceptedSamples
+    .filter((sample) => { const at = Date.parse(sample.occurredAt); return at >= from && at <= to; })
+    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  if (samples.length < 2) return evidence;
+  return {
+    ...evidence,
+    segment: { ...evidence.segment, evidenceCount: samples.length },
+    map: {
+      ...evidence.map,
+      route: { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) },
+      straightLineFallback: null,
+      acceptedSamples: samples
+    }
+  };
+}
+
+function EvidenceMap({ evidence, knownPlace, leg = null }: {
+  evidence: TimelineItemEvidenceDto | "unavailable" | null;
+  knownPlace: boolean;
+  /** A trip's open leg: the same map, drawn for the leg. */
+  leg?: Pick<TripLeg, "startedAt" | "stoppedAt"> | null;
+}) {
+  // One evidence object per content (glitch fix 1): a re-render (typing, a search, the clock) hands the map the
+  // same object, so it never rebuilds.
+  const legStartedAt = leg?.startedAt ?? null;
+  const legStoppedAt = leg?.stoppedAt ?? null;
+  const mapEvidence = useMemo(() => {
+    if (!evidence || evidence === "unavailable") return null;
+    const shown = legStartedAt && legStoppedAt ? legEvidence(evidence, { startedAt: legStartedAt, stoppedAt: legStoppedAt }) : evidence;
+    return { ...shown, reviewItemId: shown.reviewItemId ?? "", eventId: shown.eventId ?? "" };
+  }, [evidence, legStartedAt, legStoppedAt]);
   if (evidence === null) return <p className="location-correction-map is-loading" data-section="map">Loading the map…</p>;
-  if (evidence === "unavailable") return <p className="location-correction-map is-loading" data-section="map">The map isn’t available right now.</p>;
+  if (!mapEvidence) return <p className="location-correction-map is-loading" data-section="map">The map isn’t available right now.</p>;
   // The map reads only the segment and its geometry; a timeline item may have no Review item or event. Only the
   // visit's own area (or the trip's route), and one plain line at most: never the silences (owner, 29 Oct 2026).
   return (
     <div className="location-correction-map" data-section="map">
-      <LocationEvidenceMap caption={evidenceSheetCaption(evidence, { knownPlace })}
-        evidence={{ ...evidence, reviewItemId: evidence.reviewItemId ?? "", eventId: evidence.eventId ?? "" }} visitOnly />
+      <LocationEvidenceMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} visitOnly />
     </div>
   );
 }
@@ -531,7 +572,8 @@ export function LocationCorrectionDialog({
         footer={<Button disabled={busy} onClick={onClose}>Done</Button>} onClose={onClose} size="compact" title={target.route}>
         <div className="location-correction">
           {questionCard}
-          <EvidenceMap evidence={evidence} knownPlace={false} />
+          {/* The same keyed map as the leg's view, so a leg swap keeps one map instance (glitch fix 5). */}
+          <EvidenceMap evidence={evidence} key="trip-map" knownPlace={false} />
           <div className="location-correction-section" data-section="corrections">
           <span className="location-correction-label" id="location-correction-legs">Legs</span>
           <div aria-labelledby="location-correction-legs" className="location-correction-legs" role="group">
@@ -581,6 +623,7 @@ export function LocationCorrectionDialog({
               <DayframeIcon glyph="arrow-left" size={16} /> All legs
             </button>
           ) : null}
+          {legOfTrip !== null ? <EvidenceMap evidence={evidence} key="trip-map" knownPlace={false} leg={leg} /> : null}
           <span className="location-correction-label" id="location-correction-mode">How did you travel?</span>
           <div aria-labelledby="location-correction-mode" className="location-correction-modes" role="group">
             {LEG_MODES.map((option) => (

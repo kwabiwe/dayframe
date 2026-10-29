@@ -13,14 +13,21 @@ const clientFetch = vi.hoisted(() => vi.fn());
 // own mock, so `clientFetch` sees only what the dialog sends.
 const evidenceFetch = vi.hoisted(() => vi.fn());
 // The map itself is MapLibre, client-only; a stand-in shows where it draws.
-vi.mock("next/dynamic", () => ({ default: () => function EvidenceMapStandIn({ caption, visitOnly }: { caption?: string | null; visitOnly?: boolean }) {
-  return <div data-testid="evidence-map" data-visit-only={String(Boolean(visitOnly))}>{caption}</div>;
-} }));
+// It counts its mounts and the evidence objects it is handed, so a test can see one map kept across renders.
+const mapStandIn = vi.hoisted(() => ({ mounts: 0, evidence: [] as unknown[] }));
+vi.mock("next/dynamic", async () => {
+  const { useEffect } = await import("react");
+  return { default: () => function EvidenceMapStandIn({ caption, evidence, visitOnly }: { caption?: string | null; evidence?: unknown; visitOnly?: boolean }) {
+    useEffect(() => { mapStandIn.mounts += 1; }, []);
+    mapStandIn.evidence.push(evidence);
+    return <div data-testid="evidence-map" data-visit-only={String(Boolean(visitOnly))}>{caption}</div>;
+  } };
+});
 vi.mock("@/lib/client-auth-fetch", () => ({
   clientFetch: (url: string, init?: RequestInit) => url.includes("/evidence?") ? evidenceFetch(url, init) : clientFetch(url, init)
 }));
 
-const { DIALOG_SECTION_ORDER, editedInstant, LocationCorrectionDialog } = await import("./LocationCorrectionDialog");
+const { DIALOG_SECTION_ORDER, editedInstant, legEvidence, LocationCorrectionDialog } = await import("./LocationCorrectionDialog");
 
 // Location v4 step 13: synthetic ids, made-up names.
 const at = (hour: number, minute = 0) => new Date(2026, 7, 11, hour, minute).toISOString();
@@ -48,6 +55,8 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
   beforeEach(() => {
     clientFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     evidenceFetch.mockReset().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    mapStandIn.mounts = 0;
+    mapStandIn.evidence.length = 0;
     HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
     HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
   });
@@ -391,6 +400,62 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
     expect(sent()).toEqual([{ kind: "delete", subject: "trip", itemId: "trip-1" }]);
   });
+  it("hands the map one evidence object across re-renders, so it never rebuilds (glitch fix 1)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    const props = { clock: "24h" as const, onClose: vi.fn(), onCorrected: vi.fn(), places, target: { kind: "place" as const, place: place(), label: "Unknown place" } };
+    const view = render(<LocationCorrectionDialog {...props} />);
+    await screen.findByTestId("evidence-map");
+    // Typing, a choice and a re-render from above (the clock's tick) change nothing for the map.
+    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:45" } });
+    fireEvent.change(screen.getByLabelText("End"), { target: { value: "09:55" } });
+    view.rerender(<LocationCorrectionDialog {...props} />);
+    expect(mapStandIn.mounts).toBe(1);
+    expect(mapStandIn.evidence.length).toBeGreaterThan(2);
+    expect(new Set(mapStandIn.evidence).size).toBe(1);
+  });
+
+  it("keeps one map across a trip's leg and back, drawing the leg in it (glitch fix 5)", async () => {
+    const point = (longitude: number, latitude: number) => ({ type: "Point", coordinates: [longitude, latitude] });
+    const walk: TripLeg = { startedAt: at(8), stoppedAt: at(8, 12), mode: "walking", confidence: "sure", distanceMeters: 800 };
+    const samples = [
+      { id: "a", point: point(-0.10, 51.50), occurredAt: at(8, 2) },
+      { id: "b", point: point(-0.11, 51.51), occurredAt: at(8, 10) },
+      { id: "c", point: point(-0.20, 51.60), occurredAt: at(8, 30) }
+    ];
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => ({ ...evidence(), segment: { id: "trip-1", kind: "commute", evidenceCount: 3 },
+      map: { ...evidence().map, centre: null, stayRadiusMeters: null, route: { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) }, acceptedSamples: samples } }) });
+    const trip = { kind: "trip" as const, id: "trip-1", status: "finalised" as const, startedAt: at(8), stoppedAt: at(8, 40),
+      fromId: "seg-home", toId: "seg-cafe", legs: [walk, leg], blockIds: [] };
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "trip", trip: trip as never, route: "Home → Corner café" }} />);
+    await screen.findByTestId("evidence-map");
+    const tripEvidence = mapStandIn.evidence.at(-1) as { map: { route: { coordinates: unknown[] } } };
+    expect(tripEvidence.map.route.coordinates).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: /Walk/ }));
+    expect(screen.getByRole("button", { name: "All legs" })).not.toBeNull();
+    const walkEvidence = mapStandIn.evidence.at(-1) as { map: { route: { coordinates: unknown[] } } };
+    expect(walkEvidence.map.route.coordinates).toEqual([[-0.10, 51.50], [-0.11, 51.51]]);
+    fireEvent.click(screen.getByRole("button", { name: "All legs" }));
+    // Back to the trip's content (the map compares content, not the object).
+    expect(mapStandIn.evidence.at(-1)).toStrictEqual(tripEvidence);
+    // An unobserved leg (no readings of its own) shows the trip.
+    fireEvent.click(screen.getByRole("button", { name: /Underground\?/ }));
+    expect((mapStandIn.evidence.at(-1) as typeof tripEvidence).map.route.coordinates).toHaveLength(3);
+    expect(mapStandIn.mounts).toBe(1);
+  });
+
+  it("draws a leg from the trip's readings within its times (glitch fix 5)", () => {
+    const sample = (id: string, minute: number) => ({ id, point: { type: "Point" as const, coordinates: [minute, 51] as [number, number] }, occurredAt: at(8, minute), accuracyMeters: 5, kind: "location", role: null });
+    const tripEvidence = { segment: { evidenceCount: 3 }, map: { route: null, straightLineFallback: { type: "LineString", coordinates: [[0, 0], [1, 1]] },
+      acceptedSamples: [sample("c", 30), sample("a", 2), sample("b", 10)] } } as never;
+    const shown = legEvidence(tripEvidence, { startedAt: at(8), stoppedAt: at(8, 12) });
+    expect(shown.map.route?.coordinates).toEqual([[2, 51], [10, 51]]);
+    expect(shown.map.straightLineFallback).toBeNull();
+    expect(shown.segment.evidenceCount).toBe(2);
+    expect(legEvidence(tripEvidence, { startedAt: at(8, 20), stoppedAt: at(8, 40) })).toBe(tripEvidence);
+  });
+
   it("sends each correction with one id, reused when it is retried, so a lost reply's receipt comes back (Codex r3 on #609)", async () => {
     clientFetch.mockReset()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
