@@ -34,8 +34,8 @@ const waiting = vi.hoisted(() => {
     // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
     settleOutcome: null as null | "committed" | "committing" | "abandoned",
     // The store's shared withdraw, as its deletion goes.
-    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
-    settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
+    withdrawAnswerAfterCorrections: vi.fn(async (id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
+    settleAnswerAfterCorrections: vi.fn(async (id: string, _options: { inFront: boolean }) => {
       try {
         await mock.commitAnswerAfterCorrections(id);
         return mock.settleOutcome ?? "committed";
@@ -311,7 +311,7 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       await flush();
-      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" }, "m-1", { inFront: true });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith("m-1", { inFront: true });
       expect(retried.result.current.held).toBeNull();
       expect(Alert.alert).not.toHaveBeenCalled();
       // Given up in front: the not-saved words.

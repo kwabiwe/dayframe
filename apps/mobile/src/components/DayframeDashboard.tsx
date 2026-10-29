@@ -2188,9 +2188,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
-              if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void withdrawAnswerAfterCorrections(correctionOwner, id);
+              if (!checkAnswers.answer(check.id, yes, null, { afterCorrections: id })) void withdrawAnswerAfterCorrections(id);
             },
-            cancel: () => withdrawAnswerAfterCorrections(correctionOwner, id)
+            cancel: () => withdrawAnswerAfterCorrections(id)
           };
         }
       };

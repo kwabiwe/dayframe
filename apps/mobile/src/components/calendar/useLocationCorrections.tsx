@@ -233,12 +233,13 @@ export function useLocationCorrections({
     if (log.afterCorrections) {
       // The store's shared settle and withdraw (Codex r12 on #610): a failed write is recovered by its runner, or the
       // Logs as is given up — its record hides nothing, and the place's "?" shows again.
-      const recordOwner = userId && workspaceId ? { userId, workspaceId } : null;
-      if (log.ownerKey !== currentOwner.current) void withdrawAnswerAfterCorrections(recordOwner, log.afterCorrections);
+      if (log.ownerKey !== currentOwner.current) void withdrawAnswerAfterCorrections(log.afterCorrections);
       else {
-        void settleAnswerAfterCorrections(recordOwner, log.afterCorrections, { inFront: appInFront() }).then((outcome) => {
-          // Said only when it was given up and Dayframe is still in front, for this account.
-          if (outcome === "abandoned" && appInFront() && log.ownerKey === currentOwner.current) showNotice("That place wasn't logged. Try again.");
+        void settleAnswerAfterCorrections(log.afterCorrections, { inFront: appInFront() && mounted.current }).then((outcome) => {
+          // Said only when it was given up and Dayframe is still in front, with the List here, for this account.
+          if (outcome === "abandoned" && appInFront() && mounted.current && log.ownerKey === currentOwner.current) {
+            showNotice("That place wasn't logged. Try again.");
+          }
         });
       }
       return;
@@ -256,7 +257,7 @@ export function useLocationCorrections({
     // Another account (or none): the held log is dropped, never sent for it.
     if (heldLog.ownerKey !== ownerKey) {
       setHeldLog(null);
-      if (heldLog.afterCorrections) void withdrawAnswerAfterCorrections(userId && workspaceId ? { userId, workspaceId } : null, heldLog.afterCorrections);
+      if (heldLog.afterCorrections) void withdrawAnswerAfterCorrections(heldLog.afterCorrections);
       return;
     }
     const finish = (send: boolean) => {
@@ -279,6 +280,17 @@ export function useLocationCorrections({
       subscription.remove();
     };
   }, [heldLog, ownerKey]);
+  // The Dashboard going away during a Logs as's Undo keeps it now, quietly, as an answer's hold is flushed then
+  // (Codex r13 on #610): a waiting one is let go to wait for its corrections, a plain one kept on the phone (sent
+  // when the queue next runs in front). Another account taking over drops it instead, as answers are dropped.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (heldNow.current) commitLogRef.current(heldNow.current, false);
+    };
+  }, []);
   // A second Logs as sends the one held now, as the deck's hold does.
   // A hold for an account no longer signed in (a sheet's Done that finished after a switch) is never held, and
   // never replaces this account's (Codex r2 on #606).
@@ -291,7 +303,7 @@ export function useLocationCorrections({
     if (heldNow.current) {
       consumed.current.add(heldNow.current.token);
       // Undo takes back the Logs as only: the sheet's corrections stay.
-      if (heldNow.current.afterCorrections) void withdrawAnswerAfterCorrections(userId && workspaceId ? { userId, workspaceId } : null, heldNow.current.afterCorrections);
+      if (heldNow.current.afterCorrections) void withdrawAnswerAfterCorrections(heldNow.current.afterCorrections);
     }
     setHeldLog(null);
   }, []);
@@ -326,7 +338,7 @@ export function useLocationCorrections({
         holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
           request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id });
       },
-      cancel: () => withdrawAnswerAfterCorrections(owner, id)
+      cancel: () => withdrawAnswerAfterCorrections(id)
     };
   };
   const activities = useMemo(() => [...(data?.categories ?? [])]
