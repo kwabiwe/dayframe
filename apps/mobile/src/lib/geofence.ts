@@ -2060,7 +2060,8 @@ function takeAccuracyBurstLease(capture: LocationCaptureSnapshot, startedAt: str
     // stopped (Codex r8 on #619).
     priorMs: 0, nativeDoneAt: null, nativeDoneMono: null
   };
-  scheduleAccuracyBurstGuard(accuracyBurstLease, firstTickMs ?? accuracyBurstLease.endsInMs + 1_000);
+  // Never later than its hard stop (Codex r25 on #619).
+  scheduleAccuracyBurstGuard(accuracyBurstLease, firstTickMs ?? Math.min(accuracyBurstLease.endsInMs + 1_000, accuracyBurstLease.stopInMs));
 }
 
 /**
@@ -2157,7 +2158,6 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
   }
   const elapsed = monotonicNow() - lease.takenAt;
   if (lease.nativeDoneAt == null && elapsed >= lease.endsInMs) {
-    const pastStopBy = elapsed >= lease.stopInMs;
     const done = await withNativeLocationOptions(async () => {
       if (accuracyBurstLease !== lease || !isLocationCaptureSnapshotCurrent(lease.capture)) return false;
       if (await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
@@ -2165,7 +2165,8 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
         nativeOptionsOwner = lease.capture.binding?.id ?? null;
         return true;
       }
-      if (!pastStopBy) return false;
+      // The deadline is read after the restore's own wait, so one that failed late is stopped now (Codex r25 on #619).
+      if (monotonicNow() - lease.takenAt < lease.stopInMs) return false;
       const stopped = await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
       if (stopped) {
         nativeLocationMode = "stopped";
@@ -2313,8 +2314,9 @@ export async function reconcileLearningOptionsAfterAdmission(capture: LocationCa
 /**
  * For a wake or refresh that failed before it could tell whose capture this is (an owner, consent, permission or
  * status read): options this process never set are put back to normal capture when updates are running, which only
- * ever lowers accuracy and never starts capture; if that can't be done, the guard stops updates outright until a
- * capture in this process sets the options (Codex r17 on #619). Never called inside the native options queue.
+ * ever lowers accuracy and never starts capture; if that can't be done, the admission guard keeps trying to lower
+ * them, and only after its 5 minutes stops updates (Codex r17, r25 on #619). Never called inside the native options
+ * queue.
  */
 async function protectInheritedAccuracyOptions() {
   if (heldGuardLease() || nativeLocationMode !== "unknown") return;
@@ -2328,7 +2330,9 @@ async function protectInheritedAccuracyOptions() {
       noteNativeBurstEnd();
       return;
     }
-    guardInheritedAccuracyOptions(STOPPED_CAPTURE);
+    // Still unresolved: the admission guard keeps lowering (and stops only after its 5 minutes), so a consenting
+    // owner's capture is never stopped for one failed try (Codex r25 on #619).
+    if (!accuracyBurstLease) takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, ACCURACY_BURST_RETRY_MS);
   }).catch(() => undefined);
   settlePendingAccuracyBursts();
 }

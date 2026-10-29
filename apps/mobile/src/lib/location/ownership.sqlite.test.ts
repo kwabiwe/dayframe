@@ -1420,5 +1420,34 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a lowering that fails once after a failed admission keeps trying, never stopping a consenting owner's capture (Codex r25 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    start.mockRejectedValueOnce(new Error("busy"));
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let failures = 2;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && failures > 0) {
+          failures -= 1;
+          throw new Error("consent unreadable");
+        }
+        return read(k);
+      });
+      await expect(geofence.startGeofences([place], A)).rejects.toThrow("consent unreadable");
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+      expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

@@ -1755,5 +1755,29 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await vi.advanceTimersByTimeAsync(186_000);
     expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
   });
+
+  it("a restore that fails late is stopped at once when its hard stop has passed (Codex r25 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 895 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockImplementation(() => new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error("busy")), 6_000)));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(181_000 + 6_000 + 100);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("a burst's first restore is never later than its hard stop (Codex r25 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 900 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(200_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(1080);
+  });
 });
 
