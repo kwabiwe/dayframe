@@ -1095,7 +1095,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   });
 
   it("ends a burst with no readings at all, and stops updates outright if normal capture keeps failing (Codex r2 on #619)", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     await maybeStartAccuracyBurst("departure", await capture());
     locationMocks.startLocationUpdatesAsync.mockClear();
@@ -1161,7 +1161,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   });
 
   it("the safety timer keeps trying until capture is confirmed, and stops by the day's remaining allowance (Codex r3 on #619)", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     // Five bursts used (15 minutes): this one may run at most the 3 minutes left.
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 15 * 60 } } }));
@@ -1182,7 +1182,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   });
 
   it("a stale lifetime's timer never restores or stops anyone's capture (Codex r4 on #619)", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     await maybeStartAccuracyBurst("departure", await capture());
     locationMocks.startLocationUpdatesAsync.mockClear();
@@ -1197,7 +1197,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   });
 
   it("brings normal capture back, and stops by its deadline, while storage keeps failing; the time is settled once it works (Codex r4 on #619)", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     await maybeStartAccuracyBurst("departure", await capture());
     const storage = (await import("@react-native-async-storage/async-storage")).default;
@@ -1213,5 +1213,46 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
     await vi.advanceTimersByTimeAsync(31_000);
     expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a wake during a burst it didn't start in this process (a headless relaunch) arms the safety bound again (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    // No lease in memory (as after a relaunch); the burst is stored, a minute in.
+    await stopLocationLearningIfStarted();
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a clock set back never holds off a burst's end (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 0));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
+
+  it("settles a burst at the moment normal capture came back, however late storage takes it (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date(2026, 10, 2, 8, 0))].seconds).toBeLessThan(200);
   });
 });
