@@ -97,7 +97,9 @@ describe("rows (WUI-028, WUI-029)", () => {
     expect(lastDeclaration(".timeline-task-secondary-line .timeline-task-meta,\n.timeline-task-secondary-line .tag-metadata", "color")).toBe("inherit");
     expect(rule(".timeline-task-secondary-line .tag-metadata.is-compact")).toContain("font-size: 12px;");
     expect(rule(".timeline-task-block")).toMatch(/width: 36px;[\s\S]*height: 36px;[\s\S]*border-radius: calc\(36px \* 0\.3\);/);
-    expect(rule(".df-erow-block")).toContain("border-radius: calc(36px * 0.3);");
+    // Today's and Reports' rows moved to a 28 px tile in the UI review (owner 29 Oct 2026); the List follows
+    // in the Calendar PR.
+    expect(rule(".df-erow-block")).toContain("border-radius: calc(28px * 0.3);");
     expect(rule(".timeline-list-row:hover > td,\n.timeline-list-row:has(:focus-visible) > td")).toContain("var(--surface-muted)");
     // Actions appear on hover or focus, and always on touch screens and narrow layouts.
     expect(rule(".timeline-list-actions")).toMatch(/opacity: 0;/);
