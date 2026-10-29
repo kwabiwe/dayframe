@@ -202,6 +202,66 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
     });
 
+    it("never queues confirm_outing when an outing's trip changed while it registered (Codex r9 on #610)", async () => {
+      // The outing's stay has its segment, so its Yes goes through the gate.
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount(withSegment(outing())));
+      act(() => { result.current.answer("stay", true); });
+      // The inbound trip's start moves 10:04 → 09:30 meanwhile.
+      rerender(withAccount(withSegment(outing()).map((item) => item.id === "there" ? { ...item, suggestedStartedAt: "2026-10-17T09:30:00.000Z" } : item)));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Unchanged, the same tap decides the outing as the deck does.
+      const again = deferGate();
+      const steady = mount(withAccount(withSegment(outing())));
+      act(() => { steady.result.current.answer("stay", true); });
+      await again(null);
+      expect(steady.result.current.held).toMatchObject({ itemId: "stay", outing: { key: "outing:a" } });
+    });
+
+    it("an edited sheet's answer settling while away or gone is saved at once, with nothing said (Codex r9 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      // Away: committed at once, no hold, no haptic, nothing said.
+      const away = mount(withAccount([suggestion("a")]));
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      act(() => { away.result.current.answer("a", true, null, { afterCorrections: "m-away" }); });
+      expect(away.result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-away");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+      // Gone: the same.
+      const gone = mount(withAccount([suggestion("b")]));
+      const answer = gone.result.current.answer;
+      act(() => { gone.tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      act(() => { answer("b", false, null, { afterCorrections: "m-gone" }); });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-gone");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    });
+
+    it("says nothing through the save of an answer the gate settles while the app is away (Codex r9 on #610)", async () => {
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish(null);
+      await act(async () => { for (let index = 0; index < 5; index += 1) await Promise.resolve(); });
+      expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+      expect(result.current.held).toBeNull();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+    });
+
     it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {
       waiting.commitAnswerAfterCorrections.mockClear();
       const finish = deferGate();
