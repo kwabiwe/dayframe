@@ -221,7 +221,23 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
     setClosedByServer((current) => new Map([...current, ...itemIds.map((id) => [id, over] as const)]));
   }, [owner]);
 
-  return { answer, checks, clearError, itemsById, outings, projectedItems, settleResolved, state, undo };
+  /**
+   * A saved correction whose receipt landed after its dialog had gone (the List left, or the Grid's dialog closed,
+   * while it was saving; Codex r1 on #617): the day is read again once, so its blocks (a Logs as's, an outing's
+   * trips' too) show. Held by the dialog from the lifetime it was made in, and run only while that lifetime is
+   * current, through this owner's refresh (the List's while it is shown, otherwise the shell's), which outlives it.
+   */
+  const refreshNow = useRef(refresh);
+  useLayoutEffect(() => {
+    refreshNow.current = refresh;
+  });
+  const madeIn = lifetime.generation;
+  const refreshAfterReceipt = useCallback(() => {
+    if (generationNow.current !== madeIn) return;
+    void Promise.resolve().then(() => refreshNow.current()).catch(() => undefined);
+  }, [madeIn]);
+
+  return { answer, checks, clearError, itemsById, outings, projectedItems, refreshAfterReceipt, settleResolved, state, undo };
 }
 
 type CheckDecisions = ReturnType<typeof useCheckDecisionsState>;
@@ -257,6 +273,12 @@ const NO_SETTLE = () => undefined;
 /** Settles review items a receipt resolved another way (the Grid's answers and corrections), when a provider owns decisions. */
 export function useSettleResolved(): (reviewItemIds: readonly string[]) => void {
   return useContext(CheckDecisionsContext)?.settleResolved ?? NO_SETTLE;
+}
+
+const NO_REFRESH: (() => void) | undefined = undefined;
+/** The decisions owner's refresh for a receipt that lands after its dialog has gone (Codex r1 on #617), when there is one. */
+export function useRefreshAfterReceipt(): (() => void) | undefined {
+  return useContext(CheckDecisionsContext)?.refreshAfterReceipt ?? NO_REFRESH;
 }
 
 /** The open review items as the List shows them, for counts outside it; the items as given without a provider. */

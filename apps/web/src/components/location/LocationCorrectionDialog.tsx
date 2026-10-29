@@ -136,6 +136,7 @@ export function LocationCorrectionDialog({
   clock,
   onClose,
   onCorrected,
+  onReceiptAfterClose,
   onResolved,
   places,
   question = null,
@@ -153,6 +154,11 @@ export function LocationCorrectionDialog({
   onCorrected: () => Promise<void> | void;
   /** Review items a saved correction resolved (Logs as closes the place's open "?"): the decisions owner settles them. */
   onResolved?: (reviewItemIds: readonly string[]) => void;
+  /**
+   * A correction saved after the dialog has gone (closed or left while it was saving): the owner that outlives it
+   * reads the day again, once, so its blocks show (Codex r1 on #617). `onCorrected` covers every save while it is open.
+   */
+  onReceiptAfterClose?: () => void;
   places: readonly CorrectionPlace[];
   target: LocationCorrectionTarget;
 }) {
@@ -185,11 +191,26 @@ export function LocationCorrectionDialog({
     }
     // Saved, it is done: the same change made again later is a new correction with a new id.
     return sendCorrection({ ...correction, clientCorrectionId: id }).then(({ failure, resolvedReviewItemIds }) => {
-      if (!failure) correctionIds.current.delete(signature);
+      if (!failure) {
+        correctionIds.current.delete(signature);
+        unrefreshed.current = true;
+      }
       // The questions the server closed with it: settled at once, even if the dialog has gone (Codex r6 on #609).
       if (resolvedReviewItemIds.length) onResolved?.(resolvedReviewItemIds);
+      // Gone meanwhile: what saved (this or an earlier step of the same Done) is read again by the owner that
+      // outlives the dialog, once (Codex r1 on #617).
+      if (!alive.current && unrefreshed.current) {
+        unrefreshed.current = false;
+        onReceiptAfterClose?.();
+      }
       return failure;
     });
+  };
+  // Saves not yet followed by a read of the day (onCorrected while open, onReceiptAfterClose once gone).
+  const unrefreshed = useRef(false);
+  const corrected = () => {
+    unrefreshed.current = false;
+    return onCorrected();
   };
   const [logAs, setLogAs] = useState<string | null>(null);
   // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
@@ -314,7 +335,7 @@ export function LocationCorrectionDialog({
       if (!alive.current) return;
       if (failure) {
         // What did save is the new starting point, and the List shows it.
-        if (savedAny) await onCorrected();
+        if (savedAny) await corrected();
         setBusy(false);
         setError(failure);
         return;
@@ -324,7 +345,7 @@ export function LocationCorrectionDialog({
         : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
           : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
-    await onCorrected();
+    await corrected();
     if (!alive.current) return;
     setBusy(false);
     onClose();
@@ -372,7 +393,7 @@ export function LocationCorrectionDialog({
       setError(failure);
       return;
     }
-    await onCorrected();
+    await corrected();
     if (!alive.current) return;
     setBusy(false);
     onClose();
@@ -430,7 +451,7 @@ export function LocationCorrectionDialog({
     const failure = await send({ kind: "place", subject: "place", itemId: target.place.id, placeId, learnedPlaceId: null })
       .catch(() => "Couldn't save that. Check your connection and try again.");
     if (!alive.current) return;
-    await onCorrected();
+    await corrected();
     if (!alive.current) return;
     setBusy(false);
     if (failure) {
@@ -453,7 +474,7 @@ export function LocationCorrectionDialog({
       setError(failure);
       return;
     }
-    await onCorrected();
+    await corrected();
     if (!alive.current) return;
     setBusy(false);
     onClose();

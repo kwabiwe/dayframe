@@ -721,6 +721,47 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(screen.getAllByText("Errands at the cafe")).toHaveLength(1);
   });
 
+  it("reads the day once when a Logs as's receipt lands after the List was left, through the owner that outlives it (Codex r1 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }),
+      { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const shellRefresh = vi.fn(async () => undefined);
+    const onChanged = vi.fn(async () => undefined);
+    const list = () => <EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[stay, walk]} />;
+    const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>{list()}</Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    // The List is left while the POST is out; the shell's decisions owner stays.
+    view.rerender(<Shell items={[stay, walk]} refresh={shellRefresh}>{null}</Shell>);
+    expect(dialog()).toBeNull();
+    await act(async () => { save.answer(); });
+    await waitFor(() => expect(shellRefresh).toHaveBeenCalledTimes(1));
+    // Settled, and read once: never through the List that has gone, never twice.
+    expect(badge()).toBe(0);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(shellRefresh).toHaveBeenCalledTimes(1);
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("drops a late receipt's read when the account changed meanwhile (Codex r1 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe"], resolvedReviewItemIds: [stay.id] } }), { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const shellRefresh = vi.fn(async () => undefined);
+    const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>
+      <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    view.rerender(<Shell items={[]} owner="w2:u2" refresh={shellRefresh}>{null}</Shell>);
+    await act(async () => { save.answer(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(shellRefresh).not.toHaveBeenCalled();
+  });
+
   it("moves focus to the next \"?\" when a dialog's question is answered (Codex r1 on #609)", async () => {
     renderList();
     const office = officeRow()!;

@@ -170,6 +170,23 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("reads the day once when a Logs as's receipt lands after its dialog closed (Codex r1 on #617)", async () => {
+    const refresh = vi.fn(async () => undefined);
+    let release!: () => void;
+    clientFetch.mockImplementation(() => new Promise<Response>((resolve) => {
+      release = () => resolve(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe"], resolvedReviewItemIds: ["q1"] } }), { status: 200 }));
+    }));
+    const view = render(<Grid refresh={refresh} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    // A refresh no longer lists the cafe: its dialog closes while the POST is out.
+    view.rerender(<Grid refresh={refresh} timelines={[timeline([])]} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => { release(); });
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
   it("asks nothing for a \"?\" more than 7 days old", () => {
     render(<Grid items={[suggestion("q-old", { suggestedStartedAt: new Date(2026, 9, 20, 9).toISOString(), suggestedStoppedAt: new Date(2026, 9, 20, 10).toISOString() })]} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));

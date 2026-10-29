@@ -375,6 +375,10 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         // Saved on the server; only the local copy stayed. Sent again later, its id answers it (Codex r2 on #598).
         return finish("retryable_failure");
       }
+      // Published as soon as it settles, never after the rest of the pass (Codex r1 on #617): a Logs as's blocks
+      // (the day read it starts) and the "?" it resolved, an outing's trips' too, never wait for a later request.
+      // The timeline is still read again once per pass, at its end (the refresh revision).
+      notify();
       continue;
     }
     const permanent = PERMANENT_STATUS_CODES.has(response.status);

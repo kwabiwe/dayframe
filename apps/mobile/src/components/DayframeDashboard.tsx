@@ -257,7 +257,7 @@ import {
 } from "@/lib/nativeCalendarPresentation";
 import { isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { calendarCheckRoute, settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
@@ -1980,17 +1980,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
   const resolvedByCorrections = useMemo(() => reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged),
     [correctionQueue.acknowledged]);
-  const calendarCheckBase = useMemo(() => {
-    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
-    // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
-    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
-      // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
-      // abandoned record never hides it (Codex r11 on #610).
-      && !answersAfterCorrections.waitingIds.has(item.id)
-      && !(typeof item.rawPayload?.clientSegmentId === "string" && answersAfterCorrections.waitingSegments.has(item.rawPayload.clientSegmentId)));
-    return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
+  // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do answers held
+  // for Undo or saving (part 3b), waiting for corrections, or resolved by one (settledCheckBase). Today's Earlier
+  // this week chips count from this same projection (Codex r1 on #617).
+  const calendarCheckBase = useMemo(() => settledCheckBase(shownCalendarData?.reviewItems ?? [], {
+    decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
+    waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds
+  }), [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
     answersAfterCorrections.waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
@@ -2061,17 +2057,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
   const calendarCheckRequests = useRef(0);
-  // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
-  // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
+  // Quick win (b): the hatched count chip on Earlier this week rows, from the same settled "?" the Calendar draws
+  // (the bootstrap's list, plus Today's scoped window when it is capped, less those settled on this phone: a Logs as
+  // the server acknowledged clears its day's chip at once, an outing's trips with it; Codex r1 on #617).
+  // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once, folded as the deck and
+  // Calendar › List fold it (Codex r2 on #582).
   const earlierDayReviewCountMap = useMemo(
-    () => {
-      // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
-      // The same outings the deck and Calendar › List fold (Codex r2 on #582).
-      const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);
-      const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
-      return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
-    },
-    [shownCalendarData?.reviewItems, earlierDays, reviewSyncStateIds]
+    () => earlierDayReviewCounts(earlierDays, calendarCheckBase.open.filter((item) => !calendarCheckBase.folded.has(item.id))),
+    [calendarCheckBase, earlierDays]
   );
   // Owner, 28 Oct 2026: the Grid draws only the "?" that still ask, outings folded, as the List does, so an expired
   // or folded suggestion is never a dashed block there; onOpenReview's lookup (calendarChecks) covers every one drawn.

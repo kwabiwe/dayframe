@@ -22,17 +22,16 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
     // Owner, 28 Oct 2026 (concern 4): the badge counts the "?" that still ask, the last 7 days.
     expect(dashboard).toContain("week: askingChecks.length");
-    expect(dashboard).toContain("!locallyDecidedIds.has(item.id)");
+    expect(dashboard).toContain("decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,");
     // The evening reminder opens the oldest "?" that still asks, or today's List when none does (never Review).
     expect(dashboard).toContain("openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));");
     expect(dashboard).toContain("if (!cancelled && current) openTodayChecksRef.current();");
   });
 
-  it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
-    // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582).
-    expect(dashboard).toContain("const { folded } = calendarCheckOutings(open, reviewSyncStateIds);");
-    expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");
+  it("counts open Review moments per earlier day from the same settled \"?\" the Calendar draws (Codex r1 on #617)", () => {
+    // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582);
+    // settled as the Calendar settles them, so an acknowledged Logs as clears its day's chip at once.
+    expect(dashboard).toContain("() => earlierDayReviewCounts(earlierDays, calendarCheckBase.open.filter((item) => !calendarCheckBase.folded.has(item.id))),");
     expect(dashboard).toContain("reviewCounts={earlierDayReviewCountMap}");
   });
 

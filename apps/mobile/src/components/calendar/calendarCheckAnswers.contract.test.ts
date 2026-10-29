@@ -98,7 +98,9 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
-    expect(dashboard).toContain("return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };");
+    // settledCheckBase folds with calendarCheckOutings (unit-tested in useCalendarCheckAnswers.test.tsx).
+    expect(dashboard).toContain("const calendarCheckBase = useMemo(() => settledCheckBase(shownCalendarData?.reviewItems ?? [], {");
+    expect(dashboard).toContain("syncStateIds: reviewSyncStateIds");
     expect(dashboard).toContain("const { open, outings, folded } = calendarCheckBase;");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
@@ -120,13 +122,13 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
-    expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
+    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
   });
 
   it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {
     // The helper is unit-tested in timelineCorrectionProjection.test.ts.
     expect(dashboard).toContain("reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged)");
-    expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
+    expect(dashboard).toContain("resolved: resolvedByCorrections,");
   });
 
   it("classifies each \"?\" so only Apple Health's and a legacy one without a segment ask under their row, and never sends a row to Review", () => {

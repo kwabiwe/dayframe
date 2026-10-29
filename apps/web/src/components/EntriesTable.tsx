@@ -1678,7 +1678,7 @@ export function EntriesTable({
           onCorrected={async () => {
             if (correctionFocus.current) correctionFocus.current.saved = true;
             await onChanged?.();
-          }} onResolved={listChecks.settleResolved} places={places} target={correction} />
+          }} onReceiptAfterClose={listChecks.refreshAfterReceipt} onResolved={listChecks.settleResolved} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal

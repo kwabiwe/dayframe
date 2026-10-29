@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { validReviewAcknowledgement, type ClockFormat, type LocationTimeline, type ReviewMutationEnvelope, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { LocationCorrectionDialog, type CorrectionActivity, type CorrectionPlace, type CorrectionQuestion, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { checkQuestionWords, useSettleResolved } from "@/components/location/ListChecks";
+import { checkQuestionWords, useRefreshAfterReceipt, useSettleResolved } from "@/components/location/ListChecks";
 import { askingChecks } from "@/lib/calendar-checks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { ReviewItemRow } from "@/lib/queries";
@@ -30,6 +30,16 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
   todayStartMs: number | null;
 }) {
   const settleResolved = useSettleResolved();
+  // A receipt after its dialog closed reads the day again through the decisions owner, in the lifetime it was made
+  // in (Codex r1 on #617); without one, through the Grid's own refresh while its owner is the same.
+  const sharedRefreshAfterReceipt = useRefreshAfterReceipt();
+  const ownerNow = useRef(owner);
+  useEffect(() => {
+    ownerNow.current = owner;
+  });
+  const refreshAfterReceipt = useMemo(() => sharedRefreshAfterReceipt ?? (() => {
+    if (ownerNow.current === owner) void refresh().catch(() => undefined);
+  }), [owner, refresh, sharedRefreshAfterReceipt]);
   const asking = useMemo(() => todayStartMs !== null ? askingChecks(reviewItems, todayStartMs) : null, [reviewItems, todayStartMs]);
   const askingBySegment = useMemo(() => asking
     ? new Map(asking.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : [])) : null, [asking]);
@@ -87,7 +97,7 @@ export function useGridCorrection({ activities, clock, owner, places, refresh, r
   const dialog = current ? (
     <LocationCorrectionDialog activities={activities} clock={clock} key={`${current.owner}:${targetId}`} onClose={() => setOpened(null)}
       // A saved correction (Logs as, Save this place, a fix) can remove the opener too: focus moves on as after an answer (Codex r3 on #609).
-      onCorrected={async () => { answered.current = true; await refresh(); }} onResolved={settleResolved} places={places} question={question}
+      onCorrected={async () => { answered.current = true; await refresh(); }} onReceiptAfterClose={refreshAfterReceipt} onResolved={settleResolved} places={places} question={question}
       target={current.target} />
   ) : null;
   return { askingBySegment, dialog, open };

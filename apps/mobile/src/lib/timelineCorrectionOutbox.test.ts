@@ -212,14 +212,17 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a delivered correction a while for the List, and says so once per pass (Codex r1 on #598)", async () => {
+  it("keeps a delivered correction a while for the List, says so as each settles, and reads the timeline once per pass (Codex r1 on #598, #617)", async () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
     const listener = vi.fn();
     outbox.subscribeTimelineCorrectionOutbox(listener);
     vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true })));
+    const revision = outbox.readTimelineCorrectionRefreshRevision();
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A });
-    expect(listener).toHaveBeenCalledTimes(1);
+    // Each acknowledgement as it settles, then the pass's end (its one timeline read).
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(outbox.readTimelineCorrectionRefreshRevision()).toBe(revision + 1);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.request.itemId)).toEqual(["trip-a", "trip-b"]);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_B)).toEqual([]);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A, Date.now() + 6 * 60_000)).toEqual([]);
