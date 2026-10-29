@@ -23,6 +23,7 @@ import {
 } from "@dayframe/shared";
 import {
   enqueueEvents,
+  HealthReprocessCancelledError,
   reprocessHealthReviewItems,
   type HealthReviewReprocessResult,
 } from "./api";
@@ -93,8 +94,9 @@ let healthReprocessInFlight: Promise<HealthReviewReprocessResult> | null = null;
  * further batch every one is checked, so a caller that asked only while in front (Calendar › List) stops a pass it
  * joined when it leaves the front, instead of riding along without its guards.
  */
-type HealthReprocessGuard = { signal?: AbortSignal; beforeRequest?: () => Promise<boolean> };
-let healthReprocessGuards: HealthReprocessGuard[] = [];
+type HealthReprocessGuard = { signal?: AbortSignal; beforeRequest?: () => Promise<boolean>; isWanted?: () => boolean };
+/** Adds a caller's guard to the pass in flight (its abort joined to the pass's own), or null with none in flight. */
+let joinHealthReprocess: ((guard: HealthReprocessGuard) => void) | null = null;
 let lastHealthReprocessAt = 0;
 let healthReprocessBackoffUntil = 0;
 
@@ -772,13 +774,18 @@ export async function reprocessExistingHealthReviewItems(
     deadlineAt?: number;
     /** Checked before each batch request; false stops the run there (a session that changed). */
     beforeRequest?: () => Promise<boolean>;
+    /**
+     * Read synchronously right before each request is sent, after the session read (Calendar's "still in front";
+     * Codex r5 on #615): false stops the run there.
+     */
+    isWanted?: () => boolean;
   } = {},
 ) {
   const now = Date.now();
-  const guard: HealthReprocessGuard | null = options.signal || options.beforeRequest
-    ? { signal: options.signal, beforeRequest: options.beforeRequest } : null;
+  const guard: HealthReprocessGuard | null = options.signal || options.beforeRequest || options.isWanted
+    ? { signal: options.signal, beforeRequest: options.beforeRequest, isWanted: options.isWanted } : null;
   if (healthReprocessInFlight) {
-    if (guard) healthReprocessGuards.push(guard);
+    if (guard) joinHealthReprocess?.(guard);
     return healthReprocessInFlight;
   }
   if (!options.force && now < healthReprocessBackoffUntil)
@@ -790,8 +797,20 @@ export async function reprocessExistingHealthReviewItems(
     return skippedHealthReprocessResult("Recently checked.");
   }
 
-  const guards: HealthReprocessGuard[] = guard ? [guard] : [];
-  healthReprocessGuards = guards;
+  const guards: HealthReprocessGuard[] = [];
+  // One abort for the whole pass, fired by any caller's (Codex r5 on #615): it cancels a batch during its session read
+  // or in flight, not only the next one.
+  const passAbort = new AbortController();
+  const join = (each: HealthReprocessGuard) => {
+    guards.push(each);
+    if (each.signal?.aborted) passAbort.abort();
+    else each.signal?.addEventListener("abort", () => passAbort.abort(), { once: true });
+  };
+  if (guard) join(guard);
+  joinHealthReprocess = join;
+  // Every caller's abort and synchronous predicate, read at the transport immediately before a request is sent.
+  const everyCallerWants = () => !passAbort.signal.aborted
+    && guards.every((each) => !each.signal?.aborted && (each.isWanted?.() ?? true));
   // The live set (Codex r4 on #615): a caller joining while another guard is awaited is checked too, and every abort
   // signal is read again after the last await, immediately before the batch is sent.
   let checkedGuards = 0;
@@ -803,7 +822,7 @@ export async function reprocessExistingHealthReviewItems(
       if (each.beforeRequest && !(await each.beforeRequest().catch(() => false))) return false;
     }
     checkedGuards = count;
-    return !guards.some((each) => each.signal?.aborted);
+    return everyCallerWants();
   };
   healthReprocessInFlight = (async () => {
     try {
@@ -811,8 +830,8 @@ export async function reprocessExistingHealthReviewItems(
         preferences ?? (await getHealthImportPreferences()),
         options.mappings ?? (await getHealthAutoLogMappings()),
         options.force === true,
-        { ...options, beforeRequest: everyGuardWants, isAborted: () => guards.some((each) => each.signal?.aborted),
-          guardsPending: () => checkedGuards < guards.length },
+        { ...options, signal: passAbort.signal, beforeRequest: everyGuardWants, isAborted: () => !everyCallerWants(),
+          beforeSend: everyCallerWants, guardsPending: () => checkedGuards < guards.length },
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -823,7 +842,7 @@ export async function reprocessExistingHealthReviewItems(
       return failedHealthReprocessResult(error);
     } finally {
       healthReprocessInFlight = null;
-      if (healthReprocessGuards === guards) healthReprocessGuards = [];
+      if (joinHealthReprocess === join) joinHealthReprocess = null;
     }
   })();
   return healthReprocessInFlight;
@@ -841,6 +860,8 @@ async function reprocessHealthReviewItemBatches(
     isAborted?: () => boolean;
     /** A caller joined after the last check: its guards are checked before the request goes. */
     guardsPending?: () => boolean;
+    /** Handed to the transport, read after its session read immediately before sending. */
+    beforeSend?: () => boolean;
   } = {},
 ) {
   const startedAt = Date.now();
@@ -867,14 +888,27 @@ async function reprocessHealthReviewItemBatches(
       }
       break;
     }
-    const result = await reprocessHealthReviewItems(preferences, {
-      limit: HEALTH_REPROCESS_BATCH_SIZE,
-      force,
-      mappings,
-      cursor,
-      signal: options.signal,
-      deadlineAt,
-    });
+    let result: HealthReviewReprocessResult;
+    try {
+      result = await reprocessHealthReviewItems(preferences, {
+        limit: HEALTH_REPROCESS_BATCH_SIZE,
+        force,
+        mappings,
+        cursor,
+        signal: options.signal,
+        deadlineAt,
+        beforeSend: options.beforeSend,
+      });
+    } catch (error) {
+      // Stopped by a caller at the transport (before sending, or in flight): what was done stands, the rest waits.
+      if (error instanceof HealthReprocessCancelledError || (options.signal?.aborted && error instanceof Error && error.name === "AbortError")) {
+        combined ??= skippedHealthReprocessResult("Stopped before sending.");
+        combined.partial = true;
+        combined.hasMore = true;
+        break;
+      }
+      throw error;
+    }
     cursor = result.nextCursor ?? null;
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;

@@ -258,7 +258,7 @@ import {
 import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
-import { useCheckLinks } from "@/components/calendar/useCheckLinks";
+import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
 import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
 import { useDeferredReload } from "@/lib/useDeferredReload";
@@ -2943,9 +2943,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
   const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
     [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
-  // A new value whenever the Calendar's data loads (the bootstrap and its answers, the day's places): a named "?" an
-  // old link waits for is tried again on each (Codex r4 on #615).
-  const checkLinkLoadMarker = useMemo(() => ({}), [shownCalendarData, calendarTimeline]);
+  // Completed loads only (a bootstrap landing, the shown day's places landing; Codex r5 on #615): a named "?" an old
+  // link waits for is tried again on each, and a day switch's empty first render is none.
+  const checkLinkLoads = useCompletedLoadCount(data, calendarTimelineRequestedAt);
   const openCheckLink = useCheckLinks({
     ready: authState === "authenticated" && data !== null,
     owner: checkLinkOwner,
@@ -2965,7 +2965,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return { startedAt: item.startedAt, asks };
     },
     selectedDayKey,
-    loadMarker: checkLinkLoadMarker,
+    loads: checkLinkLoads,
     dayKeyOf: (instant) => {
       const ms = Date.parse(instant);
       return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;

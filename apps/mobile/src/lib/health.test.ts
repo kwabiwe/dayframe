@@ -87,7 +87,8 @@ vi.mock("./api", () => ({
     return { acceptedCount: events.length };
   },
   reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems,
-  AuthRequiredError: class AuthRequiredError extends Error {}
+  AuthRequiredError: class AuthRequiredError extends Error {},
+  HealthReprocessCancelledError: class HealthReprocessCancelledError extends Error {}
 }));
 
 vi.mock("@kingstinct/react-native-healthkit", () => ({
@@ -741,7 +742,7 @@ describe("HealthKit mapping", () => {
         strength_training: false,
         swimming: false
       }),
-      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: expect.any(AbortSignal), beforeSend: expect.any(Function) }
     );
   });
 
@@ -768,7 +769,7 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
       expect.objectContaining({ walking: true }),
       {
-        cursor: null, deadlineAt: expect.any(Number), signal: undefined,
+        cursor: null, deadlineAt: expect.any(Number), signal: expect.any(AbortSignal), beforeSend: expect.any(Function),
         limit: 25,
         force: true,
         mappings: {
@@ -820,12 +821,12 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: expect.any(AbortSignal), beforeSend: expect.any(Function) }
     );
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: expect.any(AbortSignal), beforeSend: expect.any(Function) }
     );
     expect(result).toMatchObject({
       checkedCount: 33,
@@ -975,6 +976,82 @@ describe("HealthKit mapping", () => {
     await automatic;
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
     apiMocks.reprocessHealthReviewItems.mockReset();
+  });
+
+  describe("at the transport (Codex r5 on #615)", () => {
+    // The API's own body, in short: a session read, then the caller's checks, then the request.
+    const transport = (gates: Array<Promise<void>>, sent: { count: number }) => async (_preferences: unknown, options: { signal?: AbortSignal; beforeSend?: () => boolean }) => {
+      await (gates.shift() ?? Promise.resolve());
+      const { HealthReprocessCancelledError } = await import("./api");
+      if (options.signal?.aborted || (options.beforeSend && !options.beforeSend())) throw new HealthReprocessCancelledError();
+      sent.count += 1;
+      return MORE_HEALTH_WORK;
+    };
+
+    it("cancels a batch whose session read a joined caller's abort interrupts", async () => {
+      const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+      resetCalendarHealthReprocessForTests();
+      apiMocks.reprocessHealthReviewItems.mockReset();
+      let openSecondRead!: () => void;
+      const sent = { count: 0 };
+      apiMocks.reprocessHealthReviewItems.mockImplementation(transport([Promise.resolve(), new Promise<void>((resolve) => { openSecondRead = resolve; })], sent));
+      const automatic = reprocessExistingHealthReviewItems(undefined, { force: true });
+      // Calendar joins; the second batch reaches its session read.
+      const controller = new AbortController();
+      const calendar = reprocessHealthOnCalendarFront({ ownerKey: "abort-in-session-read", isCurrentOwner: () => true, isInFront: () => true, signal: controller.signal });
+      await vi.waitFor(() => expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(2));
+      const passSignal = (apiMocks.reprocessHealthReviewItems.mock.calls[1][1] as { signal: AbortSignal }).signal;
+      expect(passSignal.aborted).toBe(false);
+      // Calendar's abort during that read reaches the request's own signal, and the batch is never sent.
+      controller.abort();
+      expect(passSignal.aborted).toBe(true);
+      openSecondRead();
+      await expect(calendar).resolves.toBe("interrupted");
+      await expect(automatic).resolves.toMatchObject({ partial: true, hasMore: true });
+      expect(sent.count).toBe(1);
+      apiMocks.reprocessHealthReviewItems.mockReset();
+    });
+
+    it("stops when the foreground predicate goes stale during a later guard's await, or during the session read", async () => {
+      const { reprocessHealthOnCalendarFront, resetCalendarHealthReprocessForTests } = await import("./calendarHealthReprocess");
+      // During a later caller's awaited guard.
+      resetCalendarHealthReprocessForTests();
+      apiMocks.reprocessHealthReviewItems.mockReset();
+      let sent = { count: 0 };
+      apiMocks.reprocessHealthReviewItems.mockImplementation(transport([], sent));
+      let inFront = true;
+      let releaseSlow!: (value: boolean) => void;
+      let slowCalls = 0;
+      const automatic = reprocessExistingHealthReviewItems(undefined, { force: true });
+      const calendar = reprocessHealthOnCalendarFront({ ownerKey: "stale-in-guard", isCurrentOwner: () => true, isInFront: () => inFront });
+      void reprocessExistingHealthReviewItems(undefined, { force: true, beforeRequest: () => {
+        slowCalls += 1;
+        return slowCalls === 1 ? Promise.resolve(true) : new Promise<boolean>((resolve) => { releaseSlow = resolve; });
+      } });
+      await vi.waitFor(() => expect(slowCalls).toBe(2));
+      inFront = false;
+      releaseSlow(true);
+      await expect(calendar).resolves.toBe("interrupted");
+      await automatic;
+      expect(sent.count).toBe(1);
+
+      // During the transport's session read (no guard is awaited then).
+      resetCalendarHealthReprocessForTests();
+      apiMocks.reprocessHealthReviewItems.mockReset();
+      sent = { count: 0 };
+      let openRead!: () => void;
+      apiMocks.reprocessHealthReviewItems.mockImplementation(transport([Promise.resolve(), new Promise<void>((resolve) => { openRead = resolve; })], sent));
+      inFront = true;
+      const second = reprocessExistingHealthReviewItems(undefined, { force: true });
+      const joined = reprocessHealthOnCalendarFront({ ownerKey: "stale-in-session-read", isCurrentOwner: () => true, isInFront: () => inFront });
+      await vi.waitFor(() => expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(2));
+      inFront = false;
+      openRead();
+      await expect(joined).resolves.toBe("interrupted");
+      await second;
+      expect(sent.count).toBe(1);
+      apiMocks.reprocessHealthReviewItems.mockReset();
+    });
   });
 
   it("keeps background Health review reprocess failures non-fatal", async () => {

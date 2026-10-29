@@ -2149,12 +2149,28 @@ export function dismissReviewItem(id: string) {
   return resolveReviewItem(id, "ignore_once");
 }
 
+/** A Health reprocess batch its callers no longer want, stopped before it was sent or while in flight (Codex r5 on #615). */
+export class HealthReprocessCancelledError extends Error {
+  constructor() {
+    super("Health processing was stopped.");
+    this.name = "HealthReprocessCancelledError";
+  }
+}
+
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number } = {}
+  options: {
+    limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number;
+    /**
+     * Read synchronously after the session read, immediately before the request is sent: false stops it there
+     * (every caller's abort and foreground predicate; Codex r5 on #615). `signal` cancels it in flight.
+     */
+    beforeSend?: () => boolean;
+  } = {}
 ): Promise<HealthReviewReprocessResult> {
   const session = await readAuthenticatedSessionSnapshot();
   if(session.status!=="authenticated") throw new AuthRequiredError();
+  if(options.signal?.aborted || (options.beforeSend && !options.beforeSend())) throw new HealthReprocessCancelledError();
   const {response,body} = await mobileJsonRequest<Record<string,unknown> | null>(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.snapshot.token}`},signal:options.signal,
     body:JSON.stringify({preferences,limit:options.limit,force:options.force,mappings:options.mappings,cursor:options.cursor})

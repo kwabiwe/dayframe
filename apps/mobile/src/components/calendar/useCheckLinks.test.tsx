@@ -38,13 +38,13 @@ function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed
     listed: initial.listed ?? [],
     lookup: initial.lookup ?? (async () => null as Found),
     selectedDayKey: initial.selectedDayKey ?? "2026-10-29",
-    loadMarker: {} as object,
+    loads: 0,
     now: initial.now ?? 1_000
   };
   const result: { open: (check: string) => void } = { open: () => undefined };
   function Harness(current: typeof props) {
     result.open = useCheckLinks({
-      ready: current.ready, owner: current.owner, todayKey: "2026-10-29", selectedDayKey: props.selectedDayKey, loadMarker: current.loadMarker,
+      ready: current.ready, owner: current.owner, todayKey: "2026-10-29", selectedDayKey: props.selectedDayKey, loads: current.loads,
       openCheck: calls.openCheck, openDay: calls.openDay, openTodayFirst: calls.openTodayFirst,
       lookupItem: calls.lookupStart, dayKeyOf: (instant) => instant.slice(0, 10), now: () => props.now
     });
@@ -53,7 +53,7 @@ function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<Harness {...props} />); });
   const update = (next: Partial<typeof props>) => act(() => { props = { ...props, ...next }; tree.update(<Harness {...props} />); });
-  return { calls, update, link: (check: string) => act(() => result.open(check)), load: (next: Partial<typeof props> = {}) => update({ ...next, loadMarker: {} }),
+  return { calls, update, link: (check: string) => act(() => result.open(check)), load: (next: Partial<typeof props> = {}) => update({ ...next, loads: props.loads + 1 }),
     props: () => props };
 }
 

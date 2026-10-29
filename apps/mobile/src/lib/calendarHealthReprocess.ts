@@ -45,7 +45,9 @@ export async function reprocessHealthOnCalendarFront(input: {
       force: true,
       signal: input.signal,
       deadlineAt: now + CALENDAR_HEALTH_REPROCESS_DEADLINE_MS,
-      beforeRequest: async () => stillWanted()
+      beforeRequest: async () => stillWanted(),
+      // Read again at the transport, after its session read, right before sending (Codex r5 on #615).
+      isWanted: stillWanted
     });
     if (!input.isCurrentOwner()) return "stale";
     if (!input.isInFront() || input.signal?.aborted) return interrupted();

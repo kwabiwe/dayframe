@@ -11,7 +11,7 @@ type Request = { check: string; request: number };
 /** A named "?" that still asks on the server, waiting on its day for the loaded data to bring it. */
 type Waiting = { check: string; dayKey: string; request: number; ownerKey: string; loadsLeft: number; until: number };
 
-/** How many loads (bootstrap, the day's places or its Review read) a named "?" waits through, and for how long at most. */
+/** How many completed loads (a bootstrap, the shown day's places) a named "?" waits through, and for how long at most. */
 export const CHECK_LINK_WAIT_LOADS = 2;
 export const CHECK_LINK_WAIT_MS = 15_000;
 
@@ -35,8 +35,8 @@ export function useCheckLinks(input: {
   todayKey: string;
   /** The day Calendar shows: a named "?" waits only while its day is the one shown. */
   selectedDayKey: string;
-  /** Changes whenever the Calendar's data loads (bootstrap, the day's places, its Review read). */
-  loadMarker: unknown;
+  /** How many Calendar data loads have completed (`useCompletedLoadCount`): only a completed load counts. */
+  loads: number;
   /** Opens a "?" the List asks by its id (its #610 check request), on `dayKey` when given; false when it doesn't. */
   openCheck: (reviewItemId: string, dayKey?: string) => boolean;
   /** Calendar › List on a day, nothing selected. */
@@ -112,17 +112,33 @@ export function useCheckLinks(input: {
       return;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waiting, input.loadMarker, input.selectedDayKey, ownerKey]);
-  // Each load after it began counts against its bound.
-  const lastMarker = useRef(input.loadMarker);
+  }, [waiting, input.loads, input.selectedDayKey, ownerKey]);
+  // Each completed load after it began counts against its bound (Codex r5 on #615).
+  const lastLoads = useRef(input.loads);
   useEffect(() => {
-    if (lastMarker.current === input.loadMarker) return;
-    lastMarker.current = input.loadMarker;
+    if (lastLoads.current === input.loads) return;
+    lastLoads.current = input.loads;
     setWaiting((current) => {
       if (!current) return current;
       return current.loadsLeft <= 1 ? null : { ...current, loadsLeft: current.loadsLeft - 1 };
     });
-  }, [input.loadMarker]);
+  }, [input.loads]);
 
   return openCheckLink;
+}
+
+/**
+ * Completed Calendar data loads, counted for a named "?" waiting on its day (Codex r5 on #615): a bootstrap that
+ * lands (`bootstrap`'s identity) and a places response for the day shown (`timelineRequestedAt`, null while a day is
+ * still loading). The null a day switch shows first is no load.
+ */
+export function useCompletedLoadCount(bootstrap: unknown, timelineRequestedAt: number | null) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (bootstrap) setCount((current) => current + 1);
+  }, [bootstrap]);
+  useEffect(() => {
+    if (timelineRequestedAt != null) setCount((current) => current + 1);
+  }, [timelineRequestedAt]);
+  return count;
 }
