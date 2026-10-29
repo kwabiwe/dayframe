@@ -50,18 +50,19 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
-import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, visitedGuess, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TimelineTrip, type TripLeg } from "@dayframe/shared";
+import { useLocalDayStartMs, useMediaQuery } from "@/components/useCalendarClock";
+import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-preferences";
+import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
-import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { hasV2Evidence, reviewPicture } from "@/lib/review-deck";
+import { CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
+import { reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
 import { blockRowHeight } from "@/lib/today-view";
 import {
   LocationListRowView,
-  ShowEveryPlaceToggle,
   TripLegRows,
   TripLegsToggle,
   TripModesLine
@@ -324,33 +325,61 @@ export function EntriesTable({
   // empty list; the rows appear once the page has hydrated, without motion (React #418).
   const localTimeReady = useIsHydrated();
   const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
-  const [showEveryPlace, setShowEveryPlace] = useState(false);
+  // "All places" is remembered on this device (owner, 28 Oct 2026, concern 3). The List's
+  // location rows draw only after hydration, so reading storage on the first client render is safe.
+  const [showEveryPlace, setShowEveryPlaceState] = useState(() => typeof window !== "undefined"
+    ? readStoredFlag(SHOW_ALL_PLACES_STORAGE_KEY, false) : false);
+  // Card F (owner, 28 Oct 2026): on wide web a "Places and trips" column sits beside the blocks, remembered on this device.
+  const [placesColumn, setPlacesColumnState] = useState(() => typeof window === "undefined" || readStoredFlag(PLACES_COLUMN_STORAGE_KEY, true));
+  const wide = useMediaQuery("(min-width: 1200px)");
+  const setPlacesColumn = (next: boolean) => {
+    setPlacesColumnState(next);
+    storeFlag(PLACES_COLUMN_STORAGE_KEY, next);
+  };
+  const columnShown = wide && placesColumn && localTimeReady;
+  // The day at the top of the List, whose places the column shows.
+  const [columnDayStartMs, setColumnDayStartMs] = useState<number | null>(null);
+  const setShowEveryPlace = (update: (current: boolean) => boolean) => setShowEveryPlaceState((current) => {
+    const next = update(current);
+    storeFlag(SHOW_ALL_PLACES_STORAGE_KEY, next);
+    return next;
+  });
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
+  // Where focus goes if a saved correction (Logs as, Save this place, a fix) removes the row that opened its
+  // dialog: the next "?" down the List from that row, else the chip, else the List (Codex r4 on #609).
+  const correctionFocus = useRef<{ nextKey: string | null; saved: boolean } | null>(null);
+  const openCorrection = (next: LocationCorrectionTarget) => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const following = opener ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")]
+      .find((element) => element !== opener && Boolean(opener.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) : undefined;
+    correctionFocus.current = { nextKey: following?.dataset.checkKey ?? null, saved: false };
+    setCorrection(next);
+  };
+  // The "?" the open dialog asks at its top, if it was opened from one (owner item A).
+  const [correctionCheckId, setCorrectionCheckId] = useState<string | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
   const correctPlace = (place: TimelinePlace, label: string) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips });
+    openCorrection({ kind: "place", place, label, joinsTrips });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
-    setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
+    openCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
   const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  // Owner concern 4 (28 Oct 2026): only "?" from today and the 6 days before ask; an older one's place stays a
+  // plain row. The chip counts and steps through all of them, oldest first, across days.
+  const todayStartMs = useLocalDayStartMs();
+  const askingStartMs = todayStartMs === null ? null : checkAskingStartMs(todayStartMs);
+  const shownChecks = useMemo(() => askingStartMs !== null ? listChecks.checks.filter((check) => checkStillAsks(check, askingStartMs)) : [],
+    [askingStartMs, listChecks.checks]);
+  const askingOrder = useMemo(() => checksOldestFirst(shownChecks), [shownChecks]);
   // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
   // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setOpenCheck] = useState<string | null>(null);
-  // A trip's editor under its question ("Edit", card A); one at a time, closed with its question.
-  const [editingCheck, setEditingCheck] = useState<string | null>(null);
-  // The question open now, for a trip editor's save that finishes after the person moved on (Codex r2 on #590).
-  const openCheckNow = useRef<string | null>(null);
-  useEffect(() => { openCheckNow.current = focusedCheck; }, [focusedCheck]);
-  /** Opening, closing or answering a question closes any trip editor (Codex r1 on #590). */
-  const setFocusedCheck = (next: string | null | ((current: string | null) => string | null)) => {
-    setOpenCheck(next);
-    setEditingCheck(null);
-  };
+  const setFocusedCheck = setOpenCheck;
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   // One timeline per shown day: the day's location read, or (without it) an empty day so its checks still
   // show on rows of their own (Codex r1 on #568).
@@ -369,7 +398,7 @@ export function EntriesTable({
       .map((timeline) => ({
         dayStartMs: Date.parse(timeline.dayStart),
         dayLabel: formatDate(timeline.dayStart),
-        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks })
+        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace && !columnShown, checks: shownChecks, hideCovered: true })
       }))
       .sort((a, b) => b.dayStartMs - a.dayStartMs);
     const onPlace = new Set<string>();
@@ -400,7 +429,7 @@ export function EntriesTable({
       }
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
-  }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
+  }, [columnShown, dayTimelines, entries, localTimeReady, nowMs, shownChecks, showEveryPlace]);
   // A trip read on two days (it spans midnight): the freshest copy wins. `locationTimelines` come in
   // read order (oldest read first), so the last one read is last here (Codex r2, r5 on #584).
   const tripByBlock = useMemo(
@@ -462,6 +491,17 @@ export function EntriesTable({
       : null;
   };
   const anchorFrameRef = useRef<number | null>(null);
+  /** Card F: the column follows the day whose heading is at (or last passed) the top of the List. */
+  const trackColumnDay = () => {
+    const root = listScrollRef.current;
+    if (!root) return;
+    const top = root.getBoundingClientRect().top + 48;
+    const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
+    const passed = headings.filter((heading) => heading.getBoundingClientRect().top <= top);
+    const heading = passed[passed.length - 1] ?? headings[0];
+    const dayStart = heading ? Number(heading.dataset.dayStartMs) : NaN;
+    if (Number.isFinite(dayStart)) setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
+  };
   useEffect(() => () => {
     if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current);
   }, []);
@@ -517,20 +557,57 @@ export function EntriesTable({
     return id ? listChecks.itemsById.get(id) : undefined;
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
-  /** "N to check": the next "?" down the List opens, and comes into view. Returns its suggestion's id. */
-  const nextCheck = () => {
-    if (!checkRows.length) return null;
-    const at = checkRows.findIndex((row) => checkOf(row)?.id === focusedCheck);
-    const next = checkRows[(at + 1) % checkRows.length];
+  /** Whether a "?" row opens a dialog (a place, or a trip) rather than its question under it. */
+  const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip || row.place));
+  /** Opens a "?" by its row and brings the row into view. */
+  const openCheckRow = (next: LocationListRow) => {
     const nextId = checkOf(next)!.id;
     applyTimelineRegroup(() => setFocusedCheck(nextId));
+    // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
+    if (next.kind === "place") openPlaceDialog(next.place, next.checkIds[0] ?? null);
+    else if (next.kind === "check" && next.place) openPlaceDialog(next.place, next.checkId);
+    else if (next.kind === "check" && next.trip) openTripDialog(next.checkId, next.trip);
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
       .find((element) => element.dataset.locationRow === anchor)
       ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
     return nextId;
   };
-  /** A location row, its "?" and, while open, its question. */
+  /**
+   * Owner concern 4 (28 Oct 2026): "N to check" steps oldest first through every "?" that still asks, across
+   * days. A "?" on a day the List hasn't loaded opens that day (the List then opens it, see `check=` below).
+   */
+  // Each chip press is a step with its own token; a step that goes to an unloaded day remembers the token its link
+  // was made with, so a slow earlier navigation arriving after a newer step never reopens its "?" (Codex r8 on #609).
+  const chipSteps = useRef({ latest: 0, links: new Map<string, number>() });
+  const nextAskingCheck = (fromChip = false) => {
+    if (fromChip) chipSteps.current.latest += 1;
+    if (!askingOrder.length) return null;
+    const at = askingOrder.findIndex((check) => check.id === focusedCheck);
+    const next = askingOrder[(at + 1) % askingOrder.length];
+    const row = checkRows.find((other) => checkOf(other)?.id === next.id);
+    if (row) return openCheckRow(row);
+    const day = new Date(next.startedAt ?? nowMs);
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    // Remembered as the current one, so the next press goes on from it even before (or without) the day loading.
+    setFocusedCheck(next.id);
+    if (fromChip) chipSteps.current.links.set(next.id, chipSteps.current.latest);
+    router.push(`/timeline?view=list&scope=day&date=${key}&check=${encodeURIComponent(next.id)}`);
+    return next.id;
+  };
+  /** "N to check": the next "?", oldest first across days, opens and comes into view. Returns its id. */
+  const nextCheck = () => nextAskingCheck();
+  const pressChip = () => nextAskingCheck(true);
+  /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
+  const openPlaceDialog = (place: TimelinePlace, checkId: string | null) => {
+    setCorrectionCheckId(checkId);
+    correctPlace(place, place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+  };
+  const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
+    setCorrectionCheckId(checkId);
+    openCorrection({ kind: "trip", trip, route: trip.route });
+  };
+  /** A location row, its "?" and, while open, an Apple Health question (no dialog) under it. */
   const renderLocationRow = (row: LocationListRow) => {
     const item = checkOf(row);
     const expanded = Boolean(item) && focusedCheck === item?.id;
@@ -540,28 +617,19 @@ export function EntriesTable({
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
-          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
-          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
-        {item && expanded ? (
+          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row}
+            // A covered place's "?" keeps its place: its dialog, map and Save this place (Codex r2 on #609).
+            onOpen={row.place ? () => openPlaceDialog(row.place!, item.id) : row.trip ? () => openTripDialog(item.id, row.trip!) : undefined}
+            onYes={checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />
+            : null
+          : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
+            nowMs={nowMs} row={row}
+            onCorrect={row.kind === "place" ? () => openPlaceDialog(row.place, row.checkIds[0] ?? null) : undefined}
+            onYes={item && checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />}
+        {/* Owner final change 1 (28 Oct 2026): a row that opens a dialog shows no question under it (the dialog asks
+            it); Apple Health, which has no dialog, asks here with the compact pills. */}
+        {item && expanded && row.kind === "check" && !row.trip && !row.place ? (
           <CheckQuestionRow clock={clock} item={item}
-            editor={editingCheck === item.id ? (
-              <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
-                // Only its own editor: a late save closes after resolving, by then perhaps over another trip's
-                // editor (Codex r3 on #590).
-                onClose={() => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : current))}
-                onResolved={() => {
-                  void onChanged?.();
-                  // Saved after the person opened another question: that one, and its editor, stay as they are.
-                  if (openCheckNow.current !== item.id) return;
-                  // Saved in the editor: as an answer, focus goes to the next "?" down the List.
-                  const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
-                  applyTimelineRegroup(() => setFocusedCheck(null));
-                  focusCheck(following?.key ?? null);
-                }}
-                reviewItemId={item.id} />
-            ) : undefined}
-            onEdit={hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
-              ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
             onAnswer={(kind) => {
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
               const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
@@ -587,6 +655,20 @@ export function EntriesTable({
   const focusCheck = (key: string | null) => {
     pendingRestore.current = null;
     pendingFocus.current = key;
+  };
+  // Only while it still asks (the asking list): past midnight on its 7th day the dialog stops asking it (Codex r2 on #609).
+  const dialogCheck = correctionCheckId && shownChecks.some((check) => check.id === correctionCheckId)
+    ? listChecks.itemsById.get(correctionCheckId) : undefined;
+  const dialogWords = dialogCheck ? checkQuestionWords(dialogCheck, clock) : null;
+  /**
+   * A dialog's "?" (or a row's Yes pill, Codex r6 on #609) answered: held for Undo like an inline answer; focus then goes to the next "?" down the List,
+   * else the chip, else the List, as there (Codex r1 on #609: the row that opened the dialog is gone).
+   */
+  const answerFromDialog = (checkId: string, yes: boolean) => {
+    const at = checkRows.findIndex((other) => checkOf(other)?.id === checkId);
+    const following = at < 0 ? undefined : checkRows.slice(at + 1).find((other) => other.key !== checkRows[at].key);
+    applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip"));
+    focusCheck(following?.key ?? null);
   };
   const restoredItemId = listChecks.state.restored?.itemId ?? null;
   const restoredSequence = listChecks.state.restored?.sequence ?? 0;
@@ -618,21 +700,80 @@ export function EntriesTable({
   });
   // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
   // (location v4 step 14), once per visit.
-  const openFirstCheck = searchParams.get("check") === "first";
-  const openedFromLink = useRef(false);
+  const checkParam = searchParams.get("check");
+  const openFirstCheck = checkParam === "first";
+  // The badge and the chip link to one "?" by its id (owner concern 4); it opens once its row is in.
+  const linkedCheckRow = checkParam && !openFirstCheck ? checkRows.find((row) => checkOf(row)?.id === checkParam) : undefined;
+  const openedFromLink = useRef<string | null>(null);
+  // A link can open its "?" before that day's places are read: it opens under its own row then. When the place or
+  // trip arrives and the question is still open, its dialog opens in its place, once (Codex r1 on #609).
+  const linkedOpen = useRef<{ id: string; dialog: boolean; seen?: boolean } | null>(null);
+  // A link leaving the URL ends that visit: coming back to it on purpose opens its "?" again, while a refresh
+  // with the link still there never does (Codex r2 on #609).
   useEffect(() => {
-    if (!openFirstCheck || openedFromLink.current || !checkRows.length) return;
+    if (checkParam) return;
+    openedFromLink.current = null;
+    linkedOpen.current = null;
+    // Leaving a link also ends any chip step's claim on it: only the navigation pending then is suppressed.
+    chipSteps.current.links.clear();
+  }, [checkParam]);
+  useEffect(() => {
+    if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
+    if (!openFirstCheck && !linkedCheckRow) return;
+    // The link a chip step made that a newer step has passed: consumed without opening or moving focus.
+    const stepToken = chipSteps.current.links.get(checkParam);
+    if (stepToken !== undefined && stepToken !== chipSteps.current.latest) {
+      openedFromLink.current = checkParam;
+      // Consumed: the step's claim ends here, so a later deliberate visit to this "?" opens it (Codex r9 on #609).
+      chipSteps.current.links.delete(checkParam);
+      return;
+    }
     const frame = requestAnimationFrame(() => {
-      openedFromLink.current = true;
+      openedFromLink.current = checkParam;
+      // Consumed by opening: its step's token retires too, so suppression only ever applies to a link still pending
+      // (Codex r10 on #609).
+      chipSteps.current.links.delete(checkParam);
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
-      const opened = nextCheck();
+      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : nextCheck();
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
+        const row = checkRows.find((other) => checkOf(other)?.id === opened);
+        linkedOpen.current = row ? { id: opened, dialog: opensDialog(row) } : null;
       }
     });
     return () => cancelAnimationFrame(frame);
   });
+  useEffect(() => {
+    const linked = linkedOpen.current;
+    if (!linked || linked.dialog) return;
+    if (focusedCheck !== linked.id) {
+      // Closed, or another "?" opened, once it had opened: nothing to bring back.
+      if (linked.seen) linkedOpen.current = null;
+      return;
+    }
+    linked.seen = true;
+    const row = checkRows.find((other) => checkOf(other)?.id === linked.id);
+    if (!row || !opensDialog(row)) return;
+    linkedOpen.current = { id: linked.id, dialog: true };
+    openCheckRow(row);
+  });
+  useEffect(() => {
+    const pending = correctionFocus.current;
+    if (correction || !pending) return;
+    if (!pending.saved) {
+      correctionFocus.current = null;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      correctionFocus.current = null;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const next = pending.nextKey ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === pending.nextKey) : null;
+      (next ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [correction]);
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -1150,6 +1291,7 @@ export function EntriesTable({
       ) : null}
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
+      <div className={`timeline-list-body${columnShown ? " has-places-column" : ""}`}>
       <div
         aria-busy={localTimeReady && !continuousLoading ? undefined : true}
         className="timeline-list-scroll"
@@ -1169,6 +1311,7 @@ export function EntriesTable({
             anchorFrameRef.current = requestAnimationFrame(() => {
               anchorFrameRef.current = null;
               recordScrollAnchor();
+              if (columnShown) trackColumnDay();
             });
           }
           onScroll(event);
@@ -1180,7 +1323,16 @@ export function EntriesTable({
           scrollContainerRef(element);
         }}
       >
-        {localTimeReady ? <ChecksChip count={checkRows.length} onNext={nextCheck} /> : null}
+        {localTimeReady ? <ChecksChip count={askingOrder.length} onNext={pressChip} /> : null}
+        {/* Owner item H: a quiet filter at the top of the List, not a filled pill under it. */}
+        {localTimeReady && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
+          <div className="timeline-places-filter">
+            <button aria-pressed={showEveryPlace} onClick={() => setShowEveryPlace((current) => !current)} type="button">
+              {showEveryPlace ? "Fewer places" : "All places"}
+            </button>
+            {wide ? <button onClick={() => setPlacesColumn(true)} type="button">Places beside the List</button> : null}
+          </div>
+        ) : null}
         {continuous && localTimeReady ? (
           <ContinuousEdge direction="later" error={continuousError === "later"} loading={continuousLoading === "later"}
             onRetry={() => continuous.onLoad("later")} reachedEnd={continuous.reachedLatest} sentinelRef={laterSentinelRef} />
@@ -1481,9 +1633,6 @@ export function EntriesTable({
           <ContinuousEdge direction="earlier" error={continuousError === "earlier"} loading={continuousLoading === "earlier"}
             onRetry={() => continuous.onLoad("earlier")} reachedEnd={continuous.reachedEarliest} sentinelRef={earlierSentinelRef} />
         ) : null}
-        {localTimeReady && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
-          <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
-        ) : null}
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
@@ -1491,9 +1640,32 @@ export function EntriesTable({
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>
+      {columnShown ? (() => {
+        const dayStart = columnDayStartMs ?? continuous?.focusDayStartMs ?? (dayTimelines[0] ? Date.parse(dayTimelines[0].dayStart) : null);
+        const timeline = dayTimelines.find((candidate) => Date.parse(candidate.dayStart) === dayStart) ?? null;
+        const askingBySegment = new Map(shownChecks.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []));
+        return (
+          <PlacesColumn askingBySegment={askingBySegment} blocks={entries} clock={clock} nowMs={nowMs}
+            onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
+            onCorrectTrip={(trip, route) => openCorrection({ kind: "trip", trip, route })}
+            onHide={() => setPlacesColumn(false)}
+            onOpenCheck={(checkId) => {
+              const row = checkRows.find((other) => checkOf(other)?.id === checkId);
+              if (row) openCheckRow(row);
+            }}
+            timeline={timeline} />
+        );
+      })() : null}
+      </div>
       {correction ? (
-        <LocationCorrectionDialog clock={clock} onClose={() => setCorrection(null)}
-          onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
+        <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => { setCorrection(null); setCorrectionCheckId(null); }}
+          // Held for Undo like an inline answer; focus then moves on. "Logs as" is log_place, which closes the "?" itself.
+          question={dialogCheck && dialogWords ? { text: dialogWords.question, yesLabel: dialogWords.yesLabel, noLabel: "Not now",
+            onAnswer: (yes: boolean) => answerFromDialog(dialogCheck.id, yes) } : null}
+          onCorrected={async () => {
+            if (correctionFocus.current) correctionFocus.current.saved = true;
+            await onChanged?.();
+          }} onResolved={listChecks.settleResolved} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal
@@ -1672,7 +1844,9 @@ function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | n
  * colour and icon carry the activity, and the row's name says it).
  */
 function ListSecondaryLine({ entry }: { entry: TimeEntryRow }) {
-  if (entry.placeName) {
+  // Owner item F (28 Oct 2026): a place line that only repeats the title ("PureGym" / "📍 PureGym") is dropped.
+  const repeatsTitle = entry.placeName?.trim().toLowerCase() === timeEntryTitle(entry).trim().toLowerCase();
+  if (entry.placeName && !repeatsTitle) {
     return (
       <span className="timeline-task-secondary-line">
         <DayframeIcon glyph={entry.automaticMoveEventId ? "route" : "map-pin"} size={12} />

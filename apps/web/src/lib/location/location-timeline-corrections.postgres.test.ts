@@ -546,5 +546,95 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(entries.rows).toEqual([]);
     expect((await db.query(`select count(*)::int as n from review_items where location_segment_id = $1`, [placeRow])).rows[0].n).toBe(0);
   });
+  it("logs a place that still asks: its \"?\" closes as its own Not now does, then only the free time is logged (Codex r2 on #609)", async () => {
+    const db = database!;
+    const base = 8_000;
+    const categoryId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Lunch', 'teal') returning id`, [workspaceId])).rows[0].id;
+    const placeRow = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, algorithm_version, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'l-ask', 'device-1', 'location-v2.0', 'closed', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+         '{"placeMatchKind":"unknown"}'::jsonb) returning id`,
+      [workspaceId, userId, at(base), at(base + 60)])).rows[0].id;
+    // Its question is on the place's own location event, as replay asks it.
+    const eventId = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+       values ($1, $2, 'location-segment:l-ask', 'location_learning', 'unknown_stay', $3, 'medium', '{"clientSegmentId":"l-ask"}'::jsonb, 'needs_review')
+       returning id`, [workspaceId, userId, at(base)])).rows[0].id;
+    const reviewId = (await db.query<{ id: string }>(
+      `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at, suggested_stopped_at)
+       values ($1, $2, $3, $4, 'unknown_stay', 'Visited Boots', 'open', $5, $6) returning id`,
+      [workspaceId, userId, eventId, placeRow, at(base), at(base + 60)])).rows[0].id;
+    // Your own block covers 0–30: only 30–60 is logged.
+    await db.query(`insert into time_entries (workspace_id, user_id, source, started_at, stopped_at) values ($1, $2, 'manual_app', $3, $4)`,
+      [workspaceId, userId, at(base), at(base + 30)]);
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    const id = "66000000-0000-4000-8000-0000000000d2";
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-ask", categoryId, clientCorrectionId: id }, session);
+    expect(logged.logged?.resolvedReviewItemIds).toEqual([reviewId]);
+    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt", category_id as "categoryId"
+        from time_entries where id = any($1::uuid[]) order by started_at`, [logged.logged!.entryIds]);
+    expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString(), row.categoryId]))
+      .toEqual([[at(base + 30), at(base + 60), categoryId]]);
+    // The "?" is ignored (Not now's status), audited as its Not now is; nothing else was logged for it.
+    expect((await db.query(`select status from review_items where id = $1`, [reviewId])).rows[0].status).toBe("ignored");
+    expect((await db.query(`select count(*)::int as n from audit_log where workspace_id = $1 and action = 'ignore_once' and entity_id = $2`,
+      [workspaceId, placeRow])).rows[0].n).toBe(1);
+    // The place's own event was written last: confirmed and logged by you, never left ignored.
+    expect((await db.query(`select review_status as "status", raw_payload ->> 'semanticDisposition' as "disposition" from activity_events where id = $1`,
+      [eventId])).rows[0]).toEqual({ status: "confirmed", disposition: "logged_by_you" });
+    expect((await db.query(`select status from stay_segments where id = $1`, [placeRow])).rows[0].status).toBe("finalised");
+    // A retry gets the same answer; a phone's queued Not now for the "?" resolves as equivalent.
+    expect(await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-ask", categoryId, clientCorrectionId: id }, session))
+      .toEqual(logged);
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    expect(await resolveLocationReviewAction(reviewId, { action: "ignore_once_location" }, session))
+      .toMatchObject({ ok: true, alreadyResolved: true, equivalent: true });
+  });
+
+  it("logs an outing's stay with its trips closed as the outing's Not now, never splitting it (Codex r2 on #609)", async () => {
+    const db = database!;
+    const base = 9_000;
+    const categoryId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Shop', 'teal') returning id`, [workspaceId])).rows[0].id;
+    const stayRow = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, algorithm_version, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'o-stay', 'device-1', 'location-v2.0', 'closed', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+         '{"placeMatchKind":"unknown"}'::jsonb) returning id`,
+      [workspaceId, userId, at(base + 10), at(base + 40)])).rows[0].id;
+    const fromRow = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, algorithm_version, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'o-home', 'device-1', 'location-v2.0', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+         '{"placeMatchKind":"saved"}'::jsonb) returning id`,
+      [workspaceId, userId, at(base - 30), at(base)])).rows[0].id;
+    const tripRow = (await db.query<{ id: string }>(
+      `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
+         from_stay_segment_id, to_stay_segment_id, confidence, metadata)
+       values ($1, $2, 'device-1', 'o-in', 'location-v2.0', 'finalised', $3, $4, $5, $6, 'medium', '{}'::jsonb) returning id`,
+      [workspaceId, userId, at(base), at(base + 10), fromRow, stayRow])).rows[0].id;
+    const ask = async (clientSegmentId: string, segmentId: string, role: string, eventType: string, start: number, stop: number) => {
+      const event = (await db.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+         values ($1, $2, $3, 'location_learning', $4, $5, 'medium', $6::jsonb, 'needs_review') returning id`,
+        [workspaceId, userId, `location-segment:${clientSegmentId}`, eventType, at(base + start),
+          JSON.stringify({ clientSegmentId, outingKey: "outing-1", outingRole: role })])).rows[0].id;
+      return (await db.query<{ id: string }>(
+        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at, suggested_stopped_at)
+         values ($1, $2, $3, $4, $5, 'Outing', 'open', $6, $7) returning id`,
+        [workspaceId, userId, event, segmentId, eventType, at(base + start), at(base + stop)])).rows[0].id;
+    };
+    const stayReview = await ask("o-stay", stayRow, "stay", "unknown_stay", 10, 40);
+    const tripReview = await ask("o-in", tripRow, "in", "commute_detected", 0, 10);
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId }, session);
+    expect([...logged.logged!.resolvedReviewItemIds].sort()).toEqual([stayReview, tripReview].sort());
+    expect((await db.query(`select id, status from review_items where id = any($1::uuid[]) order by id`, [[stayReview, tripReview]])).rows
+      .map((row) => row.status)).toEqual(["ignored", "ignored"]);
+    // Only the stay's time is logged: the trip is closed with its outing, never logged by Logs as.
+    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries where id = any($1::uuid[])`,
+      [logged.logged!.entryIds]);
+    expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString()]))
+      .toEqual([[at(base + 10), at(base + 40)]]);
+  });
 });
 

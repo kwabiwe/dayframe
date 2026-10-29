@@ -11,7 +11,12 @@ function reviewLabel(count: number) {
 }
 
 function checkLabel(count: number) {
-  return `Calendar, ${count} to check`;
+  return `Calendar, ${count} to check in the last 7 days. Opens the oldest.`;
+}
+
+/** Calendar's link: while something is to check, its oldest question (owner, 28 Oct 2026, concern 4). */
+function hrefFor(section: (typeof SHELL_SECTIONS)[number], calendarHref?: string) {
+  return section.id === "calendar" && calendarHref ? calendarHref : section.href;
 }
 
 /**
@@ -20,9 +25,11 @@ function checkLabel(count: number) {
  * (which retargets from wherever it is when the route changes again), and Reduce Motion moves it
  * without travel. Pages outside the five sections (Settings) fade the thumb out.
  */
-export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
+export function ShellSidebarNav({ activeId, calendarHref, checkCount = 0, reviewCount }: {
   activeId: ShellSectionId | null;
-  /** Things to check today and the 7 days before, on Calendar (location v4 step 14). */
+  /** Calendar's link while something is to check: its oldest question. */
+  calendarHref?: string;
+  /** Things to check today and the 6 days before, on Calendar. */
   checkCount?: number;
   reviewCount: number;
 }) {
@@ -77,7 +84,7 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
         return (
           <Link
             key={section.id}
-            href={section.href}
+            href={hrefFor(section, calendarHref)}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
@@ -93,7 +100,9 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
 }
 
 /** Below 860 px the sections move to a glass bar along the bottom edge. */
-export function ShellTabBar({ activeId, checkCount = 0, reviewCount }: { activeId: ShellSectionId | null; checkCount?: number; reviewCount: number }) {
+export function ShellTabBar({ activeId, calendarHref, checkCount = 0, reviewCount }: {
+  activeId: ShellSectionId | null; calendarHref?: string; checkCount?: number; reviewCount: number;
+}) {
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
       {SHELL_SECTIONS.map((section) => {
@@ -102,7 +111,7 @@ export function ShellTabBar({ activeId, checkCount = 0, reviewCount }: { activeI
         return (
           <Link
             key={section.id}
-            href={section.href}
+            href={hrefFor(section, calendarHref)}
             aria-current={active ? "page" : undefined}
             aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
           >

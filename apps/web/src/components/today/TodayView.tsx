@@ -13,6 +13,9 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
+import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { blockStyle } from "@/lib/block-style";
@@ -161,7 +164,16 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   }, []);
   const [openPatterns, setOpenPatterns] = useState<ReadonlySet<string>>(() => new Set());
   // Today's things to check (location v4 step 14), and the last count shown, so the chip keeps its words while it closes.
-  const liveCheckCount = data.stats.dayCheckCount ?? 0;
+  // Intended, owner-approved (28 Oct 2026): this chip is "N to check today", so it counts only today's "?" (from the
+  // badge's own list) and opens today's oldest. The 7-day count and oldest-first stepping are the sidebar badge's and
+  // the List chip's; this one deliberately differs (Codex r1 on #609, ruled by the orchestrator).
+  const todayStartMs = useLocalDayStartMs();
+  const projectedItems = useProjectedReviewItems(data.reviewItems);
+  const todayChecks = useMemo(() => todayStartMs !== null
+    ? askingChecks(projectedItems, todayStartMs)
+      .filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs)
+    : null, [projectedItems, todayStartMs]);
+  const liveCheckCount = todayChecks ? todayChecks.length : data.stats.dayCheckCount ?? 0;
   const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);
   if (liveCheckCount > 0 && liveCheckCount !== shownCheckCount) setShownCheckCount(liveCheckCount);
   const togglePattern = useCallback((key: string) => {
@@ -218,7 +230,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const week = previousDays(entries, nowMs);
   // Review cards: an outing counts once (PRD D19, PR 12c).
   // Things to check today (location v4 step 14); an older server sends none, so nothing shows.
-  const dayCheckCount = data.stats.dayCheckCount ?? 0;
+  const dayCheckCount = liveCheckCount;
 
   return (
     <div className="df-today">
@@ -227,7 +239,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
       <div aria-hidden={dayCheckCount > 0 ? undefined : true} className="df-today-checks" data-open={dayCheckCount > 0}
         inert={dayCheckCount > 0 ? undefined : true}>
         <div>
-          <Link className="timeline-checks-chip" href="/timeline?view=list&scope=day&check=first">
+          <Link className="timeline-checks-chip" href={todayChecks?.length ? oldestCheckHref(todayChecks) : "/timeline?view=list&scope=day&check=first"}>
             <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
             {shownCheckCount} to check today
             <ChevronRight aria-hidden="true" size={14} />

@@ -9777,22 +9777,6 @@ dialog.ui-dialog.df-palette {
   padding: 2px 6px 2px 8px;
 }
 
-.calendar-review-mark {
-  margin-right: 3px;
-  color: var(--warning-text);
-  font-weight: 700;
-}
-
-/* Reduce Transparency's stronger hatch would put the "?" under 3:1 on some fills: it sits on a small surface
-   chip there, where the warning text is AA by design (Codex r5 on #583). */
-@media (prefers-reduced-transparency: reduce) {
-  .calendar-review-mark {
-    border-radius: 3px;
-    padding: 0 2px;
-    background: var(--surface);
-  }
-}
-
 /* A finished block of a minute or less: a short line with a dot at the column's left edge, inside the
    8 px every block keeps clear, so it never crosses a block; its title on hover, tap and to assistive tech. */
 .calendar-moment {
@@ -14261,14 +14245,6 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
 }
 
-.timeline-location-mark.is-unknown {
-  background:
-    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 32%, transparent) 0 3px, transparent 3px 7px),
-    color-mix(in oklab, var(--warning) 12%, var(--surface));
-  box-shadow: inset 0 0 0 1.5px var(--warning);
-  color: var(--warning-text);
-}
-
 .timeline-location-mark.is-faint {
   height: 24px;
   background: transparent;
@@ -14413,12 +14389,6 @@ dialog.ui-dialog.df-palette {
   font-weight: 600;
 }
 
-.timeline-location-foot {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0 16px;
-}
-
 .timeline-location-chip {
   display: inline-flex;
   min-height: 44px;
@@ -14438,6 +14408,215 @@ dialog.ui-dialog.df-palette {
   background: var(--foreground);
   color: var(--surface);
 }
+
+/* Calendar (owner, 28 Oct 2026): one signal per row. A location row's mark is its normal icon in
+   the usual filled square; a row that asks something adds one amber dot at the mark's corner (concern 1).
+   The whole row is the control, so there is no second "?" box. */
+.timeline-location-mark.is-v4 {
+  position: relative;
+}
+
+.timeline-location-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.timeline-location-hit {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.timeline-location-hit {
+  cursor: pointer;
+}
+
+button.timeline-location-hit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.timeline-location-span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.timeline-location-row.is-quiet .timeline-task-primary-line {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.timeline-location-row.is-quiet .timeline-location-mark {
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .timeline-location-row.is-v4:has(button.timeline-location-hit:hover) {
+    background: var(--surface-muted);
+  }
+}
+
+/* "N to check" stays in view while the List scrolls across days (concern 4). */
+.timeline-checks-bar.is-sticky {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  height: 0;
+  overflow: visible;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+@media (max-width: 760px) {
+  .timeline-checks-bar.is-sticky {
+    justify-content: flex-end;
+  }
+}
+
+.timeline-checks-bar.is-sticky .timeline-checks-chip {
+  margin-top: 6px;
+  box-shadow: 0 4px 14px color-mix(in oklab, black 18%, transparent);
+}
+
+/* Card F: on wide web the List and a "Places and trips" column sit side by side. */
+.timeline-list-body {
+  display: contents;
+}
+
+.timeline-list-body.has-places-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.timeline-places-column {
+  display: flex;
+  width: 320px;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.timeline-places-column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  background: var(--surface);
+}
+
+.timeline-places-column-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.timeline-places-column-head small,
+.timeline-places-column-item small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.timeline-location-chip.is-compact {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.timeline-places-column-empty {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.timeline-places-column-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 8px 16px;
+  list-style: none;
+}
+
+.timeline-places-column-item {
+  border-radius: 12px;
+  padding: 6px 8px;
+}
+
+.timeline-places-column-item .timeline-location-hit {
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.timeline-places-column-item b {
+  font-size: 13.5px;
+}
+
+@media (hover: hover) {
+  .timeline-places-column-item:has(> button.timeline-location-hit:hover) {
+    background: var(--surface-muted);
+  }
+}
+
+.timeline-places-column-legs {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0 48px;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-places-column-leg {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-places-column-leg:hover {
+  background: var(--surface-muted);
+}
+
+.timeline-places-column-leg.is-unsure {
+  color: var(--warning-text);
+}
+
 
 /* A leg whose mode can be set is one button laid out as the leg (location v4 step 13). */
 .timeline-trip-leg-button {
@@ -14529,11 +14708,6 @@ dialog.ui-dialog.df-palette {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
-}
-
-.timeline-check-toggle[aria-expanded="true"] {
-  background: color-mix(in oklab, var(--warning) 16%, var(--surface));
-  color: var(--warning-text);
 }
 
 /* Correcting the location timeline (location v4 step 13): the dialog's sections. */
@@ -14738,6 +14912,330 @@ dialog.ui-dialog.df-palette {
   .timeline-trip-legs-toggle svg {
     transition: none;
   }
+}
+
+/* Location v4 step 16: a trip block's legs down its left edge, one segment per leg in proportion to its
+   time; an Unsure leg is hatched. The title moves right to make room. */
+.calendar-time-block.has-leg-strip .calendar-entry-primary {
+  padding-left: 24px;
+}
+
+.calendar-leg-strip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 5px;
+  z-index: 2;
+  width: 16px;
+  pointer-events: none;
+}
+
+.calendar-leg-segment {
+  position: absolute;
+  left: 0;
+  display: grid;
+  width: 16px;
+  min-height: 2px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--block, var(--text-secondary)) 34%, var(--surface));
+  box-shadow: 0 0 0 1px var(--surface);
+  color: var(--text-primary);
+}
+
+.calendar-leg-segment.is-unsure {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 45%, transparent) 0 3px, transparent 3px 6px),
+    color-mix(in oklab, var(--warning) 14%, var(--surface));
+  color: var(--warning-text);
+}
+
+/* Location v4 step 17: the Places lane on the left of a day column (about a fifth of it). */
+.calendar-places-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.calendar-places-item {
+  position: absolute;
+  right: 3px;
+  left: 0;
+  display: grid;
+  min-height: 3px;
+  place-items: start center;
+  padding-top: 3px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--text-secondary) 12%, var(--surface));
+  color: var(--text-secondary);
+  pointer-events: auto;
+}
+
+.calendar-places-item.is-trip {
+  right: 40%;
+  left: 40%;
+  padding-top: 0;
+  background: color-mix(in oklab, var(--text-secondary) 30%, var(--surface));
+}
+
+.calendar-places-item.is-asking {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 32%, transparent) 0 3px, transparent 3px 7px),
+    color-mix(in oklab, var(--warning) 10%, var(--surface));
+  color: var(--warning-text);
+}
+
+.calendar-places-item.is-trip.is-asking {
+  right: 25%;
+  left: 25%;
+}
+
+.calendar-places-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.calendar-places-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* Location v4 step 15 on the web: the correction dialog opens with the map, then the choices. */
+.location-correction-map {
+  overflow: hidden;
+  min-height: 180px;
+  margin: 0 0 4px;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-map.is-loading {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.location-correction-legs {
+  display: grid;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-inset, var(--surface-muted));
+}
+
+.location-correction-leg {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 16px;
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-correction-leg:first-child {
+  border-top: 0;
+}
+
+.location-correction-leg small,
+.location-correction-leg b {
+  display: block;
+}
+
+.location-correction-leg small {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.location-correction-back,
+.location-correction-more {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  border: 0;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-logs-as {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-correction-pill {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-pill[aria-checked="true"] {
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.location-correction-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-correction-save input {
+  min-width: 0;
+  min-height: 44px;
+  flex: 1 1 180px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.location-correction-shape:has(> button + button) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Owner item A: a dialog opened from a row asks its "?" at the top. */
+.location-correction-question {
+  display: grid;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-question-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Calendar (owner items B, D, E, H, K). */
+.timeline-location-span.is-stacked {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timeline-location-span.is-stacked > span + span {
+  color: var(--text-secondary);
+}
+
+.timeline-location-row.is-quiet .timeline-location-mark.is-v4 {
+  background: var(--surface-muted);
+}
+
+.timeline-row-yes {
+  min-height: 32px;
+}
+
+.timeline-places-filter {
+  display: flex;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.timeline-places-filter button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.timeline-places-filter button[aria-pressed="true"] {
+  color: var(--text-primary);
+}
+
+.timeline-places-filter button:hover {
+  background: var(--surface-muted);
+}
+
+/* Owner item K: a question on the Grid is a light fill, a dashed amber edge and the amber dot (no hatching). */
+.calendar-review-block.is-v4 {
+  background: color-mix(in oklab, var(--warning) 7%, var(--surface)) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 55%, transparent);
+  outline: 1px dashed color-mix(in oklab, var(--warning) 70%, transparent);
+  outline-offset: -1px;
+}
+
+.calendar-review-block.is-v4::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.calendar-places-item.is-asking {
+  background: color-mix(in oklab, var(--warning) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 60%, transparent);
+}
+
+/* 44 px targets around the small new controls (Codex r1 on #609; WCAG 2.5.5): the row Yes pills, the List's
+   places filter and the Grid's Places-lane items keep their drawn size, with an invisible hit area of at least
+   44 × 44 px centred on each. */
+.timeline-row-yes,
+.timeline-places-filter button {
+  position: relative;
+}
+
+.timeline-row-yes::before,
+.timeline-places-filter button::before,
+.calendar-places-item::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  content: "";
+  transform: translate(-50%, -50%);
 }
 
 @media (any-pointer: coarse) {

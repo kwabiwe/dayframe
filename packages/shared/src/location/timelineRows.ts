@@ -48,7 +48,9 @@ export type LocationListRow =
   | { kind: "open_trip"; key: string; atMs: number; startedAt: string; fromName: string | null; legs: TripLeg[]; mode: string | null }
   /** A "?" with no place row: a trip not yet in a block (with its route and legs), Apple Health, or anything else. */
   | { kind: "check"; key: string; atMs: number; checkId: string; startedAt: string | null; stoppedAt: string | null;
-      trip: (TimelineTrip & { route: string }) | null };
+      trip: (TimelineTrip & { route: string }) | null;
+      /** The place it is about, when that place is no row because your blocks cover it (`hideCovered`). */
+      place?: TimelinePlace };
 
 type Interval = { startedAt: string; stoppedAt: string | null };
 
@@ -72,7 +74,13 @@ export function uncoveredSeconds(fromMs: number, toMs: number, intervals: readon
  * faint only with `showAll`. Superseded and ignored items never show.
  */
 export function locationListRows(timeline: LocationTimeline | null, entries: readonly Interval[],
-  options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[] }) {
+  options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[];
+    /**
+     * Owner, 28 Oct 2026 (concern 2): a place whose time your blocks cover is never a row,
+     * even with "Show all places"; the block's place line stands for it. A "?" about such a place is then a check
+     * row of its own at its time, so it still asks once and is counted once (Codex r1 on #609).
+     */
+    hideCovered?: boolean }) {
   if (!timeline) return [];
   // A check about a place shows on its row (which then always shows); any other check is a row of its own.
   const placeIds = new Set(timeline.items.flatMap((item) => item.kind === "place" ? [item.id] : []));
@@ -84,6 +92,8 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
   const dayEndMs = Date.parse(timeline.dayEnd);
   const names = new Map(timeline.items.flatMap((item) => item.kind === "place" ? [[item.id, item.name] as const] : []));
   const rows: LocationListRow[] = [];
+  // Places hidden because your blocks cover them: their "?" become rows of their own below.
+  const coveredPlaces = new Map<string, TimelinePlace>();
   for (const item of timeline.items) {
     if (item.kind !== "place" || item.status === "ignored") continue;
     const fromMs = Math.max(Date.parse(item.startedAt), dayStartMs);
@@ -94,6 +104,10 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     // A place you are still at counts up to now.
     const unlogged = unloggedSeconds >= UNLOGGED_PLACE_MINIMUM_SECONDS;
     const checkIds = checksByPlace.get(item.id) ?? [];
+    if (options.hideCovered && unloggedSeconds < 60) {
+      coveredPlaces.set(item.id, item);
+      continue;
+    }
     if ((!known && unlogged) || checkIds.length) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
         faint: false, checkIds });
@@ -106,13 +120,15 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
   const trips = new Map(timeline.items.flatMap((item) => item.kind === "trip"
     ? [[item.id, { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` }] as const] : []));
   for (const check of options.checks ?? []) {
-    if (check.segmentId && placeIds.has(check.segmentId)) continue;
+    if (check.segmentId && placeIds.has(check.segmentId) && !coveredPlaces.has(check.segmentId)) continue;
+    const coveredPlace = check.segmentId ? coveredPlaces.get(check.segmentId) : undefined;
     const trip = check.segmentId ? trips.get(check.segmentId) ?? null : null;
     const startedAt = trip?.startedAt ?? check.startedAt;
     const atMs = startedAt ? Date.parse(startedAt) : NaN;
     // Only checks on this day.
     if (!listCheckOverlaps({ startedAt, stoppedAt: check.stoppedAt }, dayStartMs, dayEndMs)) continue;
-    rows.push({ kind: "check", key: `check-${check.id}`, atMs, checkId: check.id, startedAt, stoppedAt: trip?.stoppedAt ?? check.stoppedAt, trip });
+    rows.push({ kind: "check", key: `check-${check.id}`, atMs, checkId: check.id, startedAt, stoppedAt: trip?.stoppedAt ?? check.stoppedAt, trip,
+      ...(coveredPlace ? { place: coveredPlace } : {}) });
   }
   if (timeline.openTrip) {
     rows.push({ kind: "open_trip", key: "open-trip", atMs: Date.parse(timeline.openTrip.startedAt), startedAt: timeline.openTrip.startedAt,
@@ -153,4 +169,30 @@ export function legDetail(leg: TripLeg) {
     ? leg.mode === "underground" ? "no GPS underground, guessed from the gap" : "no GPS for this leg"
     : null;
   return [km, how, leg.confidence === "likely" ? "likely" : null].filter(Boolean).join(" · ");
+}
+
+/**
+ * Owner, 28 Oct 2026 (concern 4): a "?" asks for 7 days — today and the 6 days before.
+ * The badge, the chips and the reminder count only these; an older one stops asking (no dot, not counted) and
+ * its place stays an ordinary row you can still correct. Nothing is answered for you.
+ */
+export const CHECK_ASKING_DAYS = 7;
+
+/** The start of the asking window: local midnight of the day 6 days before `todayStartMs`'s day. */
+export function checkAskingStartMs(todayStartMs: number) {
+  const start = new Date(todayStartMs);
+  start.setDate(start.getDate() - (CHECK_ASKING_DAYS - 1));
+  start.setHours(0, 0, 0, 0);
+  return start.getTime();
+}
+
+/** Whether a check still asks: it ends (or, without an end, starts) inside the asking window. */
+export function checkStillAsks(check: Pick<ListCheck, "startedAt" | "stoppedAt">, askingStartMs: number) {
+  const endMs = Date.parse(check.stoppedAt ?? check.startedAt ?? "");
+  return Number.isFinite(endMs) && endMs > askingStartMs;
+}
+
+/** Checks in the order the badge and "N to check" step through them: oldest first, across days. */
+export function checksOldestFirst<T extends Pick<ListCheck, "id" | "startedAt">>(checks: readonly T[]) {
+  return [...checks].sort((a, b) => (Date.parse(a.startedAt ?? "") || 0) - (Date.parse(b.startedAt ?? "") || 0) || a.id.localeCompare(b.id));
 }

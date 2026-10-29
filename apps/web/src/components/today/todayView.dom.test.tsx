@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("")
@@ -53,6 +53,16 @@ async function mount(data: BootstrapData) {
   const root = createRoot(container);
   await act(async () => root.render(tree(data)));
   return { container, root };
+}
+
+/** An open location suggestion: one "?" in Calendar › List. */
+function checkItem(id: string, startedAt: string, stoppedAt: string): ReviewItemRow {
+  return {
+    id, type: "location_place", title: "Visited a place", eventSource: "location", eventType: "geofence_stay", projectName: null,
+    categoryName: null, categoryColor: null, placeName: null, suggestedProjectId: null, suggestedCategoryId: null, suggestedPlaceId: null,
+    suggestedStartedAt: startedAt, suggestedStoppedAt: stoppedAt, confidence: "medium", status: "open", notes: null, rawPayload: null,
+    createdAt: startedAt
+  };
 }
 
 /** Today's rows, without a named pattern's parts (they sit in its panel, open or not). */
@@ -254,14 +264,23 @@ describe("Today", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const data = bootstrap();
-    const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 2 } });
+    // The chip counts today's "?" from the badge's own list (owner, 28 Oct 2026): yesterday's and an
+    // answered one don't count here, and the server's dayCheckCount only stands in before hydration.
+    const reviewItems = [
+      checkItem("check-today-late", local(10), local(10, 30)),
+      checkItem("check-today-early", local(9), local(9, 20)),
+      checkItem("check-yesterday", new Date(2026, 7, 16, 15).toISOString(), new Date(2026, 7, 16, 16).toISOString()),
+      { ...checkItem("check-answered", local(8), local(8, 30)), status: "accepted" }
+    ];
+    const { container, root } = await mount({ ...data, reviewItems, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 7 } });
     expect(container.querySelector<HTMLElement>(".df-today-checks")?.dataset.open).toBe("true");
     const chip = container.querySelector<HTMLAnchorElement>(".df-today-checks a");
     expect(chip?.textContent).toContain("2 to check today");
-    expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&check=first");
+    // It opens today's oldest question in Calendar's List.
+    expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&date=2026-08-17&check=check-today-early");
     // The Review card is gone; nothing shows when there is nothing to check today.
     expect(container.textContent).not.toContain("moments waiting");
-    await act(async () => root.render(tree({ ...data, stats: { ...data.stats, dayCheckCount: 0 } })));
+    await act(async () => root.render(tree({ ...data, reviewItems: reviewItems.slice(2), stats: { ...data.stats, dayCheckCount: 7 } })));
     // It closes (its row folds away and fades; at once with Reduce Motion), hidden from assistive tech and the keyboard.
     const closed = container.querySelector<HTMLElement>(".df-today-checks");
     expect(closed?.dataset.open).toBe("false");

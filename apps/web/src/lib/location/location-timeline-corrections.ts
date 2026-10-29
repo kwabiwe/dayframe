@@ -15,6 +15,7 @@ import type { RequestSession } from "../session";
 import { placeDisplayNameSql } from "../place-display";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import { recordReviewTitleHistory } from "./review-title-history";
+import { resolveLocationReviewActionWithClient } from "./location-review-service";
 
 /**
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
@@ -295,7 +296,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
       // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
       if (found && found.eventKind === "log_place" && request.kind === "log_place") {
-        return { ok: true as const, logged: { entryIds: await entriesFromEvent(client, session, found.eventId) } };
+        return { ok: true as const, logged: { entryIds: await entriesFromEvent(client, session, found.eventId),
+          resolvedReviewItemIds: await resolvedFromEvent(client, session, found.eventId) } };
       }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
       if (found) throw new TimelineCorrectionError("That change was already used for something else. Try again.", 409);
@@ -552,6 +554,14 @@ async function applyJoin(
     [...owner, first.id, second.stoppedAt]);
 }
 
+/** The questions a "Logs as" closed, as its event recorded them. */
+async function resolvedFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {
+  const ids = (await client.query<{ ids: unknown }>(
+    `select raw_payload -> 'resolvedReviewItemIds' as ids from activity_events where id = $1 and workspace_id = $2 and user_id = $3`,
+    [eventId, session.workspaceId, session.userId])).rows[0]?.ids;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+}
+
 async function entriesFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {
   return (await client.query<{ id: string }>(
     `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3 order by started_at`,
@@ -573,20 +583,18 @@ export function freeSpans(fromMs: number, toMs: number, taken: ReadonlyArray<{ f
 }
 
 /**
- * "Logs as" (step 12 part 4, orchestrator 28 Oct 2026): a finished place with no question and no block becomes
- * blocks with the picked activity, for the time the person's own blocks don't cover. Event-first: a
- * `location_place_logged` event naming the place's segment, then its blocks, then the place kept as decided,
- * as a confirmed suggestion is, so replay never replaces it.
+ * "Logs as" (step 12 part 4, orchestrator 28 Oct 2026): a finished place with no block becomes blocks with the
+ * picked activity, for the time the person's own blocks don't cover. Event-first: a `location_place_logged`
+ * event naming the place's segment, then its blocks, then the place kept as decided, as a confirmed suggestion
+ * is, so replay never replaces it. A place that still has open questions (asking or expired on the device) has
+ * each closed in the same transaction exactly as its own "Not now" closes it (`ignore_once_location`, with its
+ * audit), before the blocks are made; their ids come back as `resolvedReviewItemIds` (Codex r2 on #609).
  */
 async function logPlace(
   client: pg.PoolClient, session: RequestSession, request: Extract<TimelineCorrectionRequest, { kind: "log_place" }>, row: SegmentRow,
   clientEventId: string | null
 ) {
   if (!row.stoppedAt) throw new TimelineCorrectionError("This place hasn't ended yet. Log it once you've left.", 422);
-  const asked = await client.query(
-    `select 1 from review_items where workspace_id = $1 and user_id = $2 and location_segment_id = $3 and status = 'open' limit 1`,
-    [session.workspaceId, session.userId, row.id]);
-  if (asked.rowCount) throw new TimelineCorrectionError("This place has a question. Answer it instead.", 409);
   const category = await client.query(
     `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
   if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
@@ -602,12 +610,44 @@ async function logPlace(
     [session.workspaceId, session.userId, iso(row.startedAt), iso(row.stoppedAt)]);
   const free = freeSpans(fromMs, toMs, taken.rows.map((entry) => ({ fromMs: entry.startedAt.getTime(), toMs: entry.stoppedAt.getTime() })));
   if (!free.length) throw new TimelineCorrectionError("Your blocks already cover this place's time.", 409);
+  // The place's open questions close first, each as its own "Not now" does (status ignored, its audit): the
+  // blocks are the answer. An outing's stay closes with its trips (ignore_outing), never splitting the outing.
+  // The review rows are locked FOR UPDATE by the review service, under the owner lock this transaction holds;
+  // the place's own event is written last below, so it ends confirmed and logged by you, never ignored.
+  const asked = await client.query<{ id: string; outingKey: string | null }>(
+    `select ri.id, ae.raw_payload ->> 'outingKey' as "outingKey"
+       from review_items ri
+       join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+      where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = $3 and ri.status = 'open'
+      order by ri.id`,
+    [session.workspaceId, session.userId, row.id]);
+  const resolvedReviewItemIds: string[] = [];
+  for (const question of asked.rows) {
+    if (resolvedReviewItemIds.includes(question.id)) continue;
+    if (question.outingKey) {
+      const members = (await client.query<{ id: string }>(
+        `select ri.id
+           from review_items ri
+           join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+          where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ri.id <> $3
+            and ri.location_segment_id is not null and ae.raw_payload ->> 'outingKey' = $4
+          order by ri.id`,
+        [session.workspaceId, session.userId, question.id, question.outingKey])).rows.map((member) => member.id);
+      if (members.length) {
+        await resolveLocationReviewActionWithClient(client, question.id, { action: "ignore_outing", memberReviewItemIds: members }, session);
+        resolvedReviewItemIds.push(question.id, ...members);
+        continue;
+      }
+    }
+    await resolveLocationReviewActionWithClient(client, question.id, { action: "ignore_once_location" }, session);
+    resolvedReviewItemIds.push(question.id);
+  }
   const event = await client.query<{ id: string }>(
     `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
      values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
      returning id`,
-    [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId }),
-      clientEventId]);
+    [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId,
+      resolvedReviewItemIds }), clientEventId]);
   const entryIds: string[] = [];
   for (const span of free) {
     const entry = await client.query<{ id: string }>(
@@ -636,6 +676,6 @@ async function logPlace(
     [session.workspaceId, session.userId, `location-segment:${request.itemId}`.slice(0, 160), eventType, iso(row.startedAt),
       JSON.stringify({ clientSegmentId: request.itemId, startedAt: iso(row.startedAt), stoppedAt: iso(row.stoppedAt),
         semanticDisposition: "logged_by_you" })]);
-  return { ok: true as const, logged: { entryIds } };
+  return { ok: true as const, logged: { entryIds, resolvedReviewItemIds } };
 }
 
