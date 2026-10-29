@@ -119,7 +119,7 @@ import {
   startGeofences,
   type LocationVisitDiagnostics
 } from "@/lib/geofence";
-import { accuracyBurstDiagnostics, accuracyBurstSummaryLine, type AccuracyBurstState } from "@/lib/location/accuracyBurst";
+import { accuracyBurstDiagnostics, accuracyBurstStopped, accuracyBurstSummaryLine, type AccuracyBurstState } from "@/lib/location/accuracyBurst";
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
@@ -1727,6 +1727,8 @@ export default function SettingsScreen() {
         locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays),
         // The accuracy trial's days: arm, burst count and seconds only (card K).
         accuracyTrial: accuracyBurstDiagnostics(accuracyTrialState, new Date()),
+        // Whether the kill switch turned it off, and why: reason and local day only.
+        accuracyTrialStopped: accuracyBurstStopped(accuracyTrialState),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone

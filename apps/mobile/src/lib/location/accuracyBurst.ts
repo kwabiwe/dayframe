@@ -14,6 +14,12 @@ export const ACCURACY_BURST_FORCE_STOP_MS = 5 * 60_000;
 export const ACCURACY_BURST_MAX_PER_DAY = 6;
 /** Under the 20 minutes a day at best accuracy the location energy budget allows (performance.md). */
 export const ACCURACY_BURST_MAX_SECONDS_PER_DAY = 18 * 60;
+/**
+ * The trial's kill switch (orchestrator, 29 Oct 2026): a day whose measured best-accuracy time passes the 20 minutes
+ * performance.md allows, or a second failed restore of normal capture, turns the trial off for good.
+ */
+export const ACCURACY_BURST_KILL_SECONDS_PER_DAY = 20 * 60;
+export const ACCURACY_BURST_KILL_RESTORE_FAILURES = 2;
 export const ACCURACY_BURST_TRIAL_ON_DAYS = 7;
 export const ACCURACY_BURST_TRIAL_DAYS = 14;
 
@@ -35,7 +41,12 @@ export type AccuracyBurstDay = {
    * allowance counts as used and no further burst starts (Codex r22 on #619).
    */
   unmeasured?: boolean;
+  /** Seconds a lease measured on this day (elapsed time while the process ran): what the kill switch reads. */
+  measuredSeconds?: number;
 };
+
+/** Why the kill switch turned the trial off. */
+export type AccuracyBurstStopReason = "over_budget" | "restore_failed";
 
 export type AccuracyBurstState = {
   /** The trial's first day, this iPhone's local date (YYYY-MM-DD). */
@@ -61,6 +72,10 @@ export type AccuracyBurstState = {
     nativeStartedAt?: string;
   };
   lastEndedAt?: string;
+  /** Failed restores of normal capture so far (a guard's, a reading's, a relaunch's or an admission's). */
+  restoreFailures?: number;
+  /** Set once by the kill switch: no burst starts again in this trial. Day is the local day it tripped. */
+  stopped?: { reason: AccuracyBurstStopReason; day: string };
   /** Bursts by local day: how many started, and their seconds at best accuracy. */
   days: Record<string, AccuracyBurstDay>;
 };
@@ -113,7 +128,7 @@ export function withTrialProgress(state: AccuracyBurstState, now: Date): Accurac
 
 export type AccuracyBurstDecision =
   | { start: true }
-  | { start: false; reason: "trial_off" | "trial_done" | "active" | "cooldown" | "daily_count" | "daily_time" };
+  | { start: false; reason: "trial_off" | "trial_done" | "stopped" | "active" | "cooldown" | "daily_count" | "daily_time" };
 
 /**
  * Whether a departure or arrival now starts a burst. A burst still recorded as running (even past its 3 minutes,
@@ -123,6 +138,7 @@ export type AccuracyBurstDecision =
 export function accuracyBurstDecision(
   state: AccuracyBurstState, now: Date, trigger: AccuracyBurstTrigger = "saved_exit"
 ): AccuracyBurstDecision {
+  if (state.stopped) return { start: false, reason: "stopped" };
   const arm = accuracyBurstArm(state, now);
   if (arm === "off") return { start: false, reason: "trial_off" };
   if (arm === "done") return { start: false, reason: "trial_done" };
@@ -227,6 +243,7 @@ export function endAccuracyBurst(
   // Without evidence of when best accuracy started, every later day it may have run on counts it too: a day's cap
   // can be met early, never passed (Codex r17 on #619).
   const startKnown = (nativeStartMs != null && Number.isFinite(nativeStartMs)) || Number.isFinite(storedNative);
+  const measured = !unmeasured && elapsedMs != null && Number.isFinite(elapsedMs);
   for (const part of dayParts(started, ended, offsetMinutes)) {
     const day = days[part.key] ?? { count: 0, seconds: 0 };
     // Rounded up, never to the nearest: fractions lost per burst would add up past the day's allowance (Codex r26 on
@@ -238,7 +255,7 @@ export function endAccuracyBurst(
       [trigger]: { count: (day.byTrigger?.[trigger]?.count ?? 0) + counted, seconds: (day.byTrigger?.[trigger]?.seconds ?? 0) + seconds }
     } : day.byTrigger;
     days[part.key] = { ...day, count: day.count + counted, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}),
-      ...(unmeasured ? { unmeasured: true } : {}) };
+      ...(unmeasured ? { unmeasured: true } : {}), ...(measured ? { measuredSeconds: (day.measuredSeconds ?? 0) + seconds } : {}) };
   }
   if (unmeasured) {
     // Every day it may have run on, through the day it was settled: none starts another burst.
@@ -248,12 +265,37 @@ export function endAccuracyBurst(
     days[localNow] = { ...(days[localNow] ?? { count: 0, seconds: 0 }), unmeasured: true };
   }
   const { active: _active, ...rest } = withTrialProgress(state, now);
-  return { ...rest, lastEndedAt: new Date(elapsedMs != null ? now.getTime() : ended).toISOString(), days };
+  const result = { ...rest, lastEndedAt: new Date(elapsedMs != null ? now.getTime() : ended).toISOString(), days };
+  // The kill switch: a day whose measured best accuracy passed the budget ends the trial.
+  const over = Object.entries(days).find(([, day]) => (day.measuredSeconds ?? 0) > ACCURACY_BURST_KILL_SECONDS_PER_DAY);
+  return over ? stopAccuracyTrial(result, "over_budget", over[0]) : result;
+}
+
+/** Turns the trial off for good (the first reason stands). */
+export function stopAccuracyTrial(state: AccuracyBurstState, reason: AccuracyBurstStopReason, day: string): AccuracyBurstState {
+  return state.stopped ? state : { ...state, stopped: { reason, day } };
+}
+
+/** One failed restore of normal capture; the second turns the trial off. */
+export function recordAccuracyRestoreFailure(state: AccuracyBurstState, now: Date): AccuracyBurstState {
+  const restoreFailures = (state.restoreFailures ?? 0) + 1;
+  const next = { ...state, restoreFailures };
+  return restoreFailures >= ACCURACY_BURST_KILL_RESTORE_FAILURES ? stopAccuracyTrial(next, "restore_failed", localDayKey(now)) : next;
+}
+
+/** The kill switch's reason, for shared diagnostics: reason and local day only. */
+export function accuracyBurstStopped(state: AccuracyBurstState | null | undefined) {
+  return state?.stopped ? { ...state.stopped } : null;
 }
 
 /** Sync help's line: "Accuracy trial day 3 of 14 · bursts on · 2 bursts today (6m)". */
 export function accuracyBurstSummaryLine(state: AccuracyBurstState | null | undefined, now: Date) {
   if (!state) return "Accuracy trial: not started";
+  if (state.stopped) {
+    return state.stopped.reason === "over_budget"
+      ? "Accuracy trial stopped: best accuracy ran past its daily budget"
+      : "Accuracy trial stopped: normal capture failed to come back twice";
+  }
   const arm = accuracyBurstArm(state, now);
   if (arm === "done") return "Accuracy trial finished";
   const today = state.days[localDayKey(now)] ?? { count: 0, seconds: 0 };

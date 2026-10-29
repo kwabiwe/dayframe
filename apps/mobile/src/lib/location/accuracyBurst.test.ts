@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  accuracyBurstArm, accuracyBurstDecision, accuracyBurstDiagnostics, accuracyBurstDue, accuracyBurstSummaryLine,
+  accuracyBurstArm, accuracyBurstDecision, accuracyBurstDiagnostics, accuracyBurstDue, accuracyBurstStopped, accuracyBurstSummaryLine,
+  recordAccuracyRestoreFailure,
   accuracyBurstTrialDay, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial, withTrialProgress,
   type AccuracyBurstState
 } from "./accuracyBurst";
@@ -160,6 +161,23 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
       state = endAccuracyBurst(startAccuracyBurst(state, "departure", at), new Date(at.getTime() + 179_400), 179_400, at.getTime());
     }
     expect(state.days["2026-11-04"].seconds).toBeGreaterThanOrEqual(897);
+  });
+
+  it("the kill switch: measured best accuracy past 20 minutes a day, or a second failed restore, ends the trial (orchestrator, 29 Oct 2026)", () => {
+    const started = startAccuracyBurst(trial, "departure", day(2, 8, 0));
+    const over = endAccuracyBurst({ ...started, days: { ...started.days, "2026-11-03": { ...started.days["2026-11-03"], measuredSeconds: 1_100 } } },
+      day(2, 8, 3), 180_000, day(2, 8, 0).getTime());
+    expect(over.stopped).toEqual({ reason: "over_budget", day: "2026-11-03" });
+    expect(accuracyBurstDecision(over, day(3, 9))).toEqual({ start: false, reason: "stopped" });
+    expect(accuracyBurstSummaryLine(over, day(3, 9))).toBe("Accuracy trial stopped: best accuracy ran past its daily budget");
+    // Unmeasured time never trips it (it uses up its own day instead).
+    expect(endAccuracyBurst(started, day(2, 9, 0), undefined, undefined, true).stopped).toBeUndefined();
+    const once = recordAccuracyRestoreFailure(trial, day(4));
+    expect(once.stopped).toBeUndefined();
+    const twice = recordAccuracyRestoreFailure(once, day(5));
+    expect(twice.stopped).toEqual({ reason: "restore_failed", day: "2026-11-06" });
+    expect(accuracyBurstStopped(twice)).toEqual({ reason: "restore_failed", day: "2026-11-06" });
+    expect(accuracyBurstSummaryLine(twice, day(5))).toBe("Accuracy trial stopped: normal capture failed to come back twice");
   });
 });
 

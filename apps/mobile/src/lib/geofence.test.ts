@@ -1102,7 +1102,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await stopLocationLearningIfStarted();
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
-    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70, byTrigger: { saved_entry: { count: 1, seconds: 70 } } });
+    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70, measuredSeconds: 70, byTrigger: { saved_entry: { count: 1, seconds: 70 } } });
   });
 
   it("ends a burst with no readings at all, and stops updates outright if normal capture keeps failing (Codex r2 on #619)", async () => {
@@ -1790,6 +1790,20 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await maybeEndAccuracyBurst(await capture());
     await vi.advanceTimersByTimeAsync(2_000);
     expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("two failed restores turn the trial off, and no burst starts again (kill switch, orchestrator 29 Oct 2026)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy")).mockRejectedValueOnce(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(31_000);
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.stopped?.reason).toBe("restore_failed");
+    vi.setSystemTime(new Date(2026, 10, 2, 12, 0));
+    await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
   });
 });
 
