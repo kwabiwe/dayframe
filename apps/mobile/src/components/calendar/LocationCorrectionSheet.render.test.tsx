@@ -2,6 +2,8 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
 
+// The place sheet's Nearby and search (native Apple Maps search) is not part of these tests.
+vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: () => null }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -263,7 +265,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("  Exampleton Bakery "); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
 
     const failing = mount({ kind: "place", place, label: "Unknown place" }, undefined, vi.fn(async () => { throw new Error("offline"); }));
@@ -320,8 +322,33 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", []);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
     expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(sheet.onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("saves a place with a Logs as that waits for the server to accept its corrections, never logging at once (Codex r4 on #610)", async () => {
+    const order: string[] = [];
+    const start = vi.fn(() => { order.push("start"); });
+    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+      return { start, cancel: vi.fn(async () => undefined) }; });
+    // The List's save: the place on the server, then the waiting log with the corrections' ids, then the corrections.
+    const onSavePlace = vi.fn(async (_name: string, _rest: unknown[], beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }>) => {
+      order.push("place created");
+      const waiting = await beforeEnqueue?.(["cid-1"]);
+      order.push("queued");
+      waiting?.start();
+    });
+    const onLog = vi.fn();
+    const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace as never,
+      { activities: [{ id: "cat-errands", name: "Errands" }], onLog, onLogAfter } as never);
+    sheet.press("location-correction-log-cat-errands");
+    sheet.press("location-correction-save-place");
+    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
+    sheet.press("location-correction-confirm-save-place");
+    await sheet.settle();
+    expect(order).toEqual(["place created", "hold cat-errands cid-1", "queued", "start"]);
+    expect(onLog).not.toHaveBeenCalled();
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
   });
 
@@ -343,3 +370,204 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
   });
 });
 
+
+describe("the correction sheet's question, Done and saved places (owner, 28 Oct 2026)", () => {
+  const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
+  const nearMap = (distances: Record<string, number>) => ({
+    map: { acceptedSamples: [], centre: null, nearbySavedPlaces: Object.entries(distances).map(([id, distanceMeters]) => ({ id, distanceMeters })) },
+    segment: { kind: "stay" }
+  }) as never;
+  const NEAR = "6f000000-0000-4000-8000-000000000002";
+  const FAR = "6f000000-0000-4000-8000-000000000003";
+  function sheetWith(props: Partial<Parameters<typeof LocationCorrectionSheet>[0]>) {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={vi.fn()} onQueue={vi.fn(async () => undefined)}
+        places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
+        target={{ kind: "place", place, label: "Unknown place" }} theme={theme} {...props} />);
+    });
+    return tree;
+  }
+  const action = (tree: ReturnType<typeof create>) => tree.root.findByProps({ testID: "location-correction-sheet-action" });
+
+  it("asks the item's \"?\" at its top in compact pills, each a 44-point target, and an answer closes the sheet", () => {
+    const onAnswer = vi.fn();
+    const onDismissed = vi.fn();
+    const tree = sheetWith({ onDismissed, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    const question = tree.root.findByProps({ testID: "location-correction-question" });
+    expect(JSON.stringify(question.props.children)).toContain("Visited Pret?");
+    for (const id of ["location-correction-question-yes", "location-correction-question-no"]) {
+      const pill = tree.root.findByProps({ testID: id });
+      const style = flat(pill.props.style({ pressed: false }));
+      expect(style).toMatchObject({ minHeight: 32, paddingHorizontal: 16 });
+      expect(flat(pill.findByType("Text" as never).props.style)).toMatchObject({ fontSize: 14, fontWeight: "700" });
+      expect((style.minHeight as number) + pill.props.hitSlop.top + pill.props.hitSlop.bottom).toBeGreaterThanOrEqual(44);
+    }
+    act(() => { tree.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    expect(onAnswer).toHaveBeenCalledWith(true);
+    expect(onDismissed).toHaveBeenCalledWith(1);
+  });
+
+  it("one tap keeps the sheet's changes and its answer, the answer kept first and waiting for them (owner, 28 Oct 2026; Codex r2 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const order: string[] = [];
+    const start = vi.fn(() => { order.push("start"); });
+    const answerAfter = vi.fn(async (_yes: boolean, ids: readonly string[]) => { order.push(`hold ${ids.join(",")}`); return { start, cancel: vi.fn(async () => undefined) }; });
+    // The List's queue: the waiting answer is kept with the corrections' ids, then the corrections, then it starts.
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"]);
+      order.push("queued");
+      waiting?.start();
+    });
+    const onAnswer = vi.fn();
+    const onDismissed = vi.fn();
+    const ok = sheetWith({ onDismissed, onQueue: onQueue as never,
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter } });
+    act(() => { ok.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    // The answers stay offered while the sheet has changes.
+    expect(ok.root.findAll((node) => node.props.testID === "location-correction-question-yes").length).toBeGreaterThan(0);
+    act(() => { ok.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onQueue).toHaveBeenCalledOnce();
+    expect(onQueue.mock.calls[0][0]).toEqual([expect.objectContaining({ request: expect.objectContaining({ kind: "place", placeId: SAVED }) })]);
+    // With the tap's account lifetime the queue carries (here: none given by this stand-in queue).
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], undefined);
+    expect(order).toEqual(["hold cid-1", "queued", "start"]);
+    // Never answered straight away: only through the waiting record.
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(onDismissed).toHaveBeenCalledWith(1);
+    // The changes can't be kept: no answer starts, the sheet says why and stays open.
+    const failedDismiss = vi.fn();
+    const failingAnswer = vi.fn(async () => ({ start, cancel: vi.fn(async () => undefined) }));
+    start.mockClear();
+    const failing = sheetWith({ onDismissed: failedDismiss, onQueue: vi.fn(async () => { throw new Error("disk full"); }),
+      question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter: failingAnswer } });
+    act(() => { failing.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { failing.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    await settle();
+    expect(start).not.toHaveBeenCalled();
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(failedDismiss).not.toHaveBeenCalled();
+    expect(failing.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+  });
+
+  it("Logs as on a place with a \"?\" queues log_place only, never an answer too (#609)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const onLog = vi.fn();
+    const onAnswer = vi.fn();
+    const answerAfter = vi.fn();
+    const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const done = sheetWith({ logAs, question });
+    act(() => { done.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { action(done).props.onPress(); });
+    await settle();
+    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(answerAfter).not.toHaveBeenCalled();
+  });
+
+  it("never loses a Logs as pick: Yes with an activity is Logs as, after the sheet's corrections; Not now drops it (Codex r3 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const onLog = vi.fn();
+    const onAnswer = vi.fn();
+    const answerAfter = vi.fn();
+    const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
+    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    // Yes with Errands picked and a place change: the change is kept with Logs as waiting for it (log_place only once
+    // the server has acknowledged the change, Codex r4 on #610; #609 then closes the "?").
+    const order: string[] = [];
+    const start = vi.fn(() => { order.push("start"); });
+    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+      return { start, cancel: vi.fn(async () => undefined) }; });
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"]);
+      order.push("queue");
+      waiting?.start();
+    });
+    const onDismissed = vi.fn();
+    const yes = sheetWith({ logAs: { ...logAs, onLogAfter }, question, onQueue: onQueue as never, onDismissed });
+    act(() => { yes.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { yes.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { yes.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(order).toEqual(["hold cat-errands cid-1", "queue", "start"]);
+    // Never logged straight away.
+    expect(onLog).not.toHaveBeenCalled();
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(answerAfter).not.toHaveBeenCalled();
+    expect(onDismissed).toHaveBeenCalledWith(1);
+    // Not now with Errands picked: answers Not now, logs nothing.
+    onLog.mockClear();
+    const no = sheetWith({ logAs, question });
+    act(() => { no.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { no.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    await settle();
+    expect(onAnswer).toHaveBeenCalledWith(false);
+    expect(onLog).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unavailable answer unavailable, and stays open with its question when an answer is refused (Codex r16 on #610)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // No skip label (an incomplete suggestion, a rejected change of its own): no "Not now" in its place.
+    const none = sheetWith({ question: { text: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered here.",
+      yesLabel: null, noLabel: null, onAnswer: vi.fn() } });
+    expect(none.root.findAll((node) => node.props.testID === "location-correction-question-no")).toHaveLength(0);
+    expect(none.root.findAll((node) => node.props.testID === "location-correction-question-yes")).toHaveLength(0);
+    // The gate refuses it: the sheet stays open, says so, and nothing is taken as answered.
+    const onDismissed = vi.fn();
+    const refused = sheetWith({ onDismissed, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: () => false } });
+    act(() => { refused.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onDismissed).not.toHaveBeenCalled();
+    expect(refused.root.findAll((node) => node.props.testID === "location-correction-question").length).toBeGreaterThan(0);
+    expect(refused.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+    // With changes of its own, refused before anything is queued: stays open too.
+    const onQueue = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[]) => Promise<unknown> }) => {
+      await options.beforeEnqueue?.(["cid-1"]);
+    });
+    const dismissedToo = vi.fn();
+    const withChanges = sheetWith({ onDismissed: dismissedToo, onQueue: onQueue as never, question: { text: "Visited Pret?", detail: null,
+      yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn(), answerAfter: async () => { throw new Error("This can't be answered here now."); } } });
+    act(() => { withChanges.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { withChanges.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(dismissedToo).not.toHaveBeenCalled();
+    expect(withChanges.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+  });
+
+  it("answers at once when the sheet has nothing of its own to keep", () => {
+    const onAnswer = vi.fn();
+    const onQueue = vi.fn(async () => undefined);
+    const tree = sheetWith({ onQueue, question: { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer } });
+    act(() => { tree.root.findByProps({ testID: "location-correction-question-no" }).props.onPress(); });
+    expect(onAnswer).toHaveBeenCalledWith(false);
+    expect(onQueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps Done quiet until something changes (owner item O)", () => {
+    const tree = sheetWith({});
+    expect(flat(action(tree).props.style).backgroundColor).toBe("surfaceMuted");
+    act(() => { tree.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    expect(flat(action(tree).props.style).backgroundColor).toBe("textPrimary");
+  });
+
+  it("shows the visit's own map, saved places nearest first with how far, and the rest behind More places (owner items L, N)", () => {
+    const tree = sheetWith({
+      evidence: nearMap({ [NEAR]: 140, [SAVED]: 1_400, [FAR]: 8_000 }),
+      places: [{ id: FAR, name: "Far Gym", role: null }, { id: SAVED, name: "Exampleton Library", role: null }, { id: NEAR, name: "Near Café", role: null }]
+    });
+    expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props.visitOnly).toBe(true);
+    const shown = () => tree.root.findAll((node) => typeof node.props.testID === "string" && /^location-correction-place-6f/.test(node.props.testID)
+      && typeof node.props.onPress === "function").map((node) => node.props.testID.replace("location-correction-place-", ""));
+    expect(shown()).toEqual([NEAR, SAVED]);
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain("Saved place · 140 m away");
+    expect(text).toContain("Saved place · 1.4 km away");
+    const more = tree.root.findByProps({ testID: "location-correction-more-places" });
+    expect(JSON.stringify(more.props.children)).toContain("More places (");
+    act(() => { more.props.onPress(); });
+    expect(shown()).toEqual([NEAR, SAVED, FAR]);
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-more-places")).toHaveLength(0);
+  });
+});

@@ -538,7 +538,13 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         hourHeight: hourHeight,
         hourLabelWidth: layout.hourLabelWidth
       ).map(\.frame)
-      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames + momentFrames) else {
+      // And the Places lane's items' targets, as the entries layer places them (Codex r1 on #610).
+      let laneFrames = DayframeCalendarLaneLayout.layout(
+        presentation: presentation,
+        hourHeight: hourHeight,
+        hourLabelWidth: layout.hourLabelWidth
+      ).map(\.frame)
+      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames + momentFrames + laneFrames) else {
         return nil
       }
 

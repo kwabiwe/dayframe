@@ -7,7 +7,37 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
-  it("shows the Calendar v3 header: month title, one round Day / List menu, no − / +, and no framed line under the week strip", () => {
+  it("tells VoiceOver a \"?\" block opens its question, never Review (Codex r12 on #610)", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    expect(rootView).toContain('.accessibilityHint(entry.isReview ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")');
+    expect(rootView).not.toContain('"Opens Review"');
+  });
+
+  it("shares the Places lane's 44-point targets with the long press, and clips a trip's legs to the drawn day (Codex r1 on #610)", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    expect(model).toContain("DayframeCalendarPlacesLaneMath.hitFrames(spans:");
+    expect(rootView).toContain("let lane = DayframeCalendarLaneLayout.layout(");
+    // One arbitration for a touch (the nearest drawn centre), and each item its own VoiceOver button (Codex r2 on #610).
+    expect(rootView).toContain("DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\\.span), frames: lane.map(\\.frame))");
+    expect(rootView).toContain(".accessibilityAction { openLaneItem(item) }");
+    expect(coordinator).toContain("let laneFrames = DayframeCalendarLaneLayout.layout(");
+    expect(coordinator).toContain("frames: hitFrames + momentFrames + laneFrames");
+    expect(rootView).toContain("DayframeCalendarLegStripMath.segments(");
+    expect(rootView).not.toContain("minimumHeight: 4\n        ) {");
+  });
+
+  it("hands the Grid only the \"?\" that still ask, outings folded, and routes every one it draws (Codex r1 on #610)", () => {
+    const dashboard = readFileSync(dashboardPath, "utf8");
+    expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
+    expect(dashboard).toContain("reviewItemIds: gridReviewItemIds,");
+    // askingChecks comes from calendarChecks (outings folded), which the Grid's "?" routing looks up.
+    expect(dashboard).toContain("checksOldestFirst(calendarChecks.checks.filter(");
+    expect(dashboard).toContain(": calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;");
+  });
+
+  it("shows the Calendar v3 header: month title, one round one-tap Day / List toggle, no − / +, and no framed line under the week strip", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const header = rootView.slice(
       rootView.indexOf("private func calendarHeader("),
@@ -16,11 +46,14 @@ describe("native Calendar production contract", () => {
     expect(header).toContain("presentation.monthTitle");
     expect(header).toContain('.font(.custom("BricolageGrotesque-Bold", size: 30, relativeTo: .largeTitle))');
     expect(header).toContain(".dynamicTypeSize(.xSmall ... .xxxLarge)");
-    // One round 44-point button opening exactly two choices (owner: no Multi Day, now or later).
-    expect(header).toContain("Menu {");
-    expect(header).toContain('viewMenuItem(title: "Day", glyph: "view-day").tag("grid")');
-    expect(header).toContain('viewMenuItem(title: "List", glyph: "view-list").tag("list")');
-    expect(header.match(/viewMenuItem\(title: "/g)).toHaveLength(2);
+    // Owner item J (28 Oct 2026): one round 44-point button; one tap switches, its icon showing where it goes
+    // (owner: no Multi Day, now or later). No menu.
+    expect(header).toContain('actions.changeLayout(presentation.isList ? "grid" : "list")');
+    expect(header).toContain('DayframeCalendarGlyph(name: presentation.isList ? "view-day" : "view-list"');
+    expect(header).toContain('.accessibilityLabel(presentation.isList ? "Show as day" : "Show as list")');
+    expect(rootView).not.toContain("Menu {");
+    expect(rootView).not.toContain("legacyViewMenu");
+    expect(rootView).not.toContain("viewMenuItem(");
     expect(rootView).not.toMatch(/Multi ?Day/i);
     expect(header).toContain(".frame(width: 44, height: 44)");
     expect(header).toContain(".background(Circle().fill(Color(dayframeCSS: theme.surface)))");
@@ -240,9 +273,14 @@ describe("native Calendar production contract", () => {
     expect(rootView).not.toContain("showsWarning");
     expect(rootView).toContain("DayframeCalendarLiveRing(color: Color(uiColor: blockColor), reduceMotion: reduceMotion, shape: shape)");
     expect(rootView).toContain(".opacity(reduceMotion ? 0.6 : bright ? 1 : 0.35)");
-    expect(rootView).toContain("DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))");
-    // A suggestion's "?" in the warning text colour, ahead of its title.
-    expect(rootView).toContain('let mark = isReview ? "? " : ""');
+    // Owner item K (28 Oct 2026): a suggestion is a light fill with a dashed amber edge and the amber dot; no hatch
+    // and no "? " ahead of its title (the hatch stays only for an unsure leg in a trip's strip).
+    expect(rootView).toContain("let tint: CGFloat = entry.isReview ? (dark ? 0.08 : 0.05) : (dark ? 0.28 : 0.18)");
+    expect(rootView).toContain("shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))");
+    expect(rootView).toContain("Circle().fill(Color(dayframeCSS: theme.warning)).frame(width: 9, height: 9)");
+    expect(rootView).not.toContain("DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))");
+    expect(rootView).not.toContain('"? "');
+    expect(rootView).not.toContain("prototype");
     expect(rootView).toContain("theme.warningText");
     expect(swiftSources).not.toContain("min(13");
     expect(swiftSources).not.toContain("rect.height / 2), height: min(13");
@@ -436,11 +474,11 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const moduleSource = readFileSync(`${moduleRoot}ios/DayframeCalendarModule.swift`, "utf8");
     const dashboard = readFileSync(dashboardPath, "utf8");
-    expect(rootView).toContain("actions.changeLayout(layout)");
+    expect(rootView).toContain('actions.changeLayout(presentation.isList ? "grid" : "list")');
     expect(rootView).toContain("actions.reportHeaderHeight(");
     expect(rootView).toContain("if !presentation.isList {");
     // The app owns the Day ↔ List handoff: its List fades over the native view, which switches at once.
-    // The menu is the system's own (its presentation follows Reduce Motion); nothing in the view animates the switch.
+    // Nothing in the view animates the switch.
     expect(rootView).not.toMatch(/value: presentation\.isList/);
     expect(dashboard).toContain("exiting={localPresenceExiting(reduceMotion)}");
     expect(moduleSource).toContain('"onChangeLayout"');

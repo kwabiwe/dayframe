@@ -19,9 +19,9 @@ describe("native Calendar draws Dayframe registry glyphs (UIA-064)", () => {
 
   it("draws the bundled registry glyphs and keeps the accessibility labels", () => {
     const rootView = readFileSync(`${iosRoot}DayframeCalendarRootView.swift`, "utf8");
-    // Calendar v3: the view menu's Day and List, and the icon lines under a block's title.
-    expect(rootView).toContain('DayframeCalendarGlyph(name: presentation.isList ? "view-list" : "view-day"');
-    expect(rootView).toContain('.accessibilityLabel("Calendar view")');
+    // The header's one-tap toggle shows where it goes (owner item J), and the icon lines under a block's title.
+    expect(rootView).toContain('DayframeCalendarGlyph(name: presentation.isList ? "view-day" : "view-list"');
+    expect(rootView).toContain('.accessibilityLabel(presentation.isList ? "Show as day" : "Show as list")');
     expect(rootView).toContain("DayframeCalendarGlyph(name: detailGlyph(detail.glyph), size: iconSize, followsTextSize: false)");
 
     const manifest = JSON.parse(readFileSync(`${iosRoot}Glyphs/manifest.json`, "utf8")) as Record<string, { glyph: string }>;

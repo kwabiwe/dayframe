@@ -64,8 +64,9 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
   it("opens each \"?\" where its kind is handled, and asks none with a pending change of its own (Codex r10 on #582)", () => {
     expect(dashboard).toContain("onOpenCheck={(reviewItemId) => {");
-    // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602).
-    expect(dashboard).toContain("locationCorrections.openTripLeg(trip, null);");
+    // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602): the List opens it
+    // itself (Codex r2 on #610).
+    expect(dashboard).toContain("onOpenTripLeg={locationCorrections.openTripLeg}");
     expect(dashboard).toContain("router.push(calendarCheckRoute(");
     expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
@@ -103,3 +104,106 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
   });
 });
+
+describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #610)", () => {
+  it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
+    // Every sheet answer, with or without new changes, through the one shared registration (Codex r6 on #610).
+    expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
+    // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
+    expect(dashboard).toContain("onAnswer: (yes) => checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
+    expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
+    // And every Logs as path in the place sheets.
+    const corrections = source("./useLocationCorrections.tsx");
+    expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
+    expect(corrections).not.toContain("holdAnswerAfterCorrections(");
+    // Started through the store's one completion path (Codex r14 on #610).
+    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
+    expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
+    expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
+    expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
+  });
+
+  it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
+    expect(dashboard).toContain("correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])");
+    expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
+  });
+
+  it("classifies each \"?\" so only Apple Health's and a legacy one without a segment ask under their row, and never sends a row to Review", () => {
+    expect(dashboard).toContain("kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),");
+    expect(dashboard).toContain("checkKinds={calendarChecks.kinds}");
+    expect(dashboard).toContain('if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";');
+    // onOpenCheck is the question's own "More…" / "Open it" only; it no longer looks a trip up as a fallback.
+    expect(dashboard).not.toContain('each.kind === "trip" && each.id === segmentId && !each.blockIds.length');
+  });
+});
+
+describe("the one gated answer entry point (Codex r7 on #610)", () => {
+  const hook = source("./useCalendarCheckAnswers.ts");
+  const list = source("./CalendarListView.tsx");
+  it("gates every answer in checkAnswers.answer itself, so no caller can go ahead of a queued correction", () => {
+    const answerAt = hook.indexOf("const answer = useCallback(");
+    const answer = hook.slice(answerAt, hook.indexOf("const undo = useCallback(", answerAt));
+    expect(answer).toContain("void waitForItemCorrections(");
+    expect(answer).toContain("newIds: []");
+    // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
+    expect(hook).toContain("return { answer, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
+    // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
+    expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
+    expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");
+    expect(hook).not.toMatch(/return \{[^}]*holdAnswer/);
+  });
+
+  it("leaves Calendar › List's row Yes and inline answers to the caller's onAnswerCheck, which is checkAnswers.answer", () => {
+    // The List never saves an answer itself.
+    expect(list).not.toContain("enqueueReviewMutation");
+    expect(list).not.toMatch(/import [^;]*useCalendarCheckAnswers/);
+    expect(list).not.toContain("waitForItemCorrections");
+    expect(list).toContain("onYes={onAnswerCheck ? (id) => answerCheck(id, true) : undefined}");
+    expect(list).toContain("onAnswerCheck?.(id, logged);");
+    expect(dashboard).toContain("? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)");
+  });
+});
+
+describe("waiting records are written only through the store's shared paths (Codex r12 on #610)", () => {
+  it("leaves the raw commit and delete to the store and its recovery runner", () => {
+    const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const sources: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) {
+          if (name !== "node_modules") walk(path);
+        } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) sources.push(path);
+      }
+    };
+    walk(join(root, "src"));
+    walk(join(root, "app"));
+    const raw = sources.filter((path) => !path.endsWith("reviewAnswersAfterCorrections.ts")
+      && /\b(commitAnswerAfterCorrections|cancelAnswerAfterCorrections)\b/.test(readFileSync(path, "utf8")));
+    expect(raw).toEqual([]);
+    for (const path of ["./useCalendarCheckAnswers.ts", "./useLocationCorrections.tsx"]) {
+      expect(source(path)).toMatch(/settleAnswerAfterCorrections|withdrawAnswerAfterCorrections/);
+    }
+  });
+});
+
+describe("one guarded notifier for the answer, Logs as and recovery flows (Codex r15 on #610)", () => {
+  // Every notice, alert and announcement in these files is said inside the guarded notifier (or its hook's wrapper).
+  const unguarded = (text: string, wrappers: readonly string[]) => {
+    const lines = text.split("\n");
+    return lines.flatMap((line, index) => {
+      if (!/\b(showNotice\(|Alert\.alert\(|announceForAccessibility\()/.test(line)) return [];
+      if (/=> showNotice\(message\)\);?$/.test(line.trim()) || /\(\) => showNotice\(message\)\)/.test(line)) return [];
+      const window = lines.slice(Math.max(0, index - 3), index + 1).join("\n");
+      return wrappers.some((wrapper) => window.includes(wrapper)) ? [] : [`${index + 1}: ${line.trim()}`];
+    });
+  };
+  it("routes every notice in the answers hook, the place sheets and the recovery runner through it", () => {
+    expect(unguarded(source("./useCalendarCheckAnswers.ts"), ["sayFor("])).toEqual([]);
+    expect(unguarded(source("./useLocationCorrections.tsx"), ["sayForLog(", "sayIfStillHere("])).toEqual([]);
+    expect(unguarded(source("./useAnswersAfterCorrections.ts"), ["sayIfStillHere("])).toEqual([]);
+  });
+});
+

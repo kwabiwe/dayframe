@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(async () => undefined),
   synchronise: vi.fn(async (..._args: unknown[]) => undefined),
   appListeners: new Set<(state: string) => void>(),
+  queued: [] as Array<{ clientCorrectionId: string; request: { kind: string; itemId: string } }>,
+  acknowledgedNow: [] as Array<{ clientCorrectionId: string }>,
   appState: "active"
 }));
 vi.mock("react-native", () => ({
@@ -26,13 +28,49 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("../../lib/api", () => ({ createPlace: mocks.createPlace, fetchTimelineItemEvidence: mocks.fetchEvidence }));
 vi.mock("../../lib/timelineCorrectionOutbox", () => ({
+  createTimelineCorrectionId: (() => { let next = 0; return () => `cid-${++next}`; })(),
+  readPendingTimelineCorrections: async () => mocks.queued,
+  readAcknowledgedTimelineCorrections: () => mocks.acknowledgedNow,
   enqueueTimelineCorrections: mocks.enqueue,
   removeTimelineCorrections: mocks.remove,
   synchroniseTimelineCorrections: mocks.synchronise
 }));
 vi.mock("./LocationCorrectionSheet", () => ({ LocationCorrectionSheet: "LocationCorrectionSheet" }));
+const waiting = vi.hoisted(() => ({
+  holdAnswerAfterCorrections: vi.fn(async (..._args: unknown[]) => undefined),
+  commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+  cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+  noteTimelineCorrectionAcknowledged: vi.fn(async (..._args: unknown[]) => undefined),
+  // The store's shared settle and withdraw, as the raw writes go.
+  settleOutcome: "committed" as "committed" | "committing" | "abandoned",
+  settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
+    await waiting.commitAnswerAfterCorrections(id);
+    return waiting.settleOutcome;
+  }),
+  // The store's one completion path, over the mocked settle and withdraw.
+    finishWaitingStart: (owner: unknown, id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void waiting.withdrawAnswerAfterCorrections(owner, id); return "withdrawn"; }
+      if (!checks.present()) { void waiting.settleAnswerAfterCorrections(owner, id, { inFront: false }); return "settled"; }
+      if (checks.start()) return "started";
+      void waiting.withdrawAnswerAfterCorrections(owner, id);
+      return "withdrawn";
+    },
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await waiting.cancelAnswerAfterCorrections(id); })
+}));
+vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
+// The shared registration (afterCorrections.ts), as the queue in `mocks.queued` would answer it.
+const register = vi.hoisted(() => ({
+  waitForItemCorrections: vi.fn(async (_owner: unknown, input: { id: string; itemId: string; newIds: readonly string[] }) => {
+    const earlier = mocks.queued.filter((item) => item.request.itemId === input.itemId && item.request.kind !== "log_place").map((item) => item.clientCorrectionId);
+    const waitsFor = [...new Set([...input.newIds, ...earlier])];
+    return waitsFor.length ? { id: input.id, waitsFor } : null;
+  })
+}));
+vi.mock("../../lib/afterCorrections", () => register);
 
 const { useLocationCorrections } = await import("./useLocationCorrections");
+// The tap's account lifetime, as the sheet carries it (Codex r17 on #610).
+const { currentMobileAccountEpoch } = await import("../../lib/mobileAccount");
 
 // Location v4 step 12: synthetic ids and times only.
 const iso = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
@@ -77,6 +115,67 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { tree.update(<Probe data={account("b")} />); });
     await expect(onQueue([{ request: { kind: "times" } }], { closing: true })).rejects.toThrow();
     expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps an answer that waits before its corrections are queued, with their ids, then starts it; a failed keep removes it (Codex r2 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    type Queue = (corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> }) => Promise<void>;
+    const onQueue = sheetOf(tree)!.props.onQueue as Queue;
+    const order: string[] = [];
+    mocks.enqueue.mockImplementationOnce(async (...args: unknown[]) => {
+      const items = args[1] as Array<{ request: { clientCorrectionId?: string } }>;
+      order.push(`enqueue ${items.map((item) => item.request.clientCorrectionId).join(",")}`);
+      return items;
+    });
+    const start = vi.fn(() => { order.push("start"); });
+    const cancel = vi.fn(async () => { order.push("cancel"); });
+    await act(async () => {
+      await onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true, beforeEnqueue: async (ids) => {
+        order.push(`hold ${ids.join(",")}`);
+        return { start, cancel };
+      } });
+    });
+    expect(order).toHaveLength(3);
+    const [hold, enqueue, started] = order;
+    expect(hold.replace("hold ", "enqueue ")).toBe(enqueue);
+    expect(started).toBe("start");
+    expect(cancel).not.toHaveBeenCalled();
+    // Couldn't be kept: the waiting answer goes and never starts.
+    order.length = 0;
+    mocks.enqueue.mockRejectedValueOnce(new Error("storage full"));
+    await act(async () => {
+      await expect(onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true,
+        beforeEnqueue: async () => ({ start, cancel }) })).rejects.toThrow();
+    });
+    expect(order).toEqual(["cancel"]);
+  });
+
+  it("queues nothing and starts no answer when the account changes while the waiting answer is kept (Codex r3 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    type Queue = (corrections: unknown[], options: { closing: boolean; beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> }) => Promise<void>;
+    const onQueue = sheetOf(tree)!.props.onQueue as Queue;
+    mocks.enqueue.mockClear();
+    const start = vi.fn();
+    const cancel = vi.fn(async () => undefined);
+    let kept!: () => void;
+    let queued!: Promise<void>;
+    await act(async () => {
+      queued = onQueue([{ request: { kind: "times", subject: "place", itemId: "seg-a" } }], { closing: true,
+        beforeEnqueue: () => new Promise((resolve) => { kept = () => resolve({ start, cancel }); }) });
+    });
+    // Account B signs in while A's waiting answer is being kept, then the keep finishes.
+    await act(async () => { tree.update(<Probe data={account("b")} />); });
+    await act(async () => {
+      kept();
+      await expect(queued).rejects.toThrow("The account changed.");
+    });
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("shows a sheet whose item left the List as it was, with nothing to change, until it closes", async () => {
@@ -155,6 +254,34 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)!.props.places).toContainEqual({ id: "6f000000-0000-4000-8000-0000000000aa", name: "Exampleton Bakery", role: null });
   });
 
+  it("saves a place, then keeps a waiting Logs as with the visit's corrections' ids before queueing them (Codex r4 on #610)", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    await settle();
+    type Save = (name: string, rest: unknown[], beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }>) => Promise<void>;
+    const onSavePlace = sheetOf(tree)!.props.onSavePlace as Save;
+    const order: string[] = [];
+    mocks.createPlace.mockImplementationOnce(async () => { order.push("place"); return { ok: true, place: { id: "6f000000-0000-4000-8000-0000000000bb" } }; });
+    mocks.enqueue.mockImplementationOnce(async (...args: unknown[]) => {
+      const items = args[1] as Array<{ request: { kind: string; clientCorrectionId?: string } }>;
+      order.push(`enqueue ${items.map((item) => `${item.request.kind}:${item.request.clientCorrectionId}`).join(",")}`);
+      return items;
+    });
+    const start = vi.fn(() => { order.push("start"); });
+    const cancel = vi.fn(async () => { order.push("cancel"); });
+    await act(async () => {
+      await onSavePlace("Exampleton Bakery", [], async (ids) => { order.push(`hold ${ids.join(",")}`); return { start, cancel }; });
+    });
+    expect(order).toHaveLength(4);
+    expect(order[0]).toBe("place");
+    expect(order[1]).toMatch(/^hold .+$/);
+    // The place's correction carries the id the waiting log waits for; log_place itself is never queued here.
+    expect(order[2]).toBe(`enqueue place:${order[1].slice(5)}`);
+    expect(order[3]).toBe("start");
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it("holds Logs as for Undo, sends it after the hold, and reads the day again once the server has it (step 12 part 4c)", async () => {
     vi.useFakeTimers();
     try {
@@ -165,13 +292,13 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       act(() => { api!.openPlace(place, "Unknown place"); });
       const logAs = sheetOf(tree)!.props.logAs as { activities: Array<{ id: string }>; onLog: (id: string) => void };
       expect(logAs.activities.map((activity) => activity.id)).toEqual(["cat-errands"]);
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       expect(api!.heldLog?.title).toBe("Unknown place as Errands");
       // Undo within the hold: nothing is sent.
       act(() => { api!.undoLog(); });
       await act(async () => { vi.advanceTimersByTime(5_000); });
       expect(mocks.enqueue).not.toHaveBeenCalled();
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
         [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
@@ -185,6 +312,254 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     }
   });
 
+  it("keeps a Logs as after the sheet's corrections waiting for them, held for Undo, never queued here (Codex r4 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.enqueue.mockClear();
+      register.waitForItemCorrections.mockClear();
+      waiting.commitAnswerAfterCorrections.mockClear();
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void; cancel: () => Promise<void> }> };
+      let handle!: { start: () => void; cancel: () => Promise<void> };
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
+      expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+      const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
+      act(() => { handle.start(); });
+      expect(api!.heldLog?.title).toBe("Unknown place as Errands");
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Its Undo ended: the record may go once the corrections are acknowledged; log_place isn't queued from here.
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+      expect(mocks.enqueue).not.toHaveBeenCalled();
+      // Undo takes back the Logs as only.
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
+      act(() => { handle.start(); });
+      act(() => { api!.undoLog(); });
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledOnce();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("makes a plain Logs as wait for the place's corrections still queued from an earlier Done (Codex r5 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.enqueue.mockClear();
+      waiting.holdAnswerAfterCorrections.mockClear();
+      waiting.commitAnswerAfterCorrections.mockClear();
+      waiting.noteTimelineCorrectionAcknowledged.mockClear();
+      // Saved offline earlier (still queued), for this place and for another.
+      mocks.queued = [{ clientCorrectionId: "earlier-1", request: { kind: "place", itemId: "seg-a" } },
+        { clientCorrectionId: "other", request: { kind: "times", itemId: "seg-b" } }];
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+      await act(async () => { logAs.onLog("cat-errands"); });
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["earlier-1"] });
+      expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands" } }));
+      const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
+      expect(api!.heldLog?.afterCorrections).toBe(recordId);
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Never queued from here: only once the earlier correction is acknowledged (a refusal logs nothing).
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+      expect(mocks.enqueue).not.toHaveBeenCalled();
+      // Nothing waiting for the place: held and queued at once, as before.
+      mocks.queued = [];
+      await act(async () => { logAs.onLog("cat-errands"); });
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+    } finally {
+      mocks.queued = [];
+      vi.useRealTimers();
+    }
+  });
+
+  it("registers every Logs as through the one shared helper, with the sheet's new corrections and its place (Codex r6 on #610)", async () => {
+    register.waitForItemCorrections.mockClear();
+    mocks.queued = [{ clientCorrectionId: "earlier-1", request: { kind: "times", itemId: "seg-a" } }];
+    try {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<unknown> };
+      await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"], currentMobileAccountEpoch()); });
+      expect(register.waitForItemCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+      expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["new-1", "earlier-1"] });
+    } finally {
+      mocks.queued = [];
+    }
+  });
+
+  it("settles a waiting Logs as through the store's shared path, saying it wasn't logged only while still in front (Codex r12 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      const showNotice = vi.fn();
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
+      // Given up in front: said.
+      waiting.settleOutcome = "abandoned";
+      waiting.settleAnswerAfterCorrections.mockClear();
+      let handle!: { start: () => void };
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
+      act(() => { handle.start(); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: true });
+      expect(showNotice).toHaveBeenCalledWith("That place wasn't logged. Try again.");
+      // Its write is slow and Dayframe leaves meanwhile: given up, but nothing said.
+      showNotice.mockClear();
+      let finish!: () => void;
+      waiting.settleAnswerAfterCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve("abandoned"); }));
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
+      act(() => { handle.start(); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      mocks.appState = "background";
+      await act(async () => { finish(); await Promise.resolve(); });
+      expect(showNotice).not.toHaveBeenCalled();
+    } finally {
+      mocks.appState = "active";
+      waiting.settleOutcome = "committed";
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a Logs as at once, quietly, when the Dashboard goes away during its Undo (Codex r13 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      const showNotice = vi.fn();
+      // A waiting one: let go to wait for its corrections, nothing said.
+      waiting.settleAnswerAfterCorrections.mockClear();
+      waiting.settleOutcome = "abandoned";
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void; onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
+      let handle!: { start: () => void };
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
+      act(() => { handle.start(); });
+      await act(async () => { tree.unmount(); });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledTimes(1);
+      expect(showNotice).not.toHaveBeenCalled();
+      // A plain one: kept on the phone at once, never sent from here.
+      mocks.enqueue.mockClear();
+      mocks.synchronise.mockClear();
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const plain = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+      await act(async () => { plain.onLog("cat-errands"); });
+      await act(async () => { tree.unmount(); });
+      expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+      expect(mocks.synchronise).not.toHaveBeenCalled();
+    } finally {
+      waiting.settleOutcome = "committed";
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends every late Logs as start in one way: gone → settled quietly, another account → withdrawn, never held (Codex r14 on #610)", async () => {
+    waiting.settleAnswerAfterCorrections.mockClear();
+    waiting.withdrawAnswerAfterCorrections.mockClear();
+    // The place sheets go away between its registration and its start (after the corrections are queued).
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    let logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
+    let handle!: { start: () => void };
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
+    await act(async () => { tree.unmount(); });
+    act(() => { handle.start(); });
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
+    expect(api!.heldLog).toBeNull();
+    // Another account signs in between its registration and its start.
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    logAs = sheetOf(tree)!.props.logAs as typeof logAs;
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
+    const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
+    await act(async () => { tree.update(<Probe data={account("b")} />); });
+    act(() => { handle.start(); });
+    expect(waiting.withdrawAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), recordId);
+    expect(api!.heldLog).toBeNull();
+  });
+
+  it("finds a Logs as hold started in the same batch as its unmount, and settles it (Codex r15 on #610)", async () => {
+    waiting.settleAnswerAfterCorrections.mockClear();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} />); });
+    act(() => { api!.openPlace(place, "Unknown place"); });
+    const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
+    let handle!: { start: () => void };
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
+    // The hold starts and the place sheets go away before any re-render.
+    act(() => {
+      handle.start();
+      tree.unmount();
+    });
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledOnce();
+    expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" }, expect.any(String), { inFront: false });
+  });
+
+  it("says nothing of a late plain Logs as failure after teardown, backgrounding or an account switch (Codex r15 on #610)", async () => {
+    vi.useFakeTimers();
+    try {
+      const showNotice = vi.fn();
+      const failLater = () => {
+        let fail!: () => void;
+        mocks.enqueue.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = () => reject(new Error("disk full")); }));
+        return () => act(async () => { fail(); await Promise.resolve(); await Promise.resolve(); });
+      };
+      const holdAndEnd = async (tree: ReturnType<typeof create>) => {
+        act(() => { api!.openPlace(place, "Unknown place"); });
+        const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
+        await act(async () => { logAs.onLog("cat-errands"); });
+        await act(async () => { vi.advanceTimersByTime(4_800); });
+      };
+      // Teardown.
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      let fail = failLater();
+      await holdAndEnd(tree);
+      await act(async () => { tree.unmount(); });
+      await fail();
+      // Backgrounding.
+      await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
+      fail = failLater();
+      await holdAndEnd(tree);
+      mocks.appState = "background";
+      await fail();
+      mocks.appState = "active";
+      // An account switch.
+      fail = failLater();
+      await holdAndEnd(tree);
+      await act(async () => { tree.update(<Probe data={account("b")} showNotice={showNotice} />); });
+      await fail();
+      expect(showNotice).not.toHaveBeenCalled();
+      // In front, same account, here: said.
+      await act(async () => { tree.update(<Probe data={account("a")} showNotice={showNotice} />); });
+      fail = failLater();
+      await holdAndEnd(tree);
+      await fail();
+      expect(showNotice).toHaveBeenCalledWith("That place wasn't logged. Try again.");
+    } finally {
+      mocks.appState = "active";
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the Logs as hold through Dashboard renders, and keeps it on the phone when the app leaves (Codex r1 on #606)", async () => {
     vi.useFakeTimers();
     try {
@@ -192,7 +567,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { tree = create(<Probe data={account("a")} showNotice={() => undefined} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
       const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { vi.advanceTimersByTime(4_000); });
       // A Dashboard render with a new notice callback doesn't restart the 4.8 s.
       await act(async () => { tree.update(<Probe data={account("a")} showNotice={() => undefined} />); });
@@ -200,7 +575,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(mocks.enqueue).toHaveBeenCalledTimes(1);
       expect(mocks.synchronise).toHaveBeenCalledTimes(1);
 
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { for (const listener of mocks.appListeners) listener("background"); });
       expect(mocks.enqueue).toHaveBeenCalledTimes(2);
       // Kept, not sent from the background.
@@ -220,7 +595,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       act(() => { api!.openPlace(place, "Unknown place"); });
       const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void };
       // Two endings before React commits: queued once.
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => {
         for (const listener of mocks.appListeners) listener("inactive");
         for (const listener of mocks.appListeners) listener("background");
@@ -230,7 +605,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       // The hold ends while storage is slow and the app leaves: kept, not sent.
       let kept!: (value: unknown[]) => void;
       mocks.enqueue.mockImplementationOnce(() => new Promise((resolve) => { kept = resolve as never; }));
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       mocks.appState = "background";
       await act(async () => { kept([{ clientCorrectionId: "late" }]); });
@@ -239,7 +614,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
 
       // A's sheet finishing after B signed in never touches B's hold.
       await act(async () => { tree.update(<Probe data={account("b")} />); });
-      act(() => { logAs.onLog("cat-errands"); });
+      await act(async () => { logAs.onLog("cat-errands"); });
       expect(api!.heldLog).toBeNull();
     } finally {
       mocks.appState = "active";

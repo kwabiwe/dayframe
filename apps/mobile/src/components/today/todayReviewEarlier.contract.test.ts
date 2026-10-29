@@ -20,10 +20,11 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).toContain("setCalendarCheckScroll(calendarCheckRequests.current);");
     // Counts use the List's own rule, and leave suggestions decided on this phone at once (Codex r1 on #573).
     expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
-    expect(dashboard).toContain("listCheckOverlaps(check, weekStart, tomorrowStart)");
+    // Owner, 28 Oct 2026 (concern 4): the badge counts the "?" that still ask, the last 7 days.
+    expect(dashboard).toContain("week: askingChecks.length");
     expect(dashboard).toContain("!locallyDecidedIds.has(item.id)");
-    // The evening reminder opens the latest day with one, or Review when none is loaded.
-    expect(dashboard).toContain('latestCheckDayKey ? openChecksOn(latestCheckDayKey) : router.push("/review")');
+    // The evening reminder opens the oldest "?" that still asks, or today's List when none does (never Review).
+    expect(dashboard).toContain("openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));");
     expect(dashboard).toContain("if (!cancelled && current) openTodayChecksRef.current();");
   });
 
