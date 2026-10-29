@@ -72,7 +72,7 @@ export default function SettingsPage() {
           <SetCard
             glyph="map-pin"
             id="automatic-tracking"
-            note="Dayframe logs on its own only when it’s clear: visits at places you trust, and trips between your places. Anything it isn’t sure about is asked in Calendar. Visit suggestions are set for each saved place; background location is managed in the iPhone app, and the web only asks for this browser’s location when you choose Current location for a place."
+            note="Dayframe logs visits and trips when it’s sure, and asks in Calendar when it isn’t. Background location is set up in the iPhone app."
             title="Automatic tracking"
           >
             <PlacesLocationSettings />
@@ -80,7 +80,7 @@ export default function SettingsPage() {
           <SetCard
             glyph="shield"
             id="privacy-data"
-            note="Health and precise location stay private to your account and are never used for analytics."
+            note="Your health and location data stay private and are never used for analytics."
             title="Privacy and data"
           >
             <DataPrivacySettings />
@@ -100,7 +100,6 @@ function SettingsHead() {
     <div className="df-page-head">
       <div>
         <h1>Settings</h1>
-        <p>Your account, your day, and what Dayframe tracks for you.</p>
       </div>
     </div>
   );
