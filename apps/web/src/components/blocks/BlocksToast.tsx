@@ -19,6 +19,7 @@ export function BlocksToast({
   message,
   onAction,
   secondary,
+  stacked = null,
   swatchStyle,
   tone = "notice"
 }: {
@@ -41,6 +42,12 @@ export function BlocksToast({
    */
   secondary?: { label: string; onAction: () => void; done?: string | null; busy?: boolean } | null;
   swatchStyle?: CSSProperties;
+  /**
+   * Another toast holds the bottom place with an action of its own (a delete's Undo while a "?" answer's Undo is
+   * pending; Codex r2 on #618): this one sits just above it, so both actions stay reachable. `tall` clears a toast
+   * with a second row.
+   */
+  stacked?: "above" | "above-tall" | null;
   /**
    * `error` (WUI-027): the same inverse pill with a danger swatch, announced assertively (an alert),
    * for a failure the user can act on (Try again) — never a second kind of toast.
@@ -74,7 +81,7 @@ export function BlocksToast({
     return () => window.cancelAnimationFrame(frame);
   }, [autoFocusAction, exiting]);
   return (
-    <div className="df-toast-host">
+    <div className={`df-toast-host${stacked ? ` is-stacked${stacked === "above-tall" ? " is-stacked-tall" : ""}` : ""}`}>
       <div
         className={`df-toast${detail ? " has-detail" : ""}${secondary ? " has-secondary" : ""}${tone === "error" ? " is-error" : ""}${exiting ? " is-exiting" : ""}`}
         role={tone === "error" ? "alert" : "status"}

@@ -9227,6 +9227,16 @@ dialog.ui-dialog.df-palette {
   transform: translateX(-50%);
 }
 
+/* Two toasts with their own actions (a "?" answer's Undo above a delete's Undo; Codex r2 on #618): the second sits
+   above the first, 8 px apart, so both stay reachable. */
+.df-toast-host.is-stacked {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 56px);
+}
+
+.df-toast-host.is-stacked-tall {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 104px);
+}
+
 .df-toast {
   display: flex;
   min-height: 48px;
@@ -9432,6 +9442,14 @@ dialog.ui-dialog.df-palette {
 
   .df-toast-host {
     bottom: calc(var(--df-tabbar-space) + 8px);
+  }
+
+  .df-toast-host.is-stacked {
+    bottom: calc(var(--df-tabbar-space) + 64px);
+  }
+
+  .df-toast-host.is-stacked-tall {
+    bottom: calc(var(--df-tabbar-space) + 112px);
   }
 }
 

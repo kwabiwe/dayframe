@@ -127,3 +127,59 @@ export function projectTimerTripClashEnds(data: MobileBootstrap | null, ends: Re
   };
   return changed || stopped ? projected : data;
 }
+
+/**
+ * The block every Start guard treats as running (Codex r2 on #618): the canonical running block, unless it is being
+ * deleted (held for Undo) or End it has ended it on this iPhone (held or queued). Then nothing is running here: the
+ * orb's tap starts a bare block (never opens its editor), a quick start never says "Already recording" for it, and
+ * a matching activity starts a new block. Persistence and mutations keep reading the canonical data.
+ */
+export function runningForStart<T extends { id: string }>(canonical: T | null | undefined,
+  options: { pendingDeletion?: boolean; clashEndedId?: string | null }) {
+  if (!canonical || options.pendingDeletion) return null;
+  return options.clashEndedId && canonical.id === options.clashEndedId ? null : canonical;
+}
+
+type DeleteCommand = { operation: string; targetEntryId?: string; optimisticEntryId?: string; failureKind?: string };
+
+/**
+ * What this iPhone knows it deleted (Codex r2 on #618): blocks with a queued delete, and blocks whose delete left the
+ * outbox (acknowledged) but no authoritative read has reconciled yet. A delivered delete's block stays known deleted
+ * until a bootstrap read that started after the delete left the outbox is applied — not a failed refresh, and not a
+ * read already in flight — so its question never comes back as "not loaded" meanwhile. A delete the server refused
+ * for good (a permanent issue) is no tombstone: its block is restored. One per account (the Dashboard resets it on
+ * an account switch).
+ */
+export function createDeleteTombstones() {
+  let queued = new Set<string>();
+  const delivered = new Map<string, number>();
+  return {
+    /** The outbox's commands as read now. */
+    observe(commands: readonly DeleteCommand[], nowMs: number) {
+      const next = locallyDeletedBlockIds([], commands);
+      const refused = new Set(commands.flatMap((command) => command.operation === "delete" && command.failureKind === "permanent"
+        ? [command.targetEntryId, command.optimisticEntryId].filter((id): id is string => Boolean(id)) : []));
+      for (const id of queued) if (!next.has(id) && !refused.has(id)) delivered.set(id, nowMs);
+      for (const id of [...next, ...refused]) delivered.delete(id);
+      queued = next;
+    },
+    /** A successful bootstrap read that started at `startedAtMs` was applied: deletes delivered before it are settled. */
+    authoritative(startedAtMs: number) {
+      let changed = false;
+      for (const [id, leftAt] of delivered) {
+        if (startedAtMs >= leftAt) {
+          delivered.delete(id);
+          changed = true;
+        }
+      }
+      return changed;
+    },
+    ids(): ReadonlySet<string> {
+      return new Set([...queued, ...delivered.keys()]);
+    },
+    reset() {
+      queued = new Set();
+      delivered.clear();
+    }
+  };
+}

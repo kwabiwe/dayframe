@@ -259,7 +259,7 @@ import {
 } from "@/lib/nativeCalendarPresentation";
 import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
-import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds } from "@/lib/timerTripClashBlocks";
+import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
@@ -511,6 +511,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
+  // A successful bootstrap read was applied (when it started, and for whom): delete tombstones it settles retire.
+  const authoritativeLoadRef = useRef<(startedAtMs: number, owner: { userId: string; workspaceId: string }) => void>(() => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
@@ -1045,6 +1047,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
+      const readStartedAt = Date.now();
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1066,6 +1069,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
       void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
+      authoritativeLoadRef.current(readStartedAt, { userId: serverBootstrap.user.id, workspaceId: serverBootstrap.workspace.id });
       publishTodayBootstrapForSettings(serverBootstrap, settingsSeedGeneration);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);
@@ -1879,8 +1883,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ? stopFlight.presentation.elapsedSeconds
       : undefined;
   const recentStoppedAt = useMemo(
-    () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
-    [data?.activeEntry, data?.entries]
+    () => recentStoppedEntryTime(timerShownData?.entries ?? [], timerShownData?.activeEntry ?? null),
+    [timerShownData?.activeEntry, timerShownData?.entries]
   );
   // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
   // today's last finished block ended, when that was 1 min–4 h before the block started.
@@ -2048,21 +2052,32 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Blocks deleted on this iPhone and not yet gone from the server (held for Undo, or queued): a block that ran into a
   // trip whose block is known deleted stops asking at once, apart from one only not loaded here (Codex r1 on #618).
   const [queuedDeletes, setQueuedDeletes] = useState<{ owner: string; ids: ReadonlySet<string> } | null>(null);
+  // Queued deletes, and delivered ones until an authoritative read settles them (Codex r2 on #618), for this account.
+  const deleteTombstones = useRef({ owner: null as string | null, tombstones: createDeleteTombstones() });
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
     let sequence = 0;
+    if (deleteTombstones.current.owner !== scopedOwnerKey) deleteTombstones.current = { owner: scopedOwnerKey, tombstones: createDeleteTombstones() };
+    const own = deleteTombstones.current;
     const read = () => {
       const mine = ++sequence;
       readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then((commands) => {
-        if (current && mine === sequence) setQueuedDeletes({ owner: scopedOwnerKey, ids: locallyDeletedBlockIds([], commands) });
+        if (!current || mine !== sequence || deleteTombstones.current !== own) return;
+        own.tombstones.observe(commands, Date.now());
+        setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
       }).catch(() => undefined);
     };
     read();
     const unsubscribe = subscribeTimeEntryOutbox(read);
+    authoritativeLoadRef.current = (startedAtMs, owner) => {
+      if (!current || deleteTombstones.current !== own || owner.userId !== scopedOwner.userId || owner.workspaceId !== scopedOwner.workspaceId) return;
+      if (own.tombstones.authoritative(startedAtMs)) setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    };
     return () => {
       current = false;
       unsubscribe();
+      authoritativeLoadRef.current = () => undefined;
     };
     // scopedOwner is keyed by scopedOwnerKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2344,11 +2359,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
     const isBlankStart = !categoryId && !description.trim();
     if (isBlankStart && blankTimerStartGate.current.current()) return false;
-    if (
-      latestData.current?.activeEntry &&
-      !isActiveEntryPendingDeletion() &&
-      isBlankStart
-    ) {
+    if (runningForStartNow() && isBlankStart) {
       presentActiveEditor("existing_active_timer");
       return false;
     }
@@ -2404,7 +2415,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A start that replaces a running block says so ("Switched to …", no Undo: there is no un-switch
   // contract); a start of exactly what is recording does nothing but say "Already recording".
   function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
-    const running = isActiveEntryPendingDeletion() ? null : latestData.current?.activeEntry ?? null;
+    const running = runningForStartNow();
     if (running && startMatchesRunning(running, { categoryId, description, tagNames })) {
       showTodayNotice(alreadyRecordingToastMessage(running), toastSwatchColor(running, theme.mode));
       return;
@@ -2492,9 +2503,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The Play orb (step 3): tap starts a bare block (which opens it) or stops the running one; on
   // Today the Stop flies the live block into its row, elsewhere it stops in place.
   function tapPlayOrb() {
-    const running = latestData.current?.activeEntry?.id;
     // A block End it has ended here (location v4 design §7) is not running on this iPhone: a tap starts one.
-    const entryId = running && running !== clashEndedActiveRef.current ? running : undefined;
+    const entryId = runningForStartNow()?.id;
     if (!entryId) {
       startFromToday(null);
       return;
@@ -2506,8 +2516,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A bloom pick starts that activity, or switches to it; the running activity opens its editor
   // instead of starting a duplicate, as its mosaic tile does.
   function chooseFromPlayOrb(activityId: string) {
-    const active = latestData.current?.activeEntry;
-    if (active && active.id !== clashEndedActiveRef.current && active.categoryId === activityId) {
+    const active = runningForStartNow();
+    if (active && active.categoryId === activityId) {
       presentActiveEditor("existing_active_timer");
       return;
     }
@@ -3473,6 +3483,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
+  /** The block Start guards treat as running: the canonical one, unless being deleted or ended by End it here. */
+  function runningForStartNow() {
+    return runningForStart(latestData.current?.activeEntry ?? null, {
+      pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current
+    });
+  }
+
   function isActiveEntryPendingDeletion() {
     const pending = deletionCoordinator.current?.current();
     const deletedActiveId = pending?.snapshot?.activeEntry?.id;
@@ -3869,7 +3886,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
-                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, data?.activeEntry ?? null))}
+                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, activeEntryForDisplay))}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -4254,7 +4271,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           onClose={() => setSwitchSheetRecents(null)}
           onPick={switchToRecent}
           recents={switchSheetRecents}
-          running={Boolean(data?.activeEntry)}
+          running={Boolean(activeEntryForDisplay)}
           reduceMotion={reduceMotion}
           styles={styles}
           theme={theme}

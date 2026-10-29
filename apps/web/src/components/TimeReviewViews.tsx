@@ -468,6 +468,8 @@ export function TimeReviewViews({
   // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
   const [deletedMoveEventId, setDeletedMoveEventId] = useState<string | null>(null);
   const tripOptOut = useTripOptOut(deletedMoveEventId, pendingNotice?.token);
+  // A delete's toast holds the bottom place: a "?" answer's Undo then sits above it (Codex r2 on #618).
+  const toastStackedAbove = pendingNotice ? tripOptOut ? "above-tall" as const : "above" as const : deleteError ? "above" as const : null;
   const requestTimelineDelete = useCallback((entries: readonly TimeEntryRow[]) => {
     const first = entries[0];
     setDeletedEntrySwatch(first?.categoryId ? activityBlockStyle(first.categoryColor, first.categoryName ?? "") : undefined);
@@ -645,9 +647,10 @@ export function TimeReviewViews({
         {state.view === "calendar" && sharedDecisions?.state.error ? (
           <ErrorBanner message={sharedDecisions.state.error} onDismiss={sharedDecisions.clearError} />
         ) : null}
-        {state.view === "calendar" && sharedDecisions?.state.notice && !pendingNotice ? (
+        {state.view === "calendar" && sharedDecisions?.state.notice ? (
+          // A delete's Undo pending too: this one sits above it, so both stay reachable (Codex r2 on #618).
           <BlocksToast actionLabel="Undo" exiting={sharedDecisions.state.notice.isExiting} key={sharedDecisions.state.notice.token}
-            message={sharedDecisions.state.notice.label} onAction={sharedDecisions.undo}
+            message={sharedDecisions.state.notice.label} onAction={sharedDecisions.undo} stacked={toastStackedAbove}
             swatchStyle={sharedDecisions.state.notice.color ? activityBlockStyle(sharedDecisions.state.notice.color, sharedDecisions.state.notice.colorName) : undefined} />
         ) : null}
         {state.view === "list" ? (
@@ -673,6 +676,7 @@ export function TimeReviewViews({
             reviewItems={data.reviewItems}
             checksDays={listDays.map(timelineDayRange)}
             onChanged={refreshList}
+            noticeStackedAbove={toastStackedAbove}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}

@@ -267,7 +267,8 @@ export function EntriesTable({
   reviewItems = NO_REVIEW_ITEMS,
   checksDay = null,
   checksDays,
-  continuous
+  continuous,
+  noticeStackedAbove = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -296,6 +297,8 @@ export function EntriesTable({
   checksDays?: readonly DateRange[];
   /** Calendar › List's continuous days: loads weeks at either end as the List scrolls. */
   continuous?: ContinuousListProps;
+  /** Another toast (a delete's Undo) holds the bottom place: the "?" answer's Undo sits above it (Codex r2 on #618). */
+  noticeStackedAbove?: "above" | "above-tall" | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -1734,7 +1737,7 @@ export function EntriesTable({
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
-            message={listChecks.state.notice.label} onAction={listChecks.undo}
+            message={listChecks.state.notice.label} onAction={listChecks.undo} stacked={noticeStackedAbove}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>

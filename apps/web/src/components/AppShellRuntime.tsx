@@ -164,6 +164,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const [dateLoadError, setDateLoadError] = useState<string | null>(null);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const dataRef = useRef<BootstrapData | null>(null);
+  // End it projections (design §7): a running block End it ends shows ended, so the timer's one action is Start.
+  const [projectedEnds, setProjectedEndsState] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const projectedEndsRef = useRef(projectedEnds);
+  useLayoutEffect(() => {
+    projectedEndsRef.current = projectedEnds;
+  }, [projectedEnds]);
   // Snapshots by workspace and day (dateDataCacheKey). It only ever holds the workspace of the
   // newest commit: a commit for another workspace (a switch) empties it first (WEB-UI-6).
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
@@ -768,6 +774,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       },
       dedupeRunning: options.dedupeRunning,
       guard: options.guard,
+      // Shown ended by an End it held or saving: never "already running" (Codex r2 on #618).
+      isShownRunning: (entry) => !projectedEndsRef.current.has(entry.id),
       startAt: options.startedAt,
       gate: mutationGateRef.current,
       snapshot,
@@ -1450,12 +1458,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [commitData]);
 
-  // End it projections (design §7): a running block End it ends shows ended, so the timer's one action is Start.
-  const [projectedEnds, setProjectedEndsState] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const projectedEndsRef = useRef(projectedEnds);
-  useLayoutEffect(() => {
-    projectedEndsRef.current = projectedEnds;
-  }, [projectedEnds]);
   const setProjectedEnds = useCallback((ends: ReadonlyMap<string, string>) => setProjectedEndsState((current) =>
     current.size === ends.size && [...ends].every(([id, at]) => current.get(id) === at) ? current : ends), []);
   const toggleTimer = useCallback(() => {

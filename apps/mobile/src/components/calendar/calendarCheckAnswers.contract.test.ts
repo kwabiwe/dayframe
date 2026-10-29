@@ -222,9 +222,17 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard).toContain("const timerShownData = useMemo(() => projectTimerTripClashEnds(data, timerClashEnds), [data, timerClashEnds]);");
     expect(dashboard).toContain("const activeEntryForDisplay = timerShownData?.activeEntry ?? null;");
     expect(dashboard).toContain("setTimerClashEnds((current) => sameClashEnds(current, clashEnds) ? current : clashEnds);");
-    expect(dashboard).toContain("const entryId = running && running !== clashEndedActiveRef.current ? running : undefined;");
-    // Deleted here is not "not loaded": its question stops (tombstones from the delete hold and the queued deletes).
-    expect(dashboard).toContain("setQueuedDeletes({ owner: scopedOwnerKey, ids: locallyDeletedBlockIds([], commands) });");
+    // Every Start guard reads the projected running block (Codex r2 on #618): the orb's tap starts, a matching quick
+    // start never says "Already recording", a bloom pick starts; persistence and mutations keep the canonical data.
+    expect(dashboard).toContain("const entryId = runningForStartNow()?.id;");
+    expect(dashboard).toContain("const running = runningForStartNow();\n    if (running && startMatchesRunning(");
+    expect(dashboard).toContain("if (runningForStartNow() && isBlankStart) {");
+    expect(dashboard).toContain("const active = runningForStartNow();\n    if (active && active.categoryId === activityId) {");
+    expect(dashboard).toContain("pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current");
+    // Deleted here is not "not loaded": tombstones from the delete hold, the queued deletes, and delivered ones until a
+    // read that started after their delivery is applied (Codex r2 on #618).
+    expect(dashboard).toContain("own.tombstones.observe(commands, Date.now());");
+    expect(dashboard).toContain("authoritativeLoadRef.current(readStartedAt, { userId: serverBootstrap.user.id, workspaceId: serverBootstrap.workspace.id });");
   });
 
   it("counts a block that ran into a trip as one \"?\", asked on its block, never a row or a dashed block of its own", () => {
