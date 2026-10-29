@@ -69,6 +69,8 @@ const register = vi.hoisted(() => ({
 vi.mock("../../lib/afterCorrections", () => register);
 
 const { useLocationCorrections } = await import("./useLocationCorrections");
+// The tap's account lifetime, as the sheet carries it (Codex r17 on #610).
+const { currentMobileAccountEpoch } = await import("../../lib/mobileAccount");
 
 // Location v4 step 12: synthetic ids and times only.
 const iso = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
@@ -320,9 +322,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<Probe data={account("a")} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
-      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }> };
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void; cancel: () => Promise<void> }> };
       let handle!: { start: () => void; cancel: () => Promise<void> };
-      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
         expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands" } }));
       const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
@@ -333,7 +335,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
       expect(mocks.enqueue).not.toHaveBeenCalled();
       // Undo takes back the Logs as only.
-      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"]); });
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
       act(() => { handle.start(); });
       act(() => { api!.undoLog(); });
       await act(async () => { vi.advanceTimersByTime(5_000); });
@@ -388,8 +390,8 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<Probe data={account("a")} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
-      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<unknown> };
-      await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"]); });
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<unknown> };
+      await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
         expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands" } }));
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["new-1", "earlier-1"] });
@@ -405,12 +407,12 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
-      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+      const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
       // Given up in front: said.
       waiting.settleOutcome = "abandoned";
       waiting.settleAnswerAfterCorrections.mockClear();
       let handle!: { start: () => void };
-      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
       act(() => { handle.start(); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: true });
@@ -419,7 +421,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       showNotice.mockClear();
       let finish!: () => void;
       waiting.settleAnswerAfterCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve("abandoned"); }));
-      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"]); });
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
       act(() => { handle.start(); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       mocks.appState = "background";
@@ -442,9 +444,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<Probe data={account("a")} showNotice={showNotice} />); });
       act(() => { api!.openPlace(place, "Unknown place"); });
-      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void; onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+      const logAs = sheetOf(tree)!.props.logAs as { onLog: (id: string) => void; onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
       let handle!: { start: () => void };
-      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+      await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
       act(() => { handle.start(); });
       await act(async () => { tree.unmount(); });
       expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
@@ -475,9 +477,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
-    let logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+    let logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
     let handle!: { start: () => void };
-    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
     await act(async () => { tree.unmount(); });
     act(() => { handle.start(); });
     expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), expect.any(String), { inFront: false });
@@ -486,7 +488,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
     logAs = sheetOf(tree)!.props.logAs as typeof logAs;
-    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"]); });
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-2"], currentMobileAccountEpoch()); });
     const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
     await act(async () => { tree.update(<Probe data={account("b")} />); });
     act(() => { handle.start(); });
@@ -499,9 +501,9 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });
     act(() => { api!.openPlace(place, "Unknown place"); });
-    const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[]) => Promise<{ start: () => void }> };
+    const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<{ start: () => void }> };
     let handle!: { start: () => void };
-    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"]); });
+    await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
     // The hold starts and the place sheets go away before any re-render.
     act(() => {
       handle.start();

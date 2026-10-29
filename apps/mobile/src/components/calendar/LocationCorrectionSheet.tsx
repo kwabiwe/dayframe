@@ -55,7 +55,11 @@ import {
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
 /** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
-export type LocationCorrectionBeforeEnqueue = (ids: readonly string[]) => Promise<{ start: () => void; cancel: () => Promise<void> }>;
+/**
+ * `generation`: the account lifetime of the tap that began it (`currentMobileAccountEpoch`, captured before its first
+ * await and carried through creation, queueing and registration; Codex r17 on #610).
+ */
+export type LocationCorrectionBeforeEnqueue = (ids: readonly string[], generation: number) => Promise<{ start: () => void; cancel: () => Promise<void> }>;
 
 export type LocationCorrectionTarget =
   | { kind: "place"; place: TimelinePlace; label: string; notHere?: boolean }
@@ -104,7 +108,7 @@ export function LocationCorrectionSheet({
      * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
      * removes it if they can't be.
      */
-    answerAfter?: (yes: boolean, ids: readonly string[]) => ReturnType<LocationCorrectionBeforeEnqueue>;
+    answerAfter?: (yes: boolean, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
   } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
@@ -132,7 +136,7 @@ export function LocationCorrectionSheet({
      * Logs it after the sheet's corrections (Codex r4 on #610): kept on the phone before they are queued, and sent as
      * `log_place` only once the server has acknowledged every one; a refused one means nothing is logged.
      */
-    onLogAfter?: (categoryId: string, ids: readonly string[]) => ReturnType<LocationCorrectionBeforeEnqueue>;
+    onLogAfter?: (categoryId: string, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
   };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
@@ -279,7 +283,7 @@ export function LocationCorrectionSheet({
     if (logAfter && logCategoryId) {
       // Logs as waits for these corrections to be acknowledged, never merely kept on the phone (Codex r4 on #610).
       const categoryId = logCategoryId;
-      keep(corrections, "close", (ids) => logAfter(categoryId, ids));
+      keep(corrections, "close", (ids, generation) => logAfter(categoryId, ids, generation));
       return false;
     }
     pendingLog.current = log;
@@ -305,7 +309,7 @@ export function LocationCorrectionSheet({
     const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
     setSaving(true);
     setSaveError(null);
-    onSavePlace(placeName.trim(), rest, logAfter && categoryId ? (ids) => logAfter(categoryId, ids) : undefined).then(() => {
+    onSavePlace(placeName.trim(), rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined).then(() => {
       setSaving(false);
       kept.current = true;
       log?.();
@@ -357,7 +361,7 @@ export function LocationCorrectionSheet({
       setSaveError("Save your changes with Done; the question updates after.");
       return;
     }
-    keep(corrections, "close", (ids) => answerAfter(yes, ids));
+    keep(corrections, "close", (ids, generation) => answerAfter(yes, ids, generation));
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;

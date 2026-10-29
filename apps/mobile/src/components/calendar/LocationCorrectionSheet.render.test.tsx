@@ -430,7 +430,8 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     await settle();
     expect(onQueue).toHaveBeenCalledOnce();
     expect(onQueue.mock.calls[0][0]).toEqual([expect.objectContaining({ request: expect.objectContaining({ kind: "place", placeId: SAVED }) })]);
-    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"]);
+    // With the tap's account lifetime the queue carries (here: none given by this stand-in queue).
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], undefined);
     expect(order).toEqual(["hold cid-1", "queued", "start"]);
     // Never answered straight away: only through the waiting record.
     expect(onAnswer).not.toHaveBeenCalled();

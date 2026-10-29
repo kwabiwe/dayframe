@@ -2182,14 +2182,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
         // to the Review outbox only once the server has every one of them. No Apple place with it: the corrections say
         // where it was.
-        answerAfter: async (yes, ids) => {
+        // `generation`: the tap's account lifetime, carried from before its first await (Codex r17 on #610).
+        answerAfter: async (yes, ids, generation) => {
           if (!correctionOwner || !check.segmentId) throw new Error("No account.");
           const id = createReviewClientMutationId();
           // The account it is registered for: its start checks it is still this one (Codex r14 on #610), and every write
           // to its record is for that account (r15).
           const registeredFor = scopedOwnerKey;
           const registeredOwner = correctionOwner;
-          const generation = currentMobileAccountEpoch();
+          if (generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
           // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps
           // its question and nothing is queued (Codex r16 on #610).
           if (!checkAnswers.canAnswer(check.id)) throw new Error("This can't be answered here now.");

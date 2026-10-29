@@ -150,16 +150,19 @@ export function useLocationCorrections({
   // `beforeEnqueue` (an answer that waits for these corrections; Codex r2 on #610) is kept first, with the ids the
   // corrections will carry, so their acknowledgement always finds it; it starts once they are kept, and goes if
   // they can't be.
+  // `generation`: the account lifetime of the tap (Codex r17 on #610) — captured here, the tap's first step, unless a
+  // caller that awaited first (Save this place) carries its own; an account change since, even back, stops it.
   const queue = useCallback(async (presentationId: number, sheetOwnerKey: string, corrections: QueuedCorrection[], closing: boolean,
-    beforeEnqueue?: LocationCorrectionBeforeEnqueue) => {
-    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
+    beforeEnqueue?: LocationCorrectionBeforeEnqueue, generation = currentMobileAccountEpoch()) => {
+    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey
+      || generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
     const owner = { userId, workspaceId };
     // The ids are chosen here only when an answer waits for them.
     const ids = beforeEnqueue ? corrections.map((correction) => correction.request.clientCorrectionId ?? createTimelineCorrectionId()) : null;
-    const waiting = beforeEnqueue && ids?.length ? await beforeEnqueue(ids) : null;
+    const waiting = beforeEnqueue && ids?.length ? await beforeEnqueue(ids, generation) : null;
     // The account can change while the waiting answer is kept: then nothing is queued or started for the one that
-    // left, and its waiting answer goes (Codex r3 on #610).
-    if (waiting && currentOwner.current !== sheetOwnerKey) {
+    // left, and its waiting answer goes (Codex r3 and r17 on #610).
+    if (waiting && (currentOwner.current !== sheetOwnerKey || generation !== currentMobileAccountEpoch())) {
       await waiting.cancel().catch(() => undefined);
       throw new Error("The account changed.");
     }
@@ -192,6 +195,9 @@ export function useLocationCorrections({
     if (!userId || !workspaceId || !shownCentre || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) {
       throw new Error("The place can't be saved now.");
     }
+    // The tap's account lifetime, before its first await (createPlace), carried through queueing and registration
+    // (Codex r17 on #610).
+    const generation = currentMobileAccountEpoch();
     const key = `${sheetOwnerKey}|${place.id}|${name}`;
     let placeId = createdPlaces.current.get(key) ?? null;
     if (!placeId) {
@@ -205,12 +211,12 @@ export function useLocationCorrections({
       const saved = placeId;
       setSavedHere((current) => [...current, { ownerKey: sheetOwnerKey, id: saved, name }]);
     }
-    if (currentOwner.current !== sheetOwnerKey) throw new Error("The account changed.");
+    if (currentOwner.current !== sheetOwnerKey || generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
     // The visit set to it, then the sheet's other changes (its times), in one Done.
     await queue(presentationId, sheetOwnerKey, [{
       request: { kind: "place", subject: "place", itemId: place.id, placeId, learnedPlaceId: null },
       preview: { name, role: null }
-    }, ...rest], true, beforeEnqueue);
+    }, ...rest], true, beforeEnqueue, generation);
   }, [ownerKey, queue, shownCentre, shownRadius, userId, workspaceId]);
 
   // "Logs as" (step 12 part 4c): held for Undo for the deck's 4.8 s, then queued as `log_place`; once the server
@@ -338,12 +344,14 @@ export function useLocationCorrections({
   }, [acknowledgedIds]);
   // A Logs as kept on the phone until the place's corrections are acknowledged: `newIds` (this sheet's, about to be
   // queued) and every one still queued for the place. Null when there is nothing to wait for (Codex r5 on #610).
+  // `generation`: the account lifetime of the tap that began it, captured before its first await and carried here
+  // (Codex r16 and r17 on #610): any account change since, even back to this one, makes it stale.
   const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string, title: string,
-    newIds: readonly string[]) => {
-    if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current) throw new Error("The account changed.");
+    newIds: readonly string[], generation: number) => {
+    if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current || generation !== currentMobileAccountEpoch()) {
+      throw new Error("The account changed.");
+    }
     const owner = { userId, workspaceId };
-    // The account lifetime it is registered in: any account change since, even back to this one, makes it stale (r16).
-    const generation = currentMobileAccountEpoch();
     // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
     const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId } });
@@ -423,7 +431,7 @@ export function useLocationCorrections({
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
           const generation = currentMobileAccountEpoch();
-          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, []).then((waiting) => {
+          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation).then((waiting) => {
             // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
               waiting.start();
@@ -439,9 +447,9 @@ export function useLocationCorrections({
             else holdLog(log);
           }, () => sayForLog(sheetOwner, "That place wasn't logged. Try again."));
         },
-        onLogAfter: async (categoryId, ids) => {
+        onLogAfter: async (categoryId, ids, generation) => {
           const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
-          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids);
+          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids, generation);
           if (!waiting) throw new Error("Nothing to wait for.");
           return waiting;
         }

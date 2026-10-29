@@ -45,10 +45,12 @@ vi.mock("../../lib/reviewSyncStore", () => ({
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
-vi.mock("../../lib/api", () => ({
-  createPlace: vi.fn(async () => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
-  fetchTimelineItemEvidence: vi.fn(async () => ({ segment: { kind: "stay" }, map: { centre: null, stayRadiusMeters: 40, nearbySavedPlaces: [] } }))
+const api = vi.hoisted(() => ({
+  createPlace: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000aa" } })),
+  fetchTimelineItemEvidence: vi.fn(async () => ({ segment: { kind: "stay" },
+    map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters: 40, nearbySavedPlaces: [] } }))
 }));
+vi.mock("../../lib/api", () => api);
 vi.mock("./LocationCorrectionSheet", () => ({ LocationCorrectionSheet: "LocationCorrectionSheet" }));
 
 const account = await import("../../lib/mobileAccount");
@@ -178,6 +180,51 @@ describe("late starts of waiting answers, over the real store (Codex r14 on #610
     await flush();
     expect(hookRef.current!.heldLog).toBeNull();
     expect(await states()).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
+  it("stops a Save this place whose place creation outlived an account change, even back to the same account (Codex r17 on #610)", async () => {
+    const place = { kind: "place", id: "segment-a", status: "finalised", startedAt: at(10), stoppedAt: at(11), placeId: null, learnedPlaceId: null,
+      name: null, role: null, matchKind: "unknown", confidence: "low", blockIds: [] };
+    const timeline = { items: [place] } as never;
+    const placesData = (userId: string) => ({ ...data, user: { id: userId }, workspace: { id: userId === "user-a" ? "ws-a" : "ws-b" },
+      categories: [{ id: "6f000000-0000-4000-8000-0000000000c9", name: "Errands", color: "teal", isPinned: true }] }) as unknown as MobileBootstrap;
+    const DATA_A = placesData("user-a");
+    const DATA_B = placesData("user-b");
+    const hookRef: { current: ReturnType<typeof useLocationCorrections> | null } = { current: null };
+    function Places({ value }: { value: MobileBootstrap }) {
+      hookRef.current = useLocationCorrections({ acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
+        showNotice: () => undefined, theme: {} as never, timeline });
+      return hookRef.current.sheet;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Places value={DATA_A} />); });
+    act(() => { hookRef.current!.openPlace(place as never, "Unknown place"); });
+    await flush();
+    const sheet = () => tree.root.findAll((node) => (node.type as unknown) === "LocationCorrectionSheet")[0].props as {
+      onSavePlace: (name: string, rest: unknown[], beforeEnqueue?: (ids: readonly string[], generation: number) => Promise<unknown>) => Promise<void>;
+      logAs: { onLogAfter: (categoryId: string, ids: readonly string[], generation: number) => Promise<unknown> };
+    };
+    const { onSavePlace, logAs } = sheet();
+    const pendingBefore = (await outbox.readPendingTimelineCorrections(OWNER)).length;
+    // The place's creation is slow: A → B → A meanwhile.
+    let created!: () => void;
+    api.createPlace.mockImplementationOnce(() => new Promise((resolve) => {
+      created = () => resolve({ ok: true, place: { id: "6f000000-0000-4000-8000-0000000000ab" } });
+    }));
+    let saved!: Promise<void>;
+    act(() => { saved = onSavePlace("Exampleton Bakery", [], (ids, generation) => logAs.onLogAfter("6f000000-0000-4000-8000-0000000000c9", ids, generation)); });
+    await account.activateMobileAccount({ userId: "user-b", workspaceId: "ws-b" });
+    act(() => { tree.update(<Places value={DATA_B} />); });
+    await account.activateMobileAccount(OWNER);
+    act(() => { tree.update(<Places value={DATA_A} />); });
+    created();
+    await act(async () => { await expect(saved).rejects.toThrow("The account changed."); });
+    await flush();
+    // Nothing of the first A goes on: no correction queued, no waiting Logs as, no hold.
+    expect((await outbox.readPendingTimelineCorrections(OWNER)).length).toBe(pendingBefore);
+    expect(await states()).toEqual([]);
+    expect(hookRef.current!.heldLog).toBeNull();
     act(() => { tree.unmount(); });
   });
 
