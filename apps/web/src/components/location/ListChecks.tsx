@@ -224,18 +224,18 @@ function useCheckDecisionsState({ applyTransition, categories, owner, refresh, r
   /**
    * A saved correction whose receipt landed after its dialog had gone (the List left, or the Grid's dialog closed,
    * while it was saving; Codex r1 on #617): the day is read again once, so its blocks (a Logs as's, an outing's
-   * trips' too) show. Held by the dialog from the lifetime it was made in, and run only while that lifetime is
-   * current, through this owner's refresh (the List's while it is shown, otherwise the shell's), which outlives it.
+   * trips' too) show. As with settleResolved, the dialog holds the callback of the lifetime it was made in, which
+   * reads through the current lifetime's refresh (the List's while it is shown, otherwise the shell's) when the
+   * signed-in workspace and user are still the receipt's — after A → B → A too — and never for another (Codex r2 on #617).
    */
   const refreshNow = useRef(refresh);
   useLayoutEffect(() => {
     refreshNow.current = refresh;
   });
-  const madeIn = lifetime.generation;
   const refreshAfterReceipt = useCallback(() => {
-    if (generationNow.current !== madeIn) return;
+    if (ownerNow.current !== owner) return;
     void Promise.resolve().then(() => refreshNow.current()).catch(() => undefined);
-  }, [madeIn]);
+  }, [owner]);
 
   return { answer, checks, clearError, itemsById, outings, projectedItems, refreshAfterReceipt, settleResolved, state, undo };
 }

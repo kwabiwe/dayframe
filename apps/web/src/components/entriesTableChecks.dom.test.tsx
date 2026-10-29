@@ -746,6 +746,30 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 
+  it("reads the day once for a late receipt after A → B → A, settled in A's new lifetime (Codex r2 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }),
+      { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const refreshA = vi.fn(async () => undefined);
+    const refreshB = vi.fn(async () => undefined);
+    const view = render(<Shell items={[stay, walk]} refresh={refreshA}>
+      <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    // B signs in while the POST is out, then A again: a new lifetime of A.
+    view.rerender(<Shell items={[]} owner="w2:u2" refresh={refreshB}>{null}</Shell>);
+    view.rerender(<Shell items={[stay, walk]} refresh={refreshA}>{null}</Shell>);
+    expect(badge()).toBe(1);
+    await act(async () => { save.answer(); });
+    await waitFor(() => expect(refreshA).toHaveBeenCalledTimes(1));
+    expect(badge()).toBe(0);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(refreshA).toHaveBeenCalledTimes(1);
+    expect(refreshB).not.toHaveBeenCalled();
+  });
+
   it("drops a late receipt's read when the account changed meanwhile (Codex r1 on #617)", async () => {
     const [stay, walk] = outingPair();
     const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe"], resolvedReviewItemIds: [stay.id] } }), { status: 200 }));
