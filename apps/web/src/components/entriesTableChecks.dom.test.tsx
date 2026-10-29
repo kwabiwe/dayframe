@@ -1366,14 +1366,29 @@ describe("a block that ran into a trip in Calendar › List (location v4 design 
     expect(screen.queryByRole("button", { name: /to check, oldest first/ })).toBeNull();
   });
 
-  it("a block not loaded still counts; the chip goes to its day, where its editor opens from the link", async () => {
-    render(<Shell items={[clash()]}>{list([clash()], [])}</Shell>);
+  // #622's rule on the web: a clash counts and asks only while its block is loaded and openable in the Calendar data.
+  const shellBlocks = (entries: TimeEntryRow[]) => new Map(entries.map((one) => [one.id, {
+    id: one.id, startedAt: one.startedAt, stoppedAt: one.stoppedAt, source: one.source, eventType: null, reviewStatus: one.reviewStatus
+  }] as const));
+  it("a clash whose block is not loaded counts nowhere until the block arrives; then badge, chip and dot agree (web parity with #622)", async () => {
+    const view = render(<Shell blocks={shellBlocks([])} items={[clash()]}>{list([clash()], [])}</Shell>);
+    expect(badge()).toBe(0);
+    expect(screen.queryByRole("button", { name: /to check, oldest first/ })).toBeNull();
+    expect(blockMark()).toBeNull();
+    view.rerender(<Shell blocks={shellBlocks([running()])} items={[clash()]}>{list([clash()])}</Shell>);
+    expect(badge()).toBe(1);
+    expect(await screen.findByRole("button", { name: "1 to check, oldest first" })).toBeTruthy();
+    expect(blockMark()).toBeTruthy();
+  });
+
+  it("a block loaded in the Calendar data but not on the List's shown days: the chip goes to its day, where its editor opens", async () => {
+    render(<Shell blocks={shellBlocks([running()])} items={[clash()]}>{list([clash()], [])}</Shell>);
     expect(badge()).toBe(1);
     fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
     expect(router.push).toHaveBeenCalledWith(expect.stringContaining(`check=${CLASH}`));
     cleanup();
     search.params = `view=list&scope=day&date=2026-08-11&check=${CLASH}`;
-    render(<Shell items={[clash()]}>{list([clash()])}</Shell>);
+    render(<Shell blocks={shellBlocks([running()])} items={[clash()]}>{list([clash()])}</Shell>);
     await waitFor(() => expect(question()).toBeTruthy());
   });
 

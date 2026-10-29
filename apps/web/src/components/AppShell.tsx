@@ -21,6 +21,8 @@ import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, clashBlocksFrom, oldestCheckHref } from "@/lib/calendar-checks";
 import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
+import { useClashesBeyondCap } from "@/components/location/useClashesBeyondCap";
+import { withClashItems } from "@/lib/clash-presentation";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -81,20 +83,32 @@ const NO_CATEGORIES: readonly CategoryRow[] = [];
  * and the sidebar badge and Today's chip count from it, so an answer held, saving or saved shows the same everywhere,
  * and survives leaving the List. Another workspace or person starts it afresh.
  */
-function CheckDecisionsHost({ children }: { children: ReactNode }) {
+export function CheckDecisionsHost({ children }: { children: ReactNode }) {
   const { canonicalShellData, data, refresh, shellData } = useAppShellRuntime();
-  const owner = data ? `${data.workspace.id}:${data.user.id}` : "";
   const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
   // The blocks the shell has (the running one last, so it wins): a "block ran into your trip" stops asking once its
   // block no longer runs into the trip (location v4 design §7).
   // As the server last sent them (not the End it projection), so a projection is confirmed against canonical data.
   const canonical = canonicalShellData ?? shellData ?? data;
+  // The owner is the signed-in account as the shell's canonical bootstrap names it, which never goes empty while the
+  // Calendar loads another date (the selected period's data is null then): decisions held, saving or saved survive a
+  // date load, and only a real change of account or workspace starts afresh (Codex r2 on #623; latent since #609).
+  const owner = canonical ? `${canonical.workspace.id}:${canonical.user.id}` : "";
   const blocks = useMemo(() => canonical ? clashBlocksFrom([...canonical.historyEntries ?? [], ...canonical.weekEntries ?? [],
     ...canonical.dayEntries ?? [], ...canonical.entries ?? [], ...(canonical.activeEntry ? [canonical.activeEntry] : [])],
   canonical.categories) : undefined, [canonical]);
+  // Clashes past the bootstrap's 100 items (web parity with #622): read only when the bootstrap reached its cap, on its
+  // refreshes, and merged in once each; every one still counts only while its block is loaded here.
+  // From the stable canonical shell data, which keeps its owner while the Calendar loads another date (Codex r1 on #623).
+  const todayStartMs = useLocalDayStartMs();
+  const canonicalOwner = owner;
+  const canonicalItems = canonical?.reviewItems ?? NO_REVIEW_ITEMS;
+  const beyondCap = useClashesBeyondCap({ bootstrapItems: canonicalItems, dataVersion: canonical, owner: canonicalOwner, todayStartMs });
+  // The canonical bootstrap's items too: the same list the period data carries, kept while a date loads.
+  const reviewItems = useMemo(() => withClashItems(canonicalItems, beyondCap), [beyondCap, canonicalItems]);
   return (
-    <CheckDecisionsProvider blocks={blocks} categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
-      reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
+    <CheckDecisionsProvider blocks={blocks} categories={canonical?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
+      reviewItems={reviewItems}>
       <EndedBlocksToTimer />
       {children}
     </CheckDecisionsProvider>
