@@ -31,7 +31,7 @@ describe("the \"?\" that still ask (owner, 28 Oct 2026)", () => {
     expect(askingChecks([stay, there], today).map((check) => check.id)).toEqual(["stay"]);
   });
 
-  it("links the badge to the oldest in Calendar's List, by its day and id", () => {
+  it("links Today's chip to the oldest it is given in Calendar's List, by its day and id", () => {
     const checks = askingChecks([item("later", 27), item("old one", 23)], today);
     expect(oldestCheckHref(checks)).toBe("/timeline?view=list&scope=day&date=2026-10-23&check=old%20one");
     expect(oldestCheckHref([])).toBe("/timeline?view=list&scope=day");

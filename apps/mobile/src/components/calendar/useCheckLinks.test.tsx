@@ -39,14 +39,16 @@ function mount(initial: { ready?: boolean; owner?: CheckLinkOwner | null; listed
     lookup: initial.lookup ?? (async () => null as Found),
     selectedDayKey: initial.selectedDayKey ?? "2026-10-29",
     loads: 0,
-    now: initial.now ?? 1_000
+    now: initial.now ?? 1_000,
+    cancelRequest: 0
   };
   const result: { open: (check: string) => void } = { open: () => undefined };
   function Harness(current: typeof props) {
     result.open = useCheckLinks({
       ready: current.ready, owner: current.owner, todayKey: "2026-10-29", selectedDayKey: props.selectedDayKey, loads: current.loads,
       openCheck: calls.openCheck, openDay: calls.openDay, openTodayFirst: calls.openTodayFirst,
-      lookupItem: calls.lookupStart, dayKeyOf: (instant) => instant.slice(0, 10), now: () => props.now
+      lookupItem: calls.lookupStart, dayKeyOf: (instant) => instant.slice(0, 10), now: () => props.now,
+      cancelRequest: current.cancelRequest
     });
     return null;
   }
@@ -217,5 +219,42 @@ describe("old Review links in Calendar › List (step 15; Codex r1 on #615)", ()
     calls.openCheck.mockClear();
     load({ listed: [ID] });
     expect(calls.openCheck).not.toHaveBeenCalled();
+  });
+
+  // Owner bug (29 Oct 2026; Codex r1 on #625): the Calendar tab's tap opens today and cancels every link still being
+  // answered, so nothing takes the List back to an earlier day afterwards.
+  it("opens nothing for a read that answers after the Calendar tab's tap: the List stays on today", async () => {
+    const slow = deferred<string | null>();
+    const { calls, link, update, props } = mount({ lookup: () => slow.promise });
+    link(ID);
+    expect(calls.lookupStart).toHaveBeenCalledOnce();
+    // The tab's tap: today, and the cancel.
+    update({ selectedDayKey: "2026-10-29", cancelRequest: props().cancelRequest + 1 });
+    calls.openCheck.mockClear();
+    await act(async () => { slow.resolve("2026-10-23T09:00:00.000Z"); await slow.promise; await Promise.resolve(); });
+    expect(calls.openCheck).not.toHaveBeenCalled();
+    expect(calls.openDay).not.toHaveBeenCalled();
+    expect(props().selectedDayKey).toBe("2026-10-29");
+  });
+
+  it("drops a link held until sign-in, and a \"?\" waiting on its day, at the Calendar tab's tap", async () => {
+    const held = mount({ ready: false, owner: null });
+    held.link(ID);
+    held.update({ cancelRequest: 1 });
+    held.update({ ready: true, owner: A });
+    expect(held.calls.openCheck).not.toHaveBeenCalled();
+    expect(held.calls.lookupStart).not.toHaveBeenCalled();
+
+    const waiting = mount({ lookup: async () => ({ startedAt: "2026-10-23T08:00:00.000Z", asks: true }) });
+    waiting.link(ID);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(waiting.calls.openDay).toHaveBeenCalledWith("2026-10-23");
+    waiting.update({ cancelRequest: 1 });
+    waiting.calls.openCheck.mockClear();
+    waiting.load({ listed: [ID] });
+    expect(waiting.calls.openCheck).not.toHaveBeenCalled();
+    // A link after the tap still opens: the cancel ends only what was waiting.
+    waiting.link(ID);
+    expect(waiting.calls.openCheck).toHaveBeenCalledWith(ID);
   });
 });
