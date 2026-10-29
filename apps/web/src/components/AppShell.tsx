@@ -96,10 +96,13 @@ function CheckDecisionsHost({ children }: { children: ReactNode }) {
   canonical.categories) : undefined, [canonical]);
   // Clashes past the bootstrap's 100 items (web parity with #622): read only when the bootstrap reached its cap, on its
   // refreshes, and merged in once each; every one still counts only while its block is loaded here.
+  // From the stable canonical shell data, which keeps its owner while the Calendar loads another date (Codex r1 on #623).
   const todayStartMs = useLocalDayStartMs();
+  const canonicalOwner = canonical ? `${canonical.workspace.id}:${canonical.user.id}` : "";
+  const canonicalItems = canonical?.reviewItems ?? NO_REVIEW_ITEMS;
+  const beyondCap = useClashesBeyondCap({ bootstrapItems: canonicalItems, dataVersion: canonical, owner: canonicalOwner, todayStartMs });
   const bootstrapItems = data?.reviewItems ?? NO_REVIEW_ITEMS;
-  const beyondCap = useClashesBeyondCap({ bootstrapItems, dataVersion: canonical, owner, todayStartMs });
-  const reviewItems = useMemo(() => withClashItems(bootstrapItems, beyondCap), [beyondCap, bootstrapItems]);
+  const reviewItems = useMemo(() => data ? withClashItems(bootstrapItems, beyondCap) : NO_REVIEW_ITEMS, [beyondCap, bootstrapItems, data]);
   return (
     <CheckDecisionsProvider blocks={blocks} categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
       reviewItems={reviewItems}>
