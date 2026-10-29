@@ -131,16 +131,31 @@ export function LocationEvidenceMap({
       const created = map;
       mapRef.current = created;
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is.
+      // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is. The first
+      // load window counts the tile requests started in it (until MapLibre's `load`, or 10 s); those requests are
+      // followed until they settle, however late, and the majority rule decides then. "Ready" needs the style
+      // loaded; the timeout only stops counting new requests (Codex r3 on #626).
       let styleFailed = !baseMap.available;
       let sourceFailed = false;
+      let styleLoaded = false;
+      let mapLoaded = false;
+      let tileLoads = 0;
+      let decided = false;
+      const windowTilesPending = () => tileLoads + tileErrors < tileRequests;
+      const decide = () => {
+        if (decided || cancelled || styleFailed || sourceFailed || !styleLoaded) return;
+        const majorityFailed = tileRequests > 0 && tileErrors * 2 > tileRequests;
+        const settled = mapLoaded || (!firstLoadWindowOpen && tileRequests > 0 && !windowTilesPending());
+        if (!majorityFailed && !settled) return;
+        decided = true;
+        setBaseMapState(majorityFailed ? "degraded" : "ready");
+      };
       const closeFirstLoadWindow = () => {
         if (!firstLoadWindowOpen) return;
         firstLoadWindowOpen = false;
         if (windowTimer) clearTimeout(windowTimer);
         windowTimer = null;
-        if (cancelled || styleFailed || sourceFailed) return;
-        setBaseMapState(tileRequests > 0 && tileErrors * 2 > tileRequests ? "degraded" : "ready");
+        decide();
       };
       windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
       // The evidence is drawn as soon as the style is there, not after the tiles, from the newest content: a leg
@@ -180,11 +195,29 @@ export function LocationEvidenceMap({
           sourceFailed = true;
           return;
         }
-        if (firstLoadWindowOpen) tileErrors += 1;
+        if (windowTilesPending()) tileErrors += 1;
+        decide();
       });
-      created.on("load", closeFirstLoadWindow);
-      created.on("style.load", drawFirst);
-      if (created.isStyleLoaded?.()) drawFirst();
+      created.on("sourcedata", (event) => {
+        const detail = event as unknown as { sourceId?: string; tile?: unknown };
+        if (!detail.tile || (detail.sourceId && EVIDENCE_SOURCE_IDS.has(detail.sourceId))) return;
+        if (windowTilesPending()) tileLoads += 1;
+        decide();
+      });
+      created.on("load", () => {
+        mapLoaded = true;
+        closeFirstLoadWindow();
+        decide();
+      });
+      created.on("style.load", () => {
+        styleLoaded = true;
+        drawFirst();
+        decide();
+      });
+      if (created.isStyleLoaded?.()) {
+        styleLoaded = true;
+        drawFirst();
+      }
       created.on("click", (event) => latest.current.onSelectPoint?.({
         latitude: event.lngLat.lat,
         longitude: event.lngLat.lng

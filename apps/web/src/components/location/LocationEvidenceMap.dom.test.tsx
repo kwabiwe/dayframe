@@ -297,6 +297,72 @@ describe("LocationEvidenceMap", () => {
     }
   });
 
+  it("stays loading until the style loads, however long it takes: the timeout is not success (Codex r3 on #626)", async () => {
+    mocks.autoStyle = false;
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+      await vi.waitFor(() => expect(mocks.maps).toHaveLength(1));
+      const map = mocks.maps[0]!;
+      act(() => { vi.advanceTimersByTime(12_000); });
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      // The style loads at 12 s, then the first view.
+      act(() => map.emit("style.load"));
+      expect(map.addLayer).toHaveBeenCalled();
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      act(() => map.emit("load"));
+      expect(screen.queryByText("Loading map background…")).toBeNull();
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts late failures of the first window's tiles: four pending, three fail after 10 s (Codex r3 on #626)", async () => {
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+      await vi.waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
+      const map = mocks.maps[0]!;
+      const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
+      for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+      act(() => { vi.advanceTimersByTime(10_000); });
+      // The window has closed: a request started now is not counted, and nothing is decided yet.
+      transform("https://dayframe.test/api/map-tiles/15/9/1", "Tile");
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
+      for (let tile = 0; tile < 3; tile += 1) act(() => map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") }));
+      expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is ready once the first window's tiles settle after the timeout with only one failure", async () => {
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+      await vi.waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
+      const map = mocks.maps[0]!;
+      const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
+      for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") }));
+      for (let tile = 0; tile < 2; tile += 1) act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
+      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      act(() => map.emit("sourcedata", { sourceId: "base", tile: {} }));
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("jumps to new bounds at once under Reduce Motion", async () => {
     mocks.reducedMotion = true;
     mocks.clientFetch.mockResolvedValue(styleResponse());
