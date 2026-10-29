@@ -8956,12 +8956,11 @@ dialog.ui-dialog.df-palette {
   display: grid;
   width: 28px;
   place-items: center;
-  /* The X3 radius (WUI-028: 30% of the 36 px block), fixed so a tall block keeps round corners. */
+  /* The X3 radius (30% of the 28 px block), fixed so a tall block keeps round corners; the block's
+     height follows its length (22–44 px, set inline). */
   border-radius: calc(28px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
-  height: 28px;
-  align-self: center;
 }
 
 .df-erow-block.df-block {
