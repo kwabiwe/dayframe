@@ -22,15 +22,22 @@ export function clashBlocksFrom(entries: readonly TimeEntryRow[], categories: re
 }
 
 /**
- * Whether an open item still asks (location v4 design §7): a "block ran into your trip" asks until its block, as
- * loaded here, no longer runs into the trip (a block not loaded keeps asking: the server decides); anything else asks.
+ * Whether an open item still asks (location v4 design §7): a "block ran into your trip" asks only while its block is
+ * loaded and openable here and still runs into the trip (#622's rule, web parity): a block not loaded (deleted
+ * elsewhere, past the loaded range) or known deleted here (`null`) does not count until it arrives, so a question is
+ * never counted without its block to answer on. Without `blocks` (an already filtered list) it is not judged again.
+ * `missingBlock: "asks"` is for a surface refining the owner's list with its own subset of blocks (the List's loaded
+ * weeks, the Grid's shown days), which may leave out a block the owner has. Anything else asks.
  */
-export function clashStillAsks(item: ReviewItemRow, blocks: ClashBlocks | undefined, nowMs?: number) {
+export function clashStillAsks(item: ReviewItemRow, blocks: ClashBlocks | undefined, nowMs?: number, missingBlock: "drops" | "asks" = "drops") {
   if (!isTimerTripClashItem(item)) return true;
   const question = timerTripClashQuestion(item);
   if (!question) return false;
+  if (!blocks) return true;
+  const entry = blocks.get(question.timeEntryId);
+  if (entry === undefined && missingBlock === "drops") return false;
   // A block still running ran into the whole trip: without a clock, it is judged as at the trip's end (a pure read).
-  return timerTripClashAsksOnBlock(question, blocks?.get(question.timeEntryId), nowMs ?? Math.max(Date.parse(question.tripStoppedAt), 0));
+  return timerTripClashAsksOnBlock(question, entry, nowMs ?? Math.max(Date.parse(question.tripStoppedAt), 0));
 }
 
 /**

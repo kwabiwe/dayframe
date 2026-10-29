@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askingChecks, checkBlockId, clashBlocksFrom, drawsAsOwnCheck, oldestCheckHref, reviewCheckHref, todaysChecks } from "@/lib/calendar-checks";
+import { askingChecks, checkBlockId, clashBlocksFrom, clashStillAsks, drawsAsOwnCheck, oldestCheckHref, reviewCheckHref, todaysChecks } from "@/lib/calendar-checks";
 import { pendingReviewSeconds } from "@/lib/today-view";
 import type { TimeEntryRow } from "@/lib/queries";
 import { pendingReviewSpans } from "@/lib/today-view";
@@ -69,9 +69,14 @@ describe("a block that ran into a trip asks on its block (design §7)", () => {
     expect(askingChecks([old], today).map((check) => check.id)).toEqual([]);
   });
 
-  it("keeps asking for a block not loaded, and stops once the loaded block no longer runs into the trip", () => {
+  it("asks only while its block is loaded (#622's rule, web parity), and stops once the block no longer runs into the trip", () => {
     const running = block({ stoppedAt: null });
-    expect(askingChecks([clash], today, clashBlocksFrom([], []), nowMs).map((check) => check.id)).toEqual(["clash"]);
+    // Not loaded here (deleted elsewhere, past the loaded range): not counted until it arrives.
+    expect(askingChecks([clash], today, clashBlocksFrom([], []), nowMs)).toEqual([]);
+    // Known deleted here (held for Undo): not counted.
+    expect(askingChecks([clash], today, new Map([["e1", null]]), nowMs)).toEqual([]);
+    // A surface refining the owner's list with its own subset of blocks keeps it.
+    expect(clashStillAsks(clash, clashBlocksFrom([], []), nowMs, "asks")).toBe(true);
     expect(askingChecks([clash], today, clashBlocksFrom([running], []), nowMs).map((check) => check.id)).toEqual(["clash"]);
     // Stopped where the trip started (End it, or a Stop at the door), or moved onto a Move activity.
     expect(askingChecks([clash], today, clashBlocksFrom([block({ stoppedAt: local(27, 10) })], []), nowMs)).toEqual([]);

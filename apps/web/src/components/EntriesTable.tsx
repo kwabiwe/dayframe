@@ -393,7 +393,7 @@ export function EntriesTable({
   const askingStartMs = todayStartMs === null ? null : checkAskingStartMs(todayStartMs);
   const shownChecks = useMemo(() => askingStartMs !== null ? listChecks.checks.filter((check) => {
     const item = listChecks.itemsById.get(check.id);
-    return checkStillAsks(check, askingStartMs) && (!item || clashStillAsks(item, listBlocks, nowMs));
+    return checkStillAsks(check, askingStartMs) && (!item || clashStillAsks(item, listBlocks, nowMs, "asks"));
   }) : [], [askingStartMs, listBlocks, listChecks.checks, listChecks.itemsById, nowMs]);
   // A block that ran into a trip asks on its block's row (design §7), never on a row of its own.
   const rowChecks = useMemo(() => shownChecks.filter((check) => {

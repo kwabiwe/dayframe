@@ -21,6 +21,8 @@ import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
 import { askingChecks, clashBlocksFrom, oldestCheckHref } from "@/lib/calendar-checks";
 import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
+import { useClashesBeyondCap } from "@/components/location/useClashesBeyondCap";
+import { withClashItems } from "@/lib/clash-presentation";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -92,9 +94,15 @@ function CheckDecisionsHost({ children }: { children: ReactNode }) {
   const blocks = useMemo(() => canonical ? clashBlocksFrom([...canonical.historyEntries ?? [], ...canonical.weekEntries ?? [],
     ...canonical.dayEntries ?? [], ...canonical.entries ?? [], ...(canonical.activeEntry ? [canonical.activeEntry] : [])],
   canonical.categories) : undefined, [canonical]);
+  // Clashes past the bootstrap's 100 items (web parity with #622): read only when the bootstrap reached its cap, on its
+  // refreshes, and merged in once each; every one still counts only while its block is loaded here.
+  const todayStartMs = useLocalDayStartMs();
+  const bootstrapItems = data?.reviewItems ?? NO_REVIEW_ITEMS;
+  const beyondCap = useClashesBeyondCap({ bootstrapItems, dataVersion: canonical, owner, todayStartMs });
+  const reviewItems = useMemo(() => withClashItems(bootstrapItems, beyondCap), [beyondCap, bootstrapItems]);
   return (
     <CheckDecisionsProvider blocks={blocks} categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
-      reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
+      reviewItems={reviewItems}>
       <EndedBlocksToTimer />
       {children}
     </CheckDecisionsProvider>

@@ -920,7 +920,7 @@ export function CalendarReview({
     const nowMs = capturedNow.getTime();
     return new Map(gridReviewItems.flatMap((item) => {
       const blockId = checkBlockId(item);
-      return blockId && clashStillAsks(item, blocks, nowMs) ? [[blockId, item] as const] : [];
+      return blockId && clashStillAsks(item, blocks, nowMs, "asks") ? [[blockId, item] as const] : [];
     }));
   }, [capturedNow, categories, entries, gridReviewItems]);
   // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
