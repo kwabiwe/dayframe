@@ -27,8 +27,8 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    // A timer that ran into a trip counts nowhere until its block UI ships (step 15).
-    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item));");
+    // A block that ran into a trip counts on its day like any other "?" (location v4 design §7).
+    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item));");
     // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582).
     expect(dashboard).toContain("const { folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");

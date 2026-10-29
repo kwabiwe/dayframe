@@ -7,7 +7,7 @@ import {
   type CoveredActivityBar,
   type GoalCountingCategory
 } from "@dayframe/shared";
-import { asksAsCheck } from "@/lib/calendar-checks";
+import { drawsAsOwnCheck } from "@/lib/calendar-checks";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 /**
@@ -272,8 +272,8 @@ export type PendingReviewSpan = { id: string; title: string; color: string | nul
 export function pendingReviewSpans(items: readonly ReviewItemRow[], startMs: number, endMs: number, nowMs: number): PendingReviewSpan[] {
   const spans: PendingReviewSpan[] = [];
   for (const item of items) {
-    // A timer that ran into a trip is not an ordinary span to look at (step 15): its own UI comes later.
-    if (item.status !== "open" || !asksAsCheck(item) || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
+    // A block that ran into a trip asks on its block, never as a span of its own (location v4 design §7).
+    if (item.status !== "open" || !drawsAsOwnCheck(item) || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
     const clip = clipEntry({ startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt }, startMs, endMs, nowMs);
     if (!clip) continue;
     spans.push({
@@ -291,7 +291,8 @@ export function pendingReviewSpans(items: readonly ReviewItemRow[], startMs: num
 export function pendingReviewSeconds(items: readonly ReviewItemRow[]) {
   let total = 0;
   for (const item of items) {
-    if (item.status !== "open" || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
+    // A block that ran into a trip is already logged time: nothing noticed but not logged.
+    if (item.status !== "open" || !drawsAsOwnCheck(item) || !item.suggestedStartedAt || !item.suggestedStoppedAt) continue;
     const ms = Date.parse(item.suggestedStoppedAt) - Date.parse(item.suggestedStartedAt);
     if (Number.isFinite(ms) && ms > 0) total += ms;
   }

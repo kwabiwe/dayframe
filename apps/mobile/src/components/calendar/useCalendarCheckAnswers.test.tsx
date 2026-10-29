@@ -724,3 +724,70 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 });
+
+// Location v4 design §7: "a block ran into your trip", answered on its block's sheet through the same gate and hold.
+describe("a block that ran into a trip, answered on its block", () => {
+  const HASH = "c".repeat(64);
+  const clash = (overrides: Partial<MobileReviewItem> = {}) => suggestion("clash", {
+    type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Team sync ran 18m into your trip",
+    suggestedStartedAt: at(9), suggestedStoppedAt: at(10, 42),
+    rawPayload: { timeEntryId: "block-1", tripId: "trip-1", tripStartedAt: at(10, 42), tripStoppedAt: at(11, 10), overlapSeconds: 1080 },
+    proposalHash: HASH, ...overrides
+  });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store.enqueueReviewMutation.mockReset();
+    store.enqueueReviewMutation.mockImplementation(async () => undefined);
+    store.reviewItemsDecidedLocally.mockReset();
+    store.reviewItemsDecidedLocally.mockImplementation(async () => false);
+    gate.waitForItemCorrections.mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds End it for Undo (the block shows ended meanwhile), then saves accept with the proposal it showed", async () => {
+    const { result } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    // No location segment: never waits for a place's corrections.
+    expect(gate.waitForItemCorrections).not.toHaveBeenCalled();
+    expect(result.current.answeredYesIds.has("clash")).toBe(true);
+    expect(vi.mocked(AccessibilityInfo.announceForAccessibility)).toHaveBeenCalledWith(expect.stringMatching(/^Ended Team sync/));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ mutation: { action: "accept", expectedProposalHash: HASH } });
+    // Saving, not yet the outbox's own record: still ended here.
+    expect(result.current.answeredYesIds.has("clash")).toBe(true);
+  });
+
+  it("saves Keep it as ignore_once, and Undo brings the question back with the block as it was", async () => {
+    const { result } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    act(() => { result.current.undo(); });
+    expect(result.current.answeredYesIds.size).toBe(0);
+    expect(result.current.hiddenIds.has("clash")).toBe(false);
+    act(() => { result.current.answer("clash", false); });
+    expect(result.current.answeredYesIds.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ mutation: { action: "ignore_once" } });
+  });
+
+  it("never sends End it without a proposal (an older server's item): only Keep it is taken", () => {
+    const { result } = mount(bootstrap([clash({ proposalHash: undefined })]));
+    let taken = true;
+    act(() => { taken = result.current.answer("clash", true); });
+    expect(taken).toBe(false);
+    expect(result.current.held).toBeNull();
+    act(() => { taken = result.current.answer("clash", false); });
+    expect(taken).toBe(true);
+  });
+
+  it("drops a held End it unsaved on another account, and nothing of it stays ended there", async () => {
+    const { result, update } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    update({ owner: "owner-b" });
+    expect(result.current.held).toBeNull();
+    expect(result.current.answeredYesIds.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+});

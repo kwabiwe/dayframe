@@ -6,7 +6,7 @@ import type {
 import { reviewCardsRemovedByOutings } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
-import { asksAsCheck } from "./review";
+import { drawsAsOwnCheck } from "./review";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
 
@@ -371,20 +371,20 @@ function reviewCandidates(
   effects: readonly ReviewPresentationStoreEffect[]
 ) {
   const candidates = new Map<string, ReviewCandidate>();
-  // A timer that ran into a trip is no ordinary hatched block on Today (step 15): its own UI comes later. Left out
-  // from every source — the presentation's records and the outbox's own copies (a restored or refused decision) —
-  // and by id, so a copy can never bring back one the presentation left out (Codex r1 on #615).
-  const clashIds = new Set(response.records.filter((record) => record.kind === "review" && !asksAsCheck(record))
+  // "A block ran into your trip" asks on its block (location v4 design §7), never as a hatched span on Today. Left
+  // out from every source — the presentation's records and the outbox's own copies (a restored or refused decision)
+  // — and by id, so a copy can never bring back one the presentation left out (Codex r1 on #615).
+  const clashIds = new Set(response.records.filter((record) => record.kind === "review" && !drawsAsOwnCheck(record))
     .map((record) => (record as { reviewItemId: string }).reviewItemId));
   for (const record of response.records) {
-    if (record.kind !== "review" || record.status !== "open" || !asksAsCheck(record)) continue;
+    if (record.kind !== "review" || record.status !== "open" || !drawsAsOwnCheck(record)) continue;
     candidates.set(record.reviewItemId, {
       record,
       canonicalEntryIds: uniqueIds([...record.canonicalEntryIds, ...(links.get(record.reviewItemId) ?? [])])
     });
   }
   for (const effect of effects) {
-    if (candidates.has(effect.reviewItemId) || !effect.source || clashIds.has(effect.reviewItemId) || !asksAsCheck(effect.source)) continue;
+    if (candidates.has(effect.reviewItemId) || !effect.source || clashIds.has(effect.reviewItemId) || !drawsAsOwnCheck(effect.source)) continue;
     candidates.set(effect.reviewItemId, {
       record: {
         kind: "review",

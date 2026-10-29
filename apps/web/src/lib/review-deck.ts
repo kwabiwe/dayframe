@@ -1,4 +1,4 @@
-import { groupOutings, type CardOuting, type ReviewMutation, type ReviewMutationEdit } from "@dayframe/shared";
+import { groupOutings, isTimerTripClashItem, type CardOuting, type ReviewMutation, type ReviewMutationEdit } from "@dayframe/shared";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 
 // Review helpers for the List's and Grid's "?" (location v4 steps 14–15; the web Review deck is gone): the picture,
@@ -126,6 +126,11 @@ export function reviewLogAsEdit(item: ReviewItemRow, draft: ReviewLogAsDraft | u
 }
 
 export function reviewMutationFor(item: ReviewItemRow, kind: ReviewDecisionKind, draft: ReviewLogAsDraft | undefined): ReviewMutation {
+  // A block that ran into a trip (design §7): End it is `accept` with the proposal it was shown, Keep it `ignore_once`.
+  if (isTimerTripClashItem(item)) {
+    if (kind === "skip") return { action: "ignore_once" };
+    return { action: "accept", ...(item.proposalHash ? { expectedProposalHash: item.proposalHash } : {}) };
+  }
   const v2 = hasV2Evidence(item);
   if (kind === "skip") return v2 ? { action: "ignore_once_location" } : { action: "ignore_once" };
   const edit = reviewLogAsEdit(item, draft);

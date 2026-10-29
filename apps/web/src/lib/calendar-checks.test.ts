@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { askingChecks, asksAsCheck, oldestCheckHref, reviewCheckHref } from "@/lib/calendar-checks";
+import { askingChecks, checkBlockId, clashBlocksFrom, drawsAsOwnCheck, oldestCheckHref, reviewCheckHref, todaysChecks } from "@/lib/calendar-checks";
+import { pendingReviewSeconds } from "@/lib/today-view";
+import type { TimeEntryRow } from "@/lib/queries";
 import { pendingReviewSpans } from "@/lib/today-view";
 import type { ReviewItemRow } from "@/lib/queries";
 
@@ -41,20 +43,49 @@ describe("the \"?\" that still ask (owner, 28 Oct 2026)", () => {
   });
 });
 
-// Location v4 step 15: a timer that ran into a trip asks on its block with its own End it / Keep it, which comes
-// later; until then no web list shows or counts it as an ordinary "?" (the List, the Grid, the badge, Today).
-describe("a timer that ran into a trip is not an ordinary \"?\" (step 15)", () => {
-  const clash = item("clash", 27, { type: "location_timer_trip_clash", eventSource: "location_learning", eventType: "timer_trip_clash" });
+// Location v4 design §7: a block that ran into a trip is one "?" like any other — counted by the badge, "N to check" and
+// Today's chip within the 7 days — but asked on its block, never as a row or span of its own.
+describe("a block that ran into a trip asks on its block (design §7)", () => {
+  const payload = { timeEntryId: "e1", tripId: "trip-1", tripStartedAt: local(27, 10), tripStoppedAt: local(27, 11), overlapSeconds: 1800 };
+  const clash = item("clash", 27, { type: "location_timer_trip_clash", eventSource: "location_learning", eventType: "timer_trip_clash",
+    title: "Team sync ran 30m into your trip", suggestedStartedAt: local(27, 8), suggestedStoppedAt: local(27, 10), rawPayload: payload });
+  const block = (patch: Partial<TimeEntryRow> = {}): TimeEntryRow => ({
+    id: "e1", projectId: null, projectName: null, projectColor: null, clientName: null, categoryId: null, categoryName: null, categoryColor: null,
+    placeId: null, placeName: null, source: "manual_app", confidence: "high", reviewStatus: "confirmed", description: "Team sync",
+    startedAt: local(27, 8), stoppedAt: local(27, 10), updatedAt: local(27, 10), durationSeconds: 0, tagNames: [], tags: [], ...patch
+  });
+  const nowMs = new Date(2026, 9, 28, 12).getTime();
 
-  it("is never one of the List's checks, so the badge, Today's chip and the Grid leave it out", () => {
-    expect(asksAsCheck(clash)).toBe(false);
-    expect(asksAsCheck(item("stay", 27))).toBe(true);
-    expect(askingChecks([clash, item("stay", 26)], today).map((check) => check.id)).toEqual(["stay"]);
+  it("is counted once, oldest first, with the others (the badge, N to check, Today's chip)", () => {
+    expect(askingChecks([clash, item("stay", 26)], today).map((check) => check.id)).toEqual(["stay", "clash"]);
+    expect(checkBlockId(clash)).toBe("e1");
+    expect(checkBlockId(item("stay", 27))).toBeNull();
+    // Today's chip counts it on the day its trip started.
+    expect(todaysChecks(askingChecks([clash], new Date(2026, 9, 27).getTime()), new Date(2026, 9, 27).getTime()).map((check) => check.id)).toEqual(["clash"]);
   });
 
-  it("draws no pending span on Today's ribbon or the Grid", () => {
+  it("stops asking past the 7 days, as every \"?\"", () => {
+    const old = { ...clash, id: "old", suggestedStartedAt: local(20, 8), suggestedStoppedAt: local(20, 10) };
+    expect(askingChecks([old], today).map((check) => check.id)).toEqual([]);
+  });
+
+  it("keeps asking for a block not loaded, and stops once the loaded block no longer runs into the trip", () => {
+    const running = block({ stoppedAt: null });
+    expect(askingChecks([clash], today, clashBlocksFrom([], []), nowMs).map((check) => check.id)).toEqual(["clash"]);
+    expect(askingChecks([clash], today, clashBlocksFrom([running], []), nowMs).map((check) => check.id)).toEqual(["clash"]);
+    // Stopped where the trip started (End it, or a Stop at the door), or moved onto a Move activity.
+    expect(askingChecks([clash], today, clashBlocksFrom([block({ stoppedAt: local(27, 10) })], []), nowMs)).toEqual([]);
+    expect(askingChecks([clash], today, clashBlocksFrom([block({ stoppedAt: null, categoryId: "c" })], [{ id: "c", starterKey: "commute" }]), nowMs))
+      .toEqual([]);
+  });
+
+  it("is never drawn as a row or span of its own, nor counted as time noticed but not logged", () => {
+    expect(drawsAsOwnCheck(clash)).toBe(false);
+    expect(drawsAsOwnCheck({ type: undefined as unknown as string, eventType: "timer_trip_clash" })).toBe(false);
+    expect(drawsAsOwnCheck(item("stay", 27))).toBe(true);
     const start = new Date(2026, 9, 27).getTime();
     const spans = pendingReviewSpans([clash, item("stay", 27)], start, start + 86_400_000, today + 86_400_000);
     expect(spans.map((span) => span.id)).toEqual(["stay"]);
+    expect(pendingReviewSeconds([clash])).toBe(0);
   });
 });

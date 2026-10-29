@@ -1568,3 +1568,91 @@ function presentationEntry(data: ReturnType<typeof bootstrap>, entryId: string) 
     source: entry.source
   };
 }
+
+// Location v4 design §7: "a block ran into your trip", answered on its block (End it / Keep it) through the outbox.
+describe("a block that ran into a trip in the Review outbox", () => {
+  const HASH = "a".repeat(64);
+  const clashBootstrap = (hash: string | undefined = HASH) => {
+    const data = bootstrap();
+    const block = data.historyEntries![0];
+    const clash = { ...data.reviewItems[0], id: syntheticId(150), type: "location_timer_trip_clash", eventType: "timer_trip_clash",
+      eventSource: "location_learning", title: "Synthetic entry 1 ran 18m into your trip",
+      rawPayload: { timeEntryId: block.id, tripId: "trip-1", tripStartedAt: new Date(Date.parse(block.startedAt) + 1_800_000).toISOString(),
+        tripStoppedAt: new Date(Date.parse(block.startedAt) + 3_600_000).toISOString(), overlapSeconds: 1080 },
+      ...(hash ? { proposalHash: hash } : {}) };
+    return { data: { ...data, reviewItems: [...data.reviewItems, clash] }, clash, block };
+  };
+  const owner = (data: ReturnType<typeof bootstrap>) => ({ workspaceId: data.workspace.id, userId: data.user.id });
+
+  it("keeps the clash's payload and proposal in the cached bootstrap, so a cold start still asks on its block", async () => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    const cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((item) => item.id === clash.id)!;
+    expect(cached.rawPayload).toEqual(clash.rawPayload);
+    expect(cached.proposalHash).toBe(HASH);
+  });
+
+  it("queues End it with the proposal it showed while offline, and the iPhone shows the block ended until it is sent", async () => {
+    const { data, clash, block } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    mocks.fetch.mockRejectedValue(new TypeError("Network request failed"));
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(151),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("retry_wait");
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([{ clientMutationId: syntheticId(151), reviewItemId: clash.id,
+      timeEntryId: block.id, tripStartedAt: clash.rawPayload.tripStartedAt, acknowledged: false, stoppedRunningTimer: false }]);
+    // Back online: acknowledged with the block it ended (and that it was running).
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: block.id,
+      endedAt: clash.rawPayload.tripStartedAt, stoppedRunningTimer: true, clientMutationId: syntheticId(151), reviewItemId: clash.id,
+      expectedProposalHash: HASH }) });
+    await store.synchroniseReviewMutations({ force: true });
+    const [end] = await store.readPendingTimerTripClashEnds(owner(data));
+    expect(end).toMatchObject({ acknowledged: true, stoppedRunningTimer: true });
+    // Another account reads none of them.
+    expect(await store.readPendingTimerTripClashEnds({ workspaceId: syntheticId(902), userId: syntheticId(901) })).toEqual([]);
+  });
+
+  it("refuses End it for a proposal the iPhone no longer has", async () => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((item) => item.id === clash.id ? { ...item, proposalHash: "b".repeat(64) } : item) });
+    await expect(store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(152),
+      mutation: { action: "accept", expectedProposalHash: HASH } })).rejects.toThrow("This question changed");
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+
+  it("lets go of an End it refused as proposal_changed, keeps the question and asks for the day again", async () => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(153),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    const changed = vi.fn();
+    const unsubscribe = store.subscribeTimerTripClashChanged(changed);
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "proposal_changed", canonicalStatus: "open",
+      canonicalReviewStatuses: { [clash.id]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    unsubscribe();
+    expect(changed).toHaveBeenCalledWith(clash.id);
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(await store.listReviewSyncIssues()).toEqual([]);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id)).toContain(clash.id);
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([]);
+  });
+
+  it("saves Keep it as ignore_once, which ends nothing", async () => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(154), mutation: { action: "ignore_once" } });
+    expect(JSON.parse(String(db.prepare("select request_json from review_mutation_outbox").get()!.request_json)).mutation).toEqual({ action: "ignore_once" });
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([]);
+  });
+
+  it("an ordinary suggestion's proposal_changed stays a real rejection", () => {
+    const row = { original_snapshot_json: JSON.stringify(bootstrap().reviewItems[0]) };
+    expect(store.timerTripClashProposalChanged(409, { code: "proposal_changed" }, row)).toBe(false);
+    expect(store.timerTripClashProposalChanged(409, { code: "proposal_changed" },
+      { original_snapshot_json: JSON.stringify({ type: "location_timer_trip_clash" }) })).toBe(true);
+    expect(store.timerTripClashProposalChanged(409, { code: "resolution_conflict" },
+      { original_snapshot_json: JSON.stringify({ type: "location_timer_trip_clash" }) })).toBe(false);
+  });
+});

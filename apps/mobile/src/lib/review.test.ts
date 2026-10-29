@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  asksAsCheck,
+  asksOnItsBlock,
+  drawsAsOwnCheck,
   LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS,
   REVIEW_COPY,
   buildReviewItemDraftEntry,
@@ -592,11 +593,12 @@ function bootstrap(reviewItems: MobileReviewItem[]): MobileBootstrap {
   };
 }
 
-describe("asksAsCheck (location v4 step 15)", () => {
-  it("leaves a timer that ran into a trip out of the ordinary \"?\", by its Review type or its event's", () => {
-    expect(asksAsCheck({ type: "location_timer_trip_clash" })).toBe(false);
-    expect(asksAsCheck({ type: undefined, eventType: "timer_trip_clash" })).toBe(false);
-    expect(asksAsCheck({ type: "activity_suggestion", eventType: "unknown_stay" })).toBe(true);
-    expect(asksAsCheck({ eventType: null })).toBe(true);
+describe("asksOnItsBlock / drawsAsOwnCheck (location v4 design §7)", () => {
+  it("asks a block that ran into a trip on its block, by its Review type or its event's; everything else draws as its own \"?\"", () => {
+    expect(asksOnItsBlock({ type: "location_timer_trip_clash" })).toBe(true);
+    expect(asksOnItsBlock({ type: undefined, eventType: "timer_trip_clash" })).toBe(true);
+    expect(drawsAsOwnCheck({ type: "location_timer_trip_clash" })).toBe(false);
+    expect(drawsAsOwnCheck({ type: "activity_suggestion", eventType: "unknown_stay" })).toBe(true);
+    expect(drawsAsOwnCheck({ eventType: null })).toBe(true);
   });
 });

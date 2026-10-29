@@ -19,7 +19,7 @@ import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
-import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { askingChecks, clashBlocksFrom, oldestCheckHref } from "@/lib/calendar-checks";
 import { CheckDecisionsProvider, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
@@ -85,8 +85,12 @@ function CheckDecisionsHost({ children }: { children: ReactNode }) {
   const { data, refresh } = useAppShellRuntime();
   const owner = data ? `${data.workspace.id}:${data.user.id}` : "";
   const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
+  // The blocks the shell has (the running one last, so it wins): a "block ran into your trip" stops asking once its
+  // block no longer runs into the trip (location v4 design §7).
+  const blocks = useMemo(() => data ? clashBlocksFrom([...data.historyEntries ?? [], ...data.weekEntries ?? [], ...data.dayEntries ?? [],
+    ...data.entries ?? [], ...(data.activeEntry ? [data.activeEntry] : [])], data.categories) : undefined, [data]);
   return (
-    <CheckDecisionsProvider categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
+    <CheckDecisionsProvider blocks={blocks} categories={data?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
       reviewItems={data?.reviewItems ?? NO_REVIEW_ITEMS}>
       {children}
     </CheckDecisionsProvider>

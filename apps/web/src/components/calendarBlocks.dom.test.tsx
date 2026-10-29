@@ -354,6 +354,37 @@ describe("Calendar in Blocks", () => {
     expect(cancelledByCalendar).toBe(false);
   });
 
+  // Location v4 design §7: a block that ran into a trip carries its one "?" on its own block, never a dashed span.
+  it("puts a block-that-ran-into-a-trip's \"?\" on its block and asks it at the top of the block's editor", async () => {
+    installEditorGeometry();
+    const answer = vi.fn(async () => null);
+    const clash = review({ id: "clash", type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Deep work ran 20m into your trip",
+      suggestedStartedAt: local(9), suggestedStoppedAt: local(10), proposalHash: "b".repeat(64),
+      rawPayload: { timeEntryId: "block", tripId: "trip", tripStartedAt: local(10), tripStoppedAt: local(10, 40), overlapSeconds: 1_200 } });
+    render(createElement(CalendarReview, {
+      answerBlockCheck: answer, calendarHoursMode: "fullDay", capturedNow: new Date(2026, 7, 2, 12, 0), categories: [],
+      entries: [entry({ id: "block", description: "Deep work", startedAt: local(9), stoppedAt: local(10, 20) })], onDeleteEntries: vi.fn(),
+      onScroll: vi.fn(), onSynced: vi.fn().mockResolvedValue(undefined), places: [], reviewItems: [clash], scrollContainerRef: vi.fn(), tags: [],
+      visibleDays: [new Date(2026, 7, 2, 12)]
+    }));
+    expect(document.querySelector(".calendar-review-block")).toBeNull();
+    const block = document.querySelector<HTMLElement>('[data-entry-id="block"]')!;
+    expect(block.classList.contains("is-asking")).toBe(true);
+    expect(block.querySelector(".calendar-block-ask-dot")).not.toBeNull();
+    const primary = block.querySelector<HTMLButtonElement>(".calendar-entry-primary")!;
+    expect(primary.getAttribute("aria-label")).toMatch(/, Needs a look$/);
+    await act(async () => {
+      primary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }));
+    });
+    const asked = await waitFor(() => document.querySelector<HTMLElement>(".calendar-compact-question")!);
+    expect(asked.getAttribute("aria-label")).toBe("Deep work ran 20m into your trip, Needs a look");
+    const buttons = [...asked.querySelectorAll("button")].map((button) => button.textContent);
+    expect(buttons).toEqual([`End it at ${new Date(local(10)).toTimeString().slice(0, 5)}`, "Keep it"]);
+    await act(async () => { asked.querySelectorAll("button")[0].click(); });
+    expect(answer).toHaveBeenCalledWith(clash, true);
+    await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).toBeNull());
+  });
+
   it("labels each day heading with its full date and its logged total", () => {
     renderCalendar([entry({ id: "a", startedAt: local(9), stoppedAt: local(10) })]);
     const heading = document.querySelector(".calendar-day-heading")!;

@@ -91,7 +91,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { answer, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
+    expect(hook).toContain("return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
     expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
     expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");
@@ -205,12 +205,25 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard).toContain("onOpenCheck={openTodayRibbonCheck}");
   });
 
-  it("leaves a timer that ran into a trip out of every ordinary \"?\" until its block UI ships", () => {
+  it("asks a block's own \"?\" at the top of its sheet, through the one gate, and reads the day again after End it or a changed question", () => {
+    expect(dashboard).toContain("question={blockQuestionFor(calendarEditEntry?.id, () => setCalendarEditDismissRequestId(calendarEditPresentation.id))}");
+    expect(dashboard).toContain("question={blockQuestionFor(retainedActiveEntryForSheet?.id, () => setActiveEditDismissRequestId(activeEditPresentation.id))}");
+    expect(dashboard).toContain("if (checkAnswers.answer(checkId, end)) dismiss();");
+    expect(dashboard).toContain("useEffect(() => subscribeTimerTripClashChanged(() => { void loadRef.current({ silent: true }); }), []);");
+    expect(dashboard).toContain("const shownCalendarData = useMemo(() => projectTimerTripClashEnds(checkAnswers.data, clashEnds), [checkAnswers.data, clashEnds]);");
+    expect(source("../ActiveTimerEditSheet.tsx")).toContain("{question ? <BlockQuestionCard question={question} reduceMotion={reduceMotion} theme={theme} /> : null}");
+  });
+
+  it("counts a block that ran into a trip as one \"?\", asked on its block, never a row or a dashed block of its own", () => {
     // List rows, the Grid's blocks (askingChecks), the badge, Today's chip and the reminder all read calendarCheckBase.
-    expect(dashboard).toContain("isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)");
+    expect(dashboard).toContain("isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)\n      && clashStillAsksHere(item, shownCalendarData, minuteNow, blocks)");
     expect(dashboard).toContain("useReviewNudgeCount(nudgeOwner, askingChecks.length,");
     expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
-    expect(source("../../lib/nativeCalendarPresentation.ts")).toContain("if (!isOpenReviewItem(item) || !asksAsCheck(item)) continue;");
-    expect(source("../../lib/todayReviewPresentation.ts")).toContain('record.status !== "open" || !asksAsCheck(record)');
+    expect(dashboard).toContain("askingEntryIds: askingBlockIds,");
+    expect(dashboard).toContain("blockChecks={askingBlockChecks}");
+    expect(source("../../lib/nativeCalendarPresentation.ts")).toContain("if (!isOpenReviewItem(item) || !drawsAsOwnCheck(item)) continue;");
+    expect(source("../../lib/todayReviewPresentation.ts")).toContain('record.status !== "open" || !drawsAsOwnCheck(record)');
+    expect(source("./CalendarListView.tsx")).toContain("!blockCheckIds.has(check.id) && checkKinds?.get(check.id) !== \"block\"");
   });
+
 });

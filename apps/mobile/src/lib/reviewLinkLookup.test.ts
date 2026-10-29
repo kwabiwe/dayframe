@@ -22,11 +22,11 @@ describe("lookupReviewLinkItem (Codex r1 and r4 on #615)", () => {
     });
   });
 
-  it("says a decided item or a timer that ran into a trip no longer asks", async () => {
+  it("says a decided item no longer asks, and a block that ran into a trip still does (on its block)", async () => {
     client.fetch.mockResolvedValueOnce({ lookup: { reviewItems: [record({ status: "accepted" })], entries: [] } });
     await expect(lookupReviewLinkItem(OWNER, ID, "Europe/London")).resolves.toMatchObject({ open: false });
     client.fetch.mockResolvedValueOnce({ lookup: { reviewItems: [record({ eventType: "timer_trip_clash" })], entries: [] } });
-    await expect(lookupReviewLinkItem(OWNER, ID, "Europe/London")).resolves.toMatchObject({ open: false });
+    await expect(lookupReviewLinkItem(OWNER, ID, "Europe/London")).resolves.toMatchObject({ open: true });
   });
 
   it("returns null for a missing item, and lets a failed read fail", async () => {

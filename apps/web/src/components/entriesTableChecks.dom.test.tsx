@@ -1107,26 +1107,149 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
   });
 });
 
-// Location v4 step 15: the List is where every "?" is answered, but a timer that ran into a trip asks on its block
-// with its own UI later, so it is never one of the List's ordinary checks nor counted by the badge until then.
-describe("a timer that ran into a trip in Calendar › List (location v4 step 15)", () => {
+// Location v4 design §7: a block that ran into a trip is one "?" like any other, asked on its block's row (its mark carries
+// the dot and opens the block's editor with End it / Keep it at the top), never a row of its own. Synthetic ids and names.
+describe("a block that ran into a trip in Calendar › List (location v4 design §7)", () => {
+  const CLASH = "00000000-0000-4000-8000-0000000000c1";
+  const HASH = "a".repeat(64);
+  const BLOCK = "00000000-0000-4000-8000-0000000000e1";
+  const clash = (patch: Partial<ReviewItemRow> = {}): ReviewItemRow => suggestion(CLASH, {
+    type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Team sync ran 30m into your trip",
+    suggestedStartedAt: at(8), suggestedStoppedAt: at(10), proposalHash: HASH,
+    rawPayload: { timeEntryId: BLOCK, tripId: "seg-trip", tripStartedAt: at(10), tripStoppedAt: at(10, 30), overlapSeconds: 1_800 }, ...patch
+  });
+  const running = () => ({ ...entry(BLOCK, "Team sync", at(8), at(10, 30)), stoppedAt: null, reviewStatus: "confirmed" });
+  const tripStart = () => { const d = new Date(at(10)); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const blockMark = () => screen.queryByRole("button", { name: "Team sync: Team sync ran 30m into your trip, Needs a look" });
+  const question = () => screen.queryByRole("group", { name: "Team sync ran 30m into your trip, Needs a look" });
+  // The acknowledgement End it gets back: guarded by its proposal (the server echoes the envelope).
+  const ackClash = (url: string, init: RequestInit) => {
+    const envelope = JSON.parse(init.body as string);
+    const base = { ok: true, action: envelope.mutation.action, clientMutationId: envelope.clientMutationId, reviewItemId: url.split("/").pop() };
+    return envelope.mutation.action === "accept"
+      ? { ...base, expectedProposalHash: envelope.mutation.expectedProposalHash, status: "accepted", entryId: BLOCK, endedAt: at(10), stoppedRunningTimer: true }
+      : { ...base, status: "ignored" };
+  };
+  const list = (items: readonly ReviewItemRow[], entries: TimeEntryRow[] = [running()], props: Partial<ReturnType<typeof baseProps>> = {}) =>
+    <EntriesTable {...baseProps()} entries={entries} reviewItems={items} {...props} />;
+
   beforeEach(() => {
     clock.todayStartMs = localDayStart(at(12));
+    clientFetch.mockReset().mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(ackClash(url, init)), { status: 200 }));
+    evidenceFetch.mockReset().mockResolvedValue(new Response("{}", { status: 404 }));
+    router.push.mockReset();
+    router.replace.mockReset();
+    Element.prototype.scrollIntoView ??= () => undefined;
+    HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
+    HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
   });
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
+    search.params = "";
   });
 
-  it("is not listed as an ordinary \"?\" and the badge leaves it out", () => {
+  it("puts its one \"?\" on its block's row and counts it with the badge and chip, never as a row of its own", async () => {
     const sleep = reviewItems[2];
-    const clash: ReviewItemRow = { ...sleep, id: "00000000-0000-4000-8000-0000000000c1", type: "location_timer_trip_clash",
-      eventType: "timer_trip_clash", rawPayload: { timeEntryId: "e1" } };
-    function Probe() {
-      const checks = useListChecks({ applyTransition: (update) => update(), categories: [], refresh: async () => undefined, reviewItems: [] });
-      return <output data-testid="checks">{checks.checks.map((check) => check.id).join(",")}</output>;
-    }
-    render(<Shell items={[sleep, clash]}><Probe /></Shell>);
-    expect(screen.getByTestId("checks").textContent).toBe(SLEEP);
+    render(<Shell items={[sleep, clash()]}>{list([sleep, clash()])}</Shell>);
+    expect(await screen.findByRole("button", { name: "2 to check, oldest first" })).toBeTruthy();
+    expect(badge()).toBe(2);
+    expect(blockMark()?.querySelector(".timeline-task-block.is-asking .timeline-location-dot")).toBeTruthy();
+    // No "?" row of its own, and no word "timer".
+    expect(askingRow("Team sync ran 30m into your trip")).toBeNull();
+    expect(document.body.textContent?.toLowerCase()).not.toContain("timer");
+  });
+
+  it("opens its block's editor with End it / Keep it at the top; End it is held for Undo, then sent with its proposal", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    render(<Shell items={[clash()]}>{list([clash()])}</Shell>);
+    fireEvent.click(blockMark()!);
+    const asked = question()!;
+    expect(within(asked).getAllByRole("button").map((button) => button.textContent)).toEqual([`End it at ${tripStart()}`, "Keep it"]);
+    fireEvent.click(within(asked).getByRole("button", { name: `End it at ${tripStart()}` }));
+    // The editor closes, Undo shows, the block shows ended where the trip started (no longer running), and nothing is sent yet.
+    expect(question()).toBeNull();
+    expect(screen.getByText(`Ended Team sync at ${tripStart()}`)).toBeTruthy();
+    expect(blockMark()).toBeNull();
+    expect(badge()).toBe(0);
+    expect(screen.queryByRole("button", { name: "Restart Team sync from zero" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Start Team sync again" })).toBeTruthy();
+    expect(clientFetch).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    expect(clientFetch.mock.calls[0][0]).toBe(`/api/review/${CLASH}`);
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "accept", expectedProposalHash: HASH });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("Keep it sends ignore_once; Undo brings the \"?\" back on its block and sends nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const view = render(<Shell items={[clash()]}>{list([clash()])}</Shell>);
+    fireEvent.click(blockMark()!);
+    fireEvent.click(within(question()!).getByRole("button", { name: "End it at " + tripStart() }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(blockMark()).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Restart Team sync from zero" })).toBeTruthy();
     expect(badge()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).not.toHaveBeenCalled();
+    fireEvent.click(blockMark()!);
+    fireEvent.click(within(question()!).getByRole("button", { name: "Keep it" }));
+    expect(screen.getByText("Kept Team sync")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_once" });
+    view.unmount();
+  });
+
+  it("a question that changed (409 proposal_changed) reads the day again and keeps the question", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    clientFetch.mockReset().mockResolvedValue(new Response(JSON.stringify({ code: "proposal_changed", error: "changed" }), { status: 409 }));
+    // The List lends its refresh (which reads its days again) while it is shown.
+    const refresh = vi.fn(async () => undefined);
+    render(<Shell items={[clash()]}>{list([clash()], [running()], { onChanged: refresh })}</Shell>);
+    fireEvent.click(blockMark()!);
+    fireEvent.click(within(question()!).getByRole("button", { name: `End it at ${tripStart()}` }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(refresh).toHaveBeenCalled();
+    expect(blockMark()).toBeTruthy();
+    expect(badge()).toBe(1);
+    expect(screen.getByRole("alert").textContent).toContain("changed");
+  });
+
+  it("offers only Keep it without a proposal to send", () => {
+    render(<Shell items={[clash({ proposalHash: undefined })]}>{list([clash({ proposalHash: undefined })])}</Shell>);
+    fireEvent.click(blockMark()!);
+    expect(within(question()!).getAllByRole("button").map((button) => button.textContent)).toEqual(["Keep it"]);
+  });
+
+  it("stops asking at once once its block no longer runs into the trip (stopped where the trip started)", () => {
+    const stopped = { ...running(), stoppedAt: at(10) };
+    render(<Shell items={[clash()]}>{list([clash()], [stopped])}</Shell>);
+    expect(blockMark()).toBeNull();
+    expect(screen.queryByRole("button", { name: /to check, oldest first/ })).toBeNull();
+  });
+
+  it("a block not loaded still counts; the chip goes to its day, where its editor opens from the link", async () => {
+    render(<Shell items={[clash()]}>{list([clash()], [])}</Shell>);
+    expect(badge()).toBe(1);
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(router.push).toHaveBeenCalledWith(expect.stringContaining(`check=${CLASH}`));
+    cleanup();
+    search.params = `view=list&scope=day&date=2026-08-11&check=${CLASH}`;
+    render(<Shell items={[clash()]}>{list([clash()])}</Shell>);
+    await waitFor(() => expect(question()).toBeTruthy());
+  });
+
+  it("another account starts afresh: a held End it neither ends the block nor shows there", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const view = render(<Shell items={[clash()]}>{list([clash()])}</Shell>);
+    fireEvent.click(blockMark()!);
+    fireEvent.click(within(question()!).getByRole("button", { name: `End it at ${tripStart()}` }));
+    expect(screen.getByRole("button", { name: "Start Team sync again" })).toBeTruthy();
+    view.rerender(<Shell items={[]} owner="w2:u2">{list([], [running()])}</Shell>);
+    expect(screen.queryByText(`Ended Team sync at ${tripStart()}`)).toBeNull();
+    expect(screen.getByRole("button", { name: "Restart Team sync from zero" })).toBeTruthy();
   });
 });

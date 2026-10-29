@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
-import { askingChecks } from "@/lib/calendar-checks";
+import { askingChecks, checkBlockId, clashBlocksFrom, clashStillAsks } from "@/lib/calendar-checks";
 import { CalendarLegStrip, CalendarPlacesLane, placesLaneWidth } from "@/components/location/CalendarPlacesLane";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
@@ -11,7 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { useGridCorrection } from "@/components/location/useGridCorrection";
-import { useProjectedReviewItems } from "@/components/location/ListChecks";
+import { blockQuestionWords, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -617,6 +617,7 @@ export function TimeReviewViews({
             onScroll={(event) => rememberScrollPosition("calendar", event)}
             hasRememberedScroll={hasRememberedCalendarScroll}
             onSynced={refreshData}
+            answerBlockCheck={gridCorrection.answerBlock}
             reviewItems={gridReviewItems}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
@@ -712,8 +713,9 @@ type TimelineScrollPosition = { left: number; top: number };
 export function CalendarReview({
   calendarHoursMode,
   capturedNow,
+  answerBlockCheck,
   categories,
-  entries,
+  entries: givenEntries,
   hasRememberedScroll,
   onDeleteEntries,
   onScroll,
@@ -726,6 +728,11 @@ export function CalendarReview({
   visibleDays,
   locations
 }: {
+  /**
+   * A block's "?" (a block that ran into a trip, location v4 design §7) answered from its editor, saved at once as the
+   * Grid's other answers: null once saved, else why not.
+   */
+  answerBlockCheck?: (item: ReviewItemRow, yes: boolean) => Promise<string | null>;
   calendarHoursMode: CalendarHoursMode;
   capturedNow: Date;
   categories: CategoryRow[];
@@ -753,6 +760,12 @@ export function CalendarReview({
   // Step 16: every shown day's trips by the blocks made from them, for the leg strip.
   const tripsByBlock = useMemo(() => new Map([...(locations?.timelines.values() ?? [])].flatMap((timeline) => [...tripsByBlockId(timeline)])),
     [locations]);
+  // End it held, saving or saved in the List: the block shows ended at its trip's start here too (design §7).
+  const endedBlocks = useEndedBlocks();
+  const entries = useMemo(() => endedBlocks.size ? givenEntries.map((entry) => {
+    const endsAt = endedBlocks.get(entry.id);
+    return endsAt && (entry.stoppedAt === null || Date.parse(entry.stoppedAt) > Date.parse(endsAt)) ? { ...entry, stoppedAt: endsAt } : entry;
+  }) : givenEntries, [endedBlocks, givenEntries]);
   const clock = useClockFormat();
   const router = useRouter();
   const {
@@ -876,6 +889,15 @@ export function CalendarReview({
     const ids = new Set(askingChecks(reviewItems, askingTodayStartMs).map((check) => check.id));
     return reviewItems.filter((item) => ids.has(item.id));
   }, [askingTodayStartMs, localTimeReady, reviewItems]);
+  // A block that ran into a trip asks on its block (design §7), while its block as drawn still runs into the trip.
+  const askingByBlock = useMemo(() => {
+    const blocks = clashBlocksFrom(entries, categories);
+    const nowMs = capturedNow.getTime();
+    return new Map(gridReviewItems.flatMap((item) => {
+      const blockId = checkBlockId(item);
+      return blockId && clashStillAsks(item, blocks, nowMs) ? [[blockId, item] as const] : [];
+    }));
+  }, [capturedNow, categories, entries, gridReviewItems]);
   // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
   // one shown day (none across midnight), and each part's place in it for its block's name. Drawn
   // from the stored blocks, so a resize draft moves its block but not the bracket until it is saved.
@@ -1972,7 +1994,8 @@ export function CalendarReview({
                     entry,
                     startsBeforeDay
                   } = block;
-                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
+                  const asking = askingByBlock.get(entry.id);
+                  const detailsLabel = `${calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id))}${asking ? ", Needs a look" : ""}`;
                   const lane = lanes.get(blockKey) ?? fullLane;
                   const label = denseBlockLabel(blockPositionStyle.height, density.canDirectResize,
                     calendarBlockDetailLines(entry, capturedNow, clock).length);
@@ -2011,6 +2034,7 @@ export function CalendarReview({
                         label.detail ? "has-detail-room" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
                         legTrip ? "has-leg-strip" : "",
+                        asking ? "is-asking" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
@@ -2065,6 +2089,8 @@ export function CalendarReview({
                         <span className="calendar-entry-title"><CalendarTitleWords text={calendarBlockPrimaryParts(displayEntry).description} /></span>
                         {/* Calendar v3: icon lines under the title while they fit (place, trip or Health, tags, times). */}
                         <CalendarDetailLines lines={calendarBlockDetailLines(displayEntry, capturedNow, clock)} />
+                        {/* Its one "?" (design §7): the amber dot; the press opens its editor with the question. */}
+                        {asking ? <span aria-hidden="true" className="calendar-block-ask-dot" /> : null}
                       </button>
                       {showInlineAction ? (
                         <button
@@ -2144,6 +2170,12 @@ export function CalendarReview({
           categories={categories}
           entry={selectedEntry}
           focusOnOpen={visibleSelectedTarget.focusOnOpen}
+          question={(() => {
+            const item = askingByBlock.get(selectedEntry.id);
+            if (!item || !answerBlockCheck) return null;
+            const words = blockQuestionWords(item, timeEntryTitle(selectedEntry), clock);
+            return { text: words.question, yesLabel: words.yesLabel, noLabel: words.noLabel, onAnswer: (yes: boolean) => answerBlockCheck(item, yes) };
+          })()}
           isTimerBusy={isTimerBusy}
           mode="entry"
           onCreateCategory={createCategory}

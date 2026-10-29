@@ -1,3 +1,4 @@
+import { formatClockTime, type ClockFormat } from "../clockFormat";
 import { AUTOMATIC_COMMUTE_OVERLAP_TOLERANCE_MS, classifyAutomaticActivity } from "./automaticPolicy";
 
 /**
@@ -112,4 +113,71 @@ export function timerTripClashTitle(blockName: string | null | undefined, overla
   const minutes = Math.max(1, Math.round(overlapSeconds / 60));
   const span = minutes >= 60 ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}` : `${minutes}m`;
   return `${blockName?.trim() || "This block"} ran ${span} into your trip`;
+}
+
+/** What a Review item carries that says whether it is this question. */
+type TimerTripClashItemLike = {
+  type?: string | null;
+  eventType?: string | null;
+  rawPayload?: Record<string, unknown> | null;
+};
+
+/** Whether a Review item is "a block ran into your trip" (by its Review type, or its event's type). */
+export function isTimerTripClashItem(item: Pick<TimerTripClashItemLike, "type" | "eventType">) {
+  return item.type === TIMER_TRIP_CLASH_REVIEW_TYPE || item.eventType === TIMER_TRIP_CLASH_EVENT_TYPE;
+}
+
+/**
+ * The question a clash item asks, read from its event's payload (`timeEntryId`, `tripId`, `tripStartedAt`,
+ * `tripStoppedAt`, `overlapSeconds`), or null when the item is not one or its payload is incomplete. It asks
+ * on the block `timeEntryId` names, never on a row of its own (location v4 design §7).
+ */
+export function timerTripClashQuestion(item: TimerTripClashItemLike): TimerTripClash | null {
+  if (!isTimerTripClashItem(item)) return null;
+  const payload = item.rawPayload ?? {};
+  const text = (key: string) => typeof payload[key] === "string" && payload[key] ? payload[key] as string : null;
+  const timeEntryId = text("timeEntryId"), tripId = text("tripId");
+  const tripStartedAt = text("tripStartedAt"), tripStoppedAt = text("tripStoppedAt");
+  if (!timeEntryId || !tripId || !tripStartedAt || !tripStoppedAt) return null;
+  if (!Number.isFinite(Date.parse(tripStartedAt)) || !Number.isFinite(Date.parse(tripStoppedAt))) return null;
+  const overlap = typeof payload.overlapSeconds === "number" && Number.isFinite(payload.overlapSeconds) ? payload.overlapSeconds : 0;
+  return { timeEntryId, tripId, tripStartedAt, tripStoppedAt, overlapSeconds: Math.max(0, overlap) };
+}
+
+/**
+ * Whether a clash still asks on a client, from the block as that client has it now (a local edit, Stop or
+ * delete hides it at once, before the server's next answer): `undefined` when the block is not loaded here
+ * (the server's question stands), `null` when it is known gone.
+ */
+export function timerTripClashAsksOnBlock(
+  question: Pick<TimerTripClash, "tripId" | "tripStartedAt" | "tripStoppedAt">,
+  entry: TimerTripClashEntry | null | undefined,
+  now: Date | number
+) {
+  if (entry === undefined) return true;
+  return timerTripClashStillAsks(question, entry, now);
+}
+
+/** The block as End it leaves it: ended where the trip started. */
+export function timerTripClashEndedBlock<T extends { startedAt: string; stoppedAt: string | null }>(entry: T, question: Pick<TimerTripClash, "tripStartedAt">): T {
+  return { ...entry, stoppedAt: question.tripStartedAt };
+}
+
+/**
+ * The question's words on its block (design §7, owner rule: one Yes only, compact pills): the server's title, or
+ * "{block} ran 18m into your trip"; End it at the trip's start in local time; Keep it. Never "timer".
+ */
+export function timerTripClashWords(
+  item: { title?: string | null },
+  question: Pick<TimerTripClash, "tripStartedAt" | "overlapSeconds">,
+  blockName: string | null | undefined,
+  clock: ClockFormat
+) {
+  const endsAt = formatClockTime(question.tripStartedAt, clock);
+  return {
+    question: item.title?.trim() || timerTripClashTitle(blockName, question.overlapSeconds),
+    endLabel: `End it at ${endsAt}`,
+    keepLabel: "Keep it",
+    endsAt
+  };
 }
