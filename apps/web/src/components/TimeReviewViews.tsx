@@ -570,20 +570,18 @@ export function TimeReviewViews({
         aria-busy={isDateLoading}
         aria-label="Calendar period and view controls"
       >
-        {/* In List the period controls don't apply (continuous days): shown, greyed and inert. */}
+        {/* In List the period arrows and Day | Week don't apply (continuous days), so they leave the row (UI review
+            W8, owner 29 Oct 2026; they were shown greyed); the date stays, naming the List's top day. */}
         <div aria-disabled={isList || undefined} className="timeline-range-navigation" data-unused-in-list={isList || undefined}>
-          {isList ? <span className="sr-only" id="timeline-period-not-used">Not used in List</span> : null}
-          <IconButton
-            aria-describedby={isList ? "timeline-period-not-used" : undefined}
-            aria-disabled={isList || undefined}
-            disabled={isDateLoading}
-            label={isList ? `Previous ${state.scope}: not used in List` : `Previous ${state.scope}`}
-            onClick={() => {
-              if (!isList) void navigate(shiftTimelineState(state, "previous"));
-            }}
-          >
-            <ChevronLeft size={18} />
-          </IconButton>
+          {isList ? null : (
+            <IconButton
+              disabled={isDateLoading}
+              label={`Previous ${state.scope}`}
+              onClick={() => void navigate(shiftTimelineState(state, "previous"))}
+            >
+              <ChevronLeft size={18} />
+            </IconButton>
+          )}
           <DatePickerPopover
             disabled={isDateLoading}
             label={periodLabel}
@@ -594,17 +592,15 @@ export function TimeReviewViews({
             today={todayKey ?? state.date}
             value={headerDayKey}
           />
-          <IconButton
-            aria-describedby={isList ? "timeline-period-not-used" : undefined}
-            aria-disabled={isList || undefined}
-            disabled={isDateLoading}
-            label={isList ? `Next ${state.scope}: not used in List` : `Next ${state.scope}`}
-            onClick={() => {
-              if (!isList) void navigate(shiftTimelineState(state, "next"));
-            }}
-          >
-            <ChevronRight size={18} />
-          </IconButton>
+          {isList ? null : (
+            <IconButton
+              disabled={isDateLoading}
+              label={`Next ${state.scope}`}
+              onClick={() => void navigate(shiftTimelineState(state, "next"))}
+            >
+              <ChevronRight size={18} />
+            </IconButton>
+          )}
           {/* List has its own way back to today (it scrolls there), so only the grid shows this one. */}
           {showsToday || isList ? null : (
             <button
@@ -624,24 +620,19 @@ export function TimeReviewViews({
           disabled={isDateLoading}
           model={headModel}
           onSelectDay={(date) => void navigate({ date }, { reposition: true })}
+          showDays={!(state.view === "calendar" && state.scope === "week")}
           weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
         />
 
         <div className="timeline-range-controls">
-          <SegmentedControl
-            ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}
-            className={isList ? "is-unused-in-list" : undefined}
-            onChange={(scope) => {
-              if (!isList) updateScope(scope);
-            }}
-            options={scopeItems.map((item) => ({
-              value: item.id,
-              label: item.label,
-              disabled: isDateLoading,
-              unavailable: isList ? "Not used in List" : undefined
-            }))}
-            value={state.scope}
-          />
+          {isList ? null : (
+            <SegmentedControl
+              ariaLabel="Calendar scope"
+              onChange={updateScope}
+              options={scopeItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
+              value={state.scope}
+            />
+          )}
           {/* Card C item 5 (owner, 25 Oct 2026): a visible Calendar | List switch like Day | Week; the
               round view-icon menu is the iPhone's only. */}
           <SegmentedControl

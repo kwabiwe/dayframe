@@ -7,18 +7,21 @@ import type { CalendarHeadModel } from "@/lib/calendar-head";
 
 /**
  * The Calendar week strip, in the one compact toolbar row (#259): choose a day, see its total under
- * its date (#256) and its biggest activities as small bars, and the week's total (a link to the
- * week's report).
+ * its date (#256; not on phones) and its biggest activities as small bars, and the week's total alone
+ * (a link to the week's report). The Week grid shows only the total (UI review E, W9).
  */
 export function CalendarHead({
   disabled,
   model,
   onSelectDay,
+  showDays = true,
   weekReportHref
 }: {
   disabled: boolean;
   model: CalendarHeadModel;
   onSelectDay: (dateKey: string) => void;
+  /** False in the Week grid, whose day columns already show each date and total (UI review E). */
+  showDays?: boolean;
   weekReportHref: string;
 }) {
   const daysRef = useRef<HTMLDivElement | null>(null);
@@ -37,7 +40,7 @@ export function CalendarHead({
 
   return (
     <div className="df-cal-week">
-      <div aria-label="Choose a day" className="df-cal-days" ref={daysRef} role="group">
+      {showDays ? <div aria-label="Choose a day" className="df-cal-days" ref={daysRef} role="group">
         {model.days.map((day) => (
           <button
             aria-label={day.accessibleName}
@@ -62,8 +65,9 @@ export function CalendarHead({
             </span>
           </button>
         ))}
-      </div>
-      <Link className="df-cal-weektotal df-tnum" href={weekReportHref}>
+      </div> : null}
+      <Link aria-label={`${model.weekTotalLabel}. Open in Reports`} className="df-cal-weektotal df-tnum" href={weekReportHref}
+        title={model.weekTotalLabel}>
         {model.weekTotal}
       </Link>
     </div>

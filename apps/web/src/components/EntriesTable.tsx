@@ -1457,7 +1457,7 @@ export function EntriesTable({
         </span>
         {interval.stoppedAt
           ? timeInput("finish", interval.stoppedAt)
-          : <span className="timeline-inline-running">Running</span>}
+          : <span className="timeline-inline-running"><span className="sr-only">Running, </span>now</span>}
       </span>
     );
   }
