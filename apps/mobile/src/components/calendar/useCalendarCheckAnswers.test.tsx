@@ -64,7 +64,8 @@ const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
-import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { calendarCheckOutings, settledCheckBase, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { earlierDayReviewCounts } from "../../lib/earlierThisWeek";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
@@ -722,5 +723,39 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.held).toBeNull();
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+});
+
+describe("the settled \"?\" the Calendar and Today's Earlier this week chips count (Codex r1 on #617)", () => {
+  const none = { decided: NONE, answering: NONE, resolved: NONE, waitingIds: NONE, waitingSegments: NONE, syncStateIds: NONE };
+  // Today's Earlier this week chip for the outing's day (17 Oct), counted as the Dashboard counts it.
+  const chip = (base: ReturnType<typeof settledCheckBase>) => earlierDayReviewCounts([{ dayKey: "2026-10-17", date: new Date(2026, 9, 17) }],
+    base.open.filter((item) => !base.folded.has(item.id))).get("2026-10-17") ?? 0;
+
+  it("counts an outing once, and drops it, trips and all, once an acknowledged Logs as resolved them", () => {
+    const items = outing();
+    expect(chip(settledCheckBase(items, none))).toBe(1);
+    // The receipt resolved the stay and both trips: the chip clears before the bootstrap lists them decided.
+    const settled = settledCheckBase(items, { ...none, resolved: new Set(["stay", "there", "back"]) });
+    expect(settled.open).toEqual([]);
+    expect(chip(settled)).toBe(0);
+    // Without trips in the receipt (a place that is no outing's stay), only its own "?" leaves.
+    const plain = [suggestion("cafe", { suggestedStartedAt: "2026-10-17T12:00:00.000Z", suggestedStoppedAt: "2026-10-17T13:00:00.000Z" })];
+    expect(chip(settledCheckBase([...plain, ...items], { ...none, resolved: new Set(["cafe"]) }))).toBe(1);
+  });
+
+  it("leaves out the \"?\" decided here, held, or waiting for a sheet's corrections by id or by segment", () => {
+    const items = [suggestion("a"), suggestion("b"), suggestion("c"), suggestion("d"), suggestion("e")];
+    const base = settledCheckBase(items, { ...none, decided: new Set(["a"]), answering: new Set(["b"]), waitingIds: new Set(["c"]),
+      waitingSegments: new Set(["segment-d"]) });
+    expect(base.open.map((item) => item.id)).toEqual(["e"]);
+  });
+
+  it("never counts a timer-into-trip clash, on the Calendar or a chip, until its block UI ships (#615)", () => {
+    const clash = suggestion("clash", { type: "location_timer_trip_clash", suggestedStartedAt: "2026-10-17T12:00:00.000Z",
+      suggestedStoppedAt: "2026-10-17T13:00:00.000Z" } as Partial<MobileReviewItem>);
+    const base = settledCheckBase([clash, ...outing()], none);
+    expect(base.open.map((item) => item.id)).not.toContain("clash");
+    expect(chip(base)).toBe(1);
   });
 });

@@ -43,7 +43,9 @@ describe("Calendar › List answers and Today's toasts (Codex r2 on #582)", () =
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
-    expect(dashboard).toContain("return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };");
+    // settledCheckBase folds with calendarCheckOutings (unit-tested in useCalendarCheckAnswers.test.tsx).
+    expect(dashboard).toContain("const calendarCheckBase = useMemo(() => settledCheckBase(shownCalendarData?.reviewItems ?? [], {");
+    expect(dashboard).toContain("syncStateIds: reviewSyncStateIds");
     expect(dashboard).toContain("const { open, outings, folded } = calendarCheckBase;");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");
     expect(dashboard).not.toContain("foldedOutingMemberIds(");
@@ -65,12 +67,13 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
-    expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
+    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
   });
 
-  it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
-    expect(dashboard).toContain("correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])");
-    expect(dashboard).toContain("!resolvedByCorrections.has(item.id)");
+  it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {
+    // The helper is unit-tested in timelineCorrectionProjection.test.ts.
+    expect(dashboard).toContain("reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged)");
+    expect(dashboard).toContain("resolved: resolvedByCorrections,");
   });
 
   it("classifies each \"?\" so only Apple Health's and a legacy one without a segment ask under their row, and never sends a row to Review", () => {
@@ -207,7 +210,9 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
 
   it("leaves a timer that ran into a trip out of every ordinary \"?\" until its block UI ships", () => {
     // List rows, the Grid's blocks (askingChecks), the badge, Today's chip and the reminder all read calendarCheckBase.
-    expect(dashboard).toContain("isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)");
+    // settledCheckBase leaves it out, so the Earlier this week chips do too (#617; unit-tested in useCalendarCheckAnswers.test.tsx).
+    expect(source("./useCalendarCheckAnswers.ts")).toContain("isOpenReviewItem(item) && asksAsCheck(item) && !hidden.decided.has(item.id)");
+    expect(dashboard).toContain("const calendarCheckBase = useMemo(() => settledCheckBase(");
     expect(dashboard).toContain("useReviewNudgeCount(nudgeOwner, askingChecks.length,");
     expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
     expect(source("../../lib/nativeCalendarPresentation.ts")).toContain("if (!isOpenReviewItem(item) || !asksAsCheck(item)) continue;");

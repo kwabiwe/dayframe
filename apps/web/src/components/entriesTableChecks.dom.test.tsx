@@ -653,6 +653,139 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(chip(2)).toBeTruthy();
   });
 
+  it("shows an outing's trip blocks with its stay's after Logs as, the trips' \"?\" gone at once with no flicker (#612)", async () => {
+    const [stay, walk] = outingPair();
+    const items = [stay, walk, reviewItems[2]];
+    // The server logs the stay and, as free time, its trip: every block it made, and every "?" it closed.
+    clientFetch.mockImplementation(async (url: string) => url === "/api/timeline/corrections"
+      ? new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }), { status: 200 })
+      : new Response("{}", { status: 500 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const onChanged = vi.fn(async () => undefined);
+    const list = (props: { items: readonly ReviewItemRow[]; entries?: TimeEntryRow[] }) => (
+      <Shell items={props.items}>
+        <EntriesTable {...baseProps()} categories={[errands]} entries={props.entries ?? []} onChanged={onChanged} reviewItems={props.items} />
+      </Shell>
+    );
+    const view = render(list({ items }));
+    expect(badge()).toBe(2);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(dialog()).toBeNull());
+    // One log_place, never confirm_outing, and one read of the day.
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    // Before that read lands, the data still lists both "?" open: the receipt settles them, the trip's too.
+    expect(askingRow("Unknown place")).toBeNull();
+    expect(askingRow("Walk")).toBeNull();
+    expect(badge()).toBe(1);
+    // The read brings the stay's and the trip's blocks, each once; their "?" stay gone.
+    view.rerender(list({ items: [reviewItems[2]], entries: [entry("e-cafe", "Errands at the cafe", at(10, 30), at(11)),
+      entry("e-walk", "Getting around", at(10), at(10, 30))] }));
+    expect(screen.getAllByText("Errands at the cafe")).toHaveLength(1);
+    expect(screen.getAllByText("Getting around")).toHaveLength(1);
+    expect(askingRow("Unknown place")).toBeNull();
+    expect(askingRow("Walk")).toBeNull();
+    expect(badge()).toBe(1);
+  });
+
+  it("sends a Logs as again with its own id after a lost reply, and reads the day once, with no duplicate blocks (#612)", async () => {
+    const [stay, walk] = outingPair();
+    let attempt = 0;
+    clientFetch.mockImplementation(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new TypeError("Failed to fetch");
+      return new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }), { status: 200 });
+    });
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const onChanged = vi.fn(async () => undefined);
+    const view = render(<Shell items={[stay, walk]}><EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[stay, walk]} /></Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(within(dialog()!).getByText(/Check your connection/)).toBeTruthy());
+    // Nothing saved: the "?" are still asked and the day isn't read.
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(badge()).toBe(1);
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await waitFor(() => expect(dialog()).toBeNull());
+    const ids = clientFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string).clientCorrectionId);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).toBe(ids[0]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(badge()).toBe(0);
+    view.rerender(<Shell items={[]}><EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[]}
+      entries={[entry("e-cafe", "Errands at the cafe", at(10, 30), at(11)), entry("e-walk", "Getting around", at(10), at(10, 30))]} /></Shell>);
+    expect(screen.getAllByText("Getting around")).toHaveLength(1);
+    expect(screen.getAllByText("Errands at the cafe")).toHaveLength(1);
+  });
+
+  it("reads the day once when a Logs as's receipt lands after the List was left, through the owner that outlives it (Codex r1 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }),
+      { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const shellRefresh = vi.fn(async () => undefined);
+    const onChanged = vi.fn(async () => undefined);
+    const list = () => <EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[stay, walk]} />;
+    const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>{list()}</Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    // The List is left while the POST is out; the shell's decisions owner stays.
+    view.rerender(<Shell items={[stay, walk]} refresh={shellRefresh}>{null}</Shell>);
+    expect(dialog()).toBeNull();
+    await act(async () => { save.answer(); });
+    await waitFor(() => expect(shellRefresh).toHaveBeenCalledTimes(1));
+    // Settled, and read once: never through the List that has gone, never twice.
+    expect(badge()).toBe(0);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(shellRefresh).toHaveBeenCalledTimes(1);
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("reads the day once for a late receipt after A → B → A, settled in A's new lifetime (Codex r2 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe", "e-walk"], resolvedReviewItemIds: [walk.id, stay.id] } }),
+      { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const refreshA = vi.fn(async () => undefined);
+    const refreshB = vi.fn(async () => undefined);
+    const view = render(<Shell items={[stay, walk]} refresh={refreshA}>
+      <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    // B signs in while the POST is out, then A again: a new lifetime of A.
+    view.rerender(<Shell items={[]} owner="w2:u2" refresh={refreshB}>{null}</Shell>);
+    view.rerender(<Shell items={[stay, walk]} refresh={refreshA}>{null}</Shell>);
+    expect(badge()).toBe(1);
+    await act(async () => { save.answer(); });
+    await waitFor(() => expect(refreshA).toHaveBeenCalledTimes(1));
+    expect(badge()).toBe(0);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(refreshA).toHaveBeenCalledTimes(1);
+    expect(refreshB).not.toHaveBeenCalled();
+  });
+
+  it("drops a late receipt's read when the account changed meanwhile (Codex r1 on #617)", async () => {
+    const [stay, walk] = outingPair();
+    const save = holdSaves(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-cafe"], resolvedReviewItemIds: [stay.id] } }), { status: 200 }));
+    const errands = { id: "cat-errands", name: "Errands", color: "mint", isPinned: false };
+    const shellRefresh = vi.fn(async () => undefined);
+    const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>
+      <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
+    fireEvent.click(askingRow("Unknown place")!);
+    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    view.rerender(<Shell items={[]} owner="w2:u2" refresh={shellRefresh}>{null}</Shell>);
+    await act(async () => { save.answer(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(shellRefresh).not.toHaveBeenCalled();
+  });
+
   it("moves focus to the next \"?\" when a dialog's question is answered (Codex r1 on #609)", async () => {
     renderList();
     const office = officeRow()!;

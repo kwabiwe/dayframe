@@ -51,7 +51,7 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
-import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
+import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
@@ -257,7 +257,7 @@ import {
 } from "@/lib/nativeCalendarPresentation";
 import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
 import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
@@ -1989,22 +1989,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
     onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
-  // the same transaction, as their own "Not now" (#609), so they leave at once, until the day is read again.
-  const resolvedByCorrections = useMemo(() => new Set(correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])),
+  // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
+  // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
+  const resolvedByCorrections = useMemo(() => reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged),
     [correctionQueue.acknowledged]);
-  const calendarCheckBase = useMemo(() => {
-    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
-    // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
-    // A timer that ran into a trip (`location_timer_trip_clash`) is no ordinary "?" — not a List row, a Grid block, the
-    // badge, a chip or the reminder's count — until its block UI ships (step 15, as the web since #613).
-    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
-      // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
-      // abandoned record never hides it (Codex r11 on #610).
-      && !answersAfterCorrections.waitingIds.has(item.id)
-      && !(typeof item.rawPayload?.clientSegmentId === "string" && answersAfterCorrections.waitingSegments.has(item.rawPayload.clientSegmentId)));
-    return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
+  // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do answers held
+  // for Undo or saving (part 3b), waiting for corrections, or resolved by one (settledCheckBase). A timer that ran
+  // into a trip (`location_timer_trip_clash`) is no ordinary "?" — not a List row, a Grid block, the badge, a chip or
+  // the reminder's count — until its block UI ships (step 15, as the web since #613; asksAsCheck, inside
+  // settledCheckBase). Today's Earlier this week chips count from this same projection (Codex r1 on #617).
+  const calendarCheckBase = useMemo(() => settledCheckBase(shownCalendarData?.reviewItems ?? [], {
+    decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
+    waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds
+  }), [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
     answersAfterCorrections.waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
@@ -2075,17 +2072,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
   const calendarCheckRequests = useRef(0);
-  // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
-  // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
+  // Quick win (b): the hatched count chip on Earlier this week rows, from the same settled "?" the Calendar draws
+  // (the bootstrap's list, plus Today's scoped window when it is capped, less those settled on this phone: a Logs as
+  // the server acknowledged clears its day's chip at once, an outing's trips with it; Codex r1 on #617).
+  // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once, folded as the deck and
+  // Calendar › List fold it (Codex r2 on #582).
   const earlierDayReviewCountMap = useMemo(
-    () => {
-      // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
-      // The same outings the deck and Calendar › List fold (Codex r2 on #582).
-      const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item));
-      const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
-      return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
-    },
-    [shownCalendarData?.reviewItems, earlierDays, reviewSyncStateIds]
+    () => earlierDayReviewCounts(earlierDays, calendarCheckBase.open.filter((item) => !calendarCheckBase.folded.has(item.id))),
+    [calendarCheckBase, earlierDays]
   );
   // Owner, 28 Oct 2026: the Grid draws only the "?" that still ask, outings folded, as the List does, so an expired
   // or folded suggestion is never a dashed block there; onOpenReview's lookup (calendarChecks) covers every one drawn.
@@ -2175,7 +2169,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
-    // A place logged with Logs as: its blocks come with the next read of the day.
+    // A place logged with Logs as: its blocks, and on an outing's stay its trips' (#612), come with this one read of
+    // the day, once the server acknowledged it; none is projected before (the Undo window shows none).
     onLogged: () => { void load(); },
     pending: correctionQueue.pending,
     // Owner items A, B, I (28 Oct 2026): a sheet opened from a row or the Grid asks its item's "?" on top.

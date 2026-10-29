@@ -329,6 +329,8 @@ export function useLocationCorrections({
   }, []);
   // A Logs as the server has acknowledged (never one refused): read the day's blocks again (Codex r1 on #606) — one
   // sent from here, or one a waiting record sent once its sheet's corrections were acknowledged (Codex r4 on #610).
+  // One read per acknowledged id, however often it is listed: it brings the place's blocks and, on an outing's stay,
+  // the trips' blocks the server made with them (#612); nothing is drawn for either before it.
   const acknowledgedIds = acknowledged.map((item) => item.clientCorrectionId).join("|");
   const seenLogs = useRef(new Set<string>());
   useEffect(() => {

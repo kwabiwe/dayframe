@@ -5,7 +5,7 @@ import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { currentMobileAccountEpoch, type MobileAccountOwner } from "../../lib/mobileAccount";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
-import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
+import { asksAsCheck, hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation, type ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
@@ -51,6 +51,27 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
   const folded = new Set<string>();
   for (const outing of outings.values()) for (const member of outing.members) folded.add(member.id);
   return { outings, folded };
+}
+
+/**
+ * The "?" still open as this phone has settled them (Codex r1 on #573, part 3b, #609, #610, #617): the data's open
+ * suggestions less those decided here and not yet synced, held for Undo or saving, waiting for a sheet's corrections
+ * (by id or by their place's segment), or resolved by an acknowledged correction (a Logs as, an outing's trips'
+ * included), with the outings they fold. The one projection the Calendar (List, Grid, badge) and Today's Earlier
+ * this week chips count from, so they never disagree while a refresh is out.
+ */
+export function settledCheckBase(reviewItems: readonly MobileReviewItem[], hidden: {
+  decided: ReadonlySet<string>; answering: ReadonlySet<string>; resolved: ReadonlySet<string>;
+  waitingIds: ReadonlySet<string>; waitingSegments: ReadonlySet<string>; syncStateIds: ReadonlySet<string>;
+}) {
+  // A timer-into-trip clash item is no ordinary "?" until its block UI ships (#615; asksAsCheck).
+  const open = reviewItems.filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !hidden.decided.has(item.id)
+    && !hidden.answering.has(item.id) && !hidden.resolved.has(item.id)
+    // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
+    // abandoned record never hides it (Codex r11 on #610).
+    && !hidden.waitingIds.has(item.id)
+    && !(typeof item.rawPayload?.clientSegmentId === "string" && hidden.waitingSegments.has(item.rawPayload.clientSegmentId)));
+  return { open, ...calendarCheckOutings(open, hidden.syncStateIds) };
 }
 
 /** Whether a "?" can be answered in the List: a complete window and no waiting or rejected change of its own. */

@@ -312,6 +312,28 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     }
   });
 
+  it("reads the day once for an outing's acknowledged Logs as, its trips' blocks with it, however often it is listed (#612)", async () => {
+    const onLogged = vi.fn();
+    const log = (clientCorrectionId: string, resolvedReviewItemIds: string[]) => ({ clientCorrectionId, acknowledgedAt: 1,
+      request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", clientCorrectionId }, resolvedReviewItemIds });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} onLogged={onLogged} />); });
+    // Held for Undo or queued, nothing reads the day: no block, the place's or a trip's, comes before the server has it.
+    await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[log("cid-outing", [])] as never} />); });
+    expect(onLogged).not.toHaveBeenCalled();
+    // Acknowledged with the trips' "?" resolved too: one read brings the place's and the trips' blocks.
+    const outing = log("cid-outing", ["review-stay", "review-trip-in", "review-trip-out"]);
+    await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[]} acknowledged={[outing] as never} />); });
+    expect(onLogged).toHaveBeenCalledTimes(1);
+    // A retry with the same id (its first reply lost) is listed again, or with another acknowledgement: never a second read for it.
+    await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} acknowledged={[{ ...outing, acknowledgedAt: 2 }] as never} />); });
+    expect(onLogged).toHaveBeenCalledTimes(1);
+    // Another Logs as, with no trips: its own one read, as before.
+    await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged}
+      acknowledged={[{ ...outing, acknowledgedAt: 2 }, log("cid-plain", ["review-place"])] as never} />); });
+    expect(onLogged).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a Logs as after the sheet's corrections waiting for them, held for Undo, never queued here (Codex r4 on #610)", async () => {
     vi.useFakeTimers();
     try {
