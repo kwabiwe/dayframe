@@ -730,6 +730,9 @@ export function EntriesTable({
     }
     const frame = requestAnimationFrame(() => {
       openedFromLink.current = checkParam;
+      // Consumed by opening: its step's token retires too, so suppression only ever applies to a link still pending
+      // (Codex r10 on #609).
+      chipSteps.current.links.delete(checkParam);
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
       const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : nextCheck();
       if (opened) {

@@ -1026,4 +1026,43 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       search.params = "";
     }
   });
+  it("retires a chip step's link once it opened: check=A → check=B → check=A opens A again (Codex r10 on #609)", async () => {
+    const nap = suggestion("00000000-0000-4000-8000-0000000000c4", { title: "Nap", eventSource: "health_sleep",
+      eventType: "health_sleep_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 9, 12)).toISOString(),
+      suggestedStoppedAt: new Date(Date.UTC(2026, 7, 9, 13)).toISOString() });
+    const items = [nap, ...reviewItems];
+    const today = { start: new Date(at(0)), end: new Date(at(24)) };
+    const ninth = { start: new Date(Date.UTC(2026, 7, 9)), end: new Date(Date.UTC(2026, 7, 10)) };
+    const frames = async () => {
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+    };
+    try {
+      const { rerender } = render(<EntriesTable {...baseProps()} checksDays={[today]} reviewItems={items} />);
+      // A chip press goes to the 9th, and its navigation lands and is consumed: Nap is open.
+      fireEvent.click(await screen.findByRole("button", { name: "4 to check, oldest first" }));
+      search.params = `view=list&scope=day&date=2026-08-09&check=${nap.id}`;
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={items} />);
+      await frames();
+      expect(screen.getByRole("group", { name: /^Nap, / })).toBeTruthy();
+      // A deliberate visit to another "?" (B, the Office), then another chip press (to the trip).
+      search.params = `view=list&check=${PLACE}`;
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={[...items]} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+      await frames();
+      fireEvent.click(chip(4));
+      expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy();
+      fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" }));
+      await frames();
+      expect(screen.queryByRole("group", { name: /^Nap, / })).toBeNull();
+      // Straight back to Nap (A): it opens and takes focus.
+      search.params = `view=list&scope=day&date=2026-08-09&check=${nap.id}`;
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={[...items]} />);
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Nap, / })).toBeTruthy());
+      await waitFor(() => expect(document.activeElement).toBe(askingRow("Nap")));
+    } finally {
+      search.params = "";
+    }
+  });
 });
