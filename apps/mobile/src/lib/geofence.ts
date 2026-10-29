@@ -1666,10 +1666,14 @@ export async function stopLocationLearningIfStarted() {
   clearAccuracyBurstTimer();
   const lease = accuracyBurstLease;
   accuracyBurstLease = null;
-  // Capture stopped (sign-out, an account change, location off), so best accuracy did too: a burst ends now,
-  // counted for what it ran.
+  // Capture stopped (sign-out, an account change, location off), so best accuracy did too: its end is confirmed
+  // now, kept until storage takes it, and the burst counted for what it ran (Codex r8 on #619).
+  if (lease) {
+    confirmLeaseDone(lease);
+    pendingAccuracyBurstSettlements.set(lease.startedAt, lease);
+  }
   await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, lease) : state, result: undefined }))
-    .catch(() => undefined);
+    .catch(() => settlePendingAccuracyBursts());
 }
 
 const ACCURACY_BURST_STATE_KEY = "dayframe.location.burstTrial.v1";
@@ -1809,14 +1813,44 @@ function confirmLeaseDone(lease: AccuracyBurstLease) {
   }
 }
 
-/** Settles a burst's time from its lease when one is held: the confirmed moment and elapsed time, never a later one. */
+/**
+ * Leases whose native end is confirmed but whose time storage hasn't taken yet (a teardown, say), by burst: any
+ * later settlement of that burst uses them, never the later moment storage came back (Codex r8 on #619).
+ */
+const pendingAccuracyBurstSettlements = new Map<string, AccuracyBurstLease>();
+let accuracyBurstSettlementTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Settles a burst's time from its lease when one is known: the confirmed moment and elapsed time, never a later one. */
 function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLease | null) {
   if (!state.active) return state;
-  if (lease && lease.startedAt === state.active.startedAt) {
-    confirmLeaseDone(lease);
-    return endAccuracyBurst(state, new Date(lease.nativeDoneAt!), leaseElapsedMs(lease));
+  const startedAt = state.active.startedAt;
+  const known = lease?.startedAt === startedAt ? lease
+    : accuracyBurstLease?.startedAt === startedAt ? accuracyBurstLease : pendingAccuracyBurstSettlements.get(startedAt) ?? null;
+  if (known) {
+    confirmLeaseDone(known);
+    pendingAccuracyBurstSettlements.delete(startedAt);
+    return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known));
   }
   return endAccuracyBurst(state, new Date());
+}
+
+/** Retries a confirmed burst's settlement until storage takes it (storage only: native capture is already done). */
+function settlePendingAccuracyBursts() {
+  if (accuracyBurstSettlementTimer || !pendingAccuracyBurstSettlements.size) return;
+  accuracyBurstSettlementTimer = setTimeout(() => {
+    accuracyBurstSettlementTimer = null;
+    void withAccuracyBurstState(async (state) => ({
+      state: state?.active && pendingAccuracyBurstSettlements.has(state.active.startedAt) ? settleAccuracyBurst(state, null) : state,
+      result: undefined
+    })).then(() => {
+      // A burst no longer recorded (settled elsewhere) needs nothing more.
+      return readAccuracyBurstState().then((state) => {
+        for (const startedAt of [...pendingAccuracyBurstSettlements.keys()]) {
+          if (state?.active?.startedAt !== startedAt) pendingAccuracyBurstSettlements.delete(startedAt);
+        }
+      });
+    }).catch(() => undefined).finally(settlePendingAccuracyBursts);
+  }, ACCURACY_BURST_RETRY_MS);
 }
 let accuracyBurstLease: AccuracyBurstLease | null = null;
 
@@ -1835,7 +1869,8 @@ function takeAccuracyBurstLease(capture: LocationCaptureSnapshot, startedAt: str
   accuracyBurstLease = {
     capture, startedAt, takenAt: monotonicNow(),
     endsInMs: Math.max(0, endsAt - now), stopInMs: Math.max(0, stopBy - now),
-    priorMs: Math.max(0, Math.min(now - Date.parse(startedAt), stopBy - Date.parse(startedAt))), nativeDoneAt: null, nativeDoneMono: null
+    // All the time it has run, past its planned stop too: a deadline is no proof native capture stopped (Codex r8 on #619).
+    priorMs: Math.max(0, now - Date.parse(startedAt)), nativeDoneAt: null, nativeDoneMono: null
   };
   scheduleAccuracyBurstGuard(accuracyBurstLease, accuracyBurstLease.endsInMs + 1_000);
 }

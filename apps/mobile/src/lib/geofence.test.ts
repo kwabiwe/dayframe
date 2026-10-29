@@ -1334,4 +1334,32 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
     expect(state?.days["2026-11-02"].seconds).toBeLessThan(200);
   });
+
+  it("a relaunch 12 minutes into a stored burst counts all 12 minutes, past its planned stop (Codex r8 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 12));
+    await stopLocationLearningIfStarted();
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(12 * 60);
+  });
+
+  it("a sign-out confirms its burst's end at once and keeps it until storage takes it (Codex r8 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(70_000);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(70);
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(80);
+  });
 });
