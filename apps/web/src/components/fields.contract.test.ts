@@ -85,6 +85,6 @@ describe("fields (web UI audit P4)", () => {
   it("states one label rule in the brand guide (WUI-018)", () => {
     expect(guide).not.toMatch(/never an all-caps eyebrow/);
     expect(guide).toMatch(/\| Section and floating-list head \| 11 px uppercase/);
-    expect(guide).toMatch(/\| Field label \| 12 px \| 650/);
+    expect(guide).toMatch(/\| Field label \| 12 px \| 500/);
   });
 });

@@ -32,13 +32,22 @@
   --type-label: 11px;
   --type-meta: 12px;
   --type-body: 14px;
-  --type-panel: 17px;
-  --type-panel-lg: 18px;
-  --type-sheet: 20px;
-  --type-screen: 30px;
+  --type-panel: 15px;
+  --type-panel-lg: 16px;
+  --type-sheet: 17px;
+  --type-screen: 24px;
+  --type-total: 34px;
+  /* Three weights for the system font (UI review, owner 29 Oct 2026): body and meta, then row titles,
+     navigation, buttons, chips and labels, then titles, totals and the selected state. The display
+     face keeps its one 700 cut. `typeAndRadius.contract.test.ts` rejects any other literal weight. */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-strong: 600;
+  /* Control and navigation glyphs draw thinner than the 2-unit strokes inside activity tiles. */
+  --icon-stroke: 1.6;
   --r-chip: 10px;
   --r-block: var(--activity-marker-radius);
-  --r-card: 22px;
+  --r-card: 16px;
   --r-sheet: 24px;
   --r-pill: 999px;
 }
@@ -391,6 +400,28 @@ body {
     Arial,
     sans-serif;
   letter-spacing: 0;
+  /* Grayscale antialiasing in both themes: sharper, lighter text on Midnight (UI review, 29 Oct 2026). */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Browser-default bold elements follow the three-weight scale. */
+:where(b, strong, th, h1, h2, h3, h4, h5, h6) {
+  font-weight: var(--fw-strong);
+}
+
+/* Control and navigation glyphs are thinner; glyphs on an activity colour keep their 2-unit stroke. */
+svg.lucide:not([stroke-width="0"]),
+svg[data-glyph]:not([stroke-width="0"]) {
+  stroke-width: var(--icon-stroke);
+}
+
+/* Only a glyph drawn on the colour itself: an element that carries the activity colour as its own
+   fill (.df-block), or whose inline style sets it and holds the glyph directly. The running timer
+   form carries the colour too, so a descendant match would thicken its neutral menus (Codex r1 on #628). */
+:where(.df-block, .df-cmd-go) > svg[data-glyph]:not([stroke-width="0"]),
+[style*="--block"] > svg[data-glyph]:not([stroke-width="0"]) {
+  stroke-width: 2;
 }
 
 button,
@@ -530,10 +561,10 @@ html.ui-dialog-open {
   gap: 8px;
   border: 0;
   border-radius: 999px;
-  /* The df-rbtn geometry (WUI-012): one pill, 16 px sides, 14/700. */
+  /* The df-rbtn geometry (WUI-012): one pill, 16 px sides, 13/500 (UI review, 29 Oct 2026). */
   padding: 0 16px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
   line-height: 1.2;
 }
 
@@ -642,7 +673,7 @@ html.ui-dialog-open {
 .ui-field > label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .ui-control {
@@ -758,7 +789,7 @@ textarea.ui-control {
   padding: 0 14px;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .ui-segmented-control button:hover:not(:disabled) {
@@ -811,7 +842,7 @@ textarea.ui-control {
   border-radius: 16px;
   padding: 0 14px;
   cursor: pointer;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   list-style: none;
 }
 
@@ -931,7 +962,7 @@ textarea.ui-control {
 .settings-group .ui-settings-row > div:nth-of-type(1) > strong {
   color: var(--foreground);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .settings-group .ui-settings-row > div:nth-of-type(1) > span {
@@ -962,7 +993,7 @@ textarea.ui-control {
   background: transparent;
   color: var(--accent-text);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .edit-entry-last-stop:hover {
@@ -995,7 +1026,7 @@ textarea.ui-control {
   background: var(--surface-muted);
   color: var(--text-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
@@ -1039,7 +1070,7 @@ textarea.ui-control {
 .timeline-task-title {
   overflow-wrap: anywhere;
   color: var(--foreground);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-inline-description {
@@ -1313,14 +1344,14 @@ textarea.ui-control {
   display: block;
   color: var(--danger);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 1.35;
 }
 
 .timeline-task-meta {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 450;
+  font-weight: var(--fw-regular);
 }
 
 .timeline-occurrence-row {
@@ -1366,7 +1397,7 @@ textarea.ui-control {
   margin: 0;
   color: var(--success);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 1.45;
 }
 
@@ -1723,7 +1754,7 @@ dialog.ui-dialog::backdrop {
 
 .ui-dialog-header h2 {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .ui-dialog-header p {
@@ -2022,7 +2053,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   background: var(--warning);
   color: var(--background);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.06em;
   line-height: 1;
   padding: 5px 8px;
@@ -2276,7 +2307,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--title-lines-detailless, 1);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   line-height: 17px;
   overflow-wrap: normal;
   word-break: normal;
@@ -2331,7 +2362,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   align-items: flex-start;
   gap: 4px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   line-height: 15px;
 }
 
@@ -2600,7 +2631,7 @@ kbd {
   margin: 0;
   font-family: var(--font-display);
   font-size: 30px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 
@@ -2638,7 +2669,7 @@ kbd {
   min-height: 48px;
   border-radius: 999px;
   font-size: 15px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .auth-message {
@@ -2679,7 +2710,7 @@ kbd {
   color: var(--text-secondary);
   font: inherit;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
@@ -2720,7 +2751,7 @@ kbd {
 .auth-card form > p a,
 .auth-switch--standalone a {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -2811,7 +2842,7 @@ kbd {
   padding: 0 16px;
   color: var(--foreground);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -2865,7 +2896,7 @@ kbd {
   margin: 0;
   color: var(--foreground);
   font-size: clamp(44px, 7vw, 84px);
-  font-weight: 760;
+  font-weight: var(--fw-strong);
   letter-spacing: 0;
   line-height: 0.96;
 }
@@ -2913,7 +2944,7 @@ kbd {
   padding: 18px 20px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   text-transform: uppercase;
 }
 
@@ -3087,7 +3118,7 @@ kbd {
 
 .landing-footer a {
   color: var(--accent-text);
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   text-decoration: none;
 }
 
@@ -3217,7 +3248,7 @@ dialog.ui-dialog.df-range-custom {
   text-underline-offset: 3px;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .report-data-table-scroll {
@@ -3249,7 +3280,7 @@ dialog.ui-dialog.df-range-custom {
 
 .report-data-table th {
   color: var(--muted);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .overlap-marker {
@@ -3263,7 +3294,7 @@ dialog.ui-dialog.df-range-custom {
   background: color-mix(in srgb, var(--warning) 16%, var(--surface));
   color: var(--warning-text);
   font-size: var(--type-label);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   line-height: 1.2;
 }
 
@@ -3314,7 +3345,7 @@ dialog.ui-dialog.df-range-custom {
   width: fit-content;
   color: var(--warning-text);
   font-size: var(--type-label);
-  font-weight: 800;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3349,7 +3380,7 @@ dialog.ui-dialog.df-range-custom {
   min-height: 44px;
   align-items: center;
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .report-pagination > :last-child {
@@ -3555,8 +3586,9 @@ dialog.ui-dialog.df-range-custom {
   --web-radius-control: 10px;
   --web-radius-group: 24px;
   --web-radius-floating: 24px;
-  --web-control-height: 44px;
-  --web-control-height-compact: 44px;
+  /* 36 px with a mouse, 44 px on touch screens (UI review, owner 29 Oct 2026). */
+  --web-control-height: 36px;
+  --web-control-height-compact: 36px;
   --web-control-padding-inline: 12px;
   /* One 1 px idle field line in --control-border (3:1 or more on every surface, both themes;
      WCAG 1.4.11); focus adds a 1 px inset so the ring reads 2 px with no layout shift. */
@@ -3661,7 +3693,7 @@ dialog.ui-dialog.df-range-custom {
 
 .places-list-section > header h2 {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .places-list-section > header p,
@@ -3682,7 +3714,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--foreground);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .place-list-row {
@@ -3713,7 +3745,7 @@ dialog.ui-dialog.df-range-custom {
 .place-list-copy h3 {
   overflow-wrap: anywhere;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .place-list-actions {
@@ -3752,7 +3784,7 @@ dialog.ui-dialog.df-range-custom {
 .places-empty-state strong {
   color: var(--text-primary);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .place-dialog-copy {
@@ -3784,7 +3816,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 0 12px;
   color: var(--foreground);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-decoration: none;
 }
 
@@ -3814,7 +3846,7 @@ dialog.ui-dialog.df-range-custom {
 .place-learned-details dt {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .place-learned-details dd {
@@ -3843,7 +3875,7 @@ dialog.ui-dialog.df-range-custom {
 .place-radius-field > label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .place-search-control {
@@ -3945,7 +3977,7 @@ dialog.ui-dialog.df-range-custom {
 .place-search-option-title {
   color: var(--foreground);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
 }
 
@@ -4292,7 +4324,7 @@ dialog.ui-dialog.df-range-custom {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-date-picker-panel {
@@ -4321,7 +4353,7 @@ dialog.ui-dialog.df-range-custom {
 .timeline-date-picker-panel > label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-range-controls {
@@ -4502,7 +4534,7 @@ dialog.ui-dialog.df-range-custom {
   /* Small danger copy uses the contrast-safe token (WUI-040). */
   color: var(--danger-text);
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-align: left;
 }
 
@@ -4642,7 +4674,7 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-inset);
   padding: 0 var(--web-control-padding-inline);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   box-shadow: none;
 }
 
@@ -4740,7 +4772,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 6px 10px 4px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -4858,7 +4890,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--foreground);
   font: inherit;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   line-height: 18px;
   text-align: left;
 }
@@ -4889,7 +4921,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4905,7 +4937,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 6px 10px 4px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   line-height: 16px;
 }
 
@@ -4932,7 +4964,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-flist .df-flist-row:hover,
@@ -5025,7 +5057,7 @@ dialog.ui-dialog.df-range-custom {
    the one primary action. */
 .df-flist .df-flist-row.is-create {
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .swiss-task-suggestions {
@@ -5083,7 +5115,7 @@ dialog.ui-dialog.df-range-custom {
   overflow: hidden;
   flex: 0 1 auto;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 18px;
   text-overflow: ellipsis;
 }
@@ -5094,7 +5126,7 @@ dialog.ui-dialog.df-range-custom {
   flex: 0 1 auto;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   line-height: 16px;
   text-overflow: ellipsis;
 }
@@ -5119,7 +5151,7 @@ dialog.ui-dialog.df-range-custom {
   background: transparent;
   padding: 0 10px;
   color: var(--foreground);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   text-align: left;
 }
 
@@ -5157,7 +5189,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--accent-text);
   box-shadow: none;
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   line-height: 1.35;
 }
 
@@ -5182,7 +5214,7 @@ dialog.ui-dialog.df-range-custom {
 
 .category-picker-create-form > strong {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   line-height: 1.35;
 }
 
@@ -5194,7 +5226,7 @@ dialog.ui-dialog.df-range-custom {
 .category-picker-create-name-field > label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   line-height: 1.35;
 }
 
@@ -5351,7 +5383,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 0 10px 0 2px;
   color: var(--foreground);
   font: inherit;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
 }
 
 .category-picker-create-form input:focus {
@@ -5394,7 +5426,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--foreground);
   font-family: inherit;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   line-height: 1.35;
 }
 
@@ -5550,7 +5582,7 @@ dialog.ui-dialog.df-range-custom {
   border-radius: 999px;
   background: var(--surface-muted);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-list-table {
@@ -5571,7 +5603,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 10px 12px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-align: left;
 }
 
@@ -5584,7 +5616,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 8px 12px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 @media (max-width: 1180px) {
@@ -5655,7 +5687,7 @@ dialog.ui-dialog.df-range-custom {
   gap: 0.3rem;
   color: var(--muted);
   font-size: var(--type-meta);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   line-height: 1.2;
 }
 
@@ -5780,7 +5812,7 @@ dialog.ui-dialog.df-range-custom {
 .dayframe-calendar-weekdays {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .dayframe-calendar-grid {
@@ -5800,13 +5832,13 @@ dialog.ui-dialog.df-range-custom {
 /* Today in coral text, no fill (as on iPhone); the chosen day's fill wins. */
 .dayframe-calendar-grid button.is-today {
   color: var(--accent-text);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .dayframe-calendar-grid button[aria-pressed="true"] {
   background: var(--foreground);
   color: var(--background);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 /* Days outside min/max: dimmed, still focusable for the arrow keys, never chosen. */
@@ -5831,7 +5863,7 @@ dialog.ui-dialog.df-range-custom {
   border-radius: 0;
   background: var(--calendar-range-band);
   color: var(--foreground);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 /* Today inside the band: coral text on the tint is too faint in Midnight (Codex r1 on #426), so it
@@ -5846,7 +5878,7 @@ dialog.ui-dialog.df-range-custom {
 .dayframe-calendar-grid button.is-range-end[aria-pressed="true"],
 .dayframe-calendar-grid button.is-range-single[aria-pressed="true"] {
   color: var(--background);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .dayframe-calendar-grid button.is-range-start[aria-pressed="true"] {
@@ -5883,7 +5915,7 @@ dialog.ui-dialog.df-range-custom {
   background: var(--foreground);
   color: var(--background);
   font: inherit;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .date-sheet-done:disabled {
@@ -5969,7 +6001,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--text-secondary);
   font: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .date-sheet-segments button[aria-pressed="true"] {
@@ -6107,7 +6139,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 6px 10px;
   color: var(--foreground);
   font-size: var(--type-label);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .location-evidence-provider-state {
@@ -6163,8 +6195,9 @@ dialog.ui-dialog.df-range-custom {
   :root {
     --web-radius-group: 18px;
     --web-radius-floating: 18px;
-    /* One control scale with the Blocks controls (web UI audit WUI-015): 44 px, compact 36 px. */
-    --web-control-height: 44px;
+    /* One control scale with the Blocks controls (WUI-015), 36 px with a mouse and 44 px on touch
+       (UI review, owner 29 Oct 2026). */
+    --web-control-height: 36px;
     --web-control-height-compact: 36px;
     --web-control-padding-inline: 10px;
     --web-icon-button-size: 44px;
@@ -6176,6 +6209,14 @@ dialog.ui-dialog.df-range-custom {
     --web-table-cell-padding-inline: 12px;
     --web-touch-size: 44px;
     --web-text-action-height: 44px;
+  }
+}
+
+/* Touch screens and phones keep 44 px controls (UI review, owner 29 Oct 2026). */
+@media (any-pointer: coarse), (max-width: 760px) {
+  :root {
+    --web-control-height: 44px;
+    --web-control-height-compact: 44px;
   }
 }
 
@@ -6294,7 +6335,7 @@ dialog.ui-dialog.df-range-custom {
   overflow: hidden;
   color: var(--foreground);
   font-size: var(--type-body);
-  font-weight: 690;
+  font-weight: var(--fw-medium);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6306,7 +6347,7 @@ dialog.ui-dialog.df-range-custom {
 .calendar-compact-duration-field > span {
   color: var(--muted);
   font-size: var(--type-label);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.02em;
 }
 
@@ -6438,7 +6479,7 @@ dialog.ui-dialog.df-range-custom {
   right: 12px;
   overflow: hidden;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-overflow: ellipsis;
@@ -6730,7 +6771,7 @@ dialog.ui-dialog.df-range-custom {
 .calendar-compact-day-offset {
   color: var(--muted);
   font-size: var(--type-label);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums;
 }
 
@@ -6817,7 +6858,7 @@ dialog.ui-dialog.df-range-custom {
 .calendar-compact-running-value {
   color: var(--foreground);
   font-size: 15px;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   line-height: 21px;
 }
 
@@ -6834,7 +6875,7 @@ dialog.ui-dialog.df-range-custom {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 1.35;
 }
 
@@ -6869,8 +6910,8 @@ dialog.ui-dialog.df-range-custom {
   border-radius: 999px;
   padding: 0 16px;
   font: inherit;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
   line-height: 1.2;
 }
 
@@ -7184,7 +7225,7 @@ dialog.ui-dialog.df-range-custom {
 
 .tag-metadata.is-compact {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .inline-tag-input-anchor {
@@ -7208,7 +7249,9 @@ dialog.ui-dialog.df-range-custom {
   flex: 0 1 auto;
   align-items: center;
   gap: 4px;
-  overflow: hidden;
+  /* Clip sideways only: each tag's 44 px hit area overhangs a 36 px field (Codex r1 on #628). */
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .inline-selected-tag,
@@ -7227,7 +7270,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--foreground);
   font: inherit;
   font-size: 11px;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   white-space: nowrap;
 }
 
@@ -7299,7 +7342,7 @@ dialog.ui-dialog.df-range-custom {
 
 .inline-tag-measurer > span {
   font-size: 11px;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
 }
 
 @media (max-width: 1020px) {
@@ -7445,7 +7488,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 0 12px;
   color: var(--text-secondary);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: none;
   transition: color 140ms ease-out;
 }
@@ -7471,8 +7514,8 @@ dialog.ui-dialog.df-range-custom {
   padding: 0 6px;
   background: var(--text-primary);
   color: var(--background);
-  font-size: 11.5px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
 }
 
@@ -7512,7 +7555,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 0 12px;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-align: left;
 }
 
@@ -7552,7 +7595,7 @@ dialog.ui-dialog.df-range-custom {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
 }
 
@@ -7587,7 +7630,7 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-muted);
   color: var(--text-primary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--fw-strong);
 }
 
 .df-profile > span:nth-child(2) {
@@ -7715,8 +7758,8 @@ dialog.ui-dialog.df-range-custom {
     gap: 2px;
     border-radius: 18px;
     color: var(--text-secondary);
-    font-size: 10.5px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: var(--fw-strong);
     text-decoration: none;
   }
 
@@ -7829,12 +7872,12 @@ dialog.ui-dialog.df-range-custom {
   min-height: 44px;
   padding: 0 40px 0 6px;
   font-size: 17px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input::placeholder {
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .df-cmd-tags {
@@ -7871,7 +7914,7 @@ button.df-cmd-clock:hover {
   font-family: inherit;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   letter-spacing: 0;
 }
 
@@ -7902,7 +7945,7 @@ button.df-cmd-clock:hover {
   background: var(--surface-inset);
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 15px;
   white-space: nowrap;
 }
@@ -7963,7 +8006,7 @@ button.df-cmd-clock:hover {
   background: var(--accent);
   color: var(--on-accent);
   font-size: 15px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
 }
 
@@ -7988,7 +8031,7 @@ button.df-cmd-clock:hover {
   color: var(--on-accent);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-cmd-go.is-stop {
@@ -8032,7 +8075,7 @@ button.df-cmd-clock:hover {
   gap: 6px;
   padding: 0 12px;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-cmd-parse:empty {
@@ -8044,7 +8087,7 @@ button.df-cmd-clock:hover {
   padding: 3px 8px;
   background: var(--surface-muted);
   color: var(--text-primary);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums;
 }
 
@@ -8072,7 +8115,7 @@ button.df-cmd-clock:hover {
   border-radius: 12px;
   padding: 0 8px 0 12px;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -8101,7 +8144,7 @@ button.df-cmd-clock:hover {
   color: var(--on-block);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 @media (max-width: 860px) {
@@ -8268,7 +8311,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-palette-close {
@@ -8288,7 +8331,7 @@ dialog.ui-dialog.df-palette {
   padding: 10px 10px 4px;
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -8338,7 +8381,7 @@ dialog.ui-dialog.df-palette {
 
 .df-palette-text b {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .df-palette-text small {
@@ -8354,7 +8397,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
 }
 
@@ -8408,8 +8451,8 @@ dialog.ui-dialog.df-palette {
    bar, the phone tab bar, popovers and dialogs — keeps a faint edge. */
 .df-card {
   min-width: 0;
-  border-radius: 22px;
-  padding: 18px 20px;
+  border-radius: var(--r-card);
+  padding: 16px 18px;
   background: var(--surface);
 }
 
@@ -8475,13 +8518,13 @@ dialog.ui-dialog.df-palette {
 .df-card-head h2 {
   margin: 0;
   font-size: 16px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   letter-spacing: -0.01em;
 }
 
 .df-faint {
   color: var(--text-muted);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-muted {
@@ -8500,7 +8543,7 @@ dialog.ui-dialog.df-palette {
   margin: 0 0 8px;
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -8522,8 +8565,8 @@ dialog.ui-dialog.df-palette {
 .df-today-total {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 46px;
-  font-weight: 750;
+  font-size: var(--type-total);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 0.95;
   letter-spacing: -0.035em;
@@ -8535,7 +8578,7 @@ dialog.ui-dialog.df-palette {
   margin: 2px 0 0;
   color: color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary));
   font-size: 14px;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   line-height: 1.45;
 }
 
@@ -8679,7 +8722,7 @@ dialog.ui-dialog.df-palette {
 .df-ribbon-hours span {
   position: absolute;
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   transform: translateX(-50%);
@@ -8717,7 +8760,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-ribbon-tip b {
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-ribbon-tip span {
@@ -8743,7 +8786,7 @@ dialog.ui-dialog.df-palette {
 
 .df-bar-row b {
   overflow: hidden;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8771,7 +8814,7 @@ dialog.ui-dialog.df-palette {
 
 .df-bar-row .df-tnum {
   color: var(--text-secondary);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-align: right;
 }
 
@@ -8807,7 +8850,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-mw-row b {
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-mw-track {
@@ -8832,8 +8875,8 @@ dialog.ui-dialog.df-palette {
 
 .df-mw-row .df-tnum {
   color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: var(--fw-medium);
   text-align: right;
 }
 
@@ -8934,8 +8977,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-text b {
   overflow: hidden;
-  font-size: 14.5px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: var(--fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8958,7 +9001,7 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-dur {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -9126,7 +9169,7 @@ dialog.ui-dialog.df-palette {
   color: var(--danger-text);
   font: inherit;
   font-size: var(--type-meta);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -9196,7 +9239,7 @@ dialog.ui-dialog.df-palette {
   background: var(--text-primary);
   color: var(--surface);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 1.3;
   pointer-events: none;
   visibility: hidden;
@@ -9251,7 +9294,7 @@ dialog.ui-dialog.df-palette {
   padding: 4px 4px 4px 16px;
   background: var(--text-primary);
   color: var(--surface);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   pointer-events: auto;
   box-shadow: var(--shadow-soft);
   animation: df-toast-in var(--df-toast-pop-ms, 320ms) var(--df-toast-pop, cubic-bezier(0.22, 1, 0.36, 1)) both;
@@ -9313,7 +9356,7 @@ dialog.ui-dialog.df-palette {
 .df-toast-detail {
   color: color-mix(in oklab, var(--surface) 72%, transparent);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   line-height: 16px;
 }
 
@@ -9325,7 +9368,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 14px;
   background: color-mix(in oklab, var(--surface) 14%, transparent);
   color: var(--surface);
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 /* A second action ("Don't log trips like this", PRD D19) on its own row under the message and Undo;
@@ -9348,7 +9391,7 @@ dialog.ui-dialog.df-palette {
   background: transparent;
   padding: 0 12px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -9357,7 +9400,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 12px;
   color: color-mix(in oklab, var(--surface) 72%, transparent);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 @keyframes df-toast-in {
@@ -9408,7 +9451,7 @@ dialog.ui-dialog.df-palette {
   }
 
   .df-today-total {
-    font-size: 38px;
+    font-size: 30px;
   }
 
   .df-goal-cells {
@@ -9538,7 +9581,7 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
   color: var(--text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .timeline-today-button:hover:not(:disabled) {
@@ -9559,7 +9602,7 @@ dialog.ui-dialog.df-palette {
 .calendar-day-heading .calendar-day-date small {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -9567,7 +9610,7 @@ dialog.ui-dialog.df-palette {
 .calendar-day-heading .calendar-day-date b {
   font-family: var(--font-display);
   font-size: 18px;
-  font-weight: 750;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
@@ -9690,7 +9733,7 @@ dialog.ui-dialog.df-palette {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   line-height: 12px;
   overflow-wrap: normal;
   word-break: normal;
@@ -9847,7 +9890,7 @@ dialog.ui-dialog.df-palette {
   background: var(--surface);
   color: var(--text-primary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-rchip-block {
@@ -9907,7 +9950,7 @@ dialog.ui-dialog.df-palette {
 
 .df-roverlap.is-large {
   color: var(--warning-text);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-roverlap svg {
@@ -9924,8 +9967,8 @@ dialog.ui-dialog.df-palette {
   padding: 0 16px;
   background: var(--surface-muted);
   color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
   text-decoration: none;
 }
 
@@ -10015,7 +10058,7 @@ dialog.ui-dialog.df-palette {
   margin: 8px 0 0;
   font-family: var(--font-display);
   font-size: var(--type-screen);
-  font-weight: 800;
+  font-weight: 700;
   text-wrap: balance;
 }
 
@@ -10047,7 +10090,7 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--type-screen);
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 
@@ -10083,7 +10126,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 16px;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -10113,12 +10156,12 @@ dialog.ui-dialog.df-palette {
   gap: 10px;
   margin: 12px 0 0;
   font-size: 17px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .df-lib-group .df-faint {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .df-lib-grid {
@@ -10175,7 +10218,7 @@ dialog.ui-dialog.df-palette {
   overflow-wrap: anywhere;
   hyphens: auto;
   font-size: 16px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .df-lmeta {
@@ -10192,7 +10235,7 @@ dialog.ui-dialog.df-palette {
 
 .df-lmeta small {
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-spark {
@@ -10223,17 +10266,17 @@ dialog.ui-dialog.df-palette {
   justify-items: center;
   gap: 6px;
   border: 2px dashed var(--border-strong);
-  border-radius: 22px;
+  border-radius: var(--r-card);
   background: transparent;
   color: var(--text-primary);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-lnew small {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .df-lnew:hover {
@@ -10341,7 +10384,7 @@ dialog.ui-dialog.df-palette {
   margin: 0 0 8px;
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -10527,7 +10570,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-library .places-list-section {
-  border-radius: 22px;
+  border-radius: var(--r-card);
   background: var(--surface);
 }
 
@@ -10612,7 +10655,7 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
   color: var(--text-primary);
   font-size: 18px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .df-set-id {
@@ -10777,7 +10820,7 @@ dialog.ui-dialog.df-palette {
   min-width: 56px;
   font-family: var(--font-display);
   font-size: 17px;
-  font-weight: 750;
+  font-weight: 700;
   text-align: center;
 }
 
@@ -10809,7 +10852,7 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   padding: 0 16px;
   font-size: 16px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .df-set-note {
@@ -10942,14 +10985,14 @@ dialog.ui-dialog.df-palette {
 .df-tile small {
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .df-stat-big {
   margin-top: 2px;
   font-family: var(--font-display);
   font-size: 30px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 
@@ -10959,7 +11002,7 @@ dialog.ui-dialog.df-palette {
 
 .df-delta {
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-goal-dots {
@@ -11087,7 +11130,7 @@ dialog.ui-dialog.df-palette {
   overflow: hidden;
   max-width: 100%;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11126,7 +11169,7 @@ dialog.ui-dialog.df-palette {
 
 .df-wb-label small {
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .df-month {
@@ -11138,7 +11181,7 @@ dialog.ui-dialog.df-palette {
 .df-dow {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   text-align: center;
 }
 
@@ -11176,7 +11219,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
   font-size: 11px;
   font-style: normal;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-mday-stack > .df-tblock {
@@ -11213,7 +11256,7 @@ dialog.ui-dialog.df-palette {
   }
 
   .df-wb-label b {
-    font-size: 10.5px;
+    font-size: 11px;
   }
 
   .df-wb-label small {
@@ -11259,7 +11302,7 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
   color: var(--text-primary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: none;
 }
 
@@ -11331,7 +11374,7 @@ dialog.ui-dialog.df-palette {
 .df-rf-description span {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -11424,7 +11467,7 @@ dialog.ui-dialog.df-palette {
 .df-day-pick-head h3 {
   margin: 0;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-report-blocks:focus {
@@ -11486,7 +11529,7 @@ dialog.ui-dialog.df-palette {
 
 .df-day-pick-row span {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-day-pick-row.is-hot,
@@ -11610,7 +11653,7 @@ dialog.ui-dialog.df-palette {
 .df-donut-center b {
   font-family: var(--font-display);
   font-size: 24px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
@@ -11664,7 +11707,7 @@ dialog.ui-dialog.df-palette {
 
 .df-crow span {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-crow small {
@@ -11758,7 +11801,7 @@ dialog.ui-dialog.df-palette {
   border-radius: 50%;
   background: var(--surface-muted);
   color: var(--foreground);
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .df-profile-pop-card > div {
@@ -11786,7 +11829,7 @@ dialog.ui-dialog.df-palette {
   padding: 6px 10px 4px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -11815,7 +11858,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 10px;
   color: var(--foreground);
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-align: left;
   text-decoration: none;
   cursor: pointer;
@@ -11872,7 +11915,7 @@ dialog.ui-dialog.df-palette {
   color: var(--foreground);
   font-family: inherit;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
 }
 
@@ -11889,7 +11932,7 @@ dialog.ui-dialog.df-palette {
   line-height: 16px;
   color: var(--calendar-now-ink);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
@@ -11944,7 +11987,7 @@ dialog.ui-dialog.df-palette {
 
 .df-cal-day small {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.04em;
   line-height: 12px;
   text-transform: uppercase;
@@ -11958,7 +12001,7 @@ dialog.ui-dialog.df-palette {
   border-radius: 50%;
   color: var(--foreground);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .df-cal-day.is-today b {
@@ -11973,8 +12016,8 @@ dialog.ui-dialog.df-palette {
 /* #256: the day's total under its date, in quiet tabular figures. */
 .df-cal-day-total {
   color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: var(--fw-medium);
   line-height: 13px;
   white-space: nowrap;
 }
@@ -12008,7 +12051,7 @@ dialog.ui-dialog.df-palette {
   align-items: center;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -12069,7 +12112,7 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -12079,7 +12122,7 @@ dialog.ui-dialog.df-palette {
 .df-ed-source {
   margin: 2px 0 0;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .df-ed-head h2 {
@@ -12088,7 +12131,7 @@ dialog.ui-dialog.df-palette {
   color: var(--foreground);
   font-family: var(--font-display);
   font-size: 18px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -12096,7 +12139,7 @@ dialog.ui-dialog.df-palette {
 
 .calendar-compact-editor-panel .time-entry-quick-description-control input {
   font-size: 17px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .df-ed-chips {
@@ -12271,7 +12314,7 @@ dialog.ui-dialog.df-palette {
 .calendar-compact-editor-panel .calendar-compact-duration > .tabular,
 .calendar-compact-editor-panel .calendar-compact-running-value {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 28px;
   font-variant-numeric: tabular-nums;
 }
@@ -12399,7 +12442,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 12px;
   background: var(--surface-inset);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
 }
 
@@ -12470,7 +12513,7 @@ dialog.ui-dialog.df-palette {
 .df-confirm-title {
   margin: 0;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   line-height: 1.3;
 }
 
@@ -12478,7 +12521,7 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   color: var(--danger-text);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   line-height: 1.4;
 }
 
@@ -12610,7 +12653,7 @@ dialog.ui-dialog.df-palette {
 .df-start-field-label {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -12641,7 +12684,7 @@ dialog.ui-dialog.df-palette {
 .df-start-date-trigger.timeline-period-trigger strong {
   overflow: hidden;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -12655,7 +12698,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 12px;
   font: inherit;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums;
 }
 
@@ -12745,7 +12788,7 @@ dialog.ui-dialog.df-palette {
   color: var(--foreground);
   font-family: var(--font-display);
   font-size: 15px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .timeline-list-day-heading > td > span + span {
@@ -12753,7 +12796,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-list-row > td {
@@ -12899,7 +12942,7 @@ dialog.ui-dialog.df-palette {
 
 .timeline-list-duration {
   color: var(--foreground);
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .timeline-list-actions .df-icon-action {
@@ -12944,7 +12987,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 10px 0 4px;
   color: var(--text-secondary);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: none;
 }
 
@@ -12977,7 +13020,7 @@ dialog.ui-dialog.df-palette {
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -13029,7 +13072,7 @@ dialog.ui-dialog.df-palette {
   padding: 0 14px;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-pe-seg label:hover span,
@@ -13137,7 +13180,7 @@ dialog.ui-dialog.df-palette {
   gap: 4px;
   padding: 0 8px;
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .df-range-nav:not(.is-disabled):hover,
@@ -13174,7 +13217,7 @@ dialog.ui-dialog.df-palette {
   padding: 6px 10px 4px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -13202,7 +13245,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-range-menu button[aria-checked="true"] {
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .df-range-menu button > svg {
@@ -13281,7 +13324,7 @@ dialog.ui-dialog.df-palette {
   margin-block: -14px;
   padding-inline: 4px;
   color: var(--text-primary);
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-decoration: underline;
   text-underline-offset: 2px;
   vertical-align: middle;
@@ -13429,7 +13472,7 @@ dialog.ui-dialog.df-palette {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text-primary) 45%, transparent);
   color: var(--text-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   line-height: 1.3;
   white-space: nowrap;
   pointer-events: none;
@@ -13443,7 +13486,7 @@ dialog.ui-dialog.df-palette {
   background: var(--text-primary);
   color: var(--surface);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -13466,7 +13509,7 @@ dialog.ui-dialog.df-palette {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  border-radius: 22px;
+  border-radius: var(--r-card);
   background: var(--surface);
 }
 
@@ -13505,7 +13548,7 @@ dialog.ui-dialog.df-palette {
 
 .df-report-row-when small {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .df-report-row-flag {
@@ -13549,7 +13592,7 @@ dialog.ui-dialog.df-palette {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -13607,7 +13650,7 @@ dialog.ui-dialog.df-palette {
     display: block;
     grid-column: 3;
     grid-row: 2;
-    font-size: 11.5px;
+    font-size: 12px;
   }
 
   .df-report-row .df-erow-when small::after {
@@ -13760,15 +13803,15 @@ dialog.ui-dialog.df-palette {
 
 .timeline-location-row.is-faint .timeline-task-primary-line {
   color: var(--text-secondary);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-location-secondary,
 .timeline-location-note {
   color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-trip-modes {
@@ -13779,12 +13822,12 @@ dialog.ui-dialog.df-palette {
   margin-top: 2px;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-trip-route {
   color: var(--text-secondary);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-trip-mode {
@@ -13796,7 +13839,7 @@ dialog.ui-dialog.df-palette {
 .timeline-trip-mode .is-unsure,
 .timeline-trip-leg.is-unsure b {
   color: var(--warning-text);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .timeline-trip-legs-toggle {
@@ -13886,15 +13929,15 @@ dialog.ui-dialog.df-palette {
 }
 
 .timeline-trip-leg-text b {
-  font-size: 13.5px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-trip-leg-text small,
 .timeline-trip-leg-time {
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-location-chip {
@@ -13908,7 +13951,7 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   cursor: pointer;
 }
 
@@ -13968,7 +14011,7 @@ button.timeline-location-hit:focus-visible {
 
 .timeline-location-row.is-quiet .timeline-task-primary-line {
   color: var(--text-secondary);
-  font-weight: 600;
+  font-weight: var(--fw-medium);
 }
 
 .timeline-location-row.is-quiet .timeline-location-mark {
@@ -14042,14 +14085,14 @@ button.timeline-location-hit:focus-visible {
 .timeline-places-column-head h2 {
   margin: 0;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .timeline-places-column-head small,
 .timeline-places-column-item small {
   display: block;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .timeline-location-chip.is-compact {
@@ -14082,7 +14125,7 @@ button.timeline-location-hit:focus-visible {
 }
 
 .timeline-places-column-item b {
-  font-size: 13.5px;
+  font-size: 13px;
 }
 
 @media (hover: hover) {
@@ -14112,7 +14155,7 @@ button.timeline-location-hit:focus-visible {
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -14162,7 +14205,7 @@ button.timeline-location-hit:focus-visible {
   color: var(--warning-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   cursor: pointer;
 }
 
@@ -14236,7 +14279,7 @@ button.timeline-location-hit:focus-visible {
   margin-top: 6px;
   color: var(--text-primary);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 /* A plain divider list (owner, 29 Oct 2026): the saved places and "Leave as unknown" alike, never a card. */
@@ -14285,7 +14328,7 @@ button.timeline-location-hit:focus-visible {
 
 /* The chosen place: a neutral check at the row's end, as on the iPhone; never a filled row. */
 .location-correction-option[data-checked="true"] b {
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .location-correction-check {
@@ -14327,7 +14370,7 @@ button.timeline-location-hit:focus-visible {
   background: var(--surface-muted);
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
 }
 
 .location-correction-time input {
@@ -14340,7 +14383,7 @@ button.timeline-location-hit:focus-visible {
   font: inherit;
   font-size: 20px;
   font-variant-numeric: tabular-nums;
-  font-weight: 750;
+  font-weight: var(--fw-strong);
 }
 
 .location-correction-modes {
@@ -14361,7 +14404,7 @@ button.timeline-location-hit:focus-visible {
   color: var(--text-primary);
   font: inherit;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   cursor: pointer;
 }
 
@@ -14591,7 +14634,7 @@ button.timeline-location-hit:focus-visible {
 
 .location-correction-leg small {
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .location-correction-back,
@@ -14606,7 +14649,7 @@ button.timeline-location-hit:focus-visible {
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   cursor: pointer;
 }
 
@@ -14764,7 +14807,7 @@ button.timeline-location-hit:focus-visible {
   justify-items: end;
   gap: 2px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--fw-medium);
   color: var(--text-primary);
 }
 
@@ -14801,7 +14844,7 @@ button.timeline-location-hit:focus-visible {
   color: var(--text-secondary);
   font: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--fw-medium);
   cursor: pointer;
 }
 

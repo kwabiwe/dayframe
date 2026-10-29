@@ -102,13 +102,13 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain('className="calendar-compact-duration-field"');
     expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
     expect(quick).not.toContain('<strong className="tabular">');
-    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
+    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*var\(--fw-regular\);[^}]*line-height:\s*21px;/s);
     // Add time's own date-time picker is retired (WUI-025): its CSS goes with it.
     expect(styles).not.toContain("dayframe-date-time");
   });
 
   it("lets the title win at every size, compact and narrow, whole words only (Calendar v3, 24 Oct 2026)", () => {
-    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 14px;[^}]*font-weight: 700;[^}]*line-height: 17px;[^}]*word-break: normal;/s);
+    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 14px;[^}]*font-weight: var\(--fw-strong\);[^}]*line-height: 17px;[^}]*word-break: normal;/s);
     expect(styles).toMatch(/\.calendar-time-block\.is-dense-compact \.calendar-entry-title,[\s\S]*?\{[^}]*font-size: 11\.5px;[^}]*line-height: 14px;/s);
     expect(styles).toMatch(/@container calendar-time-block \(max-width: 89\.98px\)[\s\S]*?font-size: 11\.5px;/s);
     expect(styles).toMatch(/@container calendar-time-block \(min-width: 120px\)[\s\S]*?\.calendar-entry-details \{\s*display: grid;/s);

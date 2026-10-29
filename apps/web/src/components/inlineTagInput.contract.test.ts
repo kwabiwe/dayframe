@@ -69,7 +69,7 @@ describe("web tag editor interaction contract", () => {
 
   it("separates the accessible hit target from the compact visible tag fill", () => {
     expect(styles).toMatch(/\.inline-tag-input-anchor \{[^}]*--inline-selected-tag-target-height:\s*44px;[^}]*--inline-selected-tag-visual-height:\s*24px;/s);
-    expect(styles).toMatch(/\.inline-selected-tag,\s*\.inline-selected-tag-overflow\s*\{[^}]*height:\s*var\(--inline-selected-tag-target-height\);[^}]*background:\s*transparent;[^}]*font-weight:\s*400;/s);
+    expect(styles).toMatch(/\.inline-selected-tag,\s*\.inline-selected-tag-overflow\s*\{[^}]*height:\s*var\(--inline-selected-tag-target-height\);[^}]*background:\s*transparent;[^}]*font-weight:\s*var\(--fw-regular\);/s);
     expect(styles).toMatch(/\.inline-selected-tag-visual,\s*\.inline-selected-tag-overflow-visual\s*\{[^}]*height:\s*var\(--inline-selected-tag-visual-height\);[^}]*border-radius:\s*6px;[^}]*background:\s*transparent;/s);
     // Neutral hover: coral marks recording and the one primary action only (WUI-011).
     expect(styles).toMatch(/\.inline-selected-tag:hover \.inline-selected-tag-visual\s*\{[^}]*background:\s*var\(--surface-muted\);[^}]*color:\s*var\(--foreground\);/s);
@@ -80,6 +80,6 @@ describe("web tag editor interaction contract", () => {
 
   it("measures the same normal-weight label and thin X used by visible tags", () => {
     expect(source).toMatch(/className="inline-selected-tag-visual" data-tag-measure[^>]*>[\s\S]*#\{tagName\}[\s\S]*<X size=\{12\} strokeWidth=\{1\.6\}/);
-    expect(styles).toMatch(/\.inline-tag-measurer > span \{[^}]*font-size:\s*11px;[^}]*font-weight:\s*400;/s);
+    expect(styles).toMatch(/\.inline-tag-measurer > span \{[^}]*font-size:\s*11px;[^}]*font-weight:\s*var\(--fw-regular\);/s);
   });
 });
