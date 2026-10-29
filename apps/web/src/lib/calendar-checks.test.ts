@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { askingChecks, oldestCheckHref } from "@/lib/calendar-checks";
+import { askingChecks, asksAsCheck, oldestCheckHref, reviewCheckHref } from "@/lib/calendar-checks";
+import { pendingReviewSpans } from "@/lib/today-view";
 import type { ReviewItemRow } from "@/lib/queries";
 
 // The badge's, Today's and the List's one list of "?" (owner, 28 Oct 2026, concern 4). Synthetic ids only.
@@ -32,5 +33,28 @@ describe("the \"?\" that still ask (owner, 28 Oct 2026)", () => {
     const checks = askingChecks([item("later", 27), item("old one", 23)], today);
     expect(oldestCheckHref(checks)).toBe("/timeline?view=list&scope=day&date=2026-10-23&check=old%20one");
     expect(oldestCheckHref([])).toBe("/timeline?view=list&scope=day");
+  });
+
+  it("links one \"?\" in the List, on its day when known", () => {
+    expect(reviewCheckHref("a b", "2026-10-23")).toBe("/timeline?view=list&scope=day&date=2026-10-23&check=a%20b");
+    expect(reviewCheckHref("r1")).toBe("/timeline?view=list&scope=day&check=r1");
+  });
+});
+
+// Location v4 step 15: a timer that ran into a trip asks on its block with its own End it / Keep it, which comes
+// later; until then no web list shows or counts it as an ordinary "?" (the List, the Grid, the badge, Today).
+describe("a timer that ran into a trip is not an ordinary \"?\" (step 15)", () => {
+  const clash = item("clash", 27, { type: "location_timer_trip_clash", eventSource: "location_learning", eventType: "timer_trip_clash" });
+
+  it("is never one of the List's checks, so the badge, Today's chip and the Grid leave it out", () => {
+    expect(asksAsCheck(clash)).toBe(false);
+    expect(asksAsCheck(item("stay", 27))).toBe(true);
+    expect(askingChecks([clash, item("stay", 26)], today).map((check) => check.id)).toEqual(["stay"]);
+  });
+
+  it("draws no pending span on Today's ribbon or the Grid", () => {
+    const start = new Date(2026, 9, 27).getTime();
+    const spans = pendingReviewSpans([clash, item("stay", 27)], start, start + 86_400_000, today + 86_400_000);
+    expect(spans.map((span) => span.id)).toEqual(["stay"]);
   });
 });

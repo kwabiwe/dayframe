@@ -121,7 +121,6 @@ describe("states (WUI-030)", () => {
       "components/PersistentTimerBar.tsx",
       "components/TagManager.tsx",
       "components/library/ActivitiesLibrary.tsx",
-      "components/review/ReviewDeck.tsx",
       "components/today/TodayView.tsx"
     ]) {
       const text = source(path);

@@ -35,7 +35,15 @@ describe("historical global search", () => {
     expect(sql).toContain("order by rank desc");
     expect(sql).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label)`);
     expect(sql).toContain("coalesce(lower(btrim(me.place_label)), '')");
-    expect(values).toEqual(["workspace-1", "user-1", "Examplegate visit", 40]);
+    expect(values).toEqual(["workspace-1", "user-1", "Examplegate visit", 40, "location_timer_trip_clash"]);
+  });
+
+  it("never offers a timer-into-trip clash as an open \"?\" (Codex r1 on #613)", async () => {
+    await searchDayframe("Team sync", session);
+    const [sql, values] = mocks.query.mock.calls[0];
+    const reviewBranch = sql.slice(sql.indexOf("from review_items r"));
+    expect(reviewBranch).toMatch(/r\.status = 'open'[\s\S]*and r\.type <> \$5/);
+    expect(values[4]).toBe("location_timer_trip_clash");
   });
 
   it("removes the internal ranking value from the API result", async () => {
