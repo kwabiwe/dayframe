@@ -35,6 +35,7 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
   place-search and Review map-tile routes. Never expose it through a
   `NEXT_PUBLIC_` variable.
+- `MAPKIT_JS_TEAM_ID`, `MAPKIT_JS_KEY_ID` and `MAPKIT_JS_PRIVATE_KEY`: server-only Apple MapKit JS key (the `.p8` text; one line with escaped newlines is fine) for the place and trip dialogs' Apple map. Preview uses the staging key, Production the production key. Optional: without all three the web keeps its MapLibre map.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
 - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, and `APNS_BUNDLE_ID`:
   server-only Apple provider-token credentials and the Dayframe app bundle ID.
@@ -86,6 +87,10 @@ DAYFRAME_LOCATION_ROLLOUT_MODE=v2_shadow
 # Preview only; omit in Production.
 NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging
 GEOAPIFY_API_KEY=...
+# Staging key on Preview, production key on Production.
+MAPKIT_JS_TEAM_ID=...
+MAPKIT_JS_KEY_ID=...
+MAPKIT_JS_PRIVATE_KEY=...
 APNS_KEY_ID=...
 APNS_TEAM_ID=...
 APNS_PRIVATE_KEY=...
@@ -135,6 +140,17 @@ deployments, so redeploy the relevant Preview or Production deployment
 afterwards. A preview without the key remains usable: search reports a
 friendly unavailable state, place editing still supports Current location and
 Advanced coordinates, and Review keeps its explicit tile-free evidence canvas.
+
+### Apple MapKit JS (UI review, owner 29 Oct 2026)
+
+The place and trip dialogs draw Apple's map, the same map as the iPhone, when the server has a MapKit JS key. The
+browser asks the authenticated `/api/mapkit-token` once per page; it signs a 30-minute ES256 token on the server,
+locked to the page's own origin, and answers 404 when the three variables aren't all set, which keeps the MapLibre
+map. MapKit JS loads from `https://cdn.apple-mapkit.com` (the web app sends no Content-Security-Policy today; one
+added later must allow that CDN and Apple's map hosts). An authorisation or load failure falls back to MapLibre for
+the rest of the page. The key comes from Certificates, Identifiers & Profiles › Keys (MapKit JS, tied to the Maps ID
+`maps.com.layereight.dayframe.web`), one key for staging and one for production so each can be revoked alone. Adding
+the variables needs a redeploy to take effect.
 
 Geoapify search results must retain visible Geoapify and OpenStreetMap
 attribution. The default Review map retains Geoapify, OpenMapTiles, and

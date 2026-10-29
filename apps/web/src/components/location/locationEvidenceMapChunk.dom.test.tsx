@@ -15,7 +15,12 @@ vi.mock("@/components/location/LocationEvidenceMap", async () => {
   return { LocationEvidenceMap: () => <div data-testid="evidence-map" /> };
 });
 const evidenceFetch = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: (url: string, init?: RequestInit) => evidenceFetch(url, init) }));
+// No MapKit JS key here (UI review, 29 Oct 2026): the dialog's map is MapLibre's.
+vi.mock("@/lib/client-auth-fetch", () => ({
+  clientFetch: (url: string, init?: RequestInit) => url.includes("/api/mapkit-token")
+    ? Promise.resolve({ ok: false, status: 404, json: async () => ({ available: false }) })
+    : evidenceFetch(url, init)
+}));
 
 const { LocationCorrectionDialog } = await import("./LocationCorrectionDialog");
 

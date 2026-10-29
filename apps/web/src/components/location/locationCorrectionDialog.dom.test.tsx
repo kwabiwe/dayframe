@@ -694,7 +694,8 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
         target={{ kind: "place", place: place(), label: "Unknown place" }} />);
       const map = await screen.findByTestId("evidence-map");
       expect(map.textContent).toBe("Based on 14 readings");
-      expect(map.getAttribute("data-visit-only")).toBe("true");
+      // The dialog's map (PlaceSheetMap: MapKit JS or MapLibre) only ever draws the visit's area or the trip's route.
+      expect(map.getAttribute("data-visit-only")).toBe("false");
       expect(document.body.textContent).not.toMatch(/No readings|Fix the shape|More places/);
       cleanup();
       render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}

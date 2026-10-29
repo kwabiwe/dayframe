@@ -28,7 +28,8 @@ import { formatDuration, formatTime } from "@/lib/format";
 export function EvidenceMapChunkLoading() {
   return <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" />;
 }
-const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
+// Apple MapKit JS when the server has its key, else MapLibre (UI review, owner 29 Oct 2026).
+const PlaceSheetMap = dynamic(() => import("@/components/location/PlaceSheetMap").then((module) => module.PlaceSheetMap),
   { loading: EvidenceMapChunkLoading, ssr: false });
 
 /**
@@ -133,7 +134,7 @@ function EvidenceMap({ evidence, knownPlace, leg = null }: {
   // visit's own area (or the trip's route), and one plain line at most: never the silences (owner, 29 Oct 2026).
   return (
     <div className="location-correction-map" data-section="map">
-      <LocationEvidenceMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} visitOnly />
+      <PlaceSheetMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} />
     </div>
   );
 }
