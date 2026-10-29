@@ -1,0 +1,462 @@
+/*
+ * UI review preview (29 Oct 2026, staging and local only). Every rule is scoped to
+ * :root[data-ui="next"], which only the staging toggle (UiNextToggle) sets, so production renders
+ * exactly as before. It applies the proposed tokens in .codex-dayframe-qa/ui-review-2026-10-29/findings.md
+ * so the owner can compare Current and Proposed on real data. The approved version lands as token
+ * changes in globals.css, not as this layer.
+ */
+
+:root[data-ui="next"] {
+  /* Proposed type scale (px). */
+  --type-label: 11px;
+  --type-meta: 12px;
+  --type-body: 14px;
+  --type-panel: 15px;
+  --type-panel-lg: 16px;
+  --type-sheet: 17px;
+  --type-screen: 24px;
+  --type-total: 34px;
+  --type-timer: 22px;
+  /* Three weights for the system font; the display face stays at its one cut. */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-strong: 600;
+  /* Sizes. */
+  --control-h: 36px;
+  --control-h-compact: 28px;
+  --r-card: 16px;
+  --r-control: 10px;
+  --icon-stroke: 1.6;
+  --web-control-height: 36px;
+}
+
+@media (pointer: coarse) {
+  :root[data-ui="next"] {
+    --control-h: 44px;
+    --web-control-height: 44px;
+  }
+}
+
+/* Sharper text: grayscale antialiasing, as macOS apps and Codex/Toggl do. */
+:root[data-ui="next"] body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Browser-default bold elements follow the scale. */
+:root[data-ui="next"] :is(b, strong, th, h1, h2, h3, h4) {
+  font-weight: var(--fw-strong);
+}
+
+/* ---------- Icons: thin controls, brand tiles unchanged ---------- */
+:root[data-ui="next"] svg.lucide,
+:root[data-ui="next"] svg[data-glyph] {
+  stroke-width: var(--icon-stroke);
+}
+:root[data-ui="next"] .df-erow svg[data-glyph],
+:root[data-ui="next"] .df-quick-button svg[data-glyph],
+:root[data-ui="next"] .df-block svg[data-glyph],
+:root[data-ui="next"] .df-cmd-go svg[data-glyph] {
+  stroke-width: 2;
+}
+
+/* ---------- Shell ---------- */
+:root[data-ui="next"] .df-side {
+  gap: 18px;
+  padding: 18px 12px 14px;
+}
+:root[data-ui="next"] .df-nav a {
+  height: 36px;
+  gap: 10px;
+  border-radius: var(--r-control);
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: var(--fw-medium);
+}
+:root[data-ui="next"] .df-nav a svg {
+  width: 18px;
+  height: 18px;
+}
+:root[data-ui="next"] .df-page-head h1 {
+  font-size: var(--type-screen);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+:root[data-ui="next"] .df-page-head p {
+  font-size: 13px;
+}
+
+/* ---------- Timer bar ---------- */
+:root[data-ui="next"] .df-cmd {
+  gap: 8px;
+  border-radius: 16px;
+  padding: 6px;
+}
+:root[data-ui="next"] .df-cmd.is-live {
+  box-shadow: var(--shadow-soft), inset 0 0 0 1.5px color-mix(in oklab, var(--block, var(--text-muted)) 60%, transparent);
+}
+:root[data-ui="next"] .df-cmd-activity {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+:root[data-ui="next"] .df-cmd-clock {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-size: var(--type-timer);
+  font-weight: var(--fw-strong);
+  letter-spacing: -0.01em;
+}
+:root[data-ui="next"] .df-cmd-clock small {
+  font-size: 11px;
+  font-weight: var(--fw-regular);
+}
+:root[data-ui="next"] .df-cmd-go {
+  height: 36px;
+  padding: 0 14px 0 12px;
+  font-size: 13px;
+  font-weight: var(--fw-strong);
+}
+:root[data-ui="next"] .df-cmd-go.is-stop {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+}
+:root[data-ui="next"] .df-cmd-secondary :is(button, .ui-icon-button) {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+/* Quick start: a small activity tile and the name, on a quiet pill. Shortcut numbers show on hover/focus. */
+:root[data-ui="next"] .df-quick {
+  gap: 6px;
+}
+:root[data-ui="next"] .df-quick-button.df-block {
+  min-height: var(--control-h-compact);
+  gap: 6px;
+  border-radius: 8px;
+  padding: 0 10px 0 5px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: var(--fw-medium);
+}
+:root[data-ui="next"] .df-quick-button.df-block:hover {
+  filter: none;
+  background: color-mix(in oklab, var(--block) 18%, var(--surface-muted));
+}
+:root[data-ui="next"] .df-quick-button.df-block svg[data-glyph] {
+  box-sizing: content-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 5px;
+  padding: 3px;
+  background: var(--block);
+  color: var(--on-block);
+}
+:root[data-ui="next"] .df-quick-button.is-recording {
+  box-shadow: inset 0 0 0 1.5px var(--block);
+}
+:root[data-ui="next"] .df-quick-button kbd {
+  display: none;
+}
+:root[data-ui="next"] .df-quick:is(:hover, :focus-within) .df-quick-button kbd {
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Cards and Today ---------- */
+:root[data-ui="next"] .df-today {
+  --df-today-gap: 12px;
+  padding: 16px 28px 28px;
+}
+:root[data-ui="next"] .df-card {
+  border-radius: var(--r-card);
+  padding: 16px 18px;
+}
+:root[data-ui="next"] .df-card-head {
+  margin-bottom: 10px;
+}
+:root[data-ui="next"] .df-card-head h2 {
+  font-size: var(--type-panel);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0;
+}
+:root[data-ui="next"] .df-eyebrow {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root[data-ui="next"] .df-today-total {
+  font-size: var(--type-total);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+:root[data-ui="next"] .df-today-blocks-hint {
+  display: none;
+}
+:root[data-ui="next"] .df-erow-main {
+  grid-template-columns: 28px minmax(0, 1fr) auto 64px;
+  gap: 12px;
+  min-height: 46px;
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+:root[data-ui="next"] .df-erow-text b {
+  font-size: 14px;
+  font-weight: var(--fw-medium);
+}
+
+/* "N to check": a compact quiet chip, not a floating banner. */
+:root[data-ui="next"] .timeline-checks-chip {
+  min-height: var(--control-h-compact);
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Controls ---------- */
+:root[data-ui="next"] .ui-button {
+  min-height: var(--control-h);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+:root[data-ui="next"] .ui-button.is-compact {
+  min-height: var(--control-h-compact);
+  padding-inline: 12px;
+  font-size: 13px;
+}
+:root[data-ui="next"] .ui-segmented-control {
+  padding: 3px;
+}
+:root[data-ui="next"] .ui-segmented-control button {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Calendar head: the strip carries dates and dots; totals live in the day columns ---------- */
+:root[data-ui="next"] .df-cal-day {
+  min-height: 40px;
+  border-radius: 10px;
+}
+:root[data-ui="next"] .df-cal-day small {
+  font-size: 10px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.02em;
+}
+:root[data-ui="next"] .df-cal-day b {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Place and trip dialog ---------- */
+:root[data-ui="next"] .location-correction {
+  gap: 8px;
+}
+:root[data-ui="next"] .location-correction-map {
+  min-height: 140px;
+  max-height: 160px;
+  border-radius: 12px;
+}
+:root[data-ui="next"] .location-correction-label {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: var(--fw-strong);
+}
+:root[data-ui="next"] .location-correction-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+:root[data-ui="next"] .location-correction-time {
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: var(--fw-medium);
+}
+:root[data-ui="next"] .location-correction-time input {
+  min-height: 36px;
+  font-size: 15px;
+  font-weight: var(--fw-medium);
+}
+:root[data-ui="next"] .ui-dialog-header h2 {
+  font-size: var(--type-sheet);
+}
+
+/* ---------- The preview switch itself (always visible where it renders: staging and local) ---------- */
+.ui-preview-toggle {
+  position: fixed;
+  z-index: 2147483000;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  gap: 2px;
+  border-radius: 999px;
+  padding: 3px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow-soft), inset 0 0 0 1px var(--border);
+  font-size: 12px;
+}
+.ui-preview-toggle button {
+  min-width: 44px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ui-preview-toggle button[aria-pressed="true"] {
+  background: var(--text-primary);
+  color: var(--background);
+}
+@media (max-width: 860px) {
+  .ui-preview-toggle {
+    right: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+    transform: translateX(50%);
+  }
+}
+
+/* ---------- Second pass ---------- */
+:root[data-ui="next"] .df-cmd .inline-tag-input-anchor {
+  min-height: 36px;
+}
+:root[data-ui="next"] .df-cmd .inline-tag-description-input,
+:root[data-ui="next"] .df-cmd .inline-tag-picker-trigger {
+  min-height: 36px;
+  height: 36px;
+}
+:root[data-ui="next"] .df-cmd .inline-tag-description-input {
+  font-size: 14px;
+}
+:root[data-ui="next"] .df-erow-block {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  border-radius: calc(28px * 0.3);
+}
+:root[data-ui="next"] .df-erow-block svg[data-glyph] {
+  width: 16px;
+  height: 16px;
+}
+:root[data-ui="next"] .dayframe-brand-wordmark {
+  width: 124px;
+}
+:root[data-ui="next"] .df-wb-label b {
+  font-size: 12px;
+}
+
+/* Calendar › List: one quiet time range ("15:29–16:54", "17:44–now") and one duration; denser rows. */
+:root[data-ui="next"] .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  padding-block: 6px;
+  vertical-align: middle;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time.is-running,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time[data-clock="12h"],
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
+  grid-template-columns: max-content 12px max-content;
+  grid-auto-rows: 28px;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--text-secondary);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-separator {
+  display: inline-flex;
+  width: 12px;
+  height: 28px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-control,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-input {
+  height: 28px;
+  min-height: 28px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > :last-child {
+  color: var(--text-secondary);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-running {
+  height: 28px;
+  min-height: 28px;
+  font-size: 0;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-running::after {
+  content: "now";
+  font-size: 14px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-list-time-content,
+:root[data-ui="next"] .timeline-list-table .timeline-list-duration-content {
+  min-height: 32px;
+}
+:root[data-ui="next"] .timeline-list-day-heading > td {
+  font-size: 13px;
+  font-weight: var(--fw-strong);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > :last-child .timeline-inline-time-input,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > .timeline-inline-time-control:last-child .timeline-inline-time-input {
+  text-align: left;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-separator {
+  justify-content: center;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-task-cell {
+  min-height: 32px;
+  align-items: center;
+}
+/* Dialog: fewer words (helper sentences go; the choices speak for themselves) and dark map controls. */
+:root[data-ui="next"] .location-correction .location-correction-hint,
+:root[data-ui="next"] .location-correction .location-correction-option:has(input[value="unknown"]) small {
+  display: none;
+}
+:root[data-ui="next"][data-theme="dark"] .location-correction-map .maplibregl-ctrl-group,
+:root[data-ui="next"]:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group {
+  background: var(--surface-raised, var(--surface));
+}
+@media (prefers-color-scheme: light) {
+  :root[data-ui="next"]:not([data-theme="dark"]) .location-correction-map .maplibregl-ctrl-group {
+    background: #fff;
+  }
+}
+:root[data-ui="next"]:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: light) {
+  :root[data-ui="next"]:not([data-theme="dark"]) .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+    filter: none;
+  }
+}
+
+@media (max-width: 860px) {
+  :root[data-ui="next"] .df-erow-main {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  :root[data-ui="next"] .df-report-row .df-erow-main {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    min-height: 48px;
+  }
+  :root[data-ui="next"] .df-erow-block {
+    width: 28px;
+  }
+  :root[data-ui="next"] .df-today {
+    padding: 12px 16px 24px;
+  }
+}
