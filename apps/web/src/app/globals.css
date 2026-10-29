@@ -7895,7 +7895,7 @@ dialog.ui-dialog.df-range-custom {
   justify-items: end;
   border: 0;
   border-radius: 10px;
-  padding: 2px 8px;
+  padding: 0 8px;
   background: transparent;
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
@@ -7903,7 +7903,7 @@ dialog.ui-dialog.df-range-custom {
   font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
-  line-height: 1.05;
+  line-height: 1;
 }
 
 button.df-cmd-clock:hover {
@@ -7917,6 +7917,7 @@ button.df-cmd-clock:hover {
   font-size: 11px;
   font-weight: var(--fw-regular);
   letter-spacing: 0;
+  line-height: 1.1;
 }
 
 .df-cmd-clock.is-idle {
@@ -8339,14 +8340,18 @@ button.df-cmd-clock:hover {
   }
 
   .df-cmd-from > span {
-    overflow: hidden;
+    display: flex;
+    min-width: 0;
     font-size: 0;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
+  /* The ellipsis belongs to the visible 13 px time (Codex r3 on #629). */
   .df-cmd-from > span > .tabular {
+    min-width: 0;
+    overflow: hidden;
     font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .df-cmd-wrap:has(.inline-tag-description-input:focus) .df-cmd-idle {
