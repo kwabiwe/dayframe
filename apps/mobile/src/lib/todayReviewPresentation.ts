@@ -6,6 +6,7 @@ import type {
 import { reviewCardsRemovedByOutings } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
+import { asksAsCheck } from "./review";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
 
@@ -68,22 +69,6 @@ export type TodayReviewPresentation = {
   donutSegments: readonly TodayDonutSegment[];
   daySections: readonly TodayActivitySection[];
 };
-
-/**
- * The Today nudge's split (owner decision 14 Oct 2026): how many open moments overlap today (the
- * server's `todayCount`, less local decisions) and how many are from earlier days. Only when both
- * counts are exact; otherwise null and the nudge says no split. `segment` is the Review segment the
- * nudge opens: Today when it has moments, otherwise Earlier.
- */
-export function todayReviewNudgeSplit(
-  global: { value: number | null; exact: boolean } | null | undefined,
-  today: { value: number | null; exact: boolean } | null | undefined
-): { today: number; earlier: number; segment: "today" | "earlier" } | null {
-  if (!global?.exact || !today?.exact || global.value === null || today.value === null) return null;
-  const todayCount = Math.min(today.value, global.value);
-  const earlier = Math.max(0, global.value - todayCount);
-  return { today: todayCount, earlier, segment: todayCount > 0 ? "today" : "earlier" };
-}
 
 export type TodayReviewProjectionInput = {
   ownerKey: string;
@@ -387,7 +372,8 @@ function reviewCandidates(
 ) {
   const candidates = new Map<string, ReviewCandidate>();
   for (const record of response.records) {
-    if (record.kind !== "review" || record.status !== "open") continue;
+    // A timer that ran into a trip is no ordinary hatched block on Today (step 15): its own UI comes later.
+    if (record.kind !== "review" || record.status !== "open" || !asksAsCheck(record)) continue;
     candidates.set(record.reviewItemId, {
       record,
       canonicalEntryIds: uniqueIds([...record.canonicalEntryIds, ...(links.get(record.reviewItemId) ?? [])])

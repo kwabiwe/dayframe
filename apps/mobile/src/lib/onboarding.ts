@@ -102,7 +102,7 @@ export function locationResultText(choice: LocationChoice, suggestions: Suggesti
     case "always":
       if (suggestions === "failed") return "Suggestions couldn't be switched on. Try again, or turn them on later in Settings.";
       if (suggestions === "paused") return "Suggestions are on, but location capture isn't running. Retry to start it.";
-      if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Review.";
+      if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Calendar.";
       return "Location is on, including when your phone is locked.";
     case "while":
       return "Location works while Dayframe is open. Visit and journey suggestions need Always, which you can switch on in Settings › Location.";

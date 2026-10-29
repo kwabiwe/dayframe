@@ -132,8 +132,8 @@ export function CalendarListView({
   loggedLabel: string;
   nowMs: number;
   /**
-   * Opens a suggestion: a trip's in its sheet (the caller routes it), anything else on its own screen ("More…",
-   * a place's when there is no `onOpenPlace`, or the whole answer when the List has no `onAnswerCheck`).
+   * The caller's own opener for a "?" (step 15: there is no Review screen): a place's when there is no
+   * `onOpenPlace`, a trip's when there is no `onOpenTripLeg`, or the whole answer when the List has no `onAnswerCheck`.
    */
   onOpenCheck?: (reviewItemId: string) => void;
   /** Answers a "?" in place: "Log it" (true) or "Skip" (false), with the deck's effects and Undo. */
@@ -465,9 +465,7 @@ export function CalendarListView({
                 const question = id && id === shownOpenCheckId ? checkQuestions?.get(id) : undefined;
                 return id && question ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
-                    <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)}
-                      onMore={question.more && onOpenCheck ? () => onOpenCheck(id) : undefined}
-                      onOpen={question.opens && onOpenCheck ? () => onOpenCheck(id) : undefined} question={question} theme={theme} />
+                    <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)} question={question} theme={theme} />
                   </Animated.View>
                 ) : null;
               })()}
@@ -793,16 +791,15 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
 /**
  * Apple Health's "?" question under its row (mock-up #ios-list; owner, 28 Oct 2026: only a row with no sheet
  * shows one): what it asks, why, and one-tap answers in the compact inline pills (32 points tall, each a
- * 44-point target) — "Log it" first, then the skip, then "More…" for its own screen. A suggestion without a
- * complete time cannot be answered here: it says so and offers "Open it" instead. Card D item 9 (owner, 25 Oct
- * 2026): one style with the web — the standard inset surface, "Log it" a neutral dark pill (textPrimary fill,
- * background text), the others surfaceMuted; coral stays for Play/Stop and live recording.
+ * 44-point target) — the answer first, then the skip. Step 15: there is no Review screen any more, so it has no
+ * "More…", "Edit" or "Open it"; a suggestion it can't answer (no complete time, or a change of its own waiting)
+ * says why and offers nothing. Card D item 9 (owner, 25 Oct 2026): one style with the web — the standard inset
+ * surface, the answer a neutral dark pill (textPrimary fill, background text), the skip surfaceMuted; coral stays
+ * for Play/Stop and live recording.
  */
-function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
-  onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
+function CheckQuestion({ onAnswer, question, theme }: {
+  onAnswer: (logged: boolean) => void; question: ReviewAnswerQuestion; theme: MobileTheme;
 }) {
-  // A trip-style question (card A): Yes, Edit (its own screen), Not now.
-  const edit = question.moreLabel === "Edit";
   return (
     <View style={[styles.question, { backgroundColor: theme.surfaceInset }]} testID="calendar-list-question">
       <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
@@ -810,41 +807,22 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
       {question.detail && !/\d:\d\d/.test(question.detail) ? (
         <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text>
       ) : null}
-      <View style={styles.answers}>
-        {question.logLabel ? (
-          <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.background }]}>{question.logLabel}</Text>
-          </Pressable>
-        ) : null}
-        {edit && onMore ? (
-          <Pressable accessibilityHint="Opens it on its own screen to edit it" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
-            testID="calendar-list-answer-edit"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.moreLabel}</Text>
-          </Pressable>
-        ) : null}
-        {question.skipLabel ? (
-          <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
-          </Pressable>
-        ) : null}
-        {question.opens && onOpen ? (
-          <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onOpen}
-            testID="calendar-list-answer-open"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
-          </Pressable>
-        ) : null}
-        {!edit && onMore ? (
-          <Pressable accessibilityHint="Opens it on its own screen" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onMore}
-            testID="calendar-list-answer-more"
-            style={({ pressed }) => [styles.answer, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textSecondary }]}>More…</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      {question.logLabel || question.skipLabel ? (
+        <View style={styles.answers}>
+          {question.logLabel ? (
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
+              style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
+              <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.background }]}>{question.logLabel}</Text>
+            </Pressable>
+          ) : null}
+          {question.skipLabel ? (
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
+              style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+              <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

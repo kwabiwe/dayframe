@@ -7,8 +7,6 @@ function source(relativePath: string) {
 }
 
 const dashboard = source("../DayframeDashboard.tsx");
-const nudge = source("./TodayReviewNudge.tsx");
-const review = source("../../../app/review.tsx");
 
 describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   it("opens Calendar's List at the first thing to check from Today's chip, in place of the Review nudge (location v4 step 14)", () => {
@@ -29,14 +27,11 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
+    // A timer that ran into a trip counts nowhere until its block UI ships (step 15).
+    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item));");
     // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582).
     expect(dashboard).toContain("const { folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");
     expect(dashboard).toContain("reviewCounts={earlierDayReviewCountMap}");
-  });
-
-  it("orders the offline deck by suggested start, as the backlog does", () => {
-    expect(review).toContain("if (!reviewBacklog) return orderReviewItemsByStart(cachedOpenReviewItems);");
   });
 });

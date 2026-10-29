@@ -853,7 +853,7 @@ export default function PlaceEditorScreen() {
 
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup
-                foot={loggingEnabled ? "Show detected visits in Review." : "Visits here are not suggested."}
+                foot={loggingEnabled ? "Ask about detected visits in Calendar." : "Visits here are not suggested."}
                 theme={theme}
                 title="Visits"
               >
@@ -878,8 +878,8 @@ export default function PlaceEditorScreen() {
                   theme={theme}
                   title="Suggest visits here"
                 />
-                {/* Shown always, choosable only with Suggest visits here on. The server still sends a
-                    visit to Review when it is short of trusted, overlaps tracked time or a timer runs. */}
+                {/* Shown always, choosable only with Suggest visits here on. The server still asks about a
+                    visit in Calendar when it is short of trusted, overlaps tracked time or a timer runs. */}
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
@@ -891,7 +891,7 @@ export default function PlaceEditorScreen() {
                       value={loggingEnabled && autoLog}
                     />
                   }
-                  subtitle="Visits here become blocks without a Review card."
+                  subtitle="Visits here become blocks without asking in Calendar."
                   testID="place-editor-auto-log"
                   theme={theme}
                   title="Log automatically"

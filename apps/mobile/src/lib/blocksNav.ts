@@ -3,7 +3,7 @@
  * The label comes from the route below in the navigation stack (`usePreviousScreenLabel`); the
  * `from` route param and the per-screen defaults are the fallback when the stack can't name it.
  */
-export type BlocksNavOrigin = "calendar" | "reports" | "review" | "settings" | "today";
+export type BlocksNavOrigin = "calendar" | "reports" | "settings" | "today";
 
 export function blocksNavOrigin(value: string | string[] | undefined): BlocksNavOrigin | null {
   const origin = Array.isArray(value) ? value[0] : value;
@@ -13,7 +13,6 @@ export function blocksNavOrigin(value: string | string[] | undefined): BlocksNav
 const ORIGIN_LABEL: Record<BlocksNavOrigin, string> = {
   calendar: "Calendar",
   reports: "Reports",
-  review: "Review",
   settings: "Settings",
   today: "Today"
 };
@@ -23,11 +22,6 @@ const ORIGIN_LABEL: Record<BlocksNavOrigin, string> = {
 export function settingsBackLabel(section: string, from: BlocksNavOrigin | null) {
   if (from) return ORIGIN_LABEL[from];
   return section === "index" ? "Today" : "Settings";
-}
-
-/** Location evidence opens from the Review deck unless Today's Review card sent it. */
-export function evidenceBackLabel(from: BlocksNavOrigin | null) {
-  return from ? ORIGIN_LABEL[from] : "Review";
 }
 
 const SETTINGS_SECTION_TITLE: Record<string, string> = {
@@ -73,10 +67,6 @@ export function routeBackLabel(route: BlocksNavRoute | undefined): string | null
     }
     case "places":
       return "Saved places";
-    case "review":
-      return "Review";
-    case "review/[id]":
-      return "Location evidence";
     default:
       return null;
   }

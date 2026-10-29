@@ -172,9 +172,9 @@ const QA_CHECK_TOTAL = 5;
 const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"], ["qa-check-trip", "Getting around"]]);
 // Their questions (step 14 part 3b), as reviewAnswerQuestion words them; answers here do nothing.
 const QA_CHECK_QUESTIONS = new Map([
-  ["qa-check-unknown", { question: "Visited Pret A Manger?", detail: "16:26–17:00", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }],
-  ["qa-check-trip", { question: "Getting around, 17:45–18:20?", detail: "35m · Location", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }],
-  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
+  ["qa-check-unknown", { question: "Visited Pret A Manger?", detail: "16:26–17:00", logLabel: "Yes", skipLabel: "Not now" }],
+  ["qa-check-trip", { question: "Getting around, 17:45–18:20?", detail: "35m · Location", logLabel: "Yes", skipLabel: "Not now" }],
+  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep" }]
 ]);
 
 // Step 12's correction sheets: the saved places, and the trip with no block (so its times and "This wasn't a

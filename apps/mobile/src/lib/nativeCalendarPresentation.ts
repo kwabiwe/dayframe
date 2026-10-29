@@ -17,6 +17,7 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
+  asksAsCheck,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "./review";
@@ -611,7 +612,8 @@ function buildCalendarEntries(
   for (const item of data.reviewItems ?? []) {
     // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
     // show them (hatched in the Review lane), not only commutes.
-    if (!isOpenReviewItem(item)) continue;
+    // A timer that ran into a trip is never a dashed "?" block (step 15): it asks on its block later.
+    if (!isOpenReviewItem(item) || !asksAsCheck(item)) continue;
     // Its linked needs-review entries stay hidden even when the suggestion itself isn't drawn (expired, folded or
     // answered on this phone): the moment is the suggestion's, never a second block (Codex r7 on #610).
     for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
@@ -751,7 +753,7 @@ function reviewCrowdAccessibilityLabel(
   endMs: number,
   clockFormat: ClockFormat
 ) {
-  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the Review list.";
+  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the List.";
   return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${formatClockTime(startMs, clockFormat)} to ${formatClockTime(endMs, clockFormat)}. ${opens}`;
 }
 

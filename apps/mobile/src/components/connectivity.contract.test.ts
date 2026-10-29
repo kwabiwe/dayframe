@@ -9,11 +9,8 @@ describe("connectivity status ownership", () => {
     const content = [
       source("./ActiveTimerEditSheet.tsx"),
       source("./DateSheet.tsx"),
-      source("./OverflowMenu.tsx"),
       source("../../app/place-editor.tsx"),
       source("../../app/places.tsx"),
-      source("../../app/review.tsx"),
-      source("../../app/review/[id].tsx"),
       source("../../app/settings.tsx")
     ].join("\n");
 

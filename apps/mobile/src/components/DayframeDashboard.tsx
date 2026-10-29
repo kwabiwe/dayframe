@@ -255,9 +255,9 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
@@ -358,6 +358,8 @@ type DashboardContextValue = {
   checkCount: number;
   /** Owner item A (28 Oct 2026): opens the oldest question that still asks (the Calendar tab's badge). */
   openOldestCheck: () => void;
+  /** An old Review link (step 15): opens the "?" it names, or today's first ("first"), once the data is in. */
+  openCheckLink: (check: string) => void;
 };
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -1982,7 +1984,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarCheckBase = useMemo(() => {
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
     // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
-    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
+    // A timer that ran into a trip (`location_timer_trip_clash`) is no ordinary "?" — not a List row, a Grid block, the
+    // badge, a chip or the reminder's count — until its block UI ships (step 15, as the web since #613).
+    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)
       && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
       // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
       // abandoned record never hides it (Codex r11 on #610).
@@ -2066,7 +2070,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => {
       // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
       // The same outings the deck and Calendar › List fold (Codex r2 on #582).
-      const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);
+      const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item));
       const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
       return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
     },
@@ -2886,6 +2890,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (first && openCheckOn(first.id)) return;
     openChecksOn(formatDateKey(new Date()));
   }, [askingChecks, openCheckOn, openChecksOn]);
+  // Old Review links (step 15, `reviewLinks.ts`): the "?" a link names opens in Calendar › List once the bootstrap is in
+  // — on its day with its question or sheet open when it still asks, on the day it starts when it no longer does (or
+  // is a timer-into-trip question, whose block UI comes later), and today's first "?" when it names none or isn't
+  // known here.
+  const [checkLink, setCheckLink] = useState<{ check: string; request: number } | null>(null);
+  const checkLinkRequests = useRef(0);
+  const openCheckLink = useCallback((check: string) => {
+    checkLinkRequests.current += 1;
+    setCheckLink({ check, request: checkLinkRequests.current });
+  }, []);
+  useEffect(() => {
+    if (!checkLink || authState !== "authenticated" || !data) return;
+    setCheckLink(null);
+    if (checkLink.check !== "first" && openCheckOn(checkLink.check)) return;
+    const item = checkLink.check === "first" ? undefined : data.reviewItems.find((each) => each.id === checkLink.check);
+    const startedAtMs = item?.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : NaN;
+    if (Number.isFinite(startedAtMs)) openChecksOn(formatDateKey(new Date(startedAtMs)));
+    else openTodayChecks();
+  }, [authState, checkLink, data, openCheckOn, openChecksOn, openTodayChecks]);
+  // Today's hatched ribbon blocks (step 15): their "?" in Calendar › List, as an old Review link opens it. Stable, so
+  // the memoised ribbon is not re-rendered by the per-second header.
+  const openTodayRibbonCheck = useCallback((reviewItemId: string | null) => openCheckLink(reviewItemId ?? "first"), [openCheckLink]);
   useEffect(() => {
     // The reminder opens the oldest question that still asks (no Review page, step 15).
     openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));
@@ -3673,6 +3699,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <TodayRibbonSection
                   entries={todayRibbonEntries}
                   nowMs={minuteNow}
+                  onOpenCheck={openTodayRibbonCheck}
                   onOpenEntry={openTodayEntry}
                   onOpenWhereWent={openReportsToday}
                   reduceMotion={reduceMotion}
@@ -3724,6 +3751,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  /**
+   * Opens a "?"'s own sheet (a place's or a trip's, its "?" asked at the top), or a Places lane item's (`lane:<id>`),
+   * when the day's places have it. False when it has none (Apple Health, a legacy suggestion, a place not read yet).
+   */
+  function openCheckSheet(reviewItemId: string | null | undefined) {
+    const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
+      : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
+    const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
+    if (item?.kind === "place") {
+      locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+      return true;
+    }
+    if (item?.kind === "trip") {
+      locationCorrections.openTripLeg(item, null);
+      return true;
+    }
+    return false;
+  }
+
   function renderDashboardTab(tab: DayframeDashboardTab, isFocused: boolean) {
     if (tab === "timer") return renderTodayTab(isFocused);
     if (tab === "calendar") {
@@ -3739,23 +3785,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
-            // only older needs-review entries ("") opens the Review list.
+            // Step 15: a "?" on the Grid never opens Review (there is none). Owner item A (28 Oct 2026): a Grid "?" or
+            // Places lane item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet,
+            // opens its question in the List; a crowd of only older needs-review entries ("") opens the List.
             onOpenReview: (reviewItemId) => {
-              // Step 15: a "?" on the Grid never opens Review. Owner item A (28 Oct 2026): a Grid "?" or Places lane
-              // item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet, opens its
-              // question in the List.
-              const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
-                : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
-              const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
-              if (item?.kind === "place") {
-                locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
-                return;
-              }
-              if (item?.kind === "trip") {
-                locationCorrections.openTripLeg(item, null);
-                return;
-              }
+              if (openCheckSheet(reviewItemId)) return;
               if (!reviewItemId || reviewItemId.startsWith("lane:") || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
             }
           }
@@ -3837,15 +3871,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     ? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)
                     : undefined}
                   onOpenCheckChange={setOpenCalendarCheckId}
-                  // Only a question's own "More…" / "Open it" (under its row) opens a suggestion on its own screen: a
-                  // place's evidence on its details screen, anything else on the deck, focused on it (Codex r10 on #582).
-                  // A place's or trip's "?" opens its sheet in the List itself (onOpenPlace, onOpenTripLeg), or asks under
-                  // its row when the day lacks its item: never this fallback (step 15; Codex r2 on #610). The editor's
-                  // Nearby search takes the native search over from the question first (Codex r1 on #600).
+                  // Step 15: there is no Review screen to open a suggestion on. A place's or trip's "?" opens its sheet
+                  // in the List itself (onOpenPlace, onOpenTripLeg), or asks under its row when the day lacks its item;
+                  // this is only the List's own fallback (a build without a backend identity, which can't answer in
+                  // place), and opens the sheet when the day has one. The sheet's Nearby search takes the native
+                  // search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
-                    const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
-                    router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
+                    openCheckSheet(reviewItemId);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onOpenPlace={locationCorrections.openPlace}
@@ -3922,7 +3955,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck, openCheckLink }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -4127,6 +4160,11 @@ export function useDashboardCheckCount() {
 /** Owner, 28 Oct 2026 (concern 4): the Calendar tab's badge opens the oldest question that still asks (concern 4). */
 export function useDashboardOpenOldestCheck() {
   return useContext(DashboardContext)?.openOldestCheck;
+}
+
+/** Step 15: opens the "?" an old Review link names (the Calendar tab reads the link's `check`). */
+export function useDashboardOpenCheckLink() {
+  return useContext(DashboardContext)?.openCheckLink;
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {

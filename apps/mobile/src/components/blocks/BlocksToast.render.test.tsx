@@ -296,8 +296,8 @@ describe("useBlocksNotice", () => {
     expect(flatStyle(button).minHeight).toBe(44);
     act(() => button.props.onPress());
     expect(onSecondary).toHaveBeenCalledTimes(1);
-    act(() => tree!.update(render("Trips like this will wait in Review.")));
-    expect(texts()).toContain("Trips like this will wait in Review.");
+    act(() => tree!.update(render("Trips like this will be asked in Calendar.")));
+    expect(texts()).toContain("Trips like this will be asked in Calendar.");
     expect(tree!.root.findAll((node: ReactTestInstance) => node.props.testID === "toast-trip" && typeof node.type === "string")).toHaveLength(0);
     // Undo is still there.
     expect(texts()).toContain("Undo");
