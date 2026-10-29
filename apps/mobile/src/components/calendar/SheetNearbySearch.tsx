@@ -13,6 +13,7 @@ import {
 import { formatPlaceDistance } from "../../lib/placeCategories";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { InsetDivider } from "../InsetDivider";
 
 /**
  * Step 15 (the place sheet takes over the Review details screen): under the map, the Apple
@@ -71,12 +72,13 @@ export function SheetNearbySearch({ centre, onPick, theme }: {
       ) : rows.map((row) => (
         <Pressable accessibilityHint="Names this visit; you can then save it as a place" accessibilityLabel={[row.title, row.detail].filter(Boolean).join(", ")}
           accessibilityRole="button" key={row.key} onPress={() => onPick(row.title)}
-          style={({ pressed }) => [styles.row, { borderTopColor: theme.border, opacity: pressed ? 0.7 : 1 }]}>
+          style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
           <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
           <View style={styles.text}>
             <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>{row.title}</Text>
             {row.detail ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.detail, { color: theme.textSecondary }]}>{row.detail}</Text> : null}
           </View>
+          <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={30} />
         </Pressable>
       ))}
     </View>
@@ -88,7 +90,7 @@ const styles = StyleSheet.create({
   search: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, borderRadius: 12, paddingHorizontal: 12 },
   searchInput: { flex: 1, minHeight: 44, fontSize: 16 },
   note: { paddingVertical: 8, fontSize: 13 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingVertical: 6 },
   text: { flex: 1, gap: 1 },
   title: { fontSize: 15, fontWeight: "650" as "600" },
   detail: { fontSize: 13 }

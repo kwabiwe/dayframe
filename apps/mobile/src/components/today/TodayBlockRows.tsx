@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -361,7 +362,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   return (
     <View
       onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.row.${entry.id}`, event)}
-      style={[styles.row, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
+      style={styles.row}>
       {replayable ? (
         <Reanimated.View
           accessibilityElementsHidden
@@ -461,6 +462,9 @@ export const TodayBlockRow = memo(function TodayBlockRow({
           </Pressable>
         </Reanimated.View>
       </GestureDetector>
+      {/* Last, so it draws above the opaque swipe surface; it belongs to the row, so it stays put while the
+          surface slides and after a cancelled swipe springs back. Past the block (a child row is indented 16). */}
+      {divider ? <InsetDivider color={theme.border} edge="top" start={child ? DIVIDER_INSET_PAST_BLOCK + 16 : DIVIDER_INSET_PAST_BLOCK} /> : null}
     </View>
   );
 });

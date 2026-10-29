@@ -3425,12 +3425,12 @@ function HashtagSuggestionRow({
           disabled ? styles.buttonDisabled : null
       ]}
     >
-      {!isFirst ? (
-        <View pointerEvents="none" style={styles.tagSuggestionDivider} />
-      ) : null}
       <Text {...mobileTextProps("control")} style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
         {create ? "+ " : ""}{label}
       </Text>
+      {!isFirst ? (
+        <View pointerEvents="none" style={styles.tagSuggestionDivider} />
+      ) : null}
     </Pressable>
   );
 }

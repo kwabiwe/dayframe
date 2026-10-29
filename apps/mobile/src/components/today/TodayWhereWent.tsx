@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Reanimated from "react-native-reanimated";
@@ -87,7 +88,7 @@ function WhereWentButton({ model, onOpen, theme }: { model: TodayWhereWentModel;
       accessibilityLabel={model.accessibilityLabel}
       accessibilityRole="button"
       onPress={onOpen}
-      style={({ pressed }) => [styles.button, { borderTopColor: theme.border }, pressed ? styles.pressed : null]}
+      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
       testID="today-where-went"
     >
       <View style={styles.head}>
@@ -122,6 +123,7 @@ function WhereWentButton({ model, onOpen, theme }: { model: TodayWhereWentModel;
       </View>
       {duration.probe}
       {name.probe}
+      <InsetDivider color={theme.border} edge="top" paddedBy="src/components/today/TodayRibbon.tsx:card" />
     </Pressable>
   );
 }
@@ -172,7 +174,7 @@ export function whereWentColumns({
 }
 
 const styles = StyleSheet.create({
-  button: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8, minHeight: 44, paddingBottom: 4, paddingTop: 12 },
+  button: { marginTop: 8, minHeight: 44, paddingBottom: 4, paddingTop: 12 },
   pressed: { opacity: 0.72 },
   head: { alignItems: "baseline", columnGap: 10, flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", minHeight: 22 },
   heading: { flexShrink: 1, fontSize: 15, fontWeight: "600" },

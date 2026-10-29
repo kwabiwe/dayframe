@@ -79,7 +79,8 @@ describe("mobile tag interaction contract", () => {
   it("uses the shared framed chooser language, solid icon, and draft-only tag removal", () => {
     expect(theme).toMatch(/tagAutocompletePanel:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14/);
     expect(theme).toMatch(/tagAutocompleteHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
-    expect(theme).toMatch(/tagSuggestionDivider:\s*\{[\s\S]*?left: 12[\s\S]*?right: 12/);
+    // Inset 12 on both sides through the shared mechanism (owner rule, 28 Oct 2026).
+    expect(theme).toMatch(/tagSuggestionDivider: insetDividerStyle\(\{ color: theme\.border, edge: "top", end: 12, start: 12 \}\)/);
     expect(sheet).not.toContain("styles.tagAutocompleteDivider");
     expect(theme).not.toContain("tagAutocompleteDivider:");
     expect(sheet).not.toContain("{hashtagPanelMounted ? (");
