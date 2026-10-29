@@ -73,8 +73,8 @@ describe("web contextual category creation contract", () => {
 
   it("keeps shared create typography, swatch geometry, and divider anatomy independent of host styles", () => {
     expect(styles).toMatch(/\.category-picker-create-form\s*\{[^}]*font-size:\s*14px;/s);
-    expect(styles).toMatch(/\.category-picker-create-form\s*>\s*strong\s*\{[^}]*font-size:\s*14px;[^}]*font-weight:\s*650;/s);
-    expect(styles).toMatch(/\.category-picker-create-name-field\s*>\s*label\s*\{[^}]*font-size:\s*12px;[^}]*font-weight:\s*650;/s);
+    expect(styles).toMatch(/\.category-picker-create-form\s*>\s*strong\s*\{[^}]*font-size:\s*14px;[^}]*font-weight:\s*var\(--fw-medium\);/s);
+    expect(styles).toMatch(/\.category-picker-create-name-field\s*>\s*label\s*\{[^}]*font-size:\s*12px;[^}]*font-weight:\s*var\(--fw-medium\);/s);
     expect(styles).toMatch(/\.category-picker-create-form\s+\.category-picker-color-trigger\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
     expect(styles).toMatch(/\.category-picker-color-swatch\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;/s);
     expect(styles).toMatch(/\.category-picker-create-option::before\s*\{[^}]*--divider-inset:\s*12px;[^}]*top:\s*-7px;[^}]*inset-inline:\s*var\(--divider-inset-start, var\(--divider-inset\)\) var\(--divider-inset\);[^}]*height:\s*1px;/s);
