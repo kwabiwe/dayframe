@@ -353,11 +353,6 @@ async function updateOwnedDiagnostics(key: string, patch: Partial<LocationStoreD
       diagnosticBinding: {version:1, backend:DAYFRAME_API_BASE, account:key}}), transaction);
   } catch { /* Keep the original operation result; no logging of metadata. */ }
 }
-/** Hands the Review count a location reply carried to the evening reminder. Never blocks or throws. */
-function noteLocationReviewCount(owner: MobileAccountOwner, count: unknown) {
-  if (typeof count !== "number") return;
-  void import("../reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
-}
 
 async function recordLocationAttempt(owner: MobileAccountOwner, session: AuthenticatedSessionSnapshot,
   endpoint: LocationSyncEndpoint, startedAt: number, outcome: LocationSyncAttempt["outcome"],
@@ -1288,7 +1283,6 @@ async function uploadLocationEvidenceBatch(
     });
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     attemptOutcome = partition.retryIds.length ? "partial" : "success";
-    noteLocationReviewCount(owner, (body as { reviewCount?: unknown }).reviewCount);
     return { status: "success", acknowledgedCount: acknowledged.length,warnings:payload.warnings };
   } catch (error) {
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
@@ -1414,7 +1408,6 @@ async function requestServerLocationReplay(
       };
     }
     attemptOutcome = "success";
-    noteLocationReviewCount(owner, payload.reviewCount);
     return {
       ok: true as const,
       finalisedSegmentCount: payload.finalisedSegmentCount,

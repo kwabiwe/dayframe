@@ -1065,6 +1065,12 @@ public enum DayframeCalendarBlockMath {
     )
   }
 
+  /// A time's minute on the day's wall clock, as a block's top and bottom are placed (a clock change keeps its
+  /// wall-clock place); the day's end is minute 1440.
+  public static func wallClockMinute(milliseconds: Double, dayEndMs: Double, calendar: Calendar = .current) -> Double {
+    localMinute(milliseconds: milliseconds, dayEndMs: dayEndMs, calendar: calendar)
+  }
+
   private static func localMinute(
     milliseconds: Double,
     dayEndMs: Double,
@@ -1697,6 +1703,86 @@ public enum DayframeCalendarMomentMath {
       }
     }
     return frames
+  }
+}
+
+/// The Places lane (location v4 step 17): its width left of the blocks, and its items' touch targets, shared by
+/// the entries layer (where it draws and places each button) and the scroll coordinator (where a long press must
+/// not start a new block) (Codex r1 on #610).
+public enum DayframeCalendarPlacesLaneMath {
+  /// The room the lane takes left of the blocks (the presentation's entryLeadingInset).
+  public static let width = 52.0
+  /// An item's drawn width inside the lane.
+  public static let itemWidth = width - 6
+  /// Every item is at least this tall to touch (AGENTS: 44-point targets), grown evenly about the item.
+  public static let targetHeight = 44.0
+
+  /// Where the lane's items start: where the blocks would, past the hour labels.
+  public static func minX(hourLabelWidth: Double) -> Double { hourLabelWidth + 8 }
+
+  /// Each item's target, in the order given: a full 44 × 44-point square (the item's width is wider), centred on
+  /// the item's drawn span, or the span itself when taller, kept inside the day (Codex r2 on #610). Neighbours closer
+  /// than that overlap; `hitIndex` decides which one a touch is for.
+  public static func hitFrames(spans: [DayframeCalendarBracketSpan], hourLabelWidth: Double, timelineHeight: Double) -> [DayframeCalendarHitFrame] {
+    let minX = minX(hourLabelWidth: hourLabelWidth)
+    return spans.map { span in
+      let height = max(targetHeight, span.height)
+      var minY = span.top + span.height / 2 - height / 2
+      minY = min(max(0, minY), max(0, timelineHeight - height))
+      return DayframeCalendarHitFrame(minX: minX, maxX: minX + itemWidth, minY: minY, maxY: minY + height)
+    }
+  }
+
+  /// The one arbitration for a touch on the lane, shared by its buttons and the scroll coordinator: of the items
+  /// whose target holds the point, the one whose drawn centre is nearest (the earlier on a tie); nil when none.
+  public static func hitIndex(point: DayframeCalendarPoint, spans: [DayframeCalendarBracketSpan], frames: [DayframeCalendarHitFrame]) -> Int? {
+    var best: (index: Int, distance: Double)?
+    for (index, frame) in frames.enumerated() where index < spans.count && frame.contains(point) {
+      let distance = abs(point.y - (spans[index].top + spans[index].height / 2))
+      if best == nil || distance < best!.distance { best = (index, distance) }
+    }
+    return best?.index
+  }
+}
+
+/// A trip block's leg strip (location v4 step 16): each leg clipped to the part of the trip this day draws, and
+/// placed by that day-clipped span, so a trip across midnight shows only this day's legs (Codex r1 on #610).
+public enum DayframeCalendarLegStripMath {
+  public struct Segment: Equatable {
+    public let index: Int
+    public let top: Double
+    public let height: Double
+  }
+
+  /// Segments inside a strip `height` tall (2 points of inset at each end), for the block from `startedAtMs` to
+  /// `stoppedAtMs` drawn on the day from `dayStartMs` to `dayEndMs`. Each leg's ends are placed on the day's wall
+  /// clock, as the block's own top and bottom are (`DayframeCalendarBlockMath.wallClockMinute`), so a clock change
+  /// inside the trip moves its legs with the block (Codex r2 on #610). A leg not on this day has no segment.
+  public static func segments(
+    legs: [(startedAtMs: Double, stoppedAtMs: Double)],
+    startedAtMs: Double,
+    stoppedAtMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    height: Double,
+    calendar: Calendar = .current
+  ) -> [Segment] {
+    let fromMs = max(startedAtMs, dayStartMs)
+    let toMs = min(stoppedAtMs, dayEndMs)
+    guard toMs > fromMs, height.isFinite else { return [] }
+    let minute = { (ms: Double) in DayframeCalendarBlockMath.wallClockMinute(milliseconds: ms, dayEndMs: dayEndMs, calendar: calendar) }
+    let top = minute(fromMs)
+    let span = max(1, minute(toMs) - top)
+    let usable = max(0, height - 4)
+    return legs.enumerated().compactMap { index, leg in
+      let start = max(fromMs, leg.startedAtMs)
+      let end = min(toMs, leg.stoppedAtMs)
+      guard end > start else { return nil }
+      // Inside a repeated hour the wall clock can step back: a leg never starts above the block or ends below it.
+      let startY = min(max(0, (minute(start) - top) / span), 1)
+      let endY = min(max(startY, (minute(end) - top) / span), 1)
+      return Segment(index: index, top: startY * usable + 2, height: max(2, (endY - startY) * usable - 1))
+    }
   }
 }
 

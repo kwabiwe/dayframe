@@ -26,6 +26,7 @@ import { playHaptic } from "../../lib/haptics";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { SheetNearbySearch } from "./SheetNearbySearch";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
   correctable,
@@ -53,6 +54,13 @@ import {
  */
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
+/** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
+/**
+ * `generation`: the account lifetime of the tap that began it (`currentMobileAccountEpoch`, captured before its first
+ * await and carried through creation, queueing and registration; Codex r17 on #610).
+ */
+export type LocationCorrectionBeforeEnqueue = (ids: readonly string[], generation: number) => Promise<{ start: () => void; cancel: () => Promise<void> }>;
+
 export type LocationCorrectionTarget =
   | { kind: "place"; place: TimelinePlace; label: string; notHere?: boolean }
   | { kind: "trip"; trip: TimelineTrip & { route?: string }; legIndex: number | null; didntLeave?: boolean };
@@ -78,6 +86,7 @@ export function LocationCorrectionSheet({
   logAs,
   places,
   presentationId,
+  question,
   reduceMotion,
   rootHosted,
   stale = false,
@@ -85,6 +94,22 @@ export function LocationCorrectionSheet({
   theme
 }: {
   clockFormat: ClockFormat;
+  /**
+   * Owner item A (28 Oct 2026): the item's open "?", asked at the top of its sheet now that a row or a
+   * Grid item opens the sheet directly. An answer closes the sheet (with any change made in it kept too).
+   */
+  question?: {
+    /** A missing label is an answer that isn't available here: its pill isn't shown (Codex r16 on #610). */
+    text: string; detail?: string | null; yesLabel: string | null; noLabel: string | null;
+    /** Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays. */
+    onAnswer: (yes: boolean) => boolean | void;
+    /**
+     * Answers after the sheet's own changes (Codex r2 on #610): kept on the phone first, waiting for the corrections
+     * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
+     * removes it if they can't be.
+     */
+    answerAfter?: (yes: boolean, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
+  } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
@@ -92,17 +117,27 @@ export function LocationCorrectionSheet({
    * Keeps these corrections on the phone and sends them (the List shows them at once). Resolves once they are
    * kept: the sheet closes only then, and keeps its draft when they couldn't be (Codex r1 on #602).
    */
-  onQueue: (corrections: QueuedCorrection[], options: { closing: boolean }) => Promise<void>;
+  onQueue: (corrections: QueuedCorrection[], options: { closing: boolean; beforeEnqueue?: LocationCorrectionBeforeEnqueue }) => Promise<void>;
   /**
    * "Save this place" (step 12 part 4, card D item 14): saves the visit's place under this name and sets the
    * visit to it; absent when it can't be offered (a named place, a block, or no map to place it by).
    */
-  onSavePlace?: (name: string, rest: QueuedCorrection[]) => Promise<void>;
+  /** `beforeEnqueue`: a Logs as that waits for the server to accept the visit's corrections (Codex r4 on #610). */
+  onSavePlace?: (name: string, rest: QueuedCorrection[], beforeEnqueue?: LocationCorrectionBeforeEnqueue) => Promise<void>;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
    */
-  logAs?: { activities: ReadonlyArray<{ id: string; name: string }>; onLog: (categoryId: string) => void };
+  logAs?: {
+    activities: ReadonlyArray<{ id: string; name: string }>;
+    /** Logs the place now (held for Undo): the sheet has no corrections of its own to go first. */
+    onLog: (categoryId: string) => void;
+    /**
+     * Logs it after the sheet's corrections (Codex r4 on #610): kept on the phone before they are queued, and sent as
+     * `log_place` only once the server has acknowledged every one; a refused one means nothing is logged.
+     */
+    onLogAfter?: (categoryId: string, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
+  };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
   presentationId: number;
@@ -147,6 +182,7 @@ export function LocationCorrectionSheet({
   const kept = useRef(false);
   // Logs as waiting for this Done's corrections to be kept.
   const pendingLog = useRef<(() => void) | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Kept: the sheet closes on the next render, once Done is enabled again (Codex r2 on #602).
@@ -182,10 +218,10 @@ export function LocationCorrectionSheet({
   }
 
   /** Keeps the corrections on the phone, then closes (or goes back to the trip); the draft stays if they couldn't be kept. */
-  function keep(corrections: QueuedCorrection[], then: "close" | "trip") {
+  function keep(corrections: QueuedCorrection[], then: "close" | "trip", beforeEnqueue?: LocationCorrectionBeforeEnqueue) {
     setSaving(true);
     setSaveError(null);
-    onQueue(corrections, { closing: then === "close" }).then(() => {
+    onQueue(corrections, { closing: then === "close", ...(beforeEnqueue ? { beforeEnqueue } : {}) }).then(() => {
       setSaving(false);
       if (then === "trip") {
         backToTrip();
@@ -243,6 +279,13 @@ export function LocationCorrectionSheet({
       log?.();
       return true;
     }
+    const logAfter = target.kind === "place" && logAs?.onLogAfter && logCategoryId ? logAs.onLogAfter : null;
+    if (logAfter && logCategoryId) {
+      // Logs as waits for these corrections to be acknowledged, never merely kept on the phone (Codex r4 on #610).
+      const categoryId = logCategoryId;
+      keep(corrections, "close", (ids, generation) => logAfter(categoryId, ids, generation));
+      return false;
+    }
     pendingLog.current = log;
     keep(corrections, "close");
     return false;
@@ -258,10 +301,15 @@ export function LocationCorrectionSheet({
     if (problem) return;
     // The place saved, then the sheet's other changes (its times) and its Logs as, in one Done (Codex r1 on #606).
     const rest = placeCorrections(target.place, { choice: { kind: "keep" }, times }, places);
-    const log = logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
+    // With a Logs as picked, the log waits on the phone until the server has the place's corrections (the place
+    // itself is created on the server first), never merely their keeping here; a refused one logs nothing and the
+    // "?" stays (Codex r4 on #610). Without `onLogAfter` it logs once they are kept, as before.
+    const categoryId = logCategoryId;
+    const logAfter = logAs?.onLogAfter && categoryId ? logAs.onLogAfter : null;
+    const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
     setSaving(true);
     setSaveError(null);
-    onSavePlace(placeName.trim(), rest).then(() => {
+    onSavePlace(placeName.trim(), rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined).then(() => {
       setSaving(false);
       kept.current = true;
       log?.();
@@ -270,6 +318,50 @@ export function LocationCorrectionSheet({
       setSaving(false);
       setSaveError("That place couldn't be saved. Saving a place needs a connection; try again.");
     });
+  }
+  /**
+   * The "?" at the top answered, in one tap (owner, 28 Oct 2026; Codex r2 on #610). With no changes of its own the
+   * answer is held for Undo at once. With changes, they are kept as Done keeps them (the correction outbox, shown in
+   * the List at once) and the answer waits on the phone until the server has acknowledged them, so it can never
+   * reach the server first; a refused change drops it, and the "?" stays. A Logs as pick is never lost (Codex r3 on
+   * #610): Yes with an activity picked is Logs as — Done's own flow, the sheet's corrections and then `log_place`
+   * with that activity, which closes the "?" on the server (#609) — and no separate answer is sent. Not now with an
+   * activity picked answers Not now and drops the pick: Not now means "don't log".
+   */
+  function answerFromSheet(yes: boolean) {
+    if (!question || frozen() || stale) return;
+    if (yes && logCategoryId && logAs) {
+      commitRef.current?.();
+      return;
+    }
+    if (!yes && logCategoryId) setLogCategoryId(null);
+    if (confirming) {
+      setSaveError("Finish the change above first, then answer.");
+      return;
+    }
+    if (problem) {
+      setSaveError("Those times don't work yet. Fix them, then answer.");
+      return;
+    }
+    const corrections = target.kind === "place"
+      ? placeCorrections(target.place, { choice, times }, places)
+      : tripCorrections(target.trip, { times });
+    if (!corrections.length) {
+      // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
+      if (question.onAnswer(yes) === false) {
+        setSaveError("This can't be answered here right now.");
+        return;
+      }
+      kept.current = true;
+      setCloseKept(true);
+      return;
+    }
+    const answerAfter = question.answerAfter;
+    if (!answerAfter) {
+      setSaveError("Save your changes with Done; the question updates after.");
+      return;
+    }
+    keep(corrections, "close", (ids, generation) => answerAfter(yes, ids, generation));
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;
@@ -291,10 +383,14 @@ export function LocationCorrectionSheet({
     ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${time(Date.parse(leg.startedAt))}–${time(Date.parse(leg.stoppedAt))}`
     : trip?.route ? `${trip.route} · ${span}` : span;
 
+  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || (!problem && (target.kind === "place"
+    ? placeCorrections(target.place, { choice, times }, places).length > 0
+    : tripCorrections(target.trip, { times }).length > 0));
   return (
     <BottomSheetShell
       action="Done"
-      actionTone="neutral"
+      // Owner item O (28 Oct 2026): Done looks secondary until something has changed.
+      actionTone={sheetChanged ? "neutral" : "quiet"}
       calendarLayout={false}
       commitRef={commitRef}
       // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
@@ -321,12 +417,34 @@ export function LocationCorrectionSheet({
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
         </View>
       </View>
+      {question && !leg ? (
+        // Owner items A, B, I (28 Oct 2026): the "?" at the top of its sheet, Yes first when there's a guess. Its
+        // answers are the compact inline pills (owner, 28 Oct 2026), each still a 44-point target.
+        <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
+          <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionText, { color: theme.textPrimary }]}>{question.text}</Text>
+          {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
+          <View style={styles.pills}>
+            {question.yesLabel ? (
+              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(true)}
+                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
+                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.surface }]}>{question.yesLabel}</Text>
+              </Pressable>
+            ) : null}
+            {question.noLabel ? (
+              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
+                style={({ pressed }) => [styles.compactPill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
+                <Text {...mobileTextProps("control")} style={[styles.compactPillText, { color: theme.textPrimary }]}>{question.noLabel}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       {/* The map first, on every view (owner feedback, 27 Oct 2026); it stays put as a leg pushes and pops. */}
       <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
         {evidence && evidence !== "unavailable" ? (
           <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
             dangerColor={theme.danger} evidence={evidence} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
-            textColor={theme.textSecondary} />
+            textColor={theme.textSecondary} visitOnly />
         ) : (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>
             {evidence === "unavailable" ? "The map isn't available right now." : "Loading the map…"}
@@ -341,8 +459,22 @@ export function LocationCorrectionSheet({
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
         style={styles.view}
       >
+        {target.kind === "place" && onSavePlace && !stale && !target.place.placeId
+          && evidence && evidence !== "unavailable" && evidence.map.centre ? (
+          // Step 15: Nearby and search, as the Review details screen had; a pick offers to save it.
+          <Section label="Nearby" theme={theme}>
+            <SheetNearbySearch centre={{ latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] }}
+              onPick={(name) => {
+                if (frozen()) return;
+                setPlaceName(name);
+                setConfirming("save_place");
+              }} theme={theme} />
+          </Section>
+        ) : null}
         {target.kind === "place" ? (
           <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
+            distances={evidence && evidence !== "unavailable"
+              ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : undefined}
             places={places} theme={theme} />
         ) : null}
         {target.kind === "place" && logAs && !stale ? (
@@ -519,11 +651,22 @@ function Section({ children, hint, label, theme }: { children: React.ReactNode; 
   );
 }
 
-function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: {
-  choice: PlaceChoice; correctableItem: boolean; onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
+function PlaceView({ choice, correctableItem, distances, onChoose, place, places: allPlaces, theme }: {
+  choice: PlaceChoice; correctableItem: boolean;
+  /**
+   * Owner item N (28 Oct 2026): how far each saved place is from the visit, when known. Places then sort
+   * nearest first; places further than 2 km (or not near at all) wait behind "More places".
+   */
+  distances?: ReadonlyMap<string, number>;
+  onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
   places: readonly CorrectionPlaceOption[]; theme: MobileTheme;
 }) {
+  const [morePlaces, setMorePlaces] = useState(false);
   if (!correctableItem) return null;
+  const near = (id: string) => (distances?.get(id) ?? Infinity) <= 2_000 || id === place.placeId;
+  const sorted = distances ? [...allPlaces].sort((a, b) => (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity)) : allPlaces;
+  const hidden = distances && !morePlaces ? sorted.filter((option) => !near(option.id)) : [];
+  const places = distances && !morePlaces ? sorted.filter((option) => near(option.id)) : sorted;
   // What is ticked: the pick, or the place as it is (its saved place, or unknown).
   const selected = choice.kind === "saved" ? choice.id : choice.kind === "unknown" ? null
     : place.placeId ?? (place.learnedPlaceId ? "learned" : null);
@@ -534,7 +677,8 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
     ...places.map((option) => ({
       key: option.id,
       title: option.name,
-      detail: "Saved place",
+      // Owner item N: how far, when known.
+      detail: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
       glyph: (option.role === "home" ? "house" : DAYFRAME_APP_ICONS.places) as DayframeGlyph,
       pick: { kind: "saved", id: option.id } as PlaceChoice
     })),
@@ -560,8 +704,19 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
           );
         })}
       </View>
+      {hidden.length ? (
+        <Pressable accessibilityHint="Shows your saved places further away" accessibilityRole="button" onPress={() => setMorePlaces(true)}
+          style={({ pressed }) => [styles.morePlaces, { opacity: pressed ? 0.7 : 1 }]} testID="location-correction-more-places">
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textSecondary }]}>More places ({hidden.length})</Text>
+        </Pressable>
+      ) : null}
     </Section>
   );
+}
+
+/** "120 m", "1.4 km". */
+function formatMetres(metres: number) {
+  return metres < 1_000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1_000).toFixed(1)} km`;
 }
 
 function LegModes({ mode, onPick, theme }: { mode: TripLegMode; onPick: (mode: TripLegMode) => void; theme: MobileTheme }) {
@@ -670,7 +825,17 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
   );
 }
 
+/** A compact pill is 32 points tall: 6 above and below make its target 44 points (AGENTS: 44-point targets). */
+const COMPACT_PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
+
 const styles = StyleSheet.create({
+  // Owner items A, N (28 Oct 2026): the "?" at the top of the sheet, and "More places".
+  question: { gap: 6, borderRadius: 16, padding: 14, marginBottom: 12 },
+  // The compact inline pill (CalendarListView's Yes pill): 32 points tall, its hitSlop making a 44-point target.
+  compactPill: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", paddingHorizontal: 16, borderRadius: DAYFRAME_BLOCKS.radius.pill },
+  compactPillText: { fontSize: 14, fontWeight: "700" },
+  questionText: { fontSize: 17, fontWeight: "700" },
+  morePlaces: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 6 },
   headText: { flex: 1, gap: 2 },
   back: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },

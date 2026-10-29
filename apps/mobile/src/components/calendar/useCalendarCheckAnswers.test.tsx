@@ -27,6 +27,37 @@ const store = vi.hoisted(() => ({
     (await store.reviewItemsDecidedLocally(bootstrap, ids)) ? new Set(ids) : new Set())
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
+const waiting = vi.hoisted(() => {
+  const mock = {
+    commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
+    settleOutcome: null as null | "committed" | "committing" | "abandoned",
+    // The store's shared withdraw, as its deletion goes.
+    // The store's one completion path, over the mocked settle and withdraw.
+    finishWaitingStart: (owner: unknown, id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void mock.withdrawAnswerAfterCorrections(owner, id); return "withdrawn"; }
+      if (!checks.present()) { void mock.settleAnswerAfterCorrections(owner, id, { inFront: false }); return "settled"; }
+      if (checks.start()) return "started";
+      void mock.withdrawAnswerAfterCorrections(owner, id);
+      return "withdrawn";
+    },
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
+    settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
+      try {
+        await mock.commitAnswerAfterCorrections(id);
+        return mock.settleOutcome ?? "committed";
+      } catch {
+        return mock.settleOutcome ?? "committing";
+      }
+    })
+  };
+  return mock;
+});
+vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
+// The one gate every answer goes through (Codex r7 on #610): by default nothing is queued for its item.
+const gate = vi.hoisted(() => ({ waitForItemCorrections: vi.fn(async (..._args: unknown[]): Promise<unknown> => null) }));
+vi.mock("../../lib/afterCorrections", () => gate);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
@@ -100,6 +131,276 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     // Saved, not yet in the outbox's own record: still out of the List.
     expect(result.current.held).toBeNull();
     expect(result.current.hiddenIds.has("a")).toBe(true);
+  });
+
+  it("lets an answer after corrections go only through its waiting record, after Undo; Undo removes the record (Codex r2 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    waiting.cancelAnswerAfterCorrections.mockClear();
+    // Its data says its account: a waiting record is written only for its own account (Codex r15 on #610).
+    const { result } = mount({ ...bootstrap([suggestion("a"), suggestion("b")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
+    let taken = false;
+    act(() => { taken = result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(taken).toBe(true);
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-1");
+    // Never into the Review outbox from here: the record goes once its corrections are acknowledged. Its record now
+    // keeps the "?" out (the Dashboard's waiting set, Codex r11 on #610), not this hook.
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.held).toBeNull();
+    act(() => { result.current.answer("b", false, null, { afterCorrections: "m-2" }); });
+    act(() => { result.current.undo(); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("m-2");
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalledWith("m-2");
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("brings a dropped waiting answer's “?” back at once, its saving copy too (Codex r3 on #610)", async () => {
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+  });
+
+  it("ends a waiting answer's Undo too when its change is refused before Undo runs out, so the “?” stays back (Codex r4 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    const { result } = mount({ ...bootstrap([suggestion("a")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
+    act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(result.current.held).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalled();
+  });
+
+  it("makes a row's Yes wait for a correction still queued for its place: no confirmation until it is accepted (Codex r7 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // A correction saved offline for its place, the sheet closed: the gate makes it wait.
+    gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+    const { result } = mount(withAccount([suggestion("a")]));
+    await act(async () => { result.current.answer("a", true); await Promise.resolve(); });
+    expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" },
+      expect.objectContaining({ itemId: "segment-a", newIds: [], action: { kind: "answer", reviewItemId: "a", logged: true } }));
+    const recordId = (gate.waitForItemCorrections.mock.calls[0][1] as { id: string }).id;
+    expect(result.current.held).toMatchObject({ itemId: "a", afterCorrections: recordId });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    // Its Undo ended: only its waiting record lets it go, once the correction is accepted; never the Review outbox now.
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    // Nothing queued for its place: held at once, and saved as before.
+    const second = mount(withAccount([suggestion("b")]));
+    await act(async () => { second.result.current.answer("b", false); await Promise.resolve(); });
+    expect(second.result.current.held).toMatchObject({ itemId: "b" });
+    expect((second.result.current.held as { afterCorrections?: string }).afterCorrections).toBeUndefined();
+  });
+
+  describe("while the gate answers (Codex r8 on #610)", () => {
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // The gate's registration, finished by hand.
+    const deferGate = () => {
+      let finish!: (record: unknown) => void;
+      gate.waitForItemCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      return (record: unknown) => act(async () => { finish(record); await Promise.resolve(); await Promise.resolve(); });
+    };
+
+    it("never confirms a proposal that changed while it registered: Yes for 10–11, a refresh brings 10–13", async () => {
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      rerender(withAccount([suggestion("a", { suggestedStoppedAt: at(13) })]));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Waiting for a correction too: its record goes, never confirmed.
+      const finishWaiting = deferGate();
+      const other = mount(withAccount([suggestion("b")]));
+      act(() => { other.result.current.answer("b", true); });
+      other.rerender(withAccount([suggestion("b", { suggestedStoppedAt: at(13) })]));
+      await finishWaiting({ id: "client-id" });
+      expect(other.result.current.held).toBeNull();
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("never queues confirm_outing when an outing's trip changed while it registered (Codex r9 on #610)", async () => {
+      // The outing's stay has its segment, so its Yes goes through the gate.
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount(withSegment(outing())));
+      act(() => { result.current.answer("stay", true); });
+      // The inbound trip's start moves 10:04 → 09:30 meanwhile.
+      rerender(withAccount(withSegment(outing()).map((item) => item.id === "there" ? { ...item, suggestedStartedAt: "2026-10-17T09:30:00.000Z" } : item)));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Unchanged, the same tap decides the outing as the deck does.
+      const again = deferGate();
+      const steady = mount(withAccount(withSegment(outing())));
+      act(() => { steady.result.current.answer("stay", true); });
+      await again(null);
+      expect(steady.result.current.held).toMatchObject({ itemId: "stay", outing: { key: "outing:a" } });
+    });
+
+    it("an edited sheet's answer settling while away or gone is saved at once, with nothing said (Codex r9 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      // Away: committed at once, no hold, no haptic, nothing said.
+      const away = mount(withAccount([suggestion("a")]));
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      act(() => { away.result.current.answer("a", true, null, { afterCorrections: "m-away" }); });
+      expect(away.result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-away");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+      // Gone: the same.
+      const gone = mount(withAccount([suggestion("b")]));
+      const answer = gone.result.current.answer;
+      act(() => { gone.tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      act(() => { answer("b", false, null, { afterCorrections: "m-gone" }); });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-gone");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    });
+
+    it("says nothing through the save of an answer the gate settles while the app is away (Codex r9 on #610)", async () => {
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish(null);
+      await act(async () => { for (let index = 0; index < 5; index += 1) await Promise.resolve(); });
+      expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+      expect(result.current.held).toBeNull();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+    });
+
+    it("gates an outing on its trips' queued corrections too, and its record answers the trips with it (Codex r10 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      gate.waitForItemCorrections.mockClear();
+      const segments = (items: MobileReviewItem[]) => items.map((item) => ({ ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: `segment-${item.id}` } }));
+      // The inbound trip was corrected offline: the gate makes the outing wait.
+      gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+      const { result } = mount(withAccount(segments(outing())));
+      await act(async () => { result.current.answer("stay", true); await Promise.resolve(); await Promise.resolve(); });
+      expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" }, expect.objectContaining({
+        itemId: "segment-stay", memberItemIds: ["segment-there", "segment-back"],
+        action: { kind: "answer", reviewItemId: "stay", logged: true, outingMemberIds: ["there", "back"] }
+      }));
+      expect(result.current.held).toMatchObject({ itemId: "stay", afterCorrections: "client-id", outing: { key: "outing:a" } });
+      expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Only its record lets confirm_outing go, once every correction is accepted; never the Review outbox now.
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    });
+
+    it("leaves a waiting answer's recovery to the store, and says not-saved in front when the store gives it up (Codex r10 and r11 on #610)", async () => {
+      const flush = () => act(async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); });
+      vi.mocked(Alert.alert).mockClear();
+      waiting.settleAnswerAfterCorrections.mockClear();
+      // Still being tried: nothing said, nothing held; its record (not this hook) keeps the "?" out.
+      waiting.settleOutcome = "committing";
+      const retried = mount(withAccount([suggestion("a")]));
+      act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), "m-1", { inFront: true });
+      expect(retried.result.current.held).toBeNull();
+      expect(Alert.alert).not.toHaveBeenCalled();
+      // Given up in front: the not-saved words.
+      waiting.settleOutcome = "abandoned";
+      const given = mount(withAccount([suggestion("b")]));
+      act(() => { given.result.current.answer("b", true, null, { afterCorrections: "m-2" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(given.result.current.hiddenIds.has("b")).toBe(false);
+      expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
+      waiting.settleOutcome = null;
+    });
+
+    it("says nothing when the store gives an answer up after Dayframe left during its slow write (Codex r12 on #610)", async () => {
+      vi.mocked(Alert.alert).mockClear();
+      let finish!: () => void;
+      waiting.settleAnswerAfterCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve("abandoned"); }));
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true, null, { afterCorrections: "m-slow" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      await act(async () => { finish(); await Promise.resolve(); await Promise.resolve(); });
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+    });
+
+    it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      await finish({ id: "client-id" });
+      expect(result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("saves at once and says nothing when the List went away while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, tree } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish({ id: "client-id" });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+    });
+  });
+
+  it("refuses at once an answer the List can't take here, never registering it (Codex r16 on #610)", () => {
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // An incomplete suggestion (no complete window), and one with a rejected change of its own.
+    const { result, update } = mount(withAccount([suggestion("a", { suggestedStoppedAt: null }), suggestion("b")]));
+    update({ states: new Set(["b"]) });
+    let taken = true;
+    act(() => { taken = result.current.answer("a", true); });
+    expect(taken).toBe(false);
+    act(() => { taken = result.current.answer("b", false); });
+    expect(taken).toBe(false);
+    expect(result.current.canAnswer("a")).toBe(false);
+    expect(result.current.canAnswer("b")).toBe(false);
+    expect(gate.waitForItemCorrections).not.toHaveBeenCalled();
+    expect(result.current.held).toBeNull();
+  });
+
+  it("says nothing when a held answer's suggestion changed and the List goes away (Codex r16 on #610)", async () => {
+    const { result, rerender, tree } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    rerender(bootstrap([suggestion("a", { suggestedStoppedAt: at(13) })]));
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    act(() => { tree.unmount(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 
   it("Undo brings the “?” back and saves nothing", async () => {

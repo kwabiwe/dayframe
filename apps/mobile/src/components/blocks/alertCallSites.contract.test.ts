@@ -50,7 +50,12 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Couldn\'t sign out"'
   ],
   "src/components/calendar/useCalendarCheckAnswers.ts": [
-    '"Calendar"' // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"', // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"', // a waiting answer's record couldn't be let go, so the answer was given up (Codex r10 on #610)
+    '"Calendar"' // an answer couldn't be registered behind a queued correction on this iPhone (Codex r7 on #610)
+  ],
+  "src/components/calendar/useAnswersAfterCorrections.ts": [
+    '"Calendar"' // the recovery runner gave a waiting answer up on return to the front (Codex r11 on #610)
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',

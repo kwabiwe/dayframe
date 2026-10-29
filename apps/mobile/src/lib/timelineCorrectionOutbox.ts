@@ -9,6 +9,11 @@ import {
 } from "./mobile-network";
 import { isAuthenticatedSessionSnapshotCurrent, readOwnedAuthenticatedSessionSnapshot } from "./secure-session";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
+import {
+  clearAnswersAfterCorrectionsForOwner,
+  noteTimelineCorrectionAcknowledged,
+  noteTimelineCorrectionRefused
+} from "./reviewAnswersAfterCorrections";
 
 /**
  * The iPhone's queue of location timeline corrections (location v4 step 12): what the person set in a place,
@@ -50,8 +55,12 @@ export type TimelineCorrectionSyncResult = {
   reason: "drained" | "retry_wait" | "retryable_failure" | "authentication_required" | "session_changed" | "background";
 };
 
-/** A correction the server has, kept a short while so the List keeps showing it until a timeline read after it lands. */
-export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number };
+/**
+ * A correction the server has, kept a short while so the List keeps showing it until a timeline read after it lands.
+ * `resolvedReviewItemIds`: the "?" the server resolved with it — a Logs as on a place with an open "?" resolves
+ * them in the same transaction, as their own "Not now" (#609) — so they leave the List at once.
+ */
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[] };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
 /** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
@@ -257,6 +266,8 @@ export async function clearTimelineCorrectionsForOwner(owner: MobileAccountOwner
     await AsyncStorage.removeItem(TIMELINE_CORRECTION_UNREADABLE_KEY);
   });
   acknowledged = acknowledged.filter((item) => !mobileAccountOwnersEqual(item, owner));
+  // Answers waiting for its corrections leave with them (Codex r2 on #610).
+  await clearAnswersAfterCorrectionsForOwner(owner).catch(() => undefined);
   notify();
 }
 
@@ -339,15 +350,24 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         error instanceof Error ? error.message : "Network request failed.", stillCurrent);
       if (kept === "session_changed") return finish("session_changed");
       if (retryable) return finish("retryable_failure");
-      if (kept) refused.push(kept);
+      if (kept) refused.push(await noteRefused(input.owner, kept));
       continue;
     }
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
+      const resolvedReviewItemIds = await resolvedIds(response);
+      try {
+        // An answer waiting for this correction learns it is acknowledged before the queue lets go of it, so an
+        // id that has left the queue unmarked was refused or discarded (Codex r2 on #610).
+        await noteTimelineCorrectionAcknowledged(input.owner, next.clientCorrectionId);
+      } catch {
+        // Not marked: kept, and sent again later; its id answers it (#597).
+        return finish("retryable_failure");
+      }
       // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
       acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-        { ...next, acknowledgedAt: Date.now() }];
+        { ...next, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
       deliveredCount += 1;
       try {
         await removeQuietly([next.clientCorrectionId]);
@@ -364,7 +384,24 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, stillCurrent, response.status);
     if (kept === "session_changed") return finish("session_changed");
     if (!permanent) return finish("retryable_failure");
-    if (kept) refused.push(kept);
+    if (kept) refused.push(await noteRefused(input.owner, kept));
+  }
+}
+
+/** An answer waiting for a refused correction is dropped (best effort: an unmarked one finds it refused anyway). */
+async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorrection) {
+  await noteTimelineCorrectionRefused(owner, item.clientCorrectionId).catch(() => undefined);
+  return item;
+}
+
+/** The review items the server resolved with this correction (#609), when its reply says so. */
+async function resolvedIds(response: Response): Promise<string[]> {
+  try {
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown } };
+    const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
   }
 }
 

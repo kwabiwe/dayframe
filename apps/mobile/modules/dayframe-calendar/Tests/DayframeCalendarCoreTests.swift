@@ -1519,6 +1519,99 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(layout["tick"])
   }
 
+  // Codex r1 and r2 on #610: every Places lane item gets a full 44 × 44-point target, centred on it.
+  func testPlacesLaneItemsGetA44PointTargetCentredOnThem() {
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 300, height: 4), DayframeCalendarBracketSpan(top: 600, height: 120)],
+      hourLabelWidth: 68,
+      timelineHeight: 24 * 72
+    )
+    XCTAssertEqual(frames[0], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 280, maxY: 324))
+    // A tall item keeps its own span.
+    XCTAssertEqual(frames[1], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 600, maxY: 720))
+    XCTAssertGreaterThanOrEqual(DayframeCalendarPlacesLaneMath.itemWidth, 44)
+    XCTAssertEqual(DayframeCalendarPlacesLaneMath.width, 52)
+  }
+
+  func testPlacesLaneTargetsStayInsideTheDay() {
+    let edge = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 0, height: 4), DayframeCalendarBracketSpan(top: 1724, height: 4)],
+      hourLabelWidth: 68,
+      timelineHeight: 1728
+    )
+    XCTAssertEqual(edge[0].minY, 0)
+    XCTAssertEqual(edge[0].maxY, 44)
+    XCTAssertEqual(edge[1].minY, 1684)
+    XCTAssertEqual(edge[1].maxY, 1728)
+  }
+
+  func testCloseLaneItemsKeepFull44PointTargetsAndATouchGoesToTheNearest() {
+    // Two 10-point items 12 points apart.
+    let spans = [DayframeCalendarBracketSpan(top: 500, height: 10), DayframeCalendarBracketSpan(top: 522, height: 10)]
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(spans: spans, hourLabelWidth: 68, timelineHeight: 1728)
+    for frame in frames {
+      XCTAssertEqual(frame.maxY - frame.minY, 44, accuracy: 0.001)
+      XCTAssertGreaterThanOrEqual(frame.maxX - frame.minX, 44)
+    }
+    // Centres at 505 and 527: a touch goes to the nearer, wherever the two targets overlap.
+    let hit = { (y: Double) in DayframeCalendarPlacesLaneMath.hitIndex(point: DayframeCalendarPoint(x: 90, y: y), spans: spans, frames: frames) }
+    XCTAssertEqual(hit(490), 0)
+    XCTAssertEqual(hit(515), 0)
+    XCTAssertEqual(hit(517), 1)
+    XCTAssertEqual(hit(545), 1)
+    XCTAssertNil(hit(560))
+    XCTAssertNil(DayframeCalendarPlacesLaneMath.hitIndex(point: DayframeCalendarPoint(x: 140, y: 505), spans: spans, frames: frames))
+    // A long press over either is over an item (the coordinator passes these frames with the blocks').
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(point: DayframeCalendarPoint(x: 90, y: 540), frames: frames))
+  }
+
+  // Codex r1 on #610: a trip across midnight shows only this day's legs, placed by the day-clipped span.
+  func testLegStripClipsATripAcrossMidnightToTheDayItIsDrawnOn() {
+    let hour = 3_600_000.0
+    let midnight = 24 * hour
+    let legs = [(startedAtMs: midnight - hour, stoppedAtMs: midnight - hour / 2), (startedAtMs: midnight - hour / 2, stoppedAtMs: midnight + hour)]
+    // The first day (23:00–24:00 drawn): the first leg fills the top half, the second the bottom half.
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = TimeZone(identifier: "UTC")!
+    let before = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 0, dayEndMs: midnight, height: 104, calendar: utc)
+    XCTAssertEqual(before.map(\.index), [0, 1])
+    XCTAssertEqual(before[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(before[0].height, 49, accuracy: 0.001)
+    XCTAssertEqual(before[1].top, 52, accuracy: 0.001)
+    XCTAssertEqual(before[1].height, 49, accuracy: 0.001)
+    // The next day (00:00–01:00 drawn): only the second leg, over the whole strip.
+    let after = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: midnight, dayEndMs: 2 * midnight, height: 104, calendar: utc)
+    XCTAssertEqual(after.map(\.index), [1])
+    XCTAssertEqual(after[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(after[0].height, 99, accuracy: 0.001)
+    // Nothing on a day the block doesn't reach.
+    XCTAssertTrue(DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 2 * midnight, dayEndMs: 3 * midnight, height: 104, calendar: utc).isEmpty)
+  }
+
+  // Codex r2 on #610: across the UK clocks going back (25 Oct 2026), legs follow the block's wall-clock geometry.
+  func testLegStripUsesTheBlocksWallClockGeometryAcrossTheClockChange() throws {
+    var london = Calendar(identifier: .gregorian)
+    london.timeZone = TimeZone(identifier: "Europe/London")!
+    let iso = ISO8601DateFormatter()
+    func ms(_ text: String) -> Double { iso.date(from: text)!.timeIntervalSince1970 * 1000 }
+    let day = ms("2026-10-24T23:00:00Z"), end = ms("2026-10-26T00:00:00Z")
+    // 00:30 BST to 03:30 GMT: three wall-clock hours (four elapsed); the boundary at 02:30 GMT is two of them.
+    let start = ms("2026-10-24T23:30:00Z"), boundary = ms("2026-10-25T02:30:00Z"), stop = ms("2026-10-25T03:30:00Z")
+    let block = try XCTUnwrap(DayframeCalendarBlockMath.metrics(startedAtMs: start, stoppedAtMs: stop, nowMs: stop, dayStartMs: day, dayEndMs: end,
+      hourHeight: 72, calendar: london))
+    let leg = try XCTUnwrap(DayframeCalendarBlockMath.metrics(startedAtMs: start, stoppedAtMs: boundary, nowMs: stop, dayStartMs: day, dayEndMs: end,
+      hourHeight: 72, calendar: london))
+    let segments = DayframeCalendarLegStripMath.segments(legs: [(startedAtMs: start, stoppedAtMs: boundary), (startedAtMs: boundary, stoppedAtMs: stop)],
+      startedAtMs: start, stoppedAtMs: stop, dayStartMs: day, dayEndMs: end, height: block.height, calendar: london)
+    XCTAssertEqual(block.height, 216, accuracy: 0.001)
+    XCTAssertEqual(segments[1].top, 2 + (leg.height / block.height) * (block.height - 4), accuracy: 0.001)
+    XCTAssertEqual(segments[1].top, 143.333, accuracy: 0.001)
+    XCTAssertEqual(segments[0].top, 2, accuracy: 0.001)
+  }
+
   func testMomentsSitAtTheGutterEdgeWithA44PointTargetInsideTheDay() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
