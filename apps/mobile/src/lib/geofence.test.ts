@@ -1019,6 +1019,11 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
     locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(true);
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    locationMocks.stopLocationUpdatesAsync.mockResolvedValue(undefined);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => { asyncStore.set(key, value); return Promise.resolve(); });
     __resetAccuracyBurstForTests();
   });
 
@@ -1086,7 +1091,9 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
     locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(false);
     await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
-    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+    // Never best accuracy (a first wake only puts normal capture back).
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0 }));
   });
 
   it("capture stopping (sign-out, an account change, location off) ends a burst at once, counted for what it ran", async () => {
@@ -1344,7 +1351,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
       captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
       stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
-    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    await maybeEndAccuracyBurst(await capture());
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
     expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(12 * 60);
   });
 
@@ -1468,5 +1476,41 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
     expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("after a relaunch, no refresh ever restarts best accuracy, whatever the clock or storage (Codex r12 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 1, 10));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0 }));
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a headless wake puts normal capture back first, though the trial can't be read (Codex r12 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await maybeEndAccuracyBurst(await capture()).catch(() => undefined);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    // And if that restore keeps failing, updates are stopped 5 minutes on.
+    __resetAccuracyBurstForTests();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await maybeEndAccuracyBurst(await capture()).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
   });
 });
