@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
@@ -110,6 +110,10 @@ const {
   recordGeofenceTransition,
   REPICK_MIN_INTERVAL_MS,
   __resetGeofenceRepickClockForTests,
+  maybeEndAccuracyBurst,
+  maybeStartAccuracyBurst,
+  readAccuracyBurstState,
+  stopLocationLearningIfStarted,
   refreshGeofencesForPlaces,
   refreshNearestGeofencesInLifecycleLane,
   setLocationLearningEnabled,
@@ -993,5 +997,63 @@ describe("Always already asked, after a restart (UIA-111, Codex r3–r4)", () =>
     await getLocationVisitDiagnostics();
     fg("granted"); bgUndetermined();
     expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+});
+
+describe("departure and arrival accuracy bursts (card K, location v4 §10)", () => {
+  const BURST_KEY = "dayframe.location.burstTrial.v1";
+  const localDay = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const capture = async () => (await import("./location/store")).captureLocationOwnership();
+
+  beforeEach(async () => {
+    asyncStore.clear();
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    __resetMobileAccountForTests();
+    await activateMobileAccount({ userId: "user-geofence", workspaceId: "workspace-geofence" });
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(false);
+  });
+
+  it("a departure runs 3 minutes at best accuracy, one at a time, then the next reading restores normal capture", async () => {
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0, pausesUpdatesAutomatically: false }));
+    expect((locationMocks.startLocationUpdatesAsync.mock.lastCall as unknown[] | undefined)?.[1]).not.toHaveProperty("deferredUpdatesInterval");
+    await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 2));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 3, 30));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    await expect(readAccuracyBurstState()).resolves.toMatchObject({ days: { [localDay(new Date())]: { count: 1, seconds: 180 } } });
+  });
+
+  it("never bursts on an off day of the trial, nor while location updates aren't running", async () => {
+    const eightDaysAgo = new Date(2026, 10, 2 - 8, 8, 0);
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(eightDaysAgo), days: {} }));
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(false);
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+
+  it("capture stopping (sign-out, an account change, location off) ends a burst at once, counted for what it ran", async () => {
+    await maybeStartAccuracyBurst("arrival", await capture());
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    await stopLocationLearningIfStarted();
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70 });
   });
 });

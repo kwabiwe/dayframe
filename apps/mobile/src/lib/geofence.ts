@@ -13,6 +13,8 @@ import {
   type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
+import { accuracyBurstDecision, accuracyBurstDue, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
+  type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
 import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
   GEOFENCE_REFRESH_RADIUS_TOLERANCE_METERS, insideRefreshCircle, IOS_GEOFENCE_LIMIT, normalizedGeofenceRadius,
@@ -245,6 +247,8 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
     return null;
   });
   if (!persisted) return;
+  // Leaving or reaching a saved place sharpens the trip's ends with a best-accuracy burst (card K, location v4 §10).
+  await maybeStartAccuracyBurst(transition === "exit" ? "departure" : "arrival", capture).catch(() => undefined);
   // Expo geofences are shared capture infrastructure for V2. Once any V2 mode
   // is active they must persist evidence only; the legacy visit classifier must
   // never run as a semantic fallback (including in shadow mode).
@@ -278,6 +282,8 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
     await stopUnownedLocationCapture(capture);
     return;
   }
+  // A burst past its 3 minutes ends with this reading (card K).
+  await maybeEndAccuracyBurst(capture).catch(() => undefined);
   const payload = data as { locations?: Location.LocationObject[] };
   const locations = [...(payload.locations ?? [])].sort((left, right) => left.timestamp - right.timestamp);
   const persisted = await persistV2LocationBatch(locations, capture).catch(async (persistError) => {
@@ -854,16 +860,15 @@ async function startLocationLearningUnsafe(
 
   if (places.length > 0) await writeSavedPlaceCatalogue(places.map(monitoredPlaceFromInput));
   if (!isLocationCaptureSnapshotCurrent(capture)) return false;
-  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, {
-    accuracy: Location.Accuracy.High ?? Location.Accuracy.Balanced,
-    distanceInterval: LOCATION_ENGINE_V2_CONFIG.distanceIntervalMeters,
-    deferredUpdatesDistance: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesDistanceMeters,
-    deferredUpdatesInterval: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesIntervalMs,
-    deferredUpdatesTimeout: LOCATION_ENGINE_V2_CONFIG.deferredTimeoutMs,
-    pausesUpdatesAutomatically: LOCATION_ENGINE_V2_CONFIG.pausesUpdatesAutomatically,
-    activityType: 1 as Location.LocationActivityType,
-    showsBackgroundLocationIndicator: false
+  // The accuracy trial starts the first time capture runs (card K); a burst still running keeps its options, one
+  // past its 3 minutes ends here.
+  const burst = await withAccuracyBurstState(async (state) => {
+    const now = new Date();
+    let next = state ?? startAccuracyBurstTrial(now);
+    if (accuracyBurstDue(next, now)) next = endAccuracyBurst(next, now);
+    return { state: next, result: Boolean(next.active) };
   });
+  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(burst));
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
     locationLearningActive: true,
@@ -1630,6 +1635,93 @@ export async function stopGeofencesIfStarted() {
 export async function stopLocationLearningIfStarted() {
   const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false);
   if (started) await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK);
+  // Capture stopping (sign-out, an account change, location off) ends a burst at once, counted for what it ran.
+  await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
+    .catch(() => undefined);
+}
+
+const ACCURACY_BURST_STATE_KEY = "dayframe.location.burstTrial.v1";
+let accuracyBurstChain: Promise<unknown> = Promise.resolve();
+
+/** The trial's state on this iPhone, read and written one change at a time (both location tasks change it). */
+function withAccuracyBurstState<T>(
+  change: (state: AccuracyBurstState | null) => Promise<{ state: AccuracyBurstState | null; result: T }>
+): Promise<T> {
+  const run = accuracyBurstChain.then(async () => {
+    const stored = await AsyncStorage.getItem(ACCURACY_BURST_STATE_KEY).catch(() => null);
+    let state: AccuracyBurstState | null = null;
+    try {
+      const parsed = stored ? JSON.parse(stored) as AccuracyBurstState : null;
+      state = parsed && typeof parsed.startedDay === "string" && parsed.days && typeof parsed.days === "object" ? parsed : null;
+    } catch {
+      state = null;
+    }
+    const { state: next, result } = await change(state);
+    if (next && next !== state) await AsyncStorage.setItem(ACCURACY_BURST_STATE_KEY, JSON.stringify(next));
+    return result;
+  });
+  accuracyBurstChain = run.catch(() => undefined);
+  return run;
+}
+
+/** The accuracy trial's state, for Sync help and shared diagnostics. */
+export function readAccuracyBurstState() {
+  return withAccuracyBurstState(async (state) => ({ state, result: state }));
+}
+
+/**
+ * The location task's options: normal capture, or a burst at best accuracy for a departure's or arrival's
+ * 3 minutes (card K): every reading, no deferral, no automatic pause.
+ */
+function learningUpdateOptions(burst: boolean): Location.LocationTaskOptions {
+  return burst ? {
+    accuracy: Location.Accuracy.Highest,
+    distanceInterval: 0,
+    pausesUpdatesAutomatically: false,
+    activityType: 1 as Location.LocationActivityType,
+    showsBackgroundLocationIndicator: false
+  } : {
+    accuracy: Location.Accuracy.High ?? Location.Accuracy.Balanced,
+    distanceInterval: LOCATION_ENGINE_V2_CONFIG.distanceIntervalMeters,
+    deferredUpdatesDistance: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesDistanceMeters,
+    deferredUpdatesInterval: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesIntervalMs,
+    deferredUpdatesTimeout: LOCATION_ENGINE_V2_CONFIG.deferredTimeoutMs,
+    pausesUpdatesAutomatically: LOCATION_ENGINE_V2_CONFIG.pausesUpdatesAutomatically,
+    activityType: 1 as Location.LocationActivityType,
+    showsBackgroundLocationIndicator: false
+  };
+}
+
+/** A saved place's exit (a departure) or entry (an arrival) starts a burst when the trial allows one. */
+export async function maybeStartAccuracyBurst(kind: AccuracyBurstKind, capture: LocationCaptureSnapshot) {
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
+  if (!await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)) return false;
+  const started = await withAccuracyBurstState(async (state) => {
+    const now = new Date();
+    if (!state || !accuracyBurstDecision(state, now).start) return { state, result: false };
+    return { state: startAccuracyBurst(state, kind, now), result: true };
+  });
+  if (!started) return false;
+  const ok = isLocationCaptureSnapshotCurrent(capture) &&
+    await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
+  if (!ok) {
+    await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }));
+    return false;
+  }
+  return true;
+}
+
+/** The first reading after a burst's 3 minutes brings normal capture back. */
+export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
+  const ended = await withAccuracyBurstState(async (state) => {
+    const now = new Date();
+    if (!state || !accuracyBurstDue(state, now)) return { state, result: false };
+    return { state: endAccuracyBurst(state, now), result: true };
+  });
+  if (ended && isLocationCaptureSnapshotCurrent(capture)) {
+    await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).catch(() => undefined);
+  }
+  return ended;
 }
 
 function geofenceSource(radiusMeters: number): "geofence_specific" | "geofence_broad" {
