@@ -76,7 +76,7 @@ export function StoppedTripsSection() {
       <header>
         <div>
           <h2 id="stopped-trips-title" ref={headingRef} tabIndex={-1}>Trips you log yourself</h2>
-          <p>Trips like these wait in Review instead of logging themselves.</p>
+          <p>Trips like these are asked in Calendar instead of logging themselves.</p>
         </div>
         <span>{trips?.length ?? 0}</span>
       </header>

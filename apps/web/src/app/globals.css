@@ -5502,7 +5502,13 @@ dialog.ui-dialog.df-range-custom {
   background-color: var(--surface);
 }
 
+/* The List's table is at least 760 px wide, so it scrolls sideways in narrower Lists (phones, and
+   beside the Places column). Its scroll viewport is inset 10 px from the panel on both sides, so the
+   clip edge that row lines run into never touches the container (owner divider rule, 28 Oct 2026);
+   the table's and the "N to check" bar's own sides give the 10 px back, so nothing moves at rest. */
 .timeline-list-scroll {
+  --timeline-list-clip-inset: 10px;
+  margin-inline: var(--timeline-list-clip-inset);
   overflow: auto;
 }
 
@@ -12705,7 +12711,7 @@ dialog.ui-dialog.df-palette {
    appear on hover or focus (always on touch screens and phones). */
 .timeline-list-table {
   border-spacing: 0;
-  padding: 0 12px 12px;
+  padding: 0 calc(12px - var(--timeline-list-clip-inset)) 12px;
 }
 
 .timeline-list-table .timeline-list-day-heading > td {
@@ -13962,7 +13968,7 @@ button.timeline-location-hit:focus-visible {
   height: 0;
   overflow: visible;
   justify-content: center;
-  padding: 0 12px;
+  padding: 0 calc(12px - var(--timeline-list-clip-inset));
 }
 
 @media (max-width: 760px) {

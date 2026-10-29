@@ -145,6 +145,26 @@ describe("row dividers are inset on both sides", () => {
     }
   });
 
+  it("insets the List's sideways scroll viewport, so its clip edge never touches the panel", () => {
+    // The table is at least 760 px wide: on phones and beside the Places column the row lines run into
+    // the scroller's clip edge, which must therefore sit inside the panel on both sides.
+    const tableRules = rules().filter((rule) => rule.selector === ".timeline-list-table").map((rule) => rule.body);
+    expect(tableRules.at(-1 - [...tableRules].reverse().findIndex((body) => /min-width:/.test(body)))).toMatch(/min-width: 760px;/);
+    const scroller = rules().filter((rule) => rule.selector === ".timeline-list-scroll").map((rule) => rule.body).join("");
+    const inset = Number(scroller.match(/--timeline-list-clip-inset:\s*(\d+)px;/)?.[1]);
+    expect(inset).toBeGreaterThanOrEqual(10);
+    expect(scroller).toMatch(/margin-inline: var\(--timeline-list-clip-inset\);/);
+    // No later rule (a media query included) takes the inset away.
+    for (const body of rules().filter((rule) => rule.selector.split(",").map((part) => part.trim()).includes(".timeline-list-scroll")).map((rule) => rule.body)) {
+      expect(body).not.toMatch(/(?:^|[;\s])margin(?:-inline)?(?:-(?:start|end))?\s*:\s*0/);
+      expect(body).not.toMatch(/--timeline-list-clip-inset:\s*0/);
+    }
+    // At rest nothing moves: the table and the sticky "N to check" bar give the inset back.
+    expect(tableRules.join(""))
+      .toMatch(/padding: 0 calc\(12px - var\(--timeline-list-clip-inset\)\) 12px;/);
+    expect(ruleBody(".timeline-checks-bar.is-sticky")).toMatch(/padding: 0 calc\(12px - var\(--timeline-list-clip-inset\)\);/);
+  });
+
   it("insets dialog header and action lines by the dialog's own padding", () => {
     for (const selector of [".ui-dialog-header::after", ".ui-dialog-actions::before"]) {
       expect(ruleBody(selector), selector).toContain("--divider-inset: var(--web-dialog-padding-inline);");

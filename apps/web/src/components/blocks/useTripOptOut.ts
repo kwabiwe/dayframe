@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { clientFetch } from "@/lib/client-auth-fetch";
 
-const DONE = "Trips like this will wait in Review.";
+const DONE = "Trips like this will be asked in Calendar.";
 const FAILED = "Couldn’t save that. Trips like this can be stopped from a later one.";
 
 /**

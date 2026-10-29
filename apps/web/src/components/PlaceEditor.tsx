@@ -381,7 +381,7 @@ export function PlaceEditor({
             <strong>Suggest visits here</strong>
             <small>
               {loggingEnabled
-                ? "Show detected visits in Review."
+                ? "Ask about detected visits in Calendar."
                 : "Do not suggest visits for this place."}
             </small>
           </span>
@@ -407,8 +407,8 @@ export function PlaceEditor({
             <strong>Log automatically</strong>
             <small id="place-auto-log-help">
               {loggingEnabled
-                ? "Visits here become blocks without a Review card."
-                : "Visits here become blocks without a Review card. Turn on Suggest visits here first."}
+                ? "Visits here become blocks without asking in Calendar."
+                : "Visits here become blocks without asking in Calendar. Turn on Suggest visits here first."}
             </small>
             {shownRole === "home" ? (
               <small className="place-auto-log-caution" id="place-auto-log-caution">Home visits can be long and broad; consider leaving this off.</small>

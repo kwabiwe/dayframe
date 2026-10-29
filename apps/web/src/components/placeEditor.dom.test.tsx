@@ -66,7 +66,7 @@ describe("Place editor in Blocks (UIA-308)", () => {
     const autoLog = screen.getByRole("switch", { name: "Log automatically" }) as HTMLInputElement;
     expect(autoLog.checked).toBe(false);
     expect(autoLog.disabled).toBe(false);
-    expect(screen.getByText("Visits here become blocks without a Review card.")).toBeTruthy();
+    expect(screen.getByText("Visits here become blocks without asking in Calendar.")).toBeTruthy();
     expect(autoLog.getAttribute("aria-describedby")).toBe("place-auto-log-help");
     expect(screen.queryByText(/Home visits can be long and broad/)).toBeNull();
     fireEvent.click(autoLog);
