@@ -50,7 +50,8 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Couldn\'t sign out"'
   ],
   "src/components/calendar/useCalendarCheckAnswers.ts": [
-    '"Calendar"' // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"', // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"' // an answer couldn't be registered behind a queued correction on this iPhone (Codex r7 on #610)
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',

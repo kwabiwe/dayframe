@@ -11,6 +11,7 @@ import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld,
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
 import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { waitForItemCorrections } from "../../lib/afterCorrections";
 
 /** A held answer, with the account that gave it. */
 type HeldAnswer = ReviewDeckHeldDecision & {
@@ -316,10 +317,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   }, [hold]);
 
   /**
-   * "Log it" (true) or "Skip" (false) on a "?"; a new answer saves the one held before it. `afterCorrections`: the
-   * id of its waiting record, when its sheet's changes go first. Whether it was taken (held for Undo).
+   * Holds an answer for Undo; a new answer saves the one held before it. `afterCorrections`: the id of its waiting
+   * record. Whether it was taken. Only through `answer`, which decides first whether it must wait.
    */
-  const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
+  const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
     options: { afterCorrections?: string } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
@@ -376,6 +377,42 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // The answers read the hook's refs, which hold the latest data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
+  // Answers being registered (the gate's store read): a repeat tap on the same "?" meanwhile does nothing.
+  const registering = useRef(new Set<string>());
+  /**
+   * "Log it" (true) or "Skip" (false) on a "?", from anywhere: its row's Yes, its question, its sheet (Codex r7 on
+   * #610). The one entry point, so none can go ahead of a correction still queued for its place or trip: a "?" about
+   * one is first registered with `waitForItemCorrections`, which says whether it waits for those corrections (its
+   * waiting record, `afterCorrections`) or may be held at once. `afterCorrections` given: already registered (the
+   * sheet's own changes). Whether it was taken now; a gated one is taken once its registration answers.
+   */
+  const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
+    options: { afterCorrections?: string } = {}): boolean => {
+    if (options.afterCorrections) return holdAnswer(itemId, logged, venue, options);
+    const data = shownRef.current;
+    const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
+    const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
+    if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue);
+    if (registering.current.has(itemId)) return false;
+    registering.current.add(itemId);
+    const owner = ownerRef.current;
+    const id = createReviewClientMutationId();
+    void waitForItemCorrections({ userId: data.user.id, workspaceId: data.workspace.id }, { id, itemId: segmentId, newIds: [],
+      action: { kind: "answer", reviewItemId: itemId, logged } }).then((record) => {
+      registering.current.delete(itemId);
+      if (ownerRef.current !== owner) {
+        if (record) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+        return;
+      }
+      // Waiting for a correction: no Apple place with it (the correction says where it was).
+      if (record && !holdAnswer(itemId, logged, null, { afterCorrections: id })) void cancelAnswerAfterCorrections(id).catch(() => undefined);
+      if (!record) holdAnswer(itemId, logged, venue);
+    }, () => {
+      registering.current.delete(itemId);
+      if (ownerRef.current === owner && alive.current) Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+    });
+    return true;
+  }, [holdAnswer]);
   const undo = useCallback(() => {
     const current = hold.current();
     if (!current) return;

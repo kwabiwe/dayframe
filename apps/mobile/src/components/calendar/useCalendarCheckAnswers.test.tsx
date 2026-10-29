@@ -29,6 +29,9 @@ const store = vi.hoisted(() => ({
 vi.mock("../../lib/reviewSyncStore", () => store);
 const waiting = vi.hoisted(() => ({ commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined), cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined) }));
 vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
+// The one gate every answer goes through (Codex r7 on #610): by default nothing is queued for its item.
+const gate = vi.hoisted(() => ({ waitForItemCorrections: vi.fn(async (..._args: unknown[]): Promise<unknown> => null) }));
+vi.mock("../../lib/afterCorrections", () => gate);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
@@ -145,6 +148,29 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(result.current.hiddenIds.has("a")).toBe(false);
     expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalled();
+  });
+
+  it("makes a row's Yes wait for a correction still queued for its place: no confirmation until it is accepted (Codex r7 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // A correction saved offline for its place, the sheet closed: the gate makes it wait.
+    gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+    const { result } = mount(withAccount([suggestion("a")]));
+    await act(async () => { result.current.answer("a", true); await Promise.resolve(); });
+    expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" },
+      expect.objectContaining({ itemId: "segment-a", newIds: [], action: { kind: "answer", reviewItemId: "a", logged: true } }));
+    const recordId = (gate.waitForItemCorrections.mock.calls[0][1] as { id: string }).id;
+    expect(result.current.held).toMatchObject({ itemId: "a", afterCorrections: recordId });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    // Its Undo ended: only its waiting record lets it go, once the correction is accepted; never the Review outbox now.
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    // Nothing queued for its place: held at once, and saved as before.
+    const second = mount(withAccount([suggestion("b")]));
+    await act(async () => { second.result.current.answer("b", false); await Promise.resolve(); });
+    expect(second.result.current.held).toMatchObject({ itemId: "b" });
+    expect((second.result.current.held as { afterCorrections?: string }).afterCorrections).toBeUndefined();
   });
 
   it("Undo brings the “?” back and saves nothing", async () => {

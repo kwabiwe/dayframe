@@ -227,6 +227,16 @@ describe("native Calendar presentation boundary", () => {
       expect(build(now, data).model.entries).toHaveLength(3);
     });
 
+    it("keeps a suggestion's linked needs-review entry hidden when the suggestion isn't drawn, the asking set empty (Codex r7 on #610)", () => {
+      const data = bootstrap([needsReview("entry-linked", 7, 45), needsReview("entry-own", 13, 30)], {
+        reviewItems: [suggestion("expired", 7, 0, 45, ["entry-linked"])]
+      });
+      const state = buildNativeCalendarBridgeState({ data, now, reduceMotion: false, reduceTransparency: false, refreshing: false,
+        reviewItemIds: new Set(), selectedDayKey: "2026-07-10", theme: darkTheme(), transitionDirection: 1 });
+      // Neither the expired suggestion nor its linked entry; an unlinked needs-review entry still draws.
+      expect(state.model.entries.map((item) => item.entryId)).toEqual(["entry-own"]);
+    });
+
     it("an older server without links still draws both (no dedupe guess)", () => {
       const state = build(now, bootstrap([needsReview("entry-legacy", 7, 45)], {
         reviewItems: [suggestion("workout", 7, 0, 45)]

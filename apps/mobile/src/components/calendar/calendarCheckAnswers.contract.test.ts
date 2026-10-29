@@ -109,7 +109,8 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
   it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
     // Every sheet answer, with or without new changes, through the one shared registration (Codex r6 on #610).
     expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
-    expect(dashboard).toContain("void waitForItemCorrections(owner, { id, itemId: check.segmentId, newIds: [],");
+    // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
+    expect(dashboard).toContain("onAnswer: (yes) => { checkAnswers.answer(check.id, yes, check.id === openCalendarCheckId ? openCheckVenue.venue : null); },");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");
@@ -134,3 +135,28 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).not.toContain('each.kind === "trip" && each.id === segmentId && !each.blockIds.length');
   });
 });
+
+describe("the one gated answer entry point (Codex r7 on #610)", () => {
+  const hook = source("./useCalendarCheckAnswers.ts");
+  const list = source("./CalendarListView.tsx");
+  it("gates every answer in checkAnswers.answer itself, so no caller can go ahead of a queued correction", () => {
+    const answerAt = hook.indexOf("const answer = useCallback(");
+    const answer = hook.slice(answerAt, hook.indexOf("const undo = useCallback(", answerAt));
+    expect(answer).toContain("void waitForItemCorrections(");
+    expect(answer).toContain("newIds: []");
+    // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
+    expect(hook).toContain("return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };");
+    expect(hook).not.toMatch(/return \{[^}]*holdAnswer/);
+  });
+
+  it("leaves Calendar › List's row Yes and inline answers to the caller's onAnswerCheck, which is checkAnswers.answer", () => {
+    // The List never saves an answer itself.
+    expect(list).not.toContain("enqueueReviewMutation");
+    expect(list).not.toMatch(/import [^;]*useCalendarCheckAnswers/);
+    expect(list).not.toContain("waitForItemCorrections");
+    expect(list).toContain("onYes={onAnswerCheck ? (id) => answerCheck(id, true) : undefined}");
+    expect(list).toContain("onAnswerCheck?.(id, logged);");
+    expect(dashboard).toContain("? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)");
+  });
+});
+

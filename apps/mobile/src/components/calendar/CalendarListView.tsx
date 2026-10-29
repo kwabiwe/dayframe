@@ -46,7 +46,7 @@ import { localLayoutTransition, localPresenceEntering, localPresenceExiting } fr
  * from anywhere (the chip's "N to check", the badge, Today's chip, the Grid) opens that sheet. Only Apple
  * Health's "?" (no sheet) opens its question under its row, with compact pills. "N to check" counts every "?"
  * from the last 7 days and steps through them oldest first, across days (the caller's onNextCheck). The
- * answer itself (held for Undo, then saved) belongs to the caller (useCalendarCheckAnswers).
+ * answer itself (gated on queued corrections, held for Undo, then saved) belongs to the caller (useCalendarCheckAnswers).
  *
  * Motion: a trip's legs, a question and the quiet rows enter and leave with the app's local presence
  * (fade), and the rows below move with its layout transition (220 ms); an answered "?" leaves the same

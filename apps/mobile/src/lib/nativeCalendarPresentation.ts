@@ -612,6 +612,9 @@ function buildCalendarEntries(
     // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
     // show them (hatched in the Review lane), not only commutes.
     if (!isOpenReviewItem(item)) continue;
+    // Its linked needs-review entries stay hidden even when the suggestion itself isn't drawn (expired, folded or
+    // answered on this phone): the moment is the suggestion's, never a second block (Codex r7 on #610).
+    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
     if (reviewItemIds && !reviewItemIds.has(item.id)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
@@ -623,7 +626,6 @@ function buildCalendarEntries(
       reviewItemId: item.id
     };
       if (!entryOverlapsDay(entry, selectedDayKey, now)) continue;
-    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
     reviewEntries.push(entry);
   }
   const timeEntries = allTimeEntries.filter((entry) =>
