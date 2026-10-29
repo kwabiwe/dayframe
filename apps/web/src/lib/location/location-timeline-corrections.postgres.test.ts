@@ -592,7 +592,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       .toMatchObject({ ok: true, alreadyResolved: true, equivalent: true });
   });
 
-  it("logs an outing's stay with its trips closed as the outing's Not now, never splitting it (Codex r2 on #609)", async () => {
+  it("logs an outing's stay and its trips: each trip's free time as a Move with its own activity, its question accepted", async () => {
     const db = database!;
     const base = 9_000;
     const categoryId = (await db.query<{ id: string }>(
@@ -607,34 +607,68 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
        values ($1, $2, 'o-home', 'device-1', 'location-v2.0', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
          '{"placeMatchKind":"saved"}'::jsonb) returning id`,
       [workspaceId, userId, at(base - 30), at(base)])).rows[0].id;
-    const tripRow = (await db.query<{ id: string }>(
+    const trip = async (clientSegmentId: string, start: number, stop: number, from: string, to: string) => (await db.query<{ id: string }>(
       `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
          from_stay_segment_id, to_stay_segment_id, confidence, metadata)
-       values ($1, $2, 'device-1', 'o-in', 'location-v2.0', 'finalised', $3, $4, $5, $6, 'medium', '{}'::jsonb) returning id`,
-      [workspaceId, userId, at(base), at(base + 10), fromRow, stayRow])).rows[0].id;
-    const ask = async (clientSegmentId: string, segmentId: string, role: string, eventType: string, start: number, stop: number) => {
+       values ($1, $2, 'device-1', $3, 'location-v2.0', 'finalised', $4, $5, $6, $7, 'medium', '{}'::jsonb) returning id`,
+      [workspaceId, userId, clientSegmentId, at(base + start), at(base + stop), from, to])).rows[0].id;
+    const tripRow = await trip("o-in", 0, 10, fromRow, stayRow);
+    const outRow = await trip("o-out", 40, 55, stayRow, fromRow);
+    const errandsId = (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color, starter_key) values ($1, 'Errands', 'chartreuse', 'errands') returning id`,
+      [workspaceId])).rows[0].id;
+    const ask = async (clientSegmentId: string, segmentId: string, role: string, eventType: string, start: number, stop: number,
+      suggestedCategoryId: string | null = null) => {
       const event = (await db.query<{ id: string }>(
         `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
          values ($1, $2, $3, 'location_learning', $4, $5, 'medium', $6::jsonb, 'needs_review') returning id`,
         [workspaceId, userId, `location-segment:${clientSegmentId}`, eventType, at(base + start),
           JSON.stringify({ clientSegmentId, outingKey: "outing-1", outingRole: role })])).rows[0].id;
       return (await db.query<{ id: string }>(
-        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at, suggested_stopped_at)
-         values ($1, $2, $3, $4, $5, 'Outing', 'open', $6, $7) returning id`,
-        [workspaceId, userId, event, segmentId, eventType, at(base + start), at(base + stop)])).rows[0].id;
+        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, suggested_started_at,
+           suggested_stopped_at, suggested_category_id)
+         values ($1, $2, $3, $4, $5, 'Outing', 'open', $6, $7, $8) returning id`,
+        [workspaceId, userId, event, segmentId, eventType, at(base + start), at(base + stop), suggestedCategoryId])).rows[0].id;
     };
     const stayReview = await ask("o-stay", stayRow, "stay", "unknown_stay", 10, 40);
-    const tripReview = await ask("o-in", tripRow, "in", "commute_detected", 0, 10);
+    const tripReview = await ask("o-in", tripRow, "in", "commute_detected", 0, 10, errandsId);
+    // The trip home has no activity of its own (it logs as Getting around); a block of yours covers its first 5 minutes.
+    const outReview = await ask("o-out", outRow, "out", "commute_detected", 40, 55);
+    await db.query(`insert into time_entries (workspace_id, user_id, source, started_at, stopped_at) values ($1, $2, 'manual_app', $3, $4)`,
+      [workspaceId, userId, at(base + 38), at(base + 45)]);
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
-    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId }, session);
-    expect([...logged.logged!.resolvedReviewItemIds].sort()).toEqual([stayReview, tripReview].sort());
-    expect((await db.query(`select id, status from review_items where id = any($1::uuid[]) order by id`, [[stayReview, tripReview]])).rows
-      .map((row) => row.status)).toEqual(["ignored", "ignored"]);
-    // Only the stay's time is logged: the trip is closed with its outing, never logged by Logs as.
-    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries where id = any($1::uuid[])`,
-      [logged.logged!.entryIds]);
-    expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString()]))
-      .toEqual([[at(base + 10), at(base + 40)]]);
+    const id = "66000000-0000-4000-8000-0000000000e1";
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId, clientCorrectionId: id }, session);
+    expect([...logged.logged!.resolvedReviewItemIds].sort()).toEqual([stayReview, tripReview, outReview].sort());
+    const statuses = await db.query<{ id: string; status: string }>(`select id, status from review_items where id = any($1::uuid[])`,
+      [[stayReview, tripReview, outReview]]);
+    expect(Object.fromEntries(statuses.rows.map((row) => [row.id, row.status])))
+      .toEqual({ [stayReview]: "ignored", [tripReview]: "accepted", [outReview]: "accepted" });
+    // Free time only, your block wins; each trip with its own move activity; the stay with the chosen one.
+    const blocks = await db.query<{ startedAt: Date; stoppedAt: Date; categoryName: string; segment: string | null }>(
+      `select te.started_at as "startedAt", te.stopped_at as "stoppedAt", c.name as "categoryName", ae.raw_payload ->> 'clientSegmentId' as segment
+         from time_entries te join categories c on c.id = te.category_id
+         join activity_events ae on ae.id = te.created_from_event_id
+        where te.id = any($1::uuid[]) order by te.started_at`, [logged.logged!.entryIds]);
+    expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString(), row.categoryName, row.segment]))
+      .toEqual([
+        [at(base), at(base + 10), "Errands", "o-in"],
+        [at(base + 10), at(base + 38), "Shop", "o-stay"],
+        [at(base + 45), at(base + 55), "Getting around", "o-out"]
+      ]);
+    // The trips' own location events say you decided them, so replay never asks about them again nor logs them.
+    const events = await db.query<{ clientEventId: string; reviewStatus: string; disposition: string }>(
+      `select client_event_id as "clientEventId", review_status as "reviewStatus", raw_payload ->> 'semanticDisposition' as disposition
+         from activity_events where workspace_id = $1 and client_event_id = any($2::text[]) order by client_event_id`,
+      [workspaceId, ["location-segment:o-in", "location-segment:o-out", "location-segment:o-stay"]]);
+    expect(events.rows).toEqual([
+      { clientEventId: "location-segment:o-in", reviewStatus: "confirmed", disposition: "logged_by_you" },
+      { clientEventId: "location-segment:o-out", reviewStatus: "confirmed", disposition: "logged_by_you" },
+      { clientEventId: "location-segment:o-stay", reviewStatus: "confirmed", disposition: "logged_by_you" }
+    ]);
+    // A retry gets every block it made back, the trips' too.
+    const retried = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId, clientCorrectionId: id }, session);
+    expect([...retried.logged!.entryIds].sort()).toEqual([...logged.logged!.entryIds].sort());
   });
 });
 

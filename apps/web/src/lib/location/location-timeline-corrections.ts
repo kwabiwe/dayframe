@@ -16,6 +16,7 @@ import { placeDisplayNameSql } from "../place-display";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import { recordReviewTitleHistory } from "./review-title-history";
 import { resolveLocationReviewActionWithClient } from "./location-review-service";
+import { ensureTravelCategoryId } from "../automatic-category-service";
 
 /**
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
@@ -296,7 +297,7 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
       // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
       if (found && found.eventKind === "log_place" && request.kind === "log_place") {
-        return { ok: true as const, logged: { entryIds: await entriesFromEvent(client, session, found.eventId),
+        return { ok: true as const, logged: { entryIds: await loggedEntries(client, session, found.eventId),
           resolvedReviewItemIds: await resolvedFromEvent(client, session, found.eventId) } };
       }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
@@ -562,6 +563,21 @@ async function resolvedFromEvent(client: pg.PoolClient, session: RequestSession,
   return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
 }
 
+/** A "Logs as"'s blocks: the place's, then those of the outing's trips it logged (by their own events). */
+async function loggedEntries(client: pg.PoolClient, session: RequestSession, eventId: string) {
+  const trips = (await client.query<{ ids: unknown }>(
+    `select raw_payload -> 'tripClientSegmentIds' as ids from activity_events where id = $1 and workspace_id = $2 and user_id = $3`,
+    [eventId, session.workspaceId, session.userId])).rows[0]?.ids;
+  const tripIds = Array.isArray(trips) ? trips.filter((id): id is string => typeof id === "string") : [];
+  const tripEntries = tripIds.length ? (await client.query<{ id: string }>(
+    `select te.id from time_entries te
+       join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+      where te.workspace_id = $1 and te.user_id = $2 and ae.client_event_id = any($3::text[])
+      order by te.started_at, te.id`,
+    [session.workspaceId, session.userId, tripIds.map((id) => `location-segment:${id}`.slice(0, 160))])).rows.map((row) => row.id) : [];
+  return [...await entriesFromEvent(client, session, eventId), ...tripEntries];
+}
+
 async function entriesFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {
   return (await client.query<{ id: string }>(
     `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3 order by started_at`,
@@ -611,9 +627,11 @@ async function logPlace(
   const free = freeSpans(fromMs, toMs, taken.rows.map((entry) => ({ fromMs: entry.startedAt.getTime(), toMs: entry.stoppedAt.getTime() })));
   if (!free.length) throw new TimelineCorrectionError("Your blocks already cover this place's time.", 409);
   // The place's open questions close first, each as its own "Not now" does (status ignored, its audit): the
-  // blocks are the answer. An outing's stay closes with its trips (ignore_outing), never splitting the outing.
-  // The review rows are locked FOR UPDATE by the review service, under the owner lock this transaction holds;
-  // the place's own event is written last below, so it ends confirmed and logged by you, never ignored.
+  // blocks are the answer. An outing's trips are logged with it, never splitting the outing: each as free-time
+  // blocks with the trip's own move activity (Commute, Errands or Getting around, PRD D19), its question closed
+  // as accepted (orchestrator, 28 Oct 2026; never `confirm_outing`, which logs whole spans over the person's own
+  // blocks). The review rows are locked FOR UPDATE under the owner lock this transaction holds; the place's own
+  // event is written last below, so it ends confirmed and logged by you, never ignored.
   const asked = await client.query<{ id: string; outingKey: string | null }>(
     `select ri.id, ae.raw_payload ->> 'outingKey' as "outingKey"
        from review_items ri
@@ -621,33 +639,53 @@ async function logPlace(
       where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = $3 and ri.status = 'open'
       order by ri.id`,
     [session.workspaceId, session.userId, row.id]);
+  // A trip with no activity of its own (none suggested, or archived since) logs as Getting around, made like a
+  // Move's if missing: before any Review, event or block row is locked, as every producer orders its locks.
+  const keys = [...new Set(asked.rows.flatMap((question) => question.outingKey ? [question.outingKey] : []))];
+  const needsTravel = keys.length ? Boolean((await client.query(
+    `select 1 from review_items ri
+       join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+       join commute_segments cs on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
+       left join categories c on c.id = ri.suggested_category_id and c.workspace_id = ri.workspace_id and c.is_archived = false
+      where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ae.raw_payload ->> 'outingKey' = any($3::text[])
+        and c.id is null
+      limit 1`,
+    [session.workspaceId, session.userId, keys])).rowCount) : false;
+  const travelCategoryId = needsTravel ? await ensureTravelCategoryId(client, session) : null;
   const resolvedReviewItemIds: string[] = [];
+  const outingTrips: OutingTrip[] = [];
   for (const question of asked.rows) {
     if (resolvedReviewItemIds.includes(question.id)) continue;
     if (question.outingKey) {
-      const members = (await client.query<{ id: string }>(
-        `select ri.id
+      const members = (await client.query<OutingTrip & { isTrip: boolean }>(
+        `select ri.id as "reviewItemId", ri.suggested_category_id as "categoryId", cs.client_segment_id as "clientSegmentId",
+                cs.started_at as "startedAt", cs.stopped_at as "stoppedAt", cs.id is not null as "isTrip"
            from review_items ri
            join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+           left join commute_segments cs on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id
+            and cs.user_id = ri.user_id and cs.status <> 'superseded'
           where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ri.id <> $3
             and ri.location_segment_id is not null and ae.raw_payload ->> 'outingKey' = $4
-          order by ri.id`,
-        [session.workspaceId, session.userId, question.id, question.outingKey])).rows.map((member) => member.id);
-      if (members.length) {
-        await resolveLocationReviewActionWithClient(client, question.id, { action: "ignore_outing", memberReviewItemIds: members }, session);
-        resolvedReviewItemIds.push(question.id, ...members);
-        continue;
+          order by ri.id
+          for update of ri`,
+        [session.workspaceId, session.userId, question.id, question.outingKey])).rows;
+      for (const member of members) {
+        if (member.isTrip) outingTrips.push(member);
+        else await resolveLocationReviewActionWithClient(client, member.reviewItemId, { action: "ignore_once_location" }, session);
+        resolvedReviewItemIds.push(member.reviewItemId);
       }
     }
     await resolveLocationReviewActionWithClient(client, question.id, { action: "ignore_once_location" }, session);
     resolvedReviewItemIds.push(question.id);
   }
+  outingTrips.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime() || a.clientSegmentId.localeCompare(b.clientSegmentId));
   const event = await client.query<{ id: string }>(
     `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
      values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
      returning id`,
     [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId,
-      resolvedReviewItemIds }), clientEventId]);
+      resolvedReviewItemIds, ...(outingTrips.length ? { tripClientSegmentIds: outingTrips.map((trip) => trip.clientSegmentId) } : {}) }),
+      clientEventId]);
   const entryIds: string[] = [];
   for (const span of free) {
     const entry = await client.query<{ id: string }>(
@@ -676,6 +714,58 @@ async function logPlace(
     [session.workspaceId, session.userId, `location-segment:${request.itemId}`.slice(0, 160), eventType, iso(row.startedAt),
       JSON.stringify({ clientSegmentId: request.itemId, startedAt: iso(row.startedAt), stoppedAt: iso(row.stoppedAt),
         semanticDisposition: "logged_by_you" })]);
+  for (const trip of outingTrips) entryIds.push(...await logOutingTrip(client, session, trip, travelCategoryId));
   return { ok: true as const, logged: { entryIds, resolvedReviewItemIds } };
+}
+
+type OutingTrip = { reviewItemId: string; categoryId: string | null; clientSegmentId: string; startedAt: Date; stoppedAt: Date };
+
+/**
+ * One trip of an outing a "Logs as" logged: event first, its own location event (the one replay offers it from,
+ * and the one an accepted Move's blocks come from) confirmed and logged by you, so replay never asks about it nor
+ * logs it again; then blocks for the time the person's own blocks don't cover (the place's new ones included),
+ * with the trip's own move activity; then its question closed as accepted.
+ */
+async function logOutingTrip(client: pg.PoolClient, session: RequestSession, trip: OutingTrip, travelCategoryId: string | null) {
+  const owner = [session.workspaceId, session.userId];
+  const own = trip.categoryId ? await client.query(
+    `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [trip.categoryId, session.workspaceId]) : null;
+  const categoryId = own?.rowCount ? trip.categoryId : travelCategoryId;
+  const event = await client.query<{ id: string }>(
+    `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload,
+       suggested_category_id, review_status)
+     values ($1, $2, $3, 'location_learning', 'commute_detected', $4, 'high', $5::jsonb, $6, 'confirmed')
+     on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null
+     do update set review_status = 'confirmed',
+       raw_payload = activity_events.raw_payload || jsonb_build_object('semanticDisposition', 'logged_by_you')
+     returning id`,
+    [...owner, `location-segment:${trip.clientSegmentId}`.slice(0, 160), iso(trip.startedAt),
+      JSON.stringify({ clientSegmentId: trip.clientSegmentId, startedAt: iso(trip.startedAt), stoppedAt: iso(trip.stoppedAt),
+        semanticDisposition: "logged_by_you" }), categoryId]);
+  const taken = await client.query<{ startedAt: Date; stoppedAt: Date }>(
+    `select started_at as "startedAt", coalesce(stopped_at, now()) as "stoppedAt" from time_entries
+      where workspace_id = $1 and user_id = $2 and started_at < $4 and coalesce(stopped_at, now()) > $3`,
+    [...owner, iso(trip.startedAt), iso(trip.stoppedAt)]);
+  const free = freeSpans(trip.startedAt.getTime(), trip.stoppedAt.getTime(),
+    taken.rows.map((entry) => ({ fromMs: entry.startedAt.getTime(), toMs: entry.stoppedAt.getTime() })));
+  const entryIds: string[] = [];
+  for (const span of free) {
+    const entry = await client.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, category_id, source, confidence, review_status, started_at, stopped_at,
+         created_from_event_id)
+       values ($1, $2, $3, 'location_learning', 'high', 'confirmed', $4, $5, $6)
+       returning id`,
+      [...owner, categoryId, new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id]);
+    entryIds.push(entry.rows[0].id);
+  }
+  await client.query(
+    `update review_items set status = 'accepted', ignored_scope = null, resolved_at = now()
+      where id = $1 and workspace_id = $2 and user_id = $3 and status = 'open'`,
+    [trip.reviewItemId, ...owner]);
+  if (entryIds.length) {
+    await client.query(`update activity_events set resolved_time_entry_id = $4 where id = $1 and workspace_id = $2 and user_id = $3`,
+      [event.rows[0].id, ...owner, entryIds[0]]);
+  }
+  return entryIds;
 }
 
