@@ -183,7 +183,9 @@ function dayParts(fromMs: number, toMs: number, offsetMinutes: number) {
  * the recorded `nativeStartedAt`, else its recording), each local day its own part; a burst that best accuracy
  * started on a later day than it was recorded counts on that day. The cooldown starts from now (Codex r1, r16 on #619).
  */
-export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs?: number, nativeStartMs?: number): AccuracyBurstState {
+export function endAccuracyBurst(
+  state: AccuracyBurstState, now: Date, elapsedMs?: number, nativeStartMs?: number, unmeasured = false
+): AccuracyBurstState {
   if (!state.active) return state;
   const recorded = Date.parse(state.active.startedAt);
   const storedNative = state.active.nativeStartedAt ? Date.parse(state.active.nativeStartedAt) : NaN;
@@ -196,8 +198,11 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs
   // it (Codex r20 on #619).
   const hardStop = started + (state.active.stopBy ? Math.max(0, Date.parse(state.active.stopBy) - recorded)
     : ACCURACY_BURST_DURATION_MS + ACCURACY_BURST_FORCE_STOP_MS);
+  // Unmeasured (no elapsed time from a lease, after a relaunch): at least to the hard stop, since a clock moved
+  // since can't be seen (Codex r21 on #619).
   const ended = elapsedMs != null && Number.isFinite(elapsedMs) ? started + Math.max(0, elapsedMs)
-    : now.getTime() < started ? Math.max(started, hardStop) : now.getTime();
+    : now.getTime() < started ? Math.max(started, hardStop)
+      : unmeasured ? Math.max(now.getTime(), hardStop) : now.getTime();
   const trigger = state.active.trigger;
   const days = { ...state.days };
   const offsetMinutes = state.active.offsetMinutes ?? new Date(recorded).getTimezoneOffset();

@@ -1288,5 +1288,29 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a foreground refresh held in admission still has inherited options stopped (Codex r21 on #619)", async () => {
+    await relaunchedDuringBurst();
+    h.stopExpo.mockClear();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    const held = deferred();
+    try {
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled")) await held.promise;
+        return read(k);
+      });
+      const refreshing = geofence.refreshGeofencesForPlaces([place]).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(h.stopExpo).toHaveBeenCalled();
+      held.resolve();
+      await refreshing;
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 

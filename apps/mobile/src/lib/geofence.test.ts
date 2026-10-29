@@ -1404,7 +1404,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await vi.advanceTimersByTimeAsync(31_000);
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
-    expect(state?.days["2026-11-02"].seconds).toBe(70);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
   });
 
   it("a second teardown never replaces the first stop's moment (Codex r10 on #619)", async () => {
@@ -1420,7 +1421,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await stopLocationLearningIfStarted();
     vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
     await vi.advanceTimersByTimeAsync(31_000);
-    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(70);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(8 * 60);
   });
 
   it("a headless refresh that restores normal capture keeps that moment, for a later reading too (Codex r10 on #619)", async () => {
@@ -1440,7 +1442,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     vi.setSystemTime(new Date(2026, 10, 2, 9, 1, 10));
     vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
     await maybeEndAccuracyBurst(await capture());
-    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(70);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(8 * 60);
   });
 
   it("a refresh never resumes a burst already confirmed over without a lease, whatever the clock (Codex r11 on #619)", async () => {
@@ -1462,7 +1465,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
       expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
-    expect(state?.days["2026-11-02"].seconds).toBe(70);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
   });
 
   it("an earlier refresh's note never shortens a burst this process starts after it (Codex r11 on #619)", async () => {
@@ -1645,7 +1649,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(seconds).toBeLessThan(190);
   });
 
-  it("a slow reservation, then a relaunch and a teardown, counts only the time best accuracy ran (Codex r16 on #619)", async () => {
+  it("a slow reservation, then a relaunch and a teardown, counts from when best accuracy started (Codex r16 on #619)", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
     const storage = (await import("@react-native-async-storage/async-storage")).default;
@@ -1665,7 +1669,8 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await vi.advanceTimersByTimeAsync(31_000);
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
-    expect(state?.days["2026-11-02"].seconds).toBe(70);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
   });
 
   it("a burst whose native start fails after a slow reservation counts no time (Codex r16 on #619)", async () => {

@@ -138,5 +138,11 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     const late = { ...reserved, active: { ...reserved.active!, nativeStartedAt: day(2, 8, 10).toISOString() } };
     expect(endAccuracyBurst(late, day(2, 7, 18)).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
   });
+
+  it("an unmeasured burst (no lease) counts at least to its hard stop, whatever the clock now says (Codex r21 on #619)", () => {
+    const started = startAccuracyBurst(trial, "departure", day(2, 8, 0));
+    expect(endAccuracyBurst(started, day(2, 8, 3), undefined, undefined, true).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
+    expect(endAccuracyBurst(started, day(2, 8, 20), undefined, undefined, true).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 20 * 60 });
+  });
 });
 

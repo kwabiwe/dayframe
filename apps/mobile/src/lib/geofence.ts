@@ -525,6 +525,7 @@ export async function setLocationLearningEnabled(
   }> = [],
   expectedOwner?: MobileAccountOwner
 ) {
+  guardWakeAdmission();
   const revision = locationCaptureRevision();
   const owner = await readActiveMobileAccount();
   if (!owner) return "Sign in before enabling Location learning.";
@@ -577,6 +578,7 @@ export async function setLocationLearningEnabled(
 }
 
 export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0], owner?: MobileAccountOwner) {
+  guardWakeAdmission();
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
     const capture = await refreshCaptureCatalogue(places, owner, await captured);
@@ -584,6 +586,7 @@ export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0
   });
 }
 export function startLocationLearning(places: Parameters<typeof startLocationLearningUnsafe>[0] = []) {
+  guardWakeAdmission();
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => startLocationLearningUnsafe(places, await captured));
 }
@@ -591,6 +594,7 @@ export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofe
   // Every launch notes a seen Always grant, whatever this account's consent or binding: whether iOS
   // will ask again belongs to the iPhone, not to capture (UIA-111).
   void readBackgroundLocationPermission().catch(() => undefined);
+  guardWakeAdmission();
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
     try {
@@ -1957,10 +1961,15 @@ function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLeas
   // Kept until a retry sees the burst no longer stored: a write that fails never loses it (Codex r9 on #619).
   if (known) {
     confirmLeaseDone(known);
-    if (earlier == null || earlier >= known.nativeDoneAt!) return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known), known.nativeStartAt);
+    // Which came first is read on elapsed time, never on wall clocks a change could reorder (Codex r21 on #619).
+    if (earlier == null || earliestNativeBurstEndMono == null || earliestNativeBurstEndMono >= known.nativeDoneMono!) {
+      return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known), known.nativeStartAt);
+    }
   }
-  if (earlier != null) return endAccuracyBurst(state, new Date(earlier));
-  return endAccuracyBurst(state, new Date());
+  // No lease: nothing measured its elapsed time, and a clock moved since can't be seen, so it counts at least to its
+  // hard stop (Codex r21 on #619).
+  if (earlier != null) return endAccuracyBurst(state, new Date(earlier), undefined, undefined, true);
+  return endAccuracyBurst(state, new Date(), undefined, undefined, true);
 }
 
 /** Tests only: this process's burst memory (leases, pending settlements, timers) back to a fresh launch. */
@@ -2222,10 +2231,11 @@ const isAdmissionGuard = (lease: AccuracyBurstLease | null) => Boolean(lease && 
 const heldGuardLease = () => isAdmissionGuard(accuracyBurstLease) ? null : accuracyBurstLease;
 
 /**
- * Every wake of a process that hasn't set the options yet starts here, before any read, write or await: options a
- * relaunch may have inherited are stopped 30 seconds on unless a capture in this process has set them by then (an
- * admitted wake does at once), so a wake that's rejected, slow, or whose cleanup does nothing never leaves them
- * running (Codex r19 on #619). A capture's own options, or a guard bound to an admitted capture, end it.
+ * Every wake, and every foreground capture start or refresh, of a process that hasn't set the options yet starts
+ * here, before any read, write or await: options a relaunch may have inherited are stopped 30 seconds on unless a
+ * capture in this process has set them by then (an admitted wake or a refresh does at once), so a wake or refresh
+ * that's rejected, slow, or whose cleanup does nothing never leaves them running (Codex r19, r21 on #619). A
+ * capture's own options, or a guard bound to an admitted capture, end it; an admitted wake restarts what it stopped.
  */
 function guardWakeAdmission() {
   if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
