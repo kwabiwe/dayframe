@@ -281,6 +281,7 @@ PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f367
 
 - A user setting for the week start (web and iPhone; owner decision D4, 14 Oct 2026: Monday everywhere until then). It is a hosted preference, so it needs owner approval.
 - Safe restore/import and larger-data reporting confidence.
+- Not doing (low value; orchestrator, 29 Oct 2026): an Apple Place ID on saved places, sent by Save this place from Nearby (`POST /api/places`). It would need a migration (`places` has no column for it). Once a place is saved, it already wins in "Where were you?" and its stays match it; for stays matched to a saved place, the Review presentation uses that place instead of the stay's venue ID. An unsaved pick already keeps its ID on the stay through `record_poi_once`. Features are paused for bugs and UI.
 - Token-management UI and deliberately scoped Home Assistant/local bridge inputs.
 - Calendar integration hints and realtime transport, including live web ↔ iPhone updates without a refresh. (Automation-rule management UI was removed on 8 Oct 2026; any return needs a new owner decision.)
 - Voice/diary correction intake through a review-first audit trail.
