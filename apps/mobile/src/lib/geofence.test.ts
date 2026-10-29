@@ -1223,7 +1223,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
     // No lease in memory (as after a relaunch); the burst is stored, a minute in.
-    await stopLocationLearningIfStarted();
+    __resetAccuracyBurstForTests();
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
       captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
       stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
@@ -1263,7 +1263,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   it("a wake past a stored burst's 3 minutes keeps its retries and hard stop when the restore fails (Codex r6 on #619)", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 4));
-    await stopLocationLearningIfStarted();
+    __resetAccuracyBurstForTests();
     locationMocks.stopLocationUpdatesAsync.mockClear();
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
       captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
@@ -1340,7 +1340,7 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
   it("a relaunch 12 minutes into a stored burst counts all 12 minutes, past its planned stop (Codex r8 on #619)", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     vi.setSystemTime(new Date(2026, 10, 2, 8, 12));
-    await stopLocationLearningIfStarted();
+    __resetAccuracyBurstForTests();
     asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
       captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
       stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
@@ -1432,5 +1432,41 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
     await maybeEndAccuracyBurst(await capture());
     expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(70);
+  });
+
+  it("a refresh never resumes a burst already confirmed over without a lease, whatever the clock (Codex r11 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 1, 20));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBe(70);
+  });
+
+  it("an earlier refresh's note never shortens a burst this process starts after it (Codex r11 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    await refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 59, 10));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
   });
 });

@@ -872,7 +872,9 @@ async function startLocationLearningUnsafe(
       const next = state ?? startAccuracyBurstTrial(now);
       // This lifetime's burst still within its 3 minutes keeps best accuracy; another lifetime's, or one past them,
       // never resumes (Codex r2 on #619).
-      const keep = next.active && next.active.captureId === capture.binding?.id && !accuracyBurstDue(next, now) ? next.active : null;
+      // Nor one already confirmed over without a lease (Codex r11 on #619).
+      const keep = next.active && next.active.captureId === capture.binding?.id && !accuracyBurstDue(next, now) &&
+        !nativeEndCovers(next.active, null) ? next.active : null;
       if (keep) takeAccuracyBurstLease(capture, keep.startedAt, Date.parse(keep.endsAt), Date.parse(keep.stopBy ?? keep.endsAt));
       return { state: next === UNREADABLE_ACCURACY_TRIAL ? next : withTrialProgress(next, now), result: keep ? keep.startedAt : null };
     }).catch(() => null);
@@ -1835,9 +1837,28 @@ let accuracyBurstSettlementTimer: ReturnType<typeof setTimeout> | null = null;
  * started before it ended then at the latest. A later moment never replaces it (Codex r9–r10 on #619).
  */
 let earliestNativeBurstEndAt: number | null = null;
+/** When (monotonic) that moment was noted: a burst this process leased after it is never governed by it. */
+let earliestNativeBurstEndMono: number | null = null;
 
 function noteNativeBurstEnd(at = Date.now()) {
-  if (earliestNativeBurstEndAt == null || at < earliestNativeBurstEndAt) earliestNativeBurstEndAt = at;
+  // The first note stands until it's settled and cleared: a later one, even one a clock set back dates earlier,
+  // never replaces it (Codex r11 on #619).
+  if (earliestNativeBurstEndAt == null) {
+    earliestNativeBurstEndAt = at;
+    earliestNativeBurstEndMono = monotonicNow();
+  }
+}
+
+/**
+ * Whether that noted end governs a stored burst: one this process leased after the note never is (its own elapsed
+ * time decides), and otherwise one that started before the note (Codex r11 on #619).
+ */
+function nativeEndCovers(active: { startedAt: string }, lease: AccuracyBurstLease | null) {
+  if (earliestNativeBurstEndAt == null || earliestNativeBurstEndMono == null) return false;
+  const known = lease?.startedAt === active.startedAt ? lease
+    : accuracyBurstLease?.startedAt === active.startedAt ? accuracyBurstLease : pendingAccuracyBurstSettlements.get(active.startedAt) ?? null;
+  if (known && known.takenAt > earliestNativeBurstEndMono) return false;
+  return Date.parse(active.startedAt) <= earliestNativeBurstEndAt;
 }
 
 /** Settles a burst's time from its lease when one is known: the confirmed moment and elapsed time, never a later one. */
@@ -1846,8 +1867,9 @@ function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLeas
   const startedAt = state.active.startedAt;
   const known = lease?.startedAt === startedAt ? lease
     : accuracyBurstLease?.startedAt === startedAt ? accuracyBurstLease : pendingAccuracyBurstSettlements.get(startedAt) ?? null;
-  // An earlier confirmed end without a lease (a headless stop or restore) wins over a lease rebuilt since.
-  const earlier = earliestNativeBurstEndAt != null && earliestNativeBurstEndAt >= Date.parse(startedAt) ? earliestNativeBurstEndAt : null;
+  // An earlier confirmed end without a lease (a headless stop or restore) wins over a lease rebuilt since, never
+  // over one this process took after it.
+  const earlier = nativeEndCovers(state.active, lease) ? earliestNativeBurstEndAt : null;
   // Kept until a retry sees the burst no longer stored: a write that fails never loses it (Codex r9 on #619).
   if (known) {
     confirmLeaseDone(known);
@@ -1865,6 +1887,7 @@ export function __resetAccuracyBurstForTests() {
   accuracyBurstLease = null;
   pendingAccuracyBurstSettlements.clear();
   earliestNativeBurstEndAt = null;
+  earliestNativeBurstEndMono = null;
   accuracyBurstChain = Promise.resolve();
 }
 
@@ -1876,14 +1899,17 @@ function settlePendingAccuracyBursts() {
     void withAccuracyBurstState(async (state) => {
       const active = state?.active;
       const settle = active && (pendingAccuracyBurstSettlements.has(active.startedAt) ||
-        (earliestNativeBurstEndAt != null && earliestNativeBurstEndAt >= Date.parse(active.startedAt) && accuracyBurstLease?.startedAt !== active.startedAt));
+        (accuracyBurstLease?.startedAt !== active.startedAt && nativeEndCovers(active, null)));
       return { state: settle ? settleAccuracyBurst(state!, null) : state, result: undefined };
     }).then(() => readAccuracyBurstState()).then((state) => {
       // Once storage holds the result, a burst no longer recorded needs nothing more.
       for (const startedAt of [...pendingAccuracyBurstSettlements.keys()]) {
         if (state?.active?.startedAt !== startedAt) pendingAccuracyBurstSettlements.delete(startedAt);
       }
-      if (!state?.active || Date.parse(state.active.startedAt) > (earliestNativeBurstEndAt ?? 0)) earliestNativeBurstEndAt = null;
+      if (!state?.active || !nativeEndCovers(state.active, null)) {
+        earliestNativeBurstEndAt = null;
+        earliestNativeBurstEndMono = null;
+      }
     }).catch(() => undefined).finally(settlePendingAccuracyBursts);
   }, ACCURACY_BURST_RETRY_MS);
 }
@@ -1972,10 +1998,12 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
     if (!isLocationCaptureSnapshotCurrent(capture)) return { state, result: null };
     const current = state ?? startAccuracyBurstTrial(now);
     const own = current.active && current.active.captureId === capture.binding?.id ? current.active : null;
-    const result = own && accuracyBurstDue(current, now) ? own.startedAt : null;
+    // One already confirmed over without a lease settles now, at that moment (Codex r11 on #619).
+    const covered = own ? nativeEndCovers(own, null) : false;
+    const result = own && (covered || accuracyBurstDue(current, now)) ? own.startedAt : null;
     // A wake (a headless relaunch too) during this lifetime's burst arms its safety bound again, past its 3 minutes
     // too, before the restore is tried, so a failed restore keeps its retries and hard stop (Codex r5–r6 on #619).
-    if (own) takeAccuracyBurstLease(capture, own.startedAt, Date.parse(own.endsAt), Date.parse(own.stopBy ?? own.endsAt));
+    if (own && !covered) takeAccuracyBurstLease(capture, own.startedAt, Date.parse(own.endsAt), Date.parse(own.stopBy ?? own.endsAt));
     return { state: current === UNREADABLE_ACCURACY_TRIAL ? current : withTrialProgress(current, now), result };
   });
   if (!due) return false;
