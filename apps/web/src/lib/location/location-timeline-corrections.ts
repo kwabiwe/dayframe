@@ -10,6 +10,7 @@ import {
   type TripLeg
 } from "@dayframe/shared";
 import { withSyncTransaction } from "../sync-transaction";
+import { reconcileTimerTripClashes } from "./timer-trip-clash-service";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql } from "../place-display";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
@@ -351,6 +352,12 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
     if (joined) await applyJoin(client, session, row, joined);
     else await applyToSegment(client, session, table, row, request, legIndex, span);
+    // A trip the correction removed, joined or moved settles a timer's "?" about it now, not at the next replay.
+    const nowMs = Date.now();
+    await reconcileTimerTripClashes(client, session, {
+      from: new Date(Date.parse(span.startedAt) - 60_000).toISOString(),
+      to: new Date(Math.min(nowMs, Date.parse(span.stoppedAt) + 86_400_000)).toISOString()
+    }, new Date(nowMs));
     return { ok: true as const, correction };
   });
 }

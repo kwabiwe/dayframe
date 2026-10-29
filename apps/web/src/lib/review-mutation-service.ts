@@ -5,7 +5,8 @@ import {
   type ReviewReconciliationResult,
   DurableLocationReviewMutationSchema,
   type ReviewMutation,
-  type ReviewMutationEdit
+  type ReviewMutationEdit,
+  TIMER_TRIP_CLASH_EVENT_TYPE
 } from "@dayframe/shared";
 import type pg from "pg";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./db";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
+  endBlockAtTripStart,
   reconcileMatchingHealthSleepTimeEntry,
   recordHealthSleepResolution,
   ReviewResolutionError,
@@ -22,6 +24,7 @@ import {
 import {
   resolveLocationReviewActionWithClient
 } from "./location/location-review-service";
+import { timerTripClashStillHolds } from "./location/timer-trip-clash-service";
 import { reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
 import { syncTimeEntryTags } from "./tag-service";
@@ -49,6 +52,7 @@ type GenericReviewRow = {
   locationSegmentId: string | null;
   resolvedTimeEntryId?: string | null;
   semanticRevision?: Date | string | null;
+  createdAt?: Date | string | null;
 };
 
 export const REVIEW_MUTATION_STATEMENT_TIMEOUT_MS = 8_000;
@@ -403,6 +407,7 @@ async function resolveGenericMutation(
     );
   }
   const item = await lockGenericReview(client, reviewItemId, session);
+  if (item.eventType === TIMER_TRIP_CLASH_EVENT_TYPE) return resolveTimerTripClash(client, item, mutation, session);
   if (item.status !== "open") {
     return resolveClosedGenericReview(client, item, mutation, session);
   }
@@ -428,6 +433,74 @@ async function resolveGenericMutation(
   return acceptGenericReview(client, item, session);
 }
 
+/**
+ * A timer that ran into a trip (design §7): End it (`accept`) ends the block where the trip started, Keep it
+ * (`ignore_once`) leaves it and never asks again. A resend of the same answer is the same answer; any other
+ * answer to a closed question is a conflict.
+ */
+async function resolveTimerTripClash(
+  client: pg.PoolClient,
+  item: GenericReviewRow,
+  mutation: Extract<ReviewMutation, { action: "accept" | "ignore_once" | "edit_and_confirm" }>,
+  session: RequestSession
+) {
+  if (mutation.action === "edit_and_confirm") {
+    throw new ReviewResolutionError("invalid_action", "Answer this question with End it or Keep it.", {
+      status: 422,
+      details: { reviewItemId: item.id, canonicalStatus: item.status }
+    });
+  }
+  const wanted = mutation.action === "accept" ? "accepted" : "ignored";
+  const payload = (item.rawPayload ?? {}) as Record<string, unknown>;
+  const timeEntryId = typeof payload.timeEntryId === "string" ? payload.timeEntryId : null;
+  if (item.status !== "open") {
+    if (item.status !== wanted) throw resolutionConflict(item.id, item.status);
+    // An End it for the proposal it was shown is the same answer only if that is the proposal accepted:
+    // answered questions never change, so it is the open proposal's hash, from before it was resolved (an
+    // open item's revision is its creation; Codex r3 on #611).
+    if (mutation.action === "accept" && mutation.expectedProposalHash &&
+      mutation.expectedProposalHash !== genericProposalHash({ ...item, semanticRevision: item.createdAt ?? null })) {
+      throw resolutionConflict(item.id, item.status);
+    }
+    return {
+      ok: true, action: mutation.action, status: wanted, alreadyResolved: true, equivalent: true,
+      ...(wanted === "accepted" && item.resolvedTimeEntryId ? { entryId: item.resolvedTimeEntryId } : {})
+    };
+  }
+  if (mutation.action === "ignore_once") {
+    await resolveGenericReviewAndEvent(client, item, session, "ignored");
+    return { ok: true, action: mutation.action, status: "ignored" };
+  }
+  // End it answers the question as it was shown: a queued answer whose proposal has since changed is refused,
+  // and so is one whose block or trip no longer clash (a correction removed the trip, the block was edited
+  // into a move activity, its end was set): the next pass retires or refreshes it (Codex r1 on #611).
+  if (mutation.expectedProposalHash) assertExpectedGenericProposal(item, mutation.expectedProposalHash);
+  const tripStartedAt = typeof payload.tripStartedAt === "string" ? payload.tripStartedAt : null;
+  if (!timeEntryId || !tripStartedAt || !await timerTripClashStillHolds(client, session, payload)) {
+    throw new ReviewResolutionError(
+      "proposal_changed",
+      "This question changed before it could be answered. Refresh it before trying again.",
+      { status: 409, details: { reviewItemId: item.id, canonicalStatus: "open", canonicalReviewStatuses: { [item.id]: "open" } } }
+    );
+  }
+  const ended = await endBlockAtTripStart(client, session, timeEntryId, tripStartedAt);
+  await resolveGenericReviewAndEvent(client, item, session, "accepted");
+  // The block this answer changed, as every accepted Review answer names it (the iPhone outbox's proof).
+  if (item.eventId) {
+    await client.query(
+      `update activity_events set resolved_time_entry_id = $4 where id = $1 and workspace_id = $2 and user_id = $3`,
+      [item.eventId, session.workspaceId, session.userId, timeEntryId]);
+  }
+  return {
+    ok: true,
+    action: mutation.action,
+    status: "accepted",
+    entryId: timeEntryId,
+    ...(ended.ended ? { endedAt: new Date(tripStartedAt).toISOString() } : {}),
+    ...(ended.wasRunning ? { stoppedRunningTimer: true } : {})
+  };
+}
+
 async function lockGenericReview(
   client: pg.PoolClient,
   reviewItemId: string,
@@ -449,7 +522,8 @@ async function lockGenericReview(
             ae.raw_payload as "rawPayload",
             ae.resolved_time_entry_id as "resolvedTimeEntryId",
             ri.location_segment_id as "locationSegmentId",
-            coalesce(ri.resolved_at, ri.created_at) as "semanticRevision"
+            coalesce(ri.resolved_at, ri.created_at) as "semanticRevision",
+            ri.created_at as "createdAt"
      from review_items ri
      left join activity_events ae
        on ae.id = ri.event_id
@@ -929,8 +1003,8 @@ function resolutionConflict(reviewItemId: string, canonicalStatus: string) {
   );
 }
 
-function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalHash: string) {
-  const actual = reviewProposalHash({
+function genericProposalHash(item: GenericReviewRow) {
+  return reviewProposalHash({
     reviewItemId: item.id,
     eventId: item.eventId,
     locationSegmentId: null,
@@ -945,6 +1019,10 @@ function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalH
     eventType: item.eventType,
     semanticRevision: item.semanticRevision ?? null
   });
+}
+
+function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalHash: string) {
+  const actual = genericProposalHash(item);
   if (actual === expectedProposalHash) return;
   throw new ReviewResolutionError(
     "proposal_changed",

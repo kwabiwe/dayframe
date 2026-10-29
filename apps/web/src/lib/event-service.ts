@@ -1,4 +1,8 @@
 import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
+import { reconcileTimerTripClashes, timerTripChecksEnabled } from "./location/timer-trip-clash-service";
+import {
+  LEGACY_PERSON_EDIT_SQL, PERSON_EDIT_ACTION, PERSON_SET_END_ACTION, PERSON_SET_END_SQL, SERVER_TIMER_START_KEY, TIMER_STARTED_SQL
+} from "./time-entry-provenance";
 import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
@@ -31,7 +35,8 @@ import {
   type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences,
-  type PlaceRole
+  type PlaceRole,
+  TIMER_TRIP_CLASH_EVENT_TYPE
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -731,7 +736,9 @@ async function processActivityEventWithClient(
 
     if (
       candidate.action === "start_timer" ||
-      (candidate.action === "stop_timer" && stopScope.mode !== "entry")
+      (candidate.action === "stop_timer" && stopScope.mode !== "entry") ||
+      // A timer's "?" about a trip is settled under the owner lock, as replay and answers decide it (design §7).
+      (candidate.action === "stop_timer" && timerTripChecksEnabled())
     ) {
       const lockStartedAt = Date.now();
       await lockUserTimerState(client, session);
@@ -812,6 +819,10 @@ async function processActivityEventWithClient(
       }
       timeEntryId = stopResult.rows[0]?.id;
       stopOutcome = timeEntryId ? "stopped" : "superseded";
+      // A Stop that ended a block before the trip it ran into (one queued offline) settles its "?" (design §7).
+      if (stopResult.rows.length) {
+        await reconcileTimerTripClashes(client, session, { entryIds: stopResult.rows.map((row) => row.id) });
+      }
       // Server-owned: a Stop that ended a block is a boundary for a Shortcut Start placed later (#403).
       if (timeEntryId) {
         await client.query(
@@ -837,17 +848,21 @@ async function processActivityEventWithClient(
         startOutcome = "superseded";
       } else if (lateStart?.kind === "window") {
         if (lateStart.interruptedEntryIds.length) {
-          await client.query(
+          const interrupted = await client.query<{ id: string }>(
             `update time_entries
              set stopped_at = $1, updated_at = now()
              where workspace_id = $2 and user_id = $3 and id = any($4::uuid[])
-               and started_at < $1 and (stopped_at is null or stopped_at > $1)`,
+               and started_at < $1 and (stopped_at is null or stopped_at > $1)
+             returning id`,
             [startedAt, session.workspaceId, session.userId, lateStart.interruptedEntryIds]
           );
+          // A late Start that ended a block before the trip it ran into settles its "?" (design §7).
+          await reconcileTimerTripClashes(client, session, { entryIds: interrupted.rows.map((row) => row.id) });
         }
         startOutcome = "recorded_completed";
       } else if (candidate.shouldClosePrevious) {
-        await closeActiveTimersForReplacement(client, session, startedAt);
+        const replaced = await closeActiveTimersForReplacement(client, session, startedAt);
+        await reconcileTimerTripClashes(client, session, { entryIds: replaced });
       }
 
       const timeEntryResult = startOutcome === "superseded" ? { rows: [] } : await client.query<{ id: string }>(
@@ -1107,7 +1122,6 @@ const SERVER_STOP_OUTCOME_KEY = "serverStopOutcome";
  * a split's `timer_switch`, never taken from client input. It marks the blocks those events create as
  * blocks a timer started (TIMER_STARTED_SQL, stability audit server-1; Codex r1 on #538).
  */
-const SERVER_TIMER_START_KEY = "serverTimerStart";
 
 function withoutServerStopOutcome<T extends Record<string, unknown>>(payload: T): T {
   if (!payload || typeof payload !== "object") return payload;
@@ -1322,50 +1336,6 @@ async function lateShortcutStartWindow(
   };
 }
 
-/**
- * The audit action recorded when a person moves a block's end through an edit. Only an end still equal
- * to the one recorded counts: one a later Stop or Start has since moved is no longer the person's.
- * `user_edited_at` can't tell this apart, since a saved title, activity or tags sets it too (Codex r3 on
- * #531).
- */
-const PERSON_SET_END_ACTION = "time_entry.end_set";
-/** The audit action recorded by every other person edit, so the edit is never mistaken for a legacy one. */
-const PERSON_EDIT_ACTION = "time_entry.edited";
-/**
- * An edit made before edits were recorded (Codex r4 on #531): `user_edited_at` is set but no recorded
- * edit explains it. Every edit path that sets `user_edited_at` also writes one of the actions above in
- * the same transaction with `created_at = user_edited_at`, so only an edit made by earlier code (or one
- * recorded by a path that forgot to) reads as legacy, and its end is kept as before this change. This
- * needs no backfill and no deploy-time cutoff: it holds whenever each database gets the new code.
- */
-const LEGACY_PERSON_EDIT_SQL = `(te.user_edited_at is not null and not exists (
-  select 1 from audit_log a
-  where a.workspace_id = te.workspace_id and a.entity_type = 'time_entry' and a.entity_id = te.id
-    and a.action in ('${PERSON_SET_END_ACTION}', '${PERSON_EDIT_ACTION}')
-    and a.created_at >= te.user_edited_at
-))`;
-const PERSON_SET_END_SQL = `(exists (
-  select 1 from audit_log a
-  where a.workspace_id = te.workspace_id and a.entity_type = 'time_entry' and a.entity_id = te.id
-    and a.action = '${PERSON_SET_END_ACTION}'
-    and (a.metadata->>'stoppedAt')::timestamptz = te.stopped_at
-) or ${LEGACY_PERSON_EDIT_SQL})`;
-/**
- * A block a timer started: one inserted when an explicit Start (app, web, Shortcut, NFC, quick action,
- * split) was processed, so it ran and its end came from the timer lifecycle unless a person set it.
- * Since #538 the server marks each such event (`serverTimerStart`, stripped from client input). An older
- * event has no mark: it counts unless it has the manual-entry shape, a `manual_app` `timer_start` with no
- * `origin` (`createManualEntry` never writes one, every built-in web timer Start does), which stays
- * ambiguous and so is kept, like a block with no creating event left. Review, Location and Health blocks
- * come from other event types (stability audit server-1). No migration or backfill.
- */
-const TIMER_STARTED_SQL = `(exists (
-  select 1 from activity_events ae
-  where ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
-    and ae.event_type in ('timer_start', 'timer_switch', 'quick_action', 'nfc_action', 'shortcut_action')
-    and (ae.raw_payload->>'${SERVER_TIMER_START_KEY}' = 'true'
-      or not (ae.source = 'manual_app' and ae.event_type = 'timer_start' and not (ae.raw_payload ? 'origin')))
-))`;
 
 /**
  * Of the locked blocks covering a Stop's or late Start's moment, the ones it may end there: the running
@@ -1513,7 +1483,7 @@ async function closeActiveTimersForReplacement(
     [session.workspaceId, session.userId]
   );
   const activeEntry = activeResult.rows[0];
-  if (!activeEntry) return;
+  if (!activeEntry) return [];
 
   const activeStartedMs = new Date(activeEntry.startedAt).getTime();
   const stoppedMs = new Date(stoppedAt).getTime();
@@ -1521,15 +1491,17 @@ async function closeActiveTimersForReplacement(
     throw new TimerReplacementWindowError();
   }
 
-  await client.query(
+  const ended = await client.query<{ id: string }>(
     `update time_entries
      set stopped_at = $1, updated_at = now()
      where workspace_id = $2
        and user_id = $3
        and stopped_at is null
-       and started_at < $1`,
+       and started_at < $1
+     returning id`,
     [stoppedAt, session.workspaceId, session.userId]
   );
+  return ended.rows.map((row) => row.id);
 }
 
 export async function createManualEntry(input: {
@@ -2527,6 +2499,8 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    // The owner lock before any row, so a timer's "?" about a trip is decided with replay's view (design §7).
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
     // snapshot, so the reads below (after any concurrent save has committed and released the lock)
     // see that save's description, category, tags, times and recorded edits. Reading them in the
@@ -2660,6 +2634,8 @@ export async function updateTimeEntry(
     if (hasTagNames) {
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
+    // An edit can end a block before the trip it ran into, or make it a move activity (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
     await client.query("commit");
     return { id, updatedAt: new Date(result.rows[0].updatedAt).toISOString() };
   } catch (error) {
@@ -2775,13 +2751,54 @@ function validateResolvedTimeEntryWindow({
   }
 }
 
-export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
-  const result = await query(
-    "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
-    [id, session.workspaceId, session.userId]
+/**
+ * "End it at 14:22" (design §7): the block a timer left running into a trip ends where the trip started, as
+ * the person chose (recorded like an edit, so a Stop queued earlier never pulls it back). A running timer
+ * stops there. A block already ending by then, gone, or started after it is left as it is. The caller holds
+ * the user's timer lock.
+ */
+export async function endBlockAtTripStart(
+  client: pg.PoolClient, session: RequestSession, entryId: string, tripStartedAt: string
+): Promise<{ ended: boolean; wasRunning: boolean }> {
+  const locked = await client.query<{ startedAt: Date; stoppedAt: Date | null }>(
+    `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries
+     where id = $1 and workspace_id = $2 and user_id = $3
+     for update`,
+    [entryId, session.workspaceId, session.userId]
   );
-  if ((result.rowCount ?? 0) === 0) throw new TimeEntryNotFoundError();
-  return { id, deleted: true };
+  const block = locked.rows[0];
+  const endMs = Date.parse(tripStartedAt);
+  if (!block || !Number.isFinite(endMs) || block.startedAt.getTime() >= endMs ||
+    (block.stoppedAt && block.stoppedAt.getTime() <= endMs)) return { ended: false, wasRunning: false };
+  await client.query(
+    `update time_entries set stopped_at = $4::timestamptz, user_edited_at = now(), updated_at = now()
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [entryId, session.workspaceId, session.userId, new Date(endMs).toISOString()]
+  );
+  await recordTimeEntryEdits(client, [entryId], session, [entryId]);
+  return { ended: true, wasRunning: block.stoppedAt === null };
+}
+
+export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
+    const result = await client.query(
+      "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
+      [id, session.workspaceId, session.userId]
+    );
+    if ((result.rowCount ?? 0) === 0) throw new TimeEntryNotFoundError();
+    // A deleted block's "?" goes with it (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id] });
+    await client.query("commit");
+    return { id, deleted: true };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteTimeEntries(ids: string[], session: RequestSession = getDevSession()) {
@@ -2789,6 +2806,7 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const existing = await client.query<{ id: string }>(
       `select id
        from time_entries
@@ -2805,6 +2823,7 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
        returning id`,
       [uniqueIds, session.workspaceId, session.userId]
     );
+    await reconcileTimerTripClashes(client, session, { entryIds: uniqueIds });
     await client.query("commit");
     return { ids: deleted.rows.map((row) => row.id), deletedCount: deleted.rows.length };
   } catch (error) {
@@ -2876,6 +2895,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (timerTripChecksEnabled()) await lockUserTimerState(client, session);
     const active = await client.query<{
       id: string;
       projectId: string | null;
@@ -2969,6 +2989,8 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
         eventResult.rows[0].id
       ]
     );
+    // The running block now ends here (design §7).
+    await reconcileTimerTripClashes(client, session, { entryIds: [row.id] });
 
     await client.query("commit");
   } catch (error) {
@@ -3080,6 +3102,8 @@ export async function joinSplitEntries(
       [id, session.workspaceId, session.userId, row.stoppedAt]
     );
     await recordTimeEntryEdits(client, [id], session, row.stoppedAt ? [id] : [], input.clientCommandId);
+    // The joined block runs on to the second part's end (design §7); the second part's "?" goes with it.
+    await reconcileTimerTripClashes(client, session, { entryIds: [id, input.splitEntryId] });
     await client.query("commit");
     return { id, replayed: false as const, running: row.stoppedAt === null };
   } catch (error) {
@@ -3241,6 +3265,9 @@ async function copyFinishedEntry(
     );
     const newEntryId = inserted.rows[0].id;
     await syncTimeEntryTags(client, newEntryId, row.tagNames, session);
+    // The original now ends where the person split it, and the new part (still running, for a running split)
+    // may be the one that ran into the trip (design §7; Codex r6 on #611).
+    await reconcileTimerTripClashes(client, session, { entryIds: [id, newEntryId] });
     await client.query("commit");
     return { id, newEntryId, replayed: false as const, running };
   } catch (error) {
@@ -3328,6 +3355,11 @@ export async function resolveReviewItem(
     const item = review.rows[0];
     if (!item) {
       throw new ReviewResolutionError("review_item_not_found", "Review item not found.", { status: 404 });
+    }
+    // A timer that ran into a trip is answered through a Review mutation (End it / Keep it): a plain accept
+    // here would add a block from its suggestion (design §7).
+    if (item.eventType === TIMER_TRIP_CLASH_EVENT_TYPE) {
+      throw new ReviewResolutionError("invalid_action", "Answer this question with End it or Keep it.", { status: 422 });
     }
     if (item.status !== "open") {
       const resolvedStatus = item.status === "ignored" ? "ignored" : "accepted";

@@ -1,4 +1,5 @@
 import { emitReviewSemanticSegments, type SemanticChangeCounter, segmentMoveName } from "./location-review-semantic-batch";
+import { reconcileTimerTripClashes, timerTripClashReplayWindow } from "./timer-trip-clash-service";
 import { autoLogReconciliation, removeUnusedAutoLogOrphans } from "./location-auto-log";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
@@ -359,6 +360,9 @@ async function replayAndEmitLocationSemantics(
       );
       semanticChanges.count += await removeUnusedAutoLogOrphans(
         client, session, autoLog.orphans, autoLog.used, autoLog.locked);
+      // A timer left running into a trip asks on its block (design §7): trips appear and change here.
+      const clashWindow = timerTripClashReplayWindow(options.processingAt, options.rollout.semanticCutoverAt!);
+      if (clashWindow) semanticChanges.count += await reconcileTimerTripClashes(client, session, clashWindow, options.processingAt);
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(

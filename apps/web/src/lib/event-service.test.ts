@@ -22,6 +22,11 @@ vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
 }));
 
+// Its own disposable-PostgreSQL suite covers it; these mocked clients answer only the queries they expect.
+vi.mock("./location/timer-trip-clash-service", () => ({
+  reconcileTimerTripClashes: vi.fn(async () => 0),
+  timerTripChecksEnabled: () => false
+}));
 vi.mock("./location/location-rollout", () => ({
   getServerLocationRolloutMode: mocks.getServerLocationRolloutMode
 }));
@@ -3436,30 +3441,40 @@ describe("time entry deletion", () => {
     vi.resetAllMocks();
   });
 
+  // One transaction, so a deleted block's "?" (a timer that ran into a trip) goes with it.
+  const deleteClient = (rowCount: number) => {
+    const client = { query: vi.fn().mockResolvedValue({ rowCount, rows: [] }), release: vi.fn() };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    return client;
+  };
+
   it("hard-deletes active or completed entries in the current user workspace scope", async () => {
-    mocks.query.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const client = deleteClient(1);
 
     await expect(deleteTimeEntry("entry-1", session)).resolves.toEqual({
       id: "entry-1",
       deleted: true
     });
 
-    expect(mocks.query).toHaveBeenCalledWith(
+    expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3"),
       ["entry-1", session.workspaceId, session.userId]
     );
-    expect(mocks.query.mock.calls[0][0]).not.toContain("stopped_at");
+    expect(client.query.mock.calls[1][0]).not.toContain("stopped_at");
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalled();
   });
 
   it("does not delete entries outside the current user or workspace scope", async () => {
-    mocks.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const client = deleteClient(0);
 
     await expect(deleteTimeEntry("other-entry", session)).rejects.toBeInstanceOf(TimeEntryNotFoundError);
 
-    expect(mocks.query).toHaveBeenCalledWith(
+    expect(client.query).toHaveBeenCalledWith(
       expect.any(String),
       ["other-entry", session.workspaceId, session.userId]
     );
+    expect(client.query).toHaveBeenCalledWith("rollback");
   });
 
   it("deletes a complete scoped group in one transaction", async () => {
