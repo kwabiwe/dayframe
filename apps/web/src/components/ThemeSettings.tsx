@@ -41,7 +41,7 @@ export function ThemeSettings() {
         : `${choice === "dark" ? "Midnight" : "Daylight"} on this browser.`}
       action={(
         <SegmentedControl
-          ariaLabel="Appearance"
+          ariaLabel="Theme"
           options={choices}
           value={choice}
           onChange={updateTheme}

@@ -286,3 +286,13 @@ describe("compact answer pills", () => {
     }
   });
 });
+
+describe("Settings › Log trips automatically (UI review W15; Codex r1 on #631)", () => {
+  it("reads as a row of its card at every width: its siblings' text start and divider insets", () => {
+    expect(css).toMatch(/\.settings-group \.df-set-trips \{[^}]*background: transparent;[^}]*padding: 8px 18px 8px 48px;/);
+    expect(css).toMatch(/\.settings-group \.df-set-trips::before \{[^}]*--divider-inset: 18px;[^}]*--divider-inset-start: 52px;/);
+    const phone = css.slice(css.indexOf(".settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {\n    --divider-inset: 16px;"));
+    expect(phone).toMatch(/\.settings-group \.df-set-trips \{\s*padding: 14px 16px 14px 48px;/);
+    expect(phone).toMatch(/\.settings-group \.df-set-trips::before \{\s*--divider-inset: 16px;\s*--divider-inset-start: 16px;/);
+  });
+});

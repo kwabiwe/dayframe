@@ -36,6 +36,7 @@ describe("web Settings contracts", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     // The card is Appearance; its row is Theme (UI review W15, owner 29 Oct 2026: no "Appearance › Appearance").
     expect(themeSource).toContain('label="Theme"');
+    expect(themeSource).toContain('ariaLabel="Theme"');
     expect(themeSource).toContain('value: "system"');
     expect(themeSource).toContain('value: "light"');
     expect(themeSource).toContain('value: "dark"');

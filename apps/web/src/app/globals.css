@@ -1547,6 +1547,17 @@ textarea.ui-control {
     --divider-inset-start: 16px;
   }
 
+  /* The trips row keeps its siblings' phone text start (16 px padding, the 22 px icon column and its
+     10 px gap) and their full-width-in-padding divider (Codex r1 on #631). */
+  .settings-group .df-set-trips {
+    padding: 14px 16px 14px 48px;
+  }
+
+  .settings-group .df-set-trips::before {
+    --divider-inset: 16px;
+    --divider-inset-start: 16px;
+  }
+
   .settings-group .ui-settings-row-action {
     width: 100%;
     justify-self: stretch;

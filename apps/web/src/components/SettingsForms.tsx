@@ -514,7 +514,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="download"
         label="Export data"
-        detail="All your data in one file."
+        detail="Blocks, activities and places in one file."
         action={(
           // UIA-312: one Export; the spreadsheet and the raw history sit in a small menu beside it.
           <div className="df-export">
@@ -532,7 +532,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="trash-2"
         label="Recent location evidence"
-        detail="Raw location is deleted after 7 days. Blocks and saved places stay."
+        detail="Recent location evidence is normally deleted after 7 days. Blocks and saved places stay."
         action={(
           <Button variant="danger" compact onClick={() => setConfirmDelete(true)}>
             Delete recent evidence
