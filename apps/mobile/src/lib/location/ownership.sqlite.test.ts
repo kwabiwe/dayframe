@@ -1132,3 +1132,31 @@ describe("nearest-place geofences on task wakes (location v3 PR 16b)", () => {
     expect(registrations()).toHaveLength(count);
   });
 });
+
+describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)", () => {
+  const normal = expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) });
+  async function relaunchedDuringBurst() {
+    await signIn(A, [place]);
+    vi.setSystemTime(T0 + 60_000);
+    expect(await geofence.maybeStartAccuracyBurst("departure", await store.captureLocationOwnership())).toBe(true);
+    geofence.__resetAccuracyBurstForTests(); // the process is gone; Expo may have kept the burst's options
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear();
+    return start;
+  }
+
+  it("a location wake that reports an error puts normal capture back first", async () => {
+    const start = await relaunchedDuringBurst();
+    await learningTask()({ data: undefined, error: new Error("location unavailable") });
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  it("a geofence wake whose evidence can't be stored puts normal capture back first", async () => {
+    const start = await relaunchedDuringBurst();
+    const capture = await store.captureLocationOwnership();
+    h.beforeInsert = async () => { throw new Error("disk full"); };
+    await geofenceTask()({ data: { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } }, error: null });
+    expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+});
+

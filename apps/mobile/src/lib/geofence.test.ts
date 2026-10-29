@@ -1600,4 +1600,48 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
       captureState.current = true;
     }
   });
+
+  it("a teardown that fails after a relaunch keeps stopping inherited options (Codex r15 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    __resetAccuracyBurstForTests();
+    // Location turned off: capture is no longer current when the teardown runs.
+    captureState.current = false;
+    try {
+      locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+      await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a slow reservation neither shortens the burst nor counts as best-accuracy time (Codex r15 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    const seconds = (await readAccuracyBurstState())?.days["2026-11-02"].seconds ?? 0;
+    expect(seconds).toBeGreaterThanOrEqual(180);
+    expect(seconds).toBeLessThan(190);
+  });
 });
