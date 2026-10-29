@@ -145,12 +145,6 @@ export function reviewCardCategory(item: ReviewItemRow, draft: ReviewLogAsDraft 
   return null;
 }
 
-/** A drafted activity that has been archived or removed since it was picked falls back to the suggestion's. */
-export function activeDraft(draft: ReviewLogAsDraft | undefined, categories: readonly CategoryRow[]): ReviewLogAsDraft | undefined {
-  if (!draft || draft.categoryId === undefined || draft.categoryId === null) return draft;
-  return categories.some((category) => category.id === draft.categoryId) ? draft : { ...draft, categoryId: undefined };
-}
-
 export type ReviewOuting = CardOuting<ReviewItemRow>;
 
 /**

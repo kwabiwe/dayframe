@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewItemRow } from "@/lib/queries";
 import {
-  activeDraft,
   outingMutationFor,
   reviewOutings,
   reviewCardCategory,
@@ -95,8 +94,7 @@ describe("Review deck helpers", () => {
     expect(reviewMutationFor(item({ suggestedStoppedAt: null }), "log", { name: "Park run" })).toEqual({ action: "accept" });
   });
 
-  it("drops a picked activity that is gone and falls back to the suggestion's", () => {
-    expect(activeDraft({ categoryId: "gone", name: "x" }, categories)).toEqual({ categoryId: undefined, name: "x" });
+  it("falls back to the suggestion's activity when none is picked", () => {
     expect(reviewCardCategory(item(), { categoryId: OTHER }, categories)?.name).toBe("Errands");
     expect(reviewCardCategory(item(), undefined, categories)?.name).toBe("Exercise");
     expect(reviewCardCategory(item({ suggestedCategoryId: null, categoryName: null }), undefined, categories)).toBeNull();

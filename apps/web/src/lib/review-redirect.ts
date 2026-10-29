@@ -1,13 +1,11 @@
 import { reviewCheckHref } from "@/lib/calendar-checks";
+import { zonedDateKey } from "@/lib/viewer-time-zone";
 
 /**
  * Location v4 step 15: the web Review page is gone; every "?" is answered in Calendar › List. Old /review links
  * (bookmarks, history, an older palette's `/review#review-<id>`) land on the List, at their question when they name one.
  */
 export const CALENDAR_LIST_HREF = "/timeline?view=list&scope=day";
-
-/** Today's first "?" in the List (Today's chip uses the same link when it has no oldest question). */
-export const FIRST_CHECK_HREF = `${CALENDAR_LIST_HREF}&check=first`;
 
 /** The query names an old /review link could carry a Review item id in, in order of preference. */
 const ITEM_PARAMS = ["check", "item", "reviewItemId", "review", "id"] as const;
@@ -41,9 +39,22 @@ export function reviewHashItemId(hash: string): string | null {
   return isReviewItemId(value) ? value : null;
 }
 
-/** Where an old /review link goes: the List at its "?" (on its own day, `YYYY-MM-DD`, when known), or the List. */
-export function reviewRedirectHref(itemId: string | null, dateKey?: string | null) {
-  if (!itemId) return CALENDAR_LIST_HREF;
-  if (itemId === "first") return FIRST_CHECK_HREF;
-  return reviewCheckHref(itemId, dateKey);
+export type ReviewRedirectTarget = {
+  /** A Review item id, `first` (today's first "?"), or null for the List. */
+  itemId: string | null;
+  /** The named item's suggested start, when the server found it for this workspace and user. */
+  startedAt?: string | null;
+};
+
+/**
+ * Where an old /review link goes, its day in the browser's own zone (Codex r1 on #613): the server's zone cookie may
+ * be missing on a first visit or stale after travel, so the day is never taken from it. The List at the named "?" on
+ * the day it starts; `first` is today's first "?" (the List opens today's, never an older one); otherwise today.
+ */
+export function reviewRedirectHref(target: ReviewRedirectTarget, timeZone: string, nowMs: number) {
+  const today = zonedDateKey(nowMs, timeZone);
+  if (!target.itemId) return `${CALENDAR_LIST_HREF}&date=${today}`;
+  if (target.itemId === "first") return `${CALENDAR_LIST_HREF}&date=${today}&check=first`;
+  const startedMs = target.startedAt ? Date.parse(target.startedAt) : Number.NaN;
+  return reviewCheckHref(target.itemId, Number.isFinite(startedMs) ? zonedDateKey(startedMs, timeZone) : today);
 }

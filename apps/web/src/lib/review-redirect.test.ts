@@ -20,11 +20,17 @@ describe("old /review links (location v4 step 15)", () => {
     expect(reviewHashItemId("")).toBeNull();
   });
 
-  it("goes to the List, at the named \"?\" on its own day when known", () => {
-    expect(reviewRedirectHref(null)).toBe(CALENDAR_LIST_HREF);
-    expect(reviewRedirectHref("first")).toBe("/timeline?view=list&scope=day&check=first");
-    expect(reviewRedirectHref(ID, "2026-10-24")).toBe(`/timeline?view=list&scope=day&date=2026-10-24&check=${ID}`);
-    expect(reviewRedirectHref(ID, null)).toBe(`/timeline?view=list&scope=day&check=${ID}`);
+  it("goes to the List, at the named \"?\" on its own day in the browser's zone (Codex r1 on #613)", () => {
+    const LA = "America/Los_Angeles";
+    // 26 Oct 00:30 UTC is still the 25th in Los Angeles; "now" is 26 Oct 05:00 UTC, the 25th there too.
+    const now = Date.parse("2026-10-26T05:00:00Z");
+    const item = { itemId: ID, startedAt: "2026-10-26T00:30:00.000Z" };
+    expect(reviewRedirectHref(item, LA, now)).toBe(`/timeline?view=list&scope=day&date=2026-10-25&check=${ID}`);
+    expect(reviewRedirectHref(item, "UTC", now)).toBe(`/timeline?view=list&scope=day&date=2026-10-26&check=${ID}`);
+    expect(reviewRedirectHref({ itemId: null }, LA, now)).toBe(`${CALENDAR_LIST_HREF}&date=2026-10-25`);
+    expect(reviewRedirectHref({ itemId: "first" }, LA, now)).toBe("/timeline?view=list&scope=day&date=2026-10-25&check=first");
+    // Not found for this workspace and user: today's List, which shows no such "?".
+    expect(reviewRedirectHref({ itemId: ID, startedAt: null }, LA, now)).toBe(`/timeline?view=list&scope=day&date=2026-10-25&check=${ID}`);
   });
 
   it("keeps /review a redirect only, scoped to the signed-in workspace and user, and the deck gone", () => {
@@ -32,7 +38,9 @@ describe("old /review links (location v4 step 15)", () => {
     expect(page).not.toContain("ReviewDeck");
     expect(page).toContain("resolvePageSession()");
     expect(page).toMatch(/where id = \$1 and workspace_id = \$2 and user_id = \$3/);
-    expect(page).toContain("redirect(reviewRedirectHref(itemId, dateKey))");
+    // The day is never taken from the server's zone cookie, which can be missing or stale (Codex r1 on #613).
+    expect(page).not.toMatch(/getViewerTimeZone|zonedDateKey|redirect\(/);
+    expect(page).toContain("<ReviewRedirect itemId={itemId} startedAt=");
   });
 
   it("links a found \"?\" from the palette to the List, never to /review", () => {

@@ -1,3 +1,4 @@
+import { TIMER_TRIP_CLASH_REVIEW_TYPE } from "@dayframe/shared";
 import { query } from "./db";
 import { placeDisplayNameSql } from "./place-display";
 import type { RequestSession } from "./session";
@@ -149,6 +150,9 @@ export async function searchDayframe(
        from review_items r
        left join categories c on c.id = r.suggested_category_id and c.workspace_id = r.workspace_id
        where r.workspace_id = $1 and r.user_id = $2 and r.status = 'open'
+         -- A timer that ran into a trip asks on its block with its own UI later; until then ⌘K never offers it as an
+         -- ordinary "?" the List would not show (Codex r1 on #613).
+         and r.type <> $5
          and r.title ilike '%' || $3 || '%'
      )
      select id, kind, label, detail,
@@ -160,7 +164,7 @@ export async function searchDayframe(
      from candidates
      order by rank desc, occurred_at desc nulls last, label
      limit $4`,
-    [session.workspaceId, session.userId, normalized, Math.min(Math.max(limit, 1), 40)]
+    [session.workspaceId, session.userId, normalized, Math.min(Math.max(limit, 1), 40), TIMER_TRIP_CLASH_REVIEW_TYPE]
   );
 
   return result.rows.map((row) => {

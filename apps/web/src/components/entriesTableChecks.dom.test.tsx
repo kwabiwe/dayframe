@@ -6,7 +6,7 @@ import type { LocationTimeline } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 const search = vi.hoisted(() => ({ params: "" }));
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
   useSearchParams: () => new URLSearchParams(search.params)
@@ -574,6 +574,46 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     try {
       render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0]]} />);
       await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("opens today's first question from `check=first`, never yesterday's still-asking one (Codex r1 on #613)", async () => {
+    search.params = "check=first";
+    router.push.mockReset();
+    router.replace.mockReset();
+    try {
+      const yesterdayStart = new Date(Date.UTC(2026, 7, 10, 9)).toISOString();
+      const yesterdayStop = new Date(Date.UTC(2026, 7, 10, 10)).toISOString();
+      const yesterday = suggestion("00000000-0000-4000-8000-0000000000d1", { title: "Errand", eventSource: "health_workout",
+        eventType: "health_workout_import_suggestion", suggestedStartedAt: yesterdayStart, suggestedStoppedAt: yesterdayStop });
+      // Yesterday's "?" is the oldest still asking; today's (the 11th, the List's day) is Office.
+      render(<EntriesTable {...baseProps()} reviewItems={[yesterday, reviewItems[0]]} />);
+      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      expect(router.push).not.toHaveBeenCalled();
+      expect(router.replace).not.toHaveBeenCalled();
+    } finally {
+      search.params = "";
+    }
+  });
+
+  it("goes to today's first question by its id when the List shows another day (Codex r1 on #613)", async () => {
+    search.params = "check=first";
+    router.push.mockReset();
+    router.replace.mockReset();
+    // The viewer's today is the 12th; the List shows the 11th. The 11th's own "?" are not today's.
+    const twelfth = new Date(Date.UTC(2026, 7, 12, 12)).toISOString();
+    clock.todayStartMs = localDayStart(twelfth);
+    try {
+      const today = suggestion("00000000-0000-4000-8000-0000000000d2", { title: "Run", eventSource: "health_workout",
+        eventType: "health_workout_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 12, 8)).toISOString(),
+        suggestedStoppedAt: new Date(Date.UTC(2026, 7, 12, 9)).toISOString() });
+      render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0], today]} />);
+      await waitFor(() => expect(router.replace).toHaveBeenCalledTimes(1));
+      expect(router.replace.mock.calls[0][0]).toMatch(new RegExp(`&check=${today.id}$`));
+      expect(router.push).not.toHaveBeenCalled();
+      expect(dialog()).toBeNull();
     } finally {
       search.params = "";
     }

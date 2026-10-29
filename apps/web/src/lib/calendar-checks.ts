@@ -36,6 +36,14 @@ export function reviewCheckHref(id: string, dateKey?: string | null) {
   return `/timeline?view=list&scope=day${dateKey ? `&date=${dateKey}` : ""}&check=${encodeURIComponent(id)}`;
 }
 
+/**
+ * Today's "?" (Today's chip and `check=first`): the ones still asking that reach into the viewer's own today, oldest
+ * first — never an earlier day's alone (Codex r1 on #613).
+ */
+export function todaysChecks(checks: readonly ListCheck[], todayStartMs: number) {
+  return checks.filter((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStartMs);
+}
+
 /** Where the badge and Today's chip send you: Calendar › List at the oldest question that still asks. */
 export function oldestCheckHref(checks: readonly ListCheck[]) {
   const oldest = checks[0];

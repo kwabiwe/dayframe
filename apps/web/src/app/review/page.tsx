@@ -1,18 +1,16 @@
-import { redirect } from "next/navigation";
-import { ReviewHashRedirect } from "@/components/review/ReviewHashRedirect";
+import { ReviewRedirect } from "@/components/review/ReviewRedirect";
 import { resolvePageSession } from "@/lib/auth/server";
 import { query } from "@/lib/db";
-import { isReviewItemId, reviewLinkItemId, reviewRedirectHref } from "@/lib/review-redirect";
-import { zonedDateKey } from "@/lib/viewer-time-zone";
-import { getViewerTimeZone } from "@/lib/viewer-time-zone-server";
+import { isReviewItemId, reviewLinkItemId } from "@/lib/review-redirect";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Location v4 step 15: the Review page and its card deck are gone on the web; Calendar › List answers every "?".
- * An old /review link that names its item in the query (`?check=`, `?item=`, …) opens on that item's own day in the
- * viewer's zone, read under the signed-in workspace and user. A bare /review may carry an older palette's
- * `#review-<id>`, which only the browser sees, so it is read there.
+ * An old /review link that names its item in the query (`?check=`, `?item=`, …) has its start read here, under the
+ * signed-in workspace and user; the browser then turns it into a day in its own zone (never the zone cookie, which
+ * may be missing or stale; Codex r1 on #613) and opens the List there. A bare /review is read in the browser too,
+ * for an older palette's `#review-<id>`.
  */
 export default async function ReviewRedirectPage({
   searchParams
@@ -21,8 +19,7 @@ export default async function ReviewRedirectPage({
 }) {
   const params = searchParams ? await searchParams : {};
   const itemId = reviewLinkItemId(params);
-  if (!itemId) return <ReviewHashRedirect />;
-  if (!isReviewItemId(itemId)) redirect(reviewRedirectHref(itemId));
+  if (!itemId || !isReviewItemId(itemId)) return <ReviewRedirect itemId={itemId} />;
   const session = await resolvePageSession();
   const result = await query<{ suggestedStartedAt: Date | string | null }>(
     `select suggested_started_at as "suggestedStartedAt"
@@ -32,6 +29,5 @@ export default async function ReviewRedirectPage({
   );
   const startedAt = result.rows[0]?.suggestedStartedAt;
   const startedMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
-  const dateKey = Number.isFinite(startedMs) ? zonedDateKey(startedMs, await getViewerTimeZone()) : null;
-  redirect(reviewRedirectHref(itemId, dateKey));
+  return <ReviewRedirect itemId={itemId} startedAt={Number.isFinite(startedMs) ? new Date(startedMs).toISOString() : null} />;
 }
