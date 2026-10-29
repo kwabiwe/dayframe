@@ -29,8 +29,9 @@ function clashEntryOf(entry: MobileTimeEntry, data: MobileBootstrap): TimerTripC
 
 /**
  * Whether a "?" still asks where it is answered (location v4 design §7). Anything that is not a block that ran into a
- * trip: true. A clash asks only when it can be put on its block (its payload names it; a record recovered past the
- * bootstrap's cap carries none, so it is never counted without a surface to answer it, Codex r1 on #618), and only
+ * trip: true. A clash asks only when it can be put on its block (its payload names it: the bootstrap's, or a
+ * presentation record's `timerTripClash` past the bootstrap's cap, #621; one with none or a malformed one is never
+ * counted without a surface to answer it, Codex r1 on #618), and only
  * while that block, as this iPhone has it now (queued edits, Stop and End it applied), still runs into the trip. A
  * block not loaded here keeps asking (the server's question stands); one deleted on this iPhone (`deletedIds`: held
  * for Undo or queued) stops at once.

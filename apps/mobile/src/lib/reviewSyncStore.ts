@@ -18,6 +18,7 @@ import {
   ReviewMutationSchema,
   isTimerTripClashItem,
   timerTripClashQuestion,
+  ReviewTimerTripClashPresentationSchema,
   type LocationReviewEvidenceDto,
   type ReviewPresentationSnapshot,
   type ReviewProposalPresentation,
@@ -1740,6 +1741,11 @@ function presentationReviewItems(response: ReviewPresentationSnapshot) {
 }
 
 export function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): MobileReviewItem {
+  // The block a clash asks on and its trip (the timer-trip-clash feature, #621), so a clash read past the bootstrap's
+  // 100 items is put on its block and counted like any "?". Only a valid one: otherwise it has no block, and no count.
+  const clash = isTimerTripClashItem(record) && record.timerTripClash
+    ? ReviewTimerTripClashPresentationSchema.safeParse(record.timerTripClash) : null;
+  const clashPayload = clash?.success ? clash.data : null;
   return {
     id: record.reviewItemId,
     type: record.sourceKind === "location_v2" ? "location" : "review",
@@ -1761,7 +1767,7 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     notes: null,
     // Coordinate-free subtype and a Move's route line only, so time away keeps its labels and no
     // Commute fallback, and a Move keeps its second line (PRD D19).
-    rawPayload: record.timeAway || record.routeLabel || record.outing || record.learnedName ? {
+    rawPayload: clashPayload ? { ...clashPayload } : record.timeAway || record.routeLabel || record.outing || record.learnedName ? {
       ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
       ...(record.routeLabel ? { routeLabel: record.routeLabel } : {}),
       // One card per outing (PRD D19): which outing it belongs to and its part in it.
@@ -1773,8 +1779,7 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     } : null,
     createdAt: record.createdAt,
     // "A block ran into your trip" (location v4 design §7): End it is sent with this proposal, so a presentation read
-    // replacing the cached copy keeps it (Codex r1 on #618). Its block payload is not in the record: the cache keeps
-    // the bootstrap's (same proposal), and a record known only from a presentation read never asks (clashStillAsksHere).
+    // replacing the cached copy keeps it (Codex r1 on #618).
     ...(isTimerTripClashItem(record) && record.status === "open" && record.proposalHash ? { proposalHash: record.proposalHash } : {})
   };
 }
