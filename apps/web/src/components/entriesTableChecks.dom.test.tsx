@@ -1015,6 +1015,13 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       expect(screen.queryByRole("group", { name: /^Nap, / })).toBeNull();
       expect(screen.getByRole("group", { name: /^Sleep, / })).toBeTruthy();
       expect(document.activeElement).toBe(sleep);
+      // Later, a deliberate visit to the same "?" (the link left the URL, then came back): it opens and takes focus.
+      search.params = "view=list&scope=day";
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={items} />);
+      search.params = `view=list&scope=day&date=2026-08-09&check=${nap.id}`;
+      rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={[...items]} />);
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Nap, / })).toBeTruthy());
+      await waitFor(() => expect(document.activeElement).toBe(askingRow("Nap")));
     } finally {
       search.params = "";
     }

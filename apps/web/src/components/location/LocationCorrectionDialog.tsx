@@ -417,8 +417,9 @@ export function LocationCorrectionDialog({
       const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
       if (!alive.current) return;
       placeId = created?.place?.id ?? null;
-      // A refusal is a known outcome (nothing saved); only a lost or unreadable reply stays unknown.
-      if (placeId || (response && !response.ok)) pendingCreation.current = null;
+      // Only a definitive refusal (4xx) is a known "nothing saved"; a 5xx or gateway error, an unreadable body or a lost
+      // reply may have committed, so its outcome stays unknown and the next try looks first (Codex r9 on #609).
+      if (placeId || (response && response.status >= 400 && response.status < 500)) pendingCreation.current = null;
       if (!placeId) {
         setBusy(false);
         setError("The place wasn't saved. Saving a place needs a connection.");

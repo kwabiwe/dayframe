@@ -714,6 +714,8 @@ export function EntriesTable({
     if (checkParam) return;
     openedFromLink.current = null;
     linkedOpen.current = null;
+    // Leaving a link also ends any chip step's claim on it: only the navigation pending then is suppressed.
+    chipSteps.current.links.clear();
   }, [checkParam]);
   useEffect(() => {
     if (!checkParam || openedFromLink.current === checkParam || !checkRows.length) return;
@@ -722,6 +724,8 @@ export function EntriesTable({
     const stepToken = chipSteps.current.links.get(checkParam);
     if (stepToken !== undefined && stepToken !== chipSteps.current.latest) {
       openedFromLink.current = checkParam;
+      // Consumed: the step's claim ends here, so a later deliberate visit to this "?" opens it (Codex r9 on #609).
+      chipSteps.current.links.delete(checkParam);
       return;
     }
     const frame = requestAnimationFrame(() => {

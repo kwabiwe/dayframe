@@ -517,6 +517,43 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       expect(JSON.parse(clientFetch.mock.calls.at(-1)![1].body)).toMatchObject({ placeId: "place-new" });
     });
 
+    it("keeps a 502's outcome unknown: the retry looks first and finds the committed place (Codex r9 on #609)", async () => {
+      evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+      clientFetch.mockReset()
+        // The creation commits, but a gateway answers 502.
+        .mockResolvedValueOnce({ ok: false, status: 502, json: async () => { throw new SyntaxError("Bad gateway"); } })
+        .mockResolvedValueOnce(listed())
+        .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+      const onClose = vi.fn();
+      render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+        target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+      await screen.findByTestId("evidence-map");
+      fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await screen.findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(calls()).toEqual(["POST /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+    });
+
+    it("treats a 4xx refusal as nothing saved: the retry creates without looking", async () => {
+      evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+      clientFetch.mockReset()
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: "Conflict" }) })
+        .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ place: { id: "place-new" } }) })
+        .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+      const onClose = vi.fn();
+      render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+        target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+      await screen.findByTestId("evidence-map");
+      fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await screen.findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(calls()).toEqual(["POST /api/places", "POST /api/places", "POST /api/timeline/corrections"]);
+    });
+
     it("looks for the name it sent, not one edited since, and uses that place", async () => {
       clientFetch.mockReset()
         .mockRejectedValueOnce(new TypeError("Failed to fetch"))
