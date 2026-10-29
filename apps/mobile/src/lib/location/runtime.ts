@@ -125,10 +125,12 @@ async function bindOwnerUnsafe(owner: MobileAccountOwner, revision: number, expl
 }
 
 export function bindLocationCaptureOwner(owner: MobileAccountOwner, revision = locationCaptureRevision()) {
+  armLocationAdmissionGuard();
   return withLocationCaptureLifecycle(() => bindOwnerUnsafe(owner, revision));
 }
 
 export function enableLocationCaptureOwnership(owner: MobileAccountOwner, revision: number) {
+  armLocationAdmissionGuard();
   return withLocationCaptureLifecycle(async () => {
     if (!ownerIsCurrent(owner, revision)) return false;
     const geofence = await import("../geofence");
@@ -159,6 +161,9 @@ export function stopUnownedLocationCapture(capture: LocationCaptureSnapshot) {
 
 // Called synchronously by the existing account listener, including A -> B -> A.
 export function locationCaptureAccountChanged(owner: MobileAccountOwner | null) {
+  // Every account change, sign-out and binding arms the accuracy trial's admission guard before any await (card K,
+  // Codex r27 on #619): it only ever lowers inherited best accuracy to normal capture.
+  armLocationAdmissionGuard();
   // A first cold activation may publish before mobileAccount hydrates its cache.
   // Preserve an already attributable same-owner binding in that case. Later
   // publications invalidate synchronously, including A -> B -> A.
@@ -175,6 +180,7 @@ export function locationCaptureAccountChanged(owner: MobileAccountOwner | null) 
 
 export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "opt_out" | "no_owner",
   owner?: MobileAccountOwner, isCurrent: () => boolean = () => true) {
+  armLocationAdmissionGuard();
   if (!isCurrent()) return Promise.resolve();
   if (owner && getActiveMobileAccountSnapshot() && !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) {
     return Promise.resolve();
@@ -235,6 +241,7 @@ export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "o
 }
 
 export function locationCaptureSessionSignedOut() {
+  armLocationAdmissionGuard();
   // Hydrate at publication, before a later account activation can be queued.
   const owner = readActiveMobileAccount();
   const end = endLocationCaptureOwnership("signed_out");

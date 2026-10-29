@@ -939,8 +939,9 @@ async function startLocationLearningUnsafe(
   });
   if (!applied) return false;
   if (applied.error) {
-    // Inherited (or a burst's) options may still be in place: the guard retries and stops them 5 minutes on.
-    if (!heldGuardLease()) takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+    // Inherited (or a burst's) options may still be in place: the guard tries once more a second on and, failing, stops
+    // them at once; capture a current, consenting owner keeps is started again (Codex r27 on #619).
+    if (!heldGuardLease()) takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, 0, 1_000);
     throw applied.error;
   }
   await withAccuracyBurstState(async (state) => {
@@ -1983,6 +1984,9 @@ function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLeas
 /** Tests only: this process's burst memory (leases, pending settlements, timers) back to a fresh launch. */
 export function __resetAccuracyBurstForTests() {
   clearAccuracyBurstTimer();
+  if (stoppedCaptureRecoveryTimer) clearTimeout(stoppedCaptureRecoveryTimer);
+  stoppedCaptureRecoveryTimer = null;
+  stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
   if (accuracyBurstSettlementTimer) clearTimeout(accuracyBurstSettlementTimer);
   accuracyBurstSettlementTimer = null;
   accuracyBurstLease = null;
@@ -2113,6 +2117,7 @@ async function admissionGuardTick(lease: AccuracyBurstLease) {
     if (!await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false)) return "retry" as const;
     nativeLocationMode = "stopped";
     nativeOptionsOwner = null;
+    scheduleStoppedCaptureRecovery();
     return "ended" as const;
   });
   if (outcome === "retry") return true;
@@ -2171,6 +2176,7 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
       if (stopped) {
         nativeLocationMode = "stopped";
         nativeOptionsOwner = null;
+        scheduleStoppedCaptureRecovery();
       }
       return stopped;
     });
@@ -2217,8 +2223,8 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
       return { done: true, ended: endHeldLeaseAtNormal() };
     });
     if (!first.done) {
-      // The guard keeps trying, and stops updates 5 minutes on, whether or not a burst is recorded.
-      if (!heldGuardLease()) takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+      // The guard tries once more a second on and, failing, stops updates at once (recovered for a consenting owner).
+      if (!heldGuardLease()) takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, 0, 1_000);
       return false;
     }
     await settleAfterNormalCapture(first.ended);
@@ -2267,11 +2273,42 @@ const UNKNOWN_BURST = "";
  * this process has set them (Codex r13–r16 on #619). Called inside the native options queue.
  */
 function guardInheritedAccuracyOptions(capture: LocationCaptureSnapshot) {
-  if (!heldGuardLease() && nativeLocationMode === "unknown") takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+  if (!heldGuardLease() && nativeLocationMode === "unknown") takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, 0, 1_000);
 }
 
-/** How long a wake has to be admitted (and set the options) before its admission guard acts. */
-const WAKE_ADMISSION_GUARD_MS = 30_000;
+/**
+ * When the admission guard acts: at once, since lowering inherited options to normal capture is safe for any owner
+ * (it never starts or stops capture), so inherited best accuracy never outlives a wake's first second (Codex r27).
+ */
+const WAKE_ADMISSION_GUARD_MS = 1_000;
+
+/** How many times, 30 seconds apart, capture a guard stopped is tried again for a current, consenting owner. */
+const STOPPED_CAPTURE_RECOVERY_TRIES = 20;
+let stoppedCaptureRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+let stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
+
+/**
+ * A guard that had to stop updates (a restore or lowering that failed past its deadline) never leaves a consenting
+ * owner's capture stopped: every 30 seconds, for 10 minutes, the owner and consent are read again and, for a capture
+ * current and consenting, normal capture is started (`maybeEndAccuracyBurst`'s first-wake restore); no owner, or no
+ * consent, ends it, and so does any capture setting the options (Codex r27 on #619).
+ */
+function scheduleStoppedCaptureRecovery() {
+  if (stoppedCaptureRecoveryTimer || stoppedCaptureRecoveryLeft <= 0) return;
+  stoppedCaptureRecoveryLeft -= 1;
+  stoppedCaptureRecoveryTimer = setTimeout(() => {
+    stoppedCaptureRecoveryTimer = null;
+    if (nativeLocationMode !== "stopped") return;
+    void captureLocationOwnership().then(hydrateLegacyCapture).then(async (capture) => {
+      if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return true;
+      await maybeEndAccuracyBurst(capture);
+      return nativeLocationMode !== "stopped";
+    }).then((done) => {
+      if (done) stoppedCaptureRecoveryLeft = STOPPED_CAPTURE_RECOVERY_TRIES;
+      else scheduleStoppedCaptureRecovery();
+    }, () => scheduleStoppedCaptureRecovery());
+  }, ACCURACY_BURST_RETRY_MS);
+}
 
 /** The admission guard's lease: options this process never set, held from a wake's first line (Codex r19 on #619). */
 const isAdmissionGuard = (lease: AccuracyBurstLease | null) => Boolean(lease && lease.startedAt === UNKNOWN_BURST && lease.capture === ADMISSION_CAPTURE);
@@ -2288,7 +2325,7 @@ const heldGuardLease = () => isAdmissionGuard(accuracyBurstLease) ? null : accur
  */
 function guardWakeAdmission() {
   if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
-  takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, WAKE_ADMISSION_GUARD_MS);
+  takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, 0, WAKE_ADMISSION_GUARD_MS);
 }
 registerLocationAdmissionGuard(guardWakeAdmission);
 
@@ -2332,7 +2369,7 @@ async function protectInheritedAccuracyOptions() {
     }
     // Still unresolved: the admission guard keeps lowering (and stops only after its 5 minutes), so a consenting
     // owner's capture is never stopped for one failed try (Codex r25 on #619).
-    if (!accuracyBurstLease) takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, ACCURACY_BURST_RETRY_MS);
+    if (!accuracyBurstLease) takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, 0, WAKE_ADMISSION_GUARD_MS);
   }).catch(() => undefined);
   settlePendingAccuracyBursts();
 }

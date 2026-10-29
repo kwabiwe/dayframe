@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   clearAll: vi.fn(),
   stopExpo: vi.fn(),
   beforeInsert: null as (() => Promise<void>) | null,
-  failRead: null as ((args: unknown[], sql: string) => boolean) | null,
+  failRead: null as ((args: unknown[], sql: string) => boolean | Promise<void>) | null,
   motionStatus: "authorized",
   motionRecords: [] as Array<{ startMs: number; activity: "stationary" | "walking" | "automotive"; confidence: "high" }>,
   queryActivities: vi.fn()
@@ -100,7 +100,9 @@ function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
     getFirstAsync: async (sql: string, ...args: never[]) => {
-      if (h.failRead?.(args, sql)) throw new Error("read failed");
+      const hook = h.failRead?.(args, sql);
+      if (hook instanceof Promise) await hook;
+      else if (hook) throw new Error("read failed");
       return db.prepare(sql).get(...args) ?? null;
     },
     getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
@@ -1462,6 +1464,51 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       await vi.advanceTimersByTimeAsync(31_000);
       expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
       expect(h.stopExpo).not.toHaveBeenCalled();
+      held.resolve();
+      h.beforeInsert = null;
+      await syncing;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("an account binding held in its first read still has inherited options lowered (Codex r27 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
+    const held = deferred();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      h.failRead = (args) => args.includes("capture_binding_v1") ? held.promise : false;
+      const binding = runtime.bindLocationCaptureOwner(A).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      h.failRead = null;
+      held.resolve();
+      await binding;
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("capture a guard had to stop is started again for a current, consenting owner (Codex r27 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    start.mockRejectedValue(new Error("busy"));
+    const held = deferred();
+    h.nativeSignals = [visit("visit-held", Date.now() - 20 * 60_000, Date.now() - 60_000)];
+    h.beforeInsert = () => held.promise;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const syncing = runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.stopExpo).toHaveBeenCalledTimes(1); // inherited options it couldn't lower are stopped at once
+      start.mockReset();
+      start.mockImplementation(async () => { h.nativeCalls.push("expo:startLocationUpdates"); });
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
       held.resolve();
       h.beforeInsert = null;
       await syncing;

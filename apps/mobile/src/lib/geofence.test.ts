@@ -1779,5 +1779,17 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(state?.active).toBeUndefined();
     expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(1080);
   });
+
+  it("inherited options it can't restore are stopped at once, never given 5 more minutes (Codex r27 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    __resetAccuracyBurstForTests(); // relaunched a minute into the burst
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await maybeEndAccuracyBurst(await capture());
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
 });
 
