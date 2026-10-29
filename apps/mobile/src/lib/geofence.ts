@@ -207,10 +207,18 @@ const SAVED_PLACE_MIN_EFFECTIVE_RADIUS_METERS = 75;
 const SAVED_PLACE_LEARNING_SUPPRESSION_METERS = 150;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** The consent read an admitted wake needs; when it fails, inherited options are guarded first (Codex r16 on #619). */
+async function learningEnabledOrGuard(capture: LocationCaptureSnapshot) {
+  return getLocationLearningEnabled().catch((error) => {
+    guardInheritedAccuracyOptions(capture);
+    throw error;
+  });
+}
+
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   const captured = captureLocationOwnership();
   const capture = await hydrateLegacyCapture(await captured);
-  if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) {
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard(capture) || !isLocationCaptureSnapshotCurrent(capture)) {
     await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1);
     await stopUnownedLocationCapture(capture);
     return;
@@ -274,7 +282,7 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
     await stopUnownedLocationCapture(capture);
     return;
   }
-  const enabled = await getLocationLearningEnabled();
+  const enabled = await learningEnabledOrGuard(capture);
   if (!enabled) {
     await stopUnownedLocationCapture(capture);
     return;
@@ -1671,7 +1679,7 @@ export async function stopLocationLearningIfStarted() {
         if (started === null && await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null) === false) return;
         // Options this process never set (a relaunch may have inherited a burst's) are the guard's to keep stopping,
         // with no capture of its own, until a stop succeeds or a capture sets them (Codex r15 on #619).
-        if (!accuracyBurstLease && nativeLocationMode === "unknown") takeAccuracyBurstLease(STOPPED_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+        guardInheritedAccuracyOptions(STOPPED_CAPTURE);
         throw error;
       });
     }
@@ -1779,8 +1787,12 @@ export async function maybeStartAccuracyBurst(
 ) {
   const trigger = accuracyBurstTrigger(kind, source);
   const captureId = capture.binding?.id;
-  if (!captureId || !isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
-  if (!await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)) return false;
+  if (!captureId || !isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard(capture)) return false;
+  const running = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
+  // An unknown native status may still hide inherited options: they're put back (or guarded) before giving up
+  // (Codex r16 on #619).
+  if (running === null) await maybeEndAccuracyBurst(capture).catch(() => guardInheritedAccuracyOptions(capture));
+  if (!running) return false;
   await maybeEndAccuracyBurst(capture);
   // Ownership is checked inside the change, so a stale lifetime's callback never starts one (Codex r1 on #619).
   const started = await withAccuracyBurstState(async (state) => {
@@ -1807,10 +1819,22 @@ export async function maybeStartAccuracyBurst(
     reservingAccuracyBursts.delete(started.startedAt);
     return true;
   }).finally(() => reservingAccuracyBursts.delete(started.startedAt));
+  if (ok) {
+    // When best accuracy really started, kept with the burst so a relaunch counts its runtime from there; if this
+    // write fails, the recording's moment counts instead (more, never less) (Codex r16 on #619).
+    const nativeStartedAt = accuracyBurstLease?.startedAt === started.startedAt ? new Date(accuracyBurstLease.nativeStartAt).toISOString() : null;
+    if (nativeStartedAt) {
+      await withAccuracyBurstState(async (state) => ({
+        state: state?.active?.startedAt === started.startedAt && !state.active.nativeStartedAt
+          ? { ...state, active: { ...state.active, nativeStartedAt } } : state,
+        result: undefined
+      })).catch(() => undefined);
+    }
+  }
   if (!ok) {
-    // Best accuracy never started: this burst (and only this one) ends at once, having run for no time.
+    // Best accuracy never started: this burst (and only this one) ends at once, having run for no time (Codex r16 on #619).
     await withAccuracyBurstState(async (state) => ({
-      state: state?.active?.startedAt === started.startedAt && state.active.captureId === captureId ? endAccuracyBurst(state, new Date()) : state,
+      state: state?.active?.startedAt === started.startedAt && state.active.captureId === captureId ? endAccuracyBurst(state, new Date(), 0) : state,
       result: undefined
     }));
     return false;
@@ -1823,6 +1847,8 @@ type AccuracyBurstLease = {
   capture: LocationCaptureSnapshot; startedAt: string;
   /** Monotonic: when it was taken, and how long from then to the burst's end and its hard stop (Codex r5 on #619). */
   takenAt: number; endsInMs: number; stopInMs: number;
+  /** Wall clock when best accuracy started (the lease is taken with it): the day its runtime counts on. */
+  nativeStartAt: number;
   /** How long it had run when the lease was taken (from the wall clock, once). */
   priorMs: number;
   /** When normal capture (or none) was confirmed back: wall clock, and monotonic for its elapsed time. */
@@ -1892,7 +1918,7 @@ function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLeas
   // Kept until a retry sees the burst no longer stored: a write that fails never loses it (Codex r9 on #619).
   if (known) {
     confirmLeaseDone(known);
-    if (earlier == null || earlier >= known.nativeDoneAt!) return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known));
+    if (earlier == null || earlier >= known.nativeDoneAt!) return endAccuracyBurst(state, new Date(known.nativeDoneAt!), leaseElapsedMs(known), known.nativeStartAt);
   }
   if (earlier != null) return endAccuracyBurst(state, new Date(earlier));
   return endAccuracyBurst(state, new Date());
@@ -1969,7 +1995,7 @@ function takeAccuracyBurstLease(capture: LocationCaptureSnapshot, startedAt: str
     return;
   }
   accuracyBurstLease = {
-    capture, startedAt, takenAt: monotonicNow(),
+    capture, startedAt, takenAt: monotonicNow(), nativeStartAt: Date.now(),
     // Never longer than a burst's 3 minutes and its hard stop, whatever the clocks say (Codex r12 on #619).
     endsInMs: Math.min(ACCURACY_BURST_DURATION_MS, Math.max(0, endsInMs)),
     stopInMs: Math.min(ACCURACY_BURST_DURATION_MS + ACCURACY_BURST_FORCE_STOP_MS, Math.max(0, stopInMs)),
@@ -2129,6 +2155,15 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
 
 /** The guard's lease for options a relaunch may have inherited, with no burst of this process behind them. */
 const UNKNOWN_BURST = "";
+
+/**
+ * When this process hasn't set the options yet and holds no lease, the guard takes options a relaunch may have
+ * inherited: it restores normal capture while `capture` is current, and otherwise stops updates while no capture in
+ * this process has set them (Codex r13–r16 on #619).
+ */
+function guardInheritedAccuracyOptions(capture: LocationCaptureSnapshot) {
+  if (!accuracyBurstLease && nativeLocationMode === "unknown") takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);
+}
 /** No capture lifetime at all (a teardown's): never current, so a guard holding it only ever stops updates. */
 const STOPPED_CAPTURE: LocationCaptureSnapshot = { revision: -1, binding: null, context: null };
 

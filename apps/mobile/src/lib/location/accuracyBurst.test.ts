@@ -110,4 +110,16 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(shared[2]).toEqual({ day: "2026-11-03", arm: "on", count: 1, seconds: 180, byTrigger: { saved_exit: { count: 1, seconds: 180 } } });
     expect(accuracyBurstDiagnostics(state, day(30))).toHaveLength(14);
   });
+
+  it("counts a burst from when best accuracy started, on that day, never from its recording (Codex r16 on #619)", () => {
+    const reserved = startAccuracyBurst(trial, "departure", day(2, 23, 56));
+    const ended = endAccuracyBurst(reserved, day(3, 0, 4), 180_000, day(3, 0, 1).getTime());
+    expect(ended.days["2026-11-03"]).toMatchObject({ count: 0, seconds: 0 });
+    expect(ended.days["2026-11-04"]).toMatchObject({ count: 1, seconds: 180 });
+    // The recorded native start counts when no elapsed time is known (after a relaunch).
+    const stored = { ...reserved, active: { ...reserved.active!, nativeStartedAt: day(2, 23, 58).toISOString() } };
+    expect(endAccuracyBurst(stored, day(2, 23, 59, 10)).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 70 });
+    // One that never started natively runs for no time.
+    expect(endAccuracyBurst(reserved, day(2, 23, 58), 0).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 0 });
+  });
 });

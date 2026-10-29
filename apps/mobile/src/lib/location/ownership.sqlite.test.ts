@@ -1158,5 +1158,27 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
     await geofenceTask()({ data: { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } }, error: null });
     expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
   });
-});
 
+  it.each([["location", learningTask], ["geofence", geofenceTask]] as const)("a %s wake whose consent read fails still guards inherited options (Codex r16 on #619)", async (_name, task) => {
+    const start = await relaunchedDuringBurst();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+      const read = storage.getItem.getMockImplementation()!;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled")) throw new Error("locked");
+        return read(k);
+      });
+      const capture = await store.captureLocationOwnership();
+      const data = task === learningTask ? { locations: [fix(Date.now())] }
+        : { eventType: 2, region: { identifier: `${capture.binding!.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } };
+      await expect(task()({ data, error: null })).rejects.toThrow("locked");
+      storage.getItem.mockImplementation(read);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+});

@@ -1644,4 +1644,55 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(seconds).toBeGreaterThanOrEqual(180);
     expect(seconds).toBeLessThan(190);
   });
+
+  it("a slow reservation, then a relaunch and a teardown, counts only the time best accuracy ran (Codex r16 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(70_000);
+    __resetAccuracyBurstForTests();
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBe(70);
+  });
+
+  it("a burst whose native start fails after a slow reservation counts no time (Codex r16 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    // Normal capture is already in place (a refresh ran), so only the burst's own start is tried.
+    await maybeEndAccuracyBurst(await capture());
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    release!();
+    await expect(starting).resolves.toBe(false);
+    expect((await readAccuracyBurstState())?.days["2026-11-02"]).toMatchObject({ count: 1, seconds: 0 });
+  });
+
+  it("a Visit whose native status can't be read still puts inherited options back (Codex r16 on #619)", async () => {
+    __resetAccuracyBurstForTests();
+    locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(maybeStartAccuracyBurst("departure", await capture(), "visit")).resolves.toBe(false);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
 });

@@ -49,6 +49,11 @@ export type AccuracyBurstState = {
      * past the day's remaining best-accuracy allowance (Codex r3 on #619).
      */
     stopBy?: string;
+    /**
+     * When best accuracy really started (the burst is recorded first, as `startedAt`): its runtime and its day are
+     * counted from here, never from the recording (Codex r16 on #619). Absent until written; then `startedAt`.
+     */
+    nativeStartedAt?: string;
   };
   lastEndedAt?: string;
   /** Bursts by local day: how many started, and their seconds at best accuracy. */
@@ -174,17 +179,33 @@ function dayParts(fromMs: number, toMs: number, offsetMinutes: number) {
 
 /**
  * Ends the running burst, once normal capture is back (on time, late, or early: sign-out, location off). Its
- * seconds at best accuracy are counted as they really ran, each local day its own part, and the cooldown starts
- * from now (Codex r1 on #619).
+ * seconds at best accuracy are counted as they really ran, from when best accuracy started (`nativeStartMs`, else
+ * the recorded `nativeStartedAt`, else its recording), each local day its own part; a burst that best accuracy
+ * started on a later day than it was recorded counts on that day. The cooldown starts from now (Codex r1, r16 on #619).
  */
-export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs?: number): AccuracyBurstState {
+export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs?: number, nativeStartMs?: number): AccuracyBurstState {
   if (!state.active) return state;
-  const started = Date.parse(state.active.startedAt);
+  const recorded = Date.parse(state.active.startedAt);
+  const storedNative = state.active.nativeStartedAt ? Date.parse(state.active.nativeStartedAt) : NaN;
+  const started = Math.max(recorded, nativeStartMs != null && Number.isFinite(nativeStartMs) ? nativeStartMs
+    : Number.isFinite(storedNative) ? storedNative : recorded);
   // Elapsed time measured while it ran wins over wall-clock timestamps, which a clock change moves (Codex r7 on #619).
   const ended = elapsedMs != null && Number.isFinite(elapsedMs) ? started + Math.max(0, elapsedMs) : Math.max(started, now.getTime());
   const trigger = state.active.trigger;
   const days = { ...state.days };
-  const offsetMinutes = state.active.offsetMinutes ?? new Date(started).getTimezoneOffset();
+  const offsetMinutes = state.active.offsetMinutes ?? new Date(recorded).getTimezoneOffset();
+  // The burst's count moves with it to the day best accuracy started, when that's a later day than its recording.
+  const recordedDay = dayKeyAtOffset(recorded, offsetMinutes);
+  const nativeDay = dayKeyAtOffset(started, offsetMinutes);
+  if (nativeDay !== recordedDay && days[recordedDay]) {
+    const moveCount = (day: AccuracyBurstDay, delta: number): AccuracyBurstDay => ({
+      ...day, count: Math.max(0, day.count + delta),
+      ...(trigger ? { byTrigger: { ...day.byTrigger, [trigger]: {
+        count: Math.max(0, (day.byTrigger?.[trigger]?.count ?? 0) + delta), seconds: day.byTrigger?.[trigger]?.seconds ?? 0 } } } : {})
+    });
+    days[recordedDay] = moveCount(days[recordedDay], -1);
+    days[nativeDay] = moveCount(days[nativeDay] ?? { count: 0, seconds: 0 }, 1);
+  }
   for (const part of dayParts(started, ended, offsetMinutes)) {
     const day = days[part.key] ?? { count: 0, seconds: 0 };
     const seconds = Math.round(part.seconds);
