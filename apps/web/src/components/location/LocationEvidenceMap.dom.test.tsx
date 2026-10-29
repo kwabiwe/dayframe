@@ -1,49 +1,61 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 
 const mocks = vi.hoisted(() => ({
   clientFetch: vi.fn(),
+  reducedMotion: false,
+  /** false: the test fires the first view's `load` itself, after its tile requests and errors. */
+  autoLoad: true,
   maps: [] as Array<{
     options: Record<string, unknown>;
-    handlers: Record<string, Array<() => void>>;
+    handlers: Record<string, Array<(event?: unknown) => void>>;
     addLayer: ReturnType<typeof vi.fn>;
+    addSource: ReturnType<typeof vi.fn>;
+    fitBounds: ReturnType<typeof vi.fn>;
+    sources: Map<string, { setData: ReturnType<typeof vi.fn> }>;
     remove: ReturnType<typeof vi.fn>;
+    emit: (event: string, payload?: unknown) => void;
   }>
 }));
 
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.clientFetch }));
+vi.mock("@/lib/blocks-motion", () => ({ prefersReducedMotion: () => mocks.reducedMotion }));
 
 vi.mock("maplibre-gl", () => {
   class FakeMap {
     options: Record<string, unknown>;
-    handlers: Record<string, Array<() => void>> = {};
+    handlers: Record<string, Array<(event?: unknown) => void>> = {};
+    sources = new Map<string, { setData: ReturnType<typeof vi.fn> }>();
     addLayer = vi.fn();
-    addSource = vi.fn();
+    addSource = vi.fn((id: string) => { this.sources.set(id, { setData: vi.fn() }); });
     addControl = vi.fn();
     fitBounds = vi.fn();
-    getSource = vi.fn(() => ({}));
+    getSource = vi.fn((id: string) => this.sources.get(id));
+    isStyleLoaded = vi.fn(() => false);
     remove = vi.fn();
 
     constructor(options: Record<string, unknown>) {
       this.options = options;
       mocks.maps.push(this);
+      // The style loads first, then the first view's tiles (MapLibre's own order).
+      queueMicrotask(() => {
+        this.emit("style.load");
+        if (mocks.autoLoad) queueMicrotask(() => this.emit("load"));
+      });
     }
 
-    on(event: string, handler: () => void) {
+    on(event: string, handler: (event?: unknown) => void) {
       this.handlers[event] ??= [];
       this.handlers[event].push(handler);
-      if (event === "load") queueMicrotask(handler);
       return this;
     }
-  }
 
-  class FakeBounds {
-    coordinates = 0;
-    extend() { this.coordinates += 1; return this; }
-    isEmpty() { return this.coordinates === 0; }
+    emit(event: string, payload?: unknown) {
+      for (const handler of this.handlers[event] ?? []) handler(payload);
+    }
   }
 
   class FakePopup {
@@ -54,13 +66,13 @@ vi.mock("maplibre-gl", () => {
     setLngLat() { return this; }
     setPopup() { return this; }
     addTo() { return this; }
+    remove() { return this; }
   }
 
   class FakeNavigationControl {}
 
   const maplibreModule = {
     Map: FakeMap,
-    LngLatBounds: FakeBounds,
     Marker: FakeMarker,
     NavigationControl: FakeNavigationControl,
     Popup: FakePopup
@@ -68,12 +80,15 @@ vi.mock("maplibre-gl", () => {
   return { ...maplibreModule, default: maplibreModule };
 });
 
-const { LocationEvidenceMap } = await import("./LocationEvidenceMap");
+const { LocationEvidenceMap, resetLocationMapStyleCache } = await import("./LocationEvidenceMap");
 
 describe("LocationEvidenceMap", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.maps.length = 0;
+    mocks.reducedMotion = false;
+    mocks.autoLoad = true;
+    resetLocationMapStyleCache();
   });
   afterEach(() => cleanup());
 
@@ -96,22 +111,116 @@ describe("LocationEvidenceMap", () => {
     expect(mocks.maps[0]?.remove).toHaveBeenCalledOnce();
   });
 
-  it("uses the authenticated style response and reports a later provider failure without hiding evidence", async () => {
-    mocks.clientFetch.mockResolvedValue(new Response(JSON.stringify({
-      version: 8,
-      sources: {
-        base: { type: "raster", tiles: ["https://dayframe.test/api/map-tiles/{z}/{x}/{y}"] }
-      },
-      layers: [{ id: "base", type: "raster", source: "base" }]
-    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  it("uses the authenticated style response and ignores an isolated tile error (glitch fix 4)", async () => {
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
     render(<LocationEvidenceMap evidence={evidence()} />);
 
     await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    const map = mocks.maps[0]!;
+    const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
+    for (let tile = 0; tile < 6; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+    map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") });
+    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    act(() => map.emit("load"));
     await waitFor(() => expect(screen.queryByText("Loading map background…")).toBeNull());
-    for (const handler of mocks.maps[0]?.handlers.error ?? []) handler();
 
-    expect(await screen.findByText("Map background could not load. Evidence remains visible.")).not.toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Endpoint estimate")).not.toBeNull();
+  });
+
+  it("shows the soft note when most of the first view's tiles fail, never a hard error (glitch fix 4)", async () => {
+    mocks.autoLoad = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    render(<LocationEvidenceMap evidence={evidence()} />);
+
+    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    const map = mocks.maps[0]!;
+    const transform = map.options.transformRequest as (url: string, type?: string) => unknown;
+    for (let tile = 0; tile < 4; tile += 1) transform(`https://dayframe.test/api/map-tiles/15/${tile}/1`, "Tile");
+    for (let tile = 0; tile < 3; tile += 1) map.emit("error", { sourceId: "base", tile: {}, error: new Error("502") });
+    // An evidence source's error is never a tile failure.
+    map.emit("error", { sourceId: "route", error: new Error("bad data") });
+    act(() => map.emit("load"));
+
+    const note = await screen.findByText("Some of the map background didn’t load. Evidence remains visible.");
+    expect(note.className).toContain("is-degraded");
+    expect(note.className).not.toContain("is-error");
+    expect(screen.getByText("Endpoint estimate")).not.toBeNull();
+  });
+
+  it("shows the soft note when the style fails, and asks again next time", async () => {
+    mocks.clientFetch.mockResolvedValue(new Response("{}", { status: 503 }));
+    const first = render(<LocationEvidenceMap evidence={evidence()} />);
+    expect(await screen.findByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+    first.unmount();
+    render(<LocationEvidenceMap evidence={evidence()} />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(2));
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("fetches the style once per page session (glitch fix 1)", async () => {
+    mocks.clientFetch.mockImplementation(async () => styleResponse());
+    const first = render(<LocationEvidenceMap evidence={evidence()} />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    first.unmount();
+    render(<LocationEvidenceMap evidence={evidence({ segment: { ...evidence().segment, id: "segment-2" } })} />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(2));
+
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.maps[1]?.options.style).toMatchObject({ version: 8, layers: [{ id: "base" }] });
+    // Each map has its own copy of the cached style.
+    expect(mocks.maps[1]?.options.style).not.toBe(mocks.maps[0]?.options.style);
+  });
+
+  it("opens at the evidence's bounds, never at a zoom-15 centre first (glitch fix 2)", async () => {
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    render(<LocationEvidenceMap evidence={evidence()} />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    const options = mocks.maps[0]!.options;
+
+    expect(options.bounds).toEqual([[0.1, 51.5], [0.2, 51.6]]);
+    expect(options.fitBoundsOptions).toEqual({ padding: 48, maxZoom: 16 });
+    expect(options.zoom).toBeUndefined();
+    expect(options.center).toBeUndefined();
+    // The layers are added as soon as the style loads, and nothing refits after the tiles.
+    await waitFor(() => expect(mocks.maps[0]?.addLayer).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("Loading map background…")).toBeNull());
+    expect(mocks.maps[0]?.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("keeps one map across re-renders with equal content, and updates its sources in place when content changes (glitch fix 1)", async () => {
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    const view = render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    await waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
+    const map = mocks.maps[0]!;
+    const sourcesAdded = map.addSource.mock.calls.length;
+
+    // A new object with the same content (the dialog's re-render, a timer tick) changes nothing.
+    view.rerender(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    view.rerender(<LocationEvidenceMap caption="Based on 2 readings" evidence={evidence()} visitOnly />);
+    expect(mocks.maps).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.sources.get("straight-line-fallback")?.setData).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+
+    // New content: the same map, its data set in place and the bounds eased to it.
+    const moved = evidence({ map: { ...evidence().map, straightLineFallback: { type: "LineString", coordinates: [[0.3, 51.7], [0.4, 51.8]] } } });
+    view.rerender(<LocationEvidenceMap evidence={moved} visitOnly />);
+    expect(mocks.maps).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.addSource).toHaveBeenCalledTimes(sourcesAdded);
+    expect(map.sources.get("straight-line-fallback")?.setData).toHaveBeenCalledWith(moved.map.straightLineFallback);
+    expect(map.fitBounds).toHaveBeenCalledWith([[0.3, 51.7], [0.4, 51.8]], expect.objectContaining({ duration: 300, animate: true }));
+  });
+
+  it("jumps to new bounds at once under Reduce Motion", async () => {
+    mocks.reducedMotion = true;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    const view = render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    await waitFor(() => expect(mocks.maps[0]?.addSource).toHaveBeenCalled());
+    view.rerender(<LocationEvidenceMap evidence={evidence({ map: { ...evidence().map, straightLineFallback: { type: "LineString", coordinates: [[0.3, 51.7], [0.4, 51.8]] } } })} visitOnly />);
+    expect(mocks.maps[0]?.fitBounds).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ duration: 0, animate: false }));
   });
 
   it("draws only the visit's area on the sheets' map, never its readings, rejected readings, gaps, saved places or anchors (Codex r3 on #620)", async () => {
@@ -151,6 +260,16 @@ describe("LocationEvidenceMap", () => {
     expect(mocks.maps).toHaveLength(0);
   });
 });
+
+function styleResponse() {
+  return new Response(JSON.stringify({
+    version: 8,
+    sources: {
+      base: { type: "raster", tiles: ["https://dayframe.test/api/map-tiles/{z}/{x}/{y}"] }
+    },
+    layers: [{ id: "base", type: "raster", source: "base" }]
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
 
 function evidence(overrides: Partial<LocationReviewEvidenceDto> = {}): LocationReviewEvidenceDto {
   return {

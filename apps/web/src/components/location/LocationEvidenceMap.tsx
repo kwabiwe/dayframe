@@ -1,13 +1,14 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MapLibreMap,
   type StyleSpecification
 } from "maplibre-gl";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
+import { prefersReducedMotion } from "@/lib/blocks-motion";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   hasLocationMapGeometry,
@@ -16,7 +17,37 @@ import {
   locationEvidenceModeLabel
 } from "@/lib/location/location-evidence-presentation";
 
-type BaseMapState = "loading" | "ready" | "unavailable" | "error";
+/**
+ * The base map's state. "degraded" is the soft note for a style that failed or most of the first view's tiles
+ * failing; an isolated tile error is ignored (MapLibre asks for it again on the next move).
+ */
+type BaseMapState = "loading" | "ready" | "unavailable" | "degraded";
+
+const PROVIDER_STATE_CLASS: Record<BaseMapState, string> = {
+  loading: "is-loading",
+  ready: "is-ready",
+  unavailable: "is-unavailable",
+  degraded: "is-degraded"
+};
+
+const BOUNDS_PADDING = 48;
+const BOUNDS_MAX_ZOOM = 16;
+/** The first load's window for counting tile failures, if MapLibre's `load` never comes. */
+const FIRST_LOAD_WINDOW_MS = 10_000;
+/** A bounds change in place (a leg swap, new evidence): the brand guide's panel range, ease-out (motion.md). */
+const BOUNDS_EASE_MS = 300;
+const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+
+type EvidenceColours = {
+  accent: string;
+  accentSoft: string;
+  danger: string;
+  surfaceRaised: string;
+  warning: string;
+};
+
+/** The evidence layers' own sources: errors on them are never base-map tile errors. */
+const EVIDENCE_SOURCE_IDS = new Set(["route", "straight-line-fallback", "samples", "rejected-samples", "stay-radius", "gaps"]);
 
 export function LocationEvidenceMap({
   caption: sheetCaption,
@@ -42,80 +73,124 @@ export function LocationEvidenceMap({
   const [baseMapState, setBaseMapState] = useState<BaseMapState>(
     hasGeometry ? "loading" : "unavailable"
   );
+  // One MapLibre instance per mount and item (glitch fix 1): a re-render with the same content changes nothing,
+  // and new content (or a trip's leg) is drawn into the same map in place.
+  const identity = `${evidence.segment.kind}:${evidence.segment.id}`;
+  const contentKey = useMemo(() => evidenceContentKey(evidence, visitOnly), [evidence, visitOnly]);
+  const latest = useRef({ evidence, visitOnly, contentKey, onSelectPoint });
+  useEffect(() => {
+    latest.current = { evidence, visitOnly, contentKey, onSelectPoint };
+  });
+  /** What the map draws now: its content key, colours and markers; null until its style has loaded. */
+  const drawn = useRef<{ key: string; colours: EvidenceColours; markers: maplibregl.Marker[] } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || !hasGeometry) return undefined;
     const container = containerRef.current;
-    const abortController = new AbortController();
     let cancelled = false;
     let map: MapLibreMap | null = null;
+    let windowTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function initialize() {
       const computedStyle = getComputedStyle(container);
       const token = (name: string) => computedStyle.getPropertyValue(name).trim();
       const surfaceInset = token("--surface-inset");
-      const surfaceRaised = token("--surface-raised");
-      const accent = token("--accent");
-      const accentSoft = token("--accent-soft");
-      const warning = token("--warning");
-      const danger = token("--danger");
+      const colours: EvidenceColours = {
+        accent: token("--accent"),
+        accentSoft: token("--accent-soft"),
+        danger: token("--danger"),
+        surfaceRaised: token("--surface-raised"),
+        warning: token("--warning")
+      };
       const customStyleUrl = process.env.NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL?.trim();
-      const baseMap = await resolveBaseMapStyle(customStyleUrl, surfaceInset, abortController.signal);
+      const baseMap = await resolveBaseMapStyle(customStyleUrl, surfaceInset);
       if (cancelled) return;
       setBaseMapState(baseMap.available ? "loading" : "unavailable");
 
-      const points = evidence.map.acceptedSamples.map((sample) => sample.point.coordinates);
-      const centre = evidence.map.centre?.coordinates ??
-        points[0] ??
-        evidence.map.straightLineFallback?.coordinates[0] ??
-        evidence.map.nearbySavedPlaces[0]?.point.coordinates ??
-        [-0.1278, 51.5074];
+      const { evidence: firstEvidence, visitOnly: firstVisitOnly } = latest.current;
+      // The first tiles load at the fitted view (glitch fix 2): no centre-and-zoom-15 first, then a jump.
+      const bounds = evidenceBounds(firstEvidence, firstVisitOnly);
+      let tileRequests = 0;
+      let tileErrors = 0;
+      let firstLoadWindowOpen = true;
       map = new maplibregl.Map({
         container,
-        center: centre,
-        zoom: points.length ? 15 : 11,
+        ...(bounds
+          ? { bounds, fitBoundsOptions: { padding: BOUNDS_PADDING, maxZoom: BOUNDS_MAX_ZOOM } }
+          : { center: fallbackCentre(firstEvidence), zoom: 11 }),
         attributionControl: baseMap.available ? { compact: true } : false,
         style: baseMap.style,
-        transformRequest: (url) => ({
-          url,
-          ...(url.startsWith(window.location.origin) ? { credentials: "same-origin" as const } : {})
-        })
+        transformRequest: (url, resourceType) => {
+          if (firstLoadWindowOpen && resourceType === "Tile") tileRequests += 1;
+          return {
+            url,
+            ...(url.startsWith(window.location.origin) ? { credentials: "same-origin" as const } : {})
+          };
+        }
       });
-      mapRef.current = map;
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      map.on("error", () => {
-        if (!cancelled && baseMap.available) setBaseMapState("error");
+      const created = map;
+      mapRef.current = created;
+      created.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is.
+      const closeFirstLoadWindow = () => {
+        if (!firstLoadWindowOpen) return;
+        firstLoadWindowOpen = false;
+        if (windowTimer) clearTimeout(windowTimer);
+        windowTimer = null;
+        if (cancelled || !baseMap.available) return;
+        setBaseMapState(tileRequests > 0 && tileErrors * 2 > tileRequests ? "degraded" : "ready");
+      };
+      windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
+      created.on("error", (event) => {
+        if (firstLoadWindowOpen && isBaseTileError(event as unknown as { sourceId?: string; tile?: unknown })) tileErrors += 1;
       });
-      map.on("load", () => {
-        if (cancelled || !map) return;
-        if (baseMap.available) setBaseMapState("ready");
-        addEvidenceLayers(map, evidence, visitOnly, {
-          accent,
-          accentSoft,
-          danger,
-          surfaceRaised,
-          warning
-        });
-        fitEvidenceBounds(map, evidence, points, visitOnly);
-      });
-      if (onSelectPoint) {
-        map.on("click", (event) => onSelectPoint({
-          latitude: event.lngLat.lat,
-          longitude: event.lngLat.lng
-        }));
-      }
+      created.on("load", closeFirstLoadWindow);
+      // The evidence is drawn as soon as the style is there, not after the tiles.
+      const drawFirst = () => {
+        if (cancelled || drawn.current) return;
+        const current = latest.current;
+        drawn.current = { key: current.contentKey, colours, markers: [] };
+        drawEvidence(created, current.evidence, current.visitOnly, colours, drawn.current.markers);
+      };
+      created.on("style.load", drawFirst);
+      if (created.isStyleLoaded?.()) drawFirst();
+      created.on("click", (event) => latest.current.onSelectPoint?.({
+        latitude: event.lngLat.lat,
+        longitude: event.lngLat.lng
+      }));
     }
 
     void initialize().catch(() => {
-      if (!cancelled && !abortController.signal.aborted) setBaseMapState("error");
+      if (!cancelled) setBaseMapState("unavailable");
     });
     return () => {
       cancelled = true;
-      abortController.abort();
+      if (windowTimer) clearTimeout(windowTimer);
       mapRef.current = null;
+      drawn.current = null;
       map?.remove();
     };
-  }, [evidence, hasGeometry, onSelectPoint, visitOnly]);
+  }, [hasGeometry, identity]);
+
+  // New content in the same map (a leg swap, a refresh): its sources' data and fitted bounds change in place.
+  useEffect(() => {
+    const map = mapRef.current;
+    const current = drawn.current;
+    if (!map || !current || current.key === contentKey) return;
+    current.key = contentKey;
+    drawEvidence(map, evidence, visitOnly, current.colours, current.markers);
+    const bounds = evidenceBounds(evidence, visitOnly);
+    if (bounds) {
+      const reduceMotion = prefersReducedMotion();
+      map.fitBounds(bounds, {
+        padding: BOUNDS_PADDING,
+        maxZoom: BOUNDS_MAX_ZOOM,
+        duration: reduceMotion ? 0 : BOUNDS_EASE_MS,
+        easing: easeOutCubic,
+        animate: !reduceMotion
+      });
+    }
+  }, [contentKey, evidence, visitOnly]);
 
   return (
     <div className="location-evidence">
@@ -141,13 +216,13 @@ export function LocationEvidenceMap({
         {hasGeometry && baseMapState !== "ready" ? (
           <p
             aria-live="polite"
-            className={`location-evidence-provider-state is-${baseMapState}`}
+            className={`location-evidence-provider-state ${PROVIDER_STATE_CLASS[baseMapState]}`}
             role="status"
           >
             {baseMapState === "loading"
               ? "Loading map background…"
-              : baseMapState === "error"
-                ? "Map background could not load. Evidence remains visible."
+              : baseMapState === "degraded"
+                ? "Some of the map background didn’t load. Evidence remains visible."
                 : "Map background is unavailable. Evidence remains visible."}
           </p>
         ) : null}
@@ -162,20 +237,42 @@ export function LocationEvidenceMap({
   );
 }
 
+/** A cheap content key: what the map draws and fits, so equal content in a new object changes nothing. */
+function evidenceContentKey(evidence: LocationReviewEvidenceDto, visitOnly: boolean) {
+  return JSON.stringify([visitOnly, evidence.map]);
+}
+
+function isBaseTileError(event: { sourceId?: string; tile?: unknown }) {
+  if (event.sourceId && EVIDENCE_SOURCE_IDS.has(event.sourceId)) return false;
+  return Boolean(event.tile) || Boolean(event.sourceId);
+}
+
+/**
+ * The base map's style, fetched once per page session (glitch fix 1): every dialog after the first opens with it
+ * at once. A failure is not kept, so the next map asks again.
+ */
+let cachedBaseMapStyle: Promise<StyleSpecification | null> | null = null;
+
+/** Tests only: forget the session's style. */
+export function resetLocationMapStyleCache() {
+  cachedBaseMapStyle = null;
+}
+
 async function resolveBaseMapStyle(
   customStyleUrl: string | undefined,
-  surfaceInset: string,
-  signal: AbortSignal
+  surfaceInset: string
 ): Promise<{ style: StyleSpecification | string; available: boolean }> {
   if (customStyleUrl) return { style: customStyleUrl, available: true };
-  try {
-    const response = await clientFetch("/api/map-style", { cache: "no-store", signal });
-    if (!response.ok) return { style: tileFreeStyle(surfaceInset), available: false };
-    return { style: await response.json() as StyleSpecification, available: true };
-  } catch (error) {
-    if (signal.aborted) throw error;
+  const request = cachedBaseMapStyle ?? (cachedBaseMapStyle = clientFetch("/api/map-style", { cache: "no-store" })
+    .then(async (response) => response.ok ? await response.json() as StyleSpecification : null)
+    .catch(() => null));
+  const style = await request;
+  if (!style) {
+    if (cachedBaseMapStyle === request) cachedBaseMapStyle = null;
     return { style: tileFreeStyle(surfaceInset), available: false };
   }
+  // Each map gets its own copy: MapLibre may annotate the style it is given.
+  return { style: structuredClone(style), available: true };
 }
 
 function tileFreeStyle(surfaceInset: string): StyleSpecification {
@@ -190,55 +287,52 @@ function tileFreeStyle(surfaceInset: string): StyleSpecification {
   };
 }
 
-function addEvidenceLayers(
+/**
+ * Draws the evidence, or redraws it in place: each source's data is set when it exists, added with its layer when
+ * it is first needed, and emptied when it no longer applies; the markers are made again.
+ */
+function drawEvidence(
   map: MapLibreMap,
   evidence: LocationReviewEvidenceDto,
   visitOnly: boolean,
-  colours: {
-    accent: string;
-    accentSoft: string;
-    danger: string;
-    surfaceRaised: string;
-    warning: string;
-  }
+  colours: EvidenceColours,
+  markers: maplibregl.Marker[]
 ) {
-  addGeoJson(map, "route", evidence.map.route ?? emptyLine(), {
+  upsertGeoJson(map, "route", evidence.map.route ?? emptyLine(), [{
     id: "route-line",
     type: "line",
     paint: { "line-color": colours.accent, "line-width": 4, "line-opacity": 0.9 }
-  });
-  addGeoJson(map, "straight-line-fallback", evidence.map.straightLineFallback ?? emptyLine(), {
+  }]);
+  upsertGeoJson(map, "straight-line-fallback", evidence.map.straightLineFallback ?? emptyLine(), [{
     id: "straight-line-fallback-line",
     type: "line",
     paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2], "line-opacity": 0.8 }
-  });
+  }]);
   // The sheets' map shows only the visit's area or the trip's route, never its readings (Codex r3 on #620).
-  if (!visitOnly) {
-    addGeoJson(map, "samples", {
-      type: "FeatureCollection",
-      features: evidence.map.acceptedSamples.map((sample) => ({
-        type: "Feature",
-        properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
-        geometry: sample.point
-      }))
-    }, {
-      id: "sample-points",
-      type: "circle",
-      paint: {
-        "circle-color": colours.accent,
-        "circle-opacity": 0.55,
-        "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
-        "circle-stroke-color": colours.surfaceRaised,
-        "circle-stroke-width": 1
-      }
-    });
-  }
-  if (!visitOnly) addGeoJson(map, "rejected-samples", {
+  upsertGeoJson(map, "samples", visitOnly ? null : {
+    type: "FeatureCollection",
+    features: evidence.map.acceptedSamples.map((sample) => ({
+      type: "Feature",
+      properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
+      geometry: sample.point
+    }))
+  }, [{
+    id: "sample-points",
+    type: "circle",
+    paint: {
+      "circle-color": colours.accent,
+      "circle-opacity": 0.55,
+      "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
+      "circle-stroke-color": colours.surfaceRaised,
+      "circle-stroke-width": 1
+    }
+  }]);
+  upsertGeoJson(map, "rejected-samples", visitOnly ? null : {
     type: "FeatureCollection",
     features: evidence.map.rejectedSamples.flatMap((sample) => sample.point
       ? [{ type: "Feature" as const, properties: {}, geometry: sample.point }]
       : [])
-  }, {
+  }, [{
     id: "rejected-sample-points",
     type: "circle",
     paint: {
@@ -248,39 +342,35 @@ function addEvidenceLayers(
       "circle-stroke-color": colours.danger,
       "circle-stroke-width": 2
     }
-  });
-  if (evidence.map.centre && evidence.map.stayRadiusMeters) {
-    addGeoJson(map, "stay-radius", circleFeature(evidence.map.centre.coordinates, evidence.map.stayRadiusMeters), {
-      id: "stay-radius-fill",
-      type: "fill",
-      paint: { "fill-color": colours.accentSoft, "fill-opacity": 0.55 }
-    });
-    map.addLayer({
-      id: "stay-radius-line",
-      source: "stay-radius",
-      type: "line",
-      paint: { "line-color": colours.accent, "line-width": 2 }
-    });
-  }
-  if (!visitOnly && evidence.map.gaps.length) {
-    addGeoJson(map, "gaps", {
-      type: "FeatureCollection",
-      features: evidence.map.gaps.flatMap((gap) => gap.fromPoint && gap.toPoint
-        ? [{
-            type: "Feature" as const,
-            properties: {},
-            geometry: {
-              type: "LineString" as const,
-              coordinates: [gap.fromPoint.coordinates, gap.toPoint.coordinates]
-            }
-          }]
-        : [])
-    }, {
-      id: "gap-lines",
-      type: "line",
-      paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2] }
-    });
-  }
+  }]);
+  upsertGeoJson(map, "stay-radius", evidence.map.centre && evidence.map.stayRadiusMeters
+    ? circleFeature(evidence.map.centre.coordinates, evidence.map.stayRadiusMeters) : null, [{
+    id: "stay-radius-fill",
+    type: "fill",
+    paint: { "fill-color": colours.accentSoft, "fill-opacity": 0.55 }
+  }, {
+    id: "stay-radius-line",
+    type: "line",
+    paint: { "line-color": colours.accent, "line-width": 2 }
+  }]);
+  upsertGeoJson(map, "gaps", !visitOnly && evidence.map.gaps.length ? {
+    type: "FeatureCollection",
+    features: evidence.map.gaps.flatMap((gap) => gap.fromPoint && gap.toPoint
+      ? [{
+          type: "Feature" as const,
+          properties: {},
+          geometry: {
+            type: "LineString" as const,
+            coordinates: [gap.fromPoint.coordinates, gap.toPoint.coordinates]
+          }
+        }]
+      : [])
+  } : null, [{
+    id: "gap-lines",
+    type: "line",
+    paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2] }
+  }]);
+  for (const marker of markers.splice(0)) marker.remove();
   for (const place of visitOnly ? [] : evidence.map.nearbySavedPlaces) {
     const marker = document.createElement("button");
     marker.type = "button";
@@ -289,10 +379,10 @@ function addEvidenceLayers(
     const markerDot = document.createElement("span");
     markerDot.className = "block h-5 w-5 rounded-full border-2 border-white bg-[var(--accent)] shadow-lg";
     marker.append(markerDot);
-    new maplibregl.Marker({ element: marker })
+    markers.push(new maplibregl.Marker({ element: marker })
       .setLngLat(place.point.coordinates)
       .setPopup(new maplibregl.Popup({ offset: 12 }).setText(`${place.name} · ${place.distanceMeters} m`))
-      .addTo(map);
+      .addTo(map));
   }
   for (const anchor of visitOnly ? [] : evidence.map.anchors) {
     if (!anchor.point) continue;
@@ -300,40 +390,60 @@ function addEvidenceLayers(
     marker.className = "h-3 w-3 rounded-full border-2 border-white bg-[var(--warning)] shadow-lg";
     marker.ariaLabel = anchor.label;
     marker.setAttribute("role", "img");
-    new maplibregl.Marker({ element: marker })
+    markers.push(new maplibregl.Marker({ element: marker })
       .setLngLat(anchor.point.coordinates)
       .setPopup(new maplibregl.Popup({ offset: 10 }).setText(anchor.label))
-      .addTo(map);
+      .addTo(map));
   }
 }
 
-function fitEvidenceBounds(
-  map: MapLibreMap,
+/** The evidence's extent as [[west, south], [east, north]], or null when it has no coordinates. */
+export function evidenceBounds(
   evidence: LocationReviewEvidenceDto,
-  points: [number, number][],
   visitOnly = false
-) {
-  const bounds = new maplibregl.LngLatBounds();
-  for (const coordinate of [
-    ...points,
+): [[number, number], [number, number]] | null {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const [longitude, latitude] of [
+    ...evidence.map.acceptedSamples.map((sample) => sample.point.coordinates),
     ...(visitOnly ? [] : evidence.map.nearbySavedPlaces.map((place) => place.point.coordinates)),
     ...(visitOnly ? [] : evidence.map.rejectedSamples.flatMap((sample) => sample.point ? [sample.point.coordinates] : [])),
     ...(evidence.map.route?.coordinates ?? []),
     ...(evidence.map.straightLineFallback?.coordinates ?? []),
     ...(evidence.map.centre ? [evidence.map.centre.coordinates] : [])
-  ]) bounds.extend(coordinate);
-  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 0 });
+  ]) {
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
+    west = Math.min(west, longitude);
+    east = Math.max(east, longitude);
+    south = Math.min(south, latitude);
+    north = Math.max(north, latitude);
+  }
+  return Number.isFinite(west) ? [[west, south], [east, north]] : null;
 }
 
-function addGeoJson(
+function fallbackCentre(evidence: LocationReviewEvidenceDto): [number, number] {
+  return evidence.map.anchors.find((anchor) => anchor.point)?.point?.coordinates ??
+    evidence.map.nearbySavedPlaces[0]?.point.coordinates ??
+    [-0.1278, 51.5074];
+}
+
+/** A source and its layers: data set in place when it exists, added when first needed; null empties it. */
+function upsertGeoJson(
   map: MapLibreMap,
   sourceId: string,
-  data: GeoJSON.GeoJSON,
-  layer: Omit<maplibregl.LayerSpecification, "source">
+  data: GeoJSON.GeoJSON | null,
+  layers: Array<Omit<maplibregl.LayerSpecification, "source">>
 ) {
+  const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+  if (source) {
+    source.setData(data ?? emptyLine());
+    return;
+  }
+  if (!data) return;
   map.addSource(sourceId, { type: "geojson", data });
-  map.addLayer({ ...layer, source: sourceId } as maplibregl.LayerSpecification);
-  void (map.getSource(sourceId) as GeoJSONSource | undefined);
+  for (const layer of layers) map.addLayer({ ...layer, source: sourceId } as maplibregl.LayerSpecification);
 }
 
 function emptyLine(): GeoJSON.FeatureCollection {
