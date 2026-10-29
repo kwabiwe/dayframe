@@ -64,7 +64,7 @@ const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
@@ -722,14 +722,5 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.held).toBeNull();
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
-  });
-
-  it("opens a place's evidence on its details screen and anything else on the deck, focused on it (Codex r10 on #582)", () => {
-    const place = suggestion("a");
-    expect(calendarCheckRoute(place, "a")).toEqual({ pathname: "/review/[id]", params: { id: "a" } });
-    const sleep = suggestion("s", { eventSource: "health_sleep", eventType: "health_sleep_import", rawPayload: null });
-    expect(calendarCheckRoute(sleep, "s")).toEqual({ pathname: "/review", params: { focusReviewId: "s" } });
-    // Not loaded here (paged out): the deck finds it.
-    expect(calendarCheckRoute(undefined, "x")).toEqual({ pathname: "/review", params: { focusReviewId: "x" } });
   });
 });

@@ -467,5 +467,9 @@ export function useLocationCorrections({
     />
   ) : null;
 
-  return { heldLog, openPlace, openTripLeg, sheet, undoLog };
+  // An old link's item that no longer asks opens its day with nothing selected (Codex r3 on #615): any open sheet
+  // closes, as opening another item's sheet replaces it.
+  const closeSheet = useCallback(() => setOpen(null), []);
+
+  return { closeSheet, heldLog, openPlace, openTripLeg, sheet, undoLog };
 }

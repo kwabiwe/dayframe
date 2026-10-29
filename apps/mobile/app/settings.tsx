@@ -1169,7 +1169,7 @@ export default function SettingsScreen() {
     ? "Paused. Open Location to restart it."
     : shownLocation?.learningEnabled && !shownMonitoringAllowed
       ? "Needs Always location access"
-      : "Anything uncertain waits in Review";
+      : "Anything uncertain is asked in Calendar";
   // Display only (A4): this visit's Health types once read, otherwise the last-known ones.
   const shownHealthImportPreferences = healthImportPreferences ?? shownHealthPreferencesFrom(lastKnown?.healthImportPreferences);
   const healthWorkoutKeys = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
@@ -1186,7 +1186,7 @@ export default function SettingsScreen() {
       : shownLocation?.learningEnabled && !shownMonitoringAllowed
         ? "On, but needs Always location access"
         : shownLocation?.learningActive
-          ? "On. Anything uncertain waits in Review."
+          ? "On. Anything uncertain is asked in Calendar."
           : "Off";
   // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
   const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
@@ -1842,7 +1842,7 @@ export default function SettingsScreen() {
     void confirmForSession({
       eyebrow: "Location history",
       title: "Clear recent location history?",
-      message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
+      message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and things to check stay.",
       confirmLabel: "Clear history",
       confirmHint: "This can't be undone.",
       onConfirm: () => { void removeLocationEvidence(); }
@@ -3022,7 +3022,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Dayframe only logs on its own at places you trust. Anything else waits in Review."
+                foot="Dayframe only logs on its own at places you trust. Anything else is asked in Calendar."
                 theme={theme}
                 title="Places"
               >
@@ -3057,7 +3057,7 @@ export default function SettingsScreen() {
           {settingsSection === "health" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsBlockGroup
-                foot="Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure."
+                foot="Each one becomes a block you confirm in Calendar, or logs itself when Dayframe is sure."
                 theme={theme}
                 title="Apple Health"
               >
@@ -3385,7 +3385,7 @@ function HealthTypeSheet({
             style={styles.activeEditScroller}
           >
             <SettingsBlockGroup
-              foot={enabled ? "Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure." : undefined}
+              foot={enabled ? "Each one becomes a block you confirm in Calendar, or logs itself when Dayframe is sure." : undefined}
               theme={theme}
               title="Import"
             >
@@ -3482,8 +3482,8 @@ function HealthTypeSheet({
 
 /** Settings › Location › How suggestions work (UIA-022). */
 const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
-  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
-  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain waits in Review." },
+  { glyph: "inbox", lead: "Suggestions are asked in Calendar.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
+  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain is asked in Calendar." },
   { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
   { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
 ];

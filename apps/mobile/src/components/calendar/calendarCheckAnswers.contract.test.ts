@@ -7,10 +7,9 @@ function source(relativePath: string) {
 }
 
 const dashboard = source("../DayframeDashboard.tsx");
-const review = source("../../../app/review.tsx");
 const theme = source("../../lib/mobileTheme.ts");
 
-describe("Calendar › List answers beside the deck and Today's toasts (Codex r2 on #582)", () => {
+describe("Calendar › List answers and Today's toasts (Codex r2 on #582)", () => {
   it("stacks the answer's toast above a delete's or a notice in one measured column, never at a fixed offset", () => {
     const stackAt = dashboard.indexOf('testID="today-toast-stack"');
     expect(stackAt).toBeGreaterThan(-1);
@@ -22,37 +21,6 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(stack).not.toContain("style={styles.todayToast}");
     expect(dashboard).not.toContain("bottom: 164");
     expect(theme).toMatch(/todayToastStack: \{\s*flexDirection: "column",\s*justifyContent: "flex-end",\s*gap: 8\s*\}/);
-  });
-
-  it("saves a held card only after claiming it and reading the outbox, by the List's own order", () => {
-    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, verified = false) => {"), review.indexOf("function resolveItem("));
-    // Claim, read the outbox, check again, save (Codex r6 on #582): the claim is taken before the read and
-    // let go only when it ends, and the verified pass saves through resolveItem in the same turn.
-    const claimAt = commit.indexOf("if (!claimReviewAnswer(ids)) {");
-    const readAt = commit.indexOf("void reviewAnswerStillOpen(");
-    expect(claimAt).toBeGreaterThan(-1);
-    expect(readAt).toBeGreaterThan(claimAt);
-    expect(commit).toMatch(/\.then\(\(outcome\) => \{\s*releaseReviewAnswer\(ids\);/);
-    // Fenced to the account it began in, a failed read is a failed save, decided meanwhile saves nothing,
-    // and otherwise everything is validated again as it is now (Codex r3 on #582).
-    expect(commit).toContain("if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {");
-    expect(commit).toMatch(/if \("error" in outcome\) \{[^}]*failed\(\);/);
-    expect(commit).toMatch(/if \(!outcome\.open\) \{[^}]*settled\(\);\s*restoreMembers\(\);\s*undoCount\(\);/);
-    expect(commit).toContain("commitHeldDeckDecisionRef.current(held, true);");
-    expect(commit).toMatch(/if \(verified\) \{\s*start\(\);\s*return;\s*\}/);
-  });
-
-  it("claims a held bulk skip's moments for both surfaces while it saves, and lets them go after (Codex r5 on #582)", () => {
-    const batch = review.slice(review.indexOf("function commitHeldBulkSkip("), review.indexOf("function commitHeldBulkSkip(") + 6_000);
-    expect(batch).toContain("const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId) && claimReviewAnswer([entry.itemId]));");
-    expect(batch).toContain("const busy = held.items.filter((entry) => !claimed.includes(entry));");
-    expect(batch).toContain("releaseReviewAnswer(claimed.map((entry) => entry.itemId));");
-    // Holding the claims, it reads the outbox first: what Calendar › List decided meanwhile is resolved, and
-    // an unreadable outbox fails every write (Codex r7 on #582).
-    expect(batch.indexOf("await reviewAnswersDecided(")).toBeGreaterThan(batch.indexOf("claimReviewAnswer([entry.itemId])"));
-    expect(batch.indexOf("await reviewAnswersDecided(")).toBeLessThan(batch.indexOf("runReviewBulkSkip<MobileReviewItem>(claimed"));
-    expect(batch).toContain("decided: readFailed ? new Set() : decided,");
-    expect(batch).toContain("if (readFailed) throw decided.error;");
   });
 
   it("offers no answers in a build without a backend identity, where the outbox's record is not read (Codex r9 on #582)", () => {
@@ -67,34 +35,11 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     // A trip's question edits the trip on its own correction sheet (step 12, Codex r1 on #602): the List opens it
     // itself (Codex r2 on #610).
     expect(dashboard).toContain("onOpenTripLeg={locationCorrections.openTripLeg}");
-    expect(dashboard).toContain("router.push(calendarCheckRoute(");
-    expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
+    // Step 15: no "?" opens a Review screen; the List's own fallback opens the sheet when the day has one.
+    expect(dashboard).toContain("openCheckSheet(reviewItemId);");
+    expect(dashboard).not.toContain("calendarCheckRoute");
+    expect(dashboard).not.toMatch(/pathname: "\/review/);
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
-  });
-
-  it("lets an earlier held card's delayed save leave a newer held card's Undo alone (Codex r11 on #582)", () => {
-    const resolve = review.slice(review.indexOf("function resolveItem("), review.indexOf("function resolveItem(") + 2_000);
-    expect(resolve).toContain("if (!options.fromHold) deckHold.flush();");
-    expect(resolve).not.toMatch(/\n\s*deckHold\.flush\(\);/);
-    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, verified = false) => {"), review.indexOf("function resolveItem("));
-    expect(commit).toContain("outing ? { unlisted, affectedItems: [item, ...members], fromHold: true } : { unlisted, fromHold: true }");
-  });
-
-  it("saves the deck editor's change in the same claim → read → write order (Codex r11 on #582)", () => {
-    const edit = review.slice(review.indexOf("async function saveEdit("), review.indexOf("async function createTimerSheetTag("));
-    const claimAt = edit.indexOf("if (!claimReviewAnswer(editIds))");
-    const readAt = edit.indexOf("await reviewAnswerStillOpen(currentData, editIds)");
-    const writeAt = edit.indexOf("await enqueueReviewMutation({");
-    expect(claimAt).toBeGreaterThan(-1);
-    expect(readAt).toBeGreaterThan(claimAt);
-    expect(writeAt).toBeGreaterThan(readAt);
-    expect(edit).toMatch(/\} finally \{\s*releaseReviewAnswer\(editIds\);/);
-    // Stale outcomes are silent in another account (the claim is still released in finally), and an item
-    // already gone says so with the editor's alert (Codex r12 on #582).
-    expect(edit).toContain("editOwner = reviewDataOwnerKey(currentData);");
-    expect(edit).toMatch(/\} catch \(error\) \{\s*if \(editOwner && \(!dataRef\.current \|\| reviewDataOwnerKey\(dataRef\.current\) !== editOwner\)\) return false;/);
-    expect(edit).toMatch(/\)\) throw new Error\("This suggestion is no longer available\."\);/);
-    expect(edit).not.toMatch(/candidate\.id === editTarget\.item\.id\s*\)\) return false;/);
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
@@ -132,7 +77,7 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(dashboard).toContain("kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),");
     expect(dashboard).toContain("checkKinds={calendarChecks.kinds}");
     expect(dashboard).toContain('if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";');
-    // onOpenCheck is the question's own "More…" / "Open it" only; it no longer looks a trip up as a fallback.
+    // onOpenCheck is the List's own fallback only; it no longer looks a trip up by its kind.
     expect(dashboard).not.toContain('each.kind === "trip" && each.id === segmentId && !each.blockIds.length');
   });
 });
@@ -207,3 +152,65 @@ describe("one guarded notifier for the answer, Logs as and recovery flows (Codex
   });
 });
 
+
+describe("no Review screen on the iPhone (location v4 step 15)", () => {
+  const layout = source("../../../app/_layout.tsx");
+  const intent = source("../../../app/+native-intent.tsx");
+  const ribbon = source("../today/TodayRibbon.tsx");
+  it("has no Review route; an old Review link opens the Calendar tab with its check request", () => {
+    expect(layout).not.toContain('name="review"');
+    expect(intent).toContain("reviewLinkRedirect(path) ?? path");
+    // Through the same check request the badge, the chips and the reminder use (#610), once the data is in.
+    // Behaviour in useCheckLinks.test.tsx; here only that the Dashboard hands it the one check request, held until
+    // signed in with the bootstrap in, and today's chip opener, which keeps today selected (Codex r1 on #615).
+    expect(dashboard).toContain('ready: authState === "authenticated" && data !== null,');
+    expect(dashboard).toContain("openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),");
+    expect(dashboard).toContain("openDay: openListDay,");
+    // Completed loads only (Codex r6 on #615): server bootstraps counted where they land, never a local publication.
+    expect(dashboard).toContain("const checkLinkLoads = useCompletedLoadCount(bootstrapCompletions, calendarTimelineRequestedAt);");
+    expect(dashboard.match(/setBootstrapCompletions\(\(count\) => count \+ 1\);/g)).toHaveLength(2);
+    const publish = dashboard.slice(dashboard.indexOf("function publishDashboardData("), dashboard.indexOf("const [rowPop, setRowPop]"));
+    expect(publish).not.toContain("setBootstrapCompletions");
+    for (const landed of ["loadedBootstrap.current = bootstrap;\n      publishDashboardData(bootstrap);\n      // A server bootstrap landed",
+      "loadedBootstrap.current = next;\n    publishDashboardData(next);\n    // A server bootstrap landed"]) {
+      expect(dashboard).toContain(landed);
+    }
+    // The fallback clears every selection first, the same day included (Codex r3 on #615).
+    const listDay = dashboard.slice(dashboard.indexOf("const openListDay = useCallback("), dashboard.indexOf("}, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);"));
+    for (const step of ["setCalendarCheckTarget(null);", "setCalendarCheckScroll(0);", "setCalendarSelectionClear((count) => count + 1);", "closeCorrectionSheet();"]) {
+      expect(listDay).toContain(step);
+    }
+    expect(dashboard).toContain("clearSelectionRequest={calendarSelectionClear}");
+    expect(dashboard).toContain("openTodayFirst: openTodayChecks,");
+    expect(dashboard).toContain("if (first && openCheckOn(first.id, today)) return;");
+  });
+
+  it("reprocesses Apple Health's \"?\" when Calendar › List is in front, whether or not capture is on (Codex r1 on #615)", () => {
+    expect(dashboard).toContain('const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";');
+    const effect = dashboard.slice(dashboard.indexOf("if (!calendarListInFront || !scopedOwnerKey) return;"), dashboard.indexOf("}, [calendarListInFront, requestHealthReload"));
+    expect(effect).toContain("reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey,");
+    expect(effect).not.toContain("isHealthKitAutomaticSyncEnabled");
+    // Foreground only (Codex r2 on #615): aborted on leaving the front, checked before every batch, reload deferred.
+    expect(effect).toContain("isInFront: inFront, signal: controller.signal })");
+    expect(effect).toContain('const inFront = () => calendarListInFrontRef.current && AppState.currentState === "active";');
+    expect(effect).toContain("requestHealthReload();");
+    expect(dashboard).toContain("return () => controller.abort();\n  }, [calendarListInFront, requestHealthReload, scopedOwnerKey, transitionToSignedOut]);");
+    // One consumer, whichever comes last (Codex r3 on #615; behaviour in useDeferredReload.test.tsx).
+    expect(dashboard).toContain('const requestHealthReload = useDeferredReload(appIsForeground && authState === "authenticated",');
+  });
+
+  it("opens Today's hatched blocks in Calendar › List, never a pushed Review page", () => {
+    expect(ribbon).not.toMatch(/router\.push\("\/review/);
+    expect(ribbon).toContain("onOpenCheck(target.reviewItemId);");
+    expect(dashboard).toContain("onOpenCheck={openTodayRibbonCheck}");
+  });
+
+  it("leaves a timer that ran into a trip out of every ordinary \"?\" until its block UI ships", () => {
+    // List rows, the Grid's blocks (askingChecks), the badge, Today's chip and the reminder all read calendarCheckBase.
+    expect(dashboard).toContain("isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)");
+    expect(dashboard).toContain("useReviewNudgeCount(nudgeOwner, askingChecks.length,");
+    expect(dashboard).toContain("const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);");
+    expect(source("../../lib/nativeCalendarPresentation.ts")).toContain("if (!isOpenReviewItem(item) || !asksAsCheck(item)) continue;");
+    expect(source("../../lib/todayReviewPresentation.ts")).toContain('record.status !== "open" || !asksAsCheck(record)');
+  });
+});

@@ -194,7 +194,7 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
   });
 
-  const question = (text: string, more = false) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more, opens: false });
+  const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now" });
   const questions = (tree: ReturnType<typeof create>) =>
     tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
   const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
@@ -207,7 +207,7 @@ describe("CalendarListView (location v4 step 9)", () => {
   };
   const placeCheck = { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
   const sleepCheck = { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) };
-  const visited = { question: "Visited Pret?", detail: null, logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
+  const visited = { question: "Visited Pret?", detail: null, logLabel: "Yes", skipLabel: "Not now" };
 
   it("opens a place's sheet from its row, answers Yes from the row's compact pill, and never shows the question under it (owner, 28 Oct 2026)", () => {
     const onAnswerCheck = vi.fn();
@@ -238,7 +238,7 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({
       checks: [placeCheck, sleepCheck],
       checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
-      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?", true)]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
       onAnswerCheck, onOpenCheck, onOpenPlace: vi.fn()
     });
     expect(questions(tree)).toHaveLength(0);
@@ -255,38 +255,33 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(flat(log.findByType("Text" as never).props.style)).toMatchObject({ color: "#000", fontSize: 14, fontWeight: "700" });
     const skip = tree.root.findByProps({ testID: "calendar-list-answer-skip" });
     expect(flat(skip.props.style({ pressed: false })).backgroundColor).toBe("#222");
-    const more = tree.root.findByProps({ testID: "calendar-list-answer-more" });
-    for (const pill of [log, skip, more]) expectCompactPill(pill);
-    act(() => { more.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    for (const pill of [log, skip]) expectCompactPill(pill);
+    // Step 15: no "More…" to a Review screen.
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
+    expect(onOpenCheck).not.toHaveBeenCalled();
     // Answering closes the question and hands the answer to the caller (it holds it for Undo).
     act(() => { tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.onPress(); });
     expect(onAnswerCheck).toHaveBeenCalledWith("c-sleep", false);
     expect(questions(tree)).toHaveLength(0);
   });
 
-  it("asks a sheetless suggestion Yes, Edit, Not now, and Edit opens it on its own screen (card A)", () => {
+  it("asks a sheetless trip Yes and Not now, with no Edit to a Review screen (card A; step 15)", () => {
     const onAnswerCheck = vi.fn();
     const onOpenCheck = vi.fn();
     const { tree } = render({
       checks: [{ id: "c-trip", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-trip", "Getting around"]]),
-      checkQuestions: new Map([["c-trip", { question: "Getting around, 12:00–13:00?", detail: null, logLabel: "Yes", skipLabel: "Not now",
-        more: true, moreLabel: "Edit", opens: false }]]),
+      checkQuestions: new Map([["c-trip", { question: "Getting around, 12:00–13:00?", detail: null, logLabel: "Yes", skipLabel: "Not now" }]]),
       onAnswerCheck,
       onOpenCheck
     });
     act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-trip" }).props.onPress(); });
     const answers = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-") &&
       typeof node.props.onPress === "function").map((node) => node.props.testID);
-    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-edit", "calendar-list-answer-skip"]);
-    const edit = tree.root.findByProps({ testID: "calendar-list-answer-edit" });
-    expect(edit.findByType("Text" as never).props.children).toBe("Edit");
-    expect(edit.props.accessibilityHint).toBe("Opens it on its own screen to edit it");
-    expectCompactPill(edit);
-    act(() => { edit.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
-    expect(onAnswerCheck).not.toHaveBeenCalled();
+    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-skip"]);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-log" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-trip", true);
+    expect(onOpenCheck).not.toHaveBeenCalled();
   });
 
   it("asks a place Visited {guess}? from the real question words, with the Yes pill on its row (card B; Codex r1 on #594)", () => {
@@ -334,6 +329,51 @@ describe("CalendarListView (location v4 step 9)", () => {
     const health = render({ ...common, checks: [placeCheck, sleepCheck], openCheckRequest: { id: "c-sleep", request: 1 } });
     expect(questions(health.tree)).toHaveLength(1);
     expect(JSON.stringify(questions(health.tree)[0].props.children)).toContain("Log your sleep?");
+  });
+
+  it("clears the open question and a waiting request on a clear request, the same day included (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    const rerender = (tree: ReturnType<typeof create>, extra: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...extra} />);
+    });
+    // Another question is open (a decided item's link then lands on this same day).
+    const { tree } = render({ ...props, openCheckRequest: { id: "c-sleep", request: 1 } });
+    expect(questions(tree)).toHaveLength(1);
+    rerender(tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(questions(tree)).toHaveLength(0);
+    // A request still waiting for the day's places is dropped too: they arrive, and nothing opens.
+    const waiting = render({ ...props, timeline: null, openCheckRequest: { id: "c-unknown", request: 2 } });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    act(() => {
+      waiting.tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={null} {...props} openCheckRequest={null} clearSelectionRequest={1} />);
+    });
+    rerender(waiting.tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(waiting.tree)).toHaveLength(0);
+  });
+
+  it("replays nothing when it mounts from the Grid after a cleared selection (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    // The Dashboard's fallback cleared its request (null) and the scroll (0) before the List mounted again.
+    const { tree } = render({ ...props, openCheckRequest: null, scrollToFirstCheck: 0, clearSelectionRequest: 3 });
+    expect(questions(tree)).toHaveLength(0);
+    expect(onOpenPlace).not.toHaveBeenCalled();
   });
 
   it("holds a request for a place's \"?\" until the day's places are read, then opens its sheet, never the card (Codex r1 on #610)", () => {
@@ -416,6 +456,35 @@ describe("CalendarListView (location v4 step 9)", () => {
         loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
         theme={theme} timeline={timeline} {...props} timelineReadAt={Date.now() + 1_000} />);
     });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("lets a clear arriving with the day's fresh places drop a waiting tap and request in that same render (Codex r4 on #615)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onOpenPlace = vi.fn();
+    const props = { checks: [missing, sleepCheck], checkKinds: new Map([["c-missing", "place" as const], ["c-sleep", "health" as const]]),
+      checkTitles: new Map([["c-missing", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace, onRequestFreshRead: vi.fn() };
+    const view = (next: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...next} />
+    );
+    // A tap waits for a read newer than it.
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(questions(tree)).toHaveLength(0);
+    // The fresh read lands in the same render as a clear: nothing opens, now or after.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 1_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A caller's request the clear arrived with is dropped too, even while it is still passed in.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 7 }, clearSelectionRequest: 2 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A request made after the clear opens as usual.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 8 }, clearSelectionRequest: 2 })); });
     expect(questions(tree)).toHaveLength(1);
   });
 
@@ -568,24 +637,21 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(questions(tree)).toHaveLength(0);
   });
 
-  it("offers a suggestion without a complete time on its own screen, never answers the outbox would refuse (Codex r3 on #582)", () => {
+  it("says why a suggestion without a complete time can't be answered, and offers no answer the outbox would refuse (Codex r3 on #582; step 15)", () => {
     const onAnswerCheck = vi.fn();
     const onOpenCheck = vi.fn();
     const { tree } = render({
       checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: null }],
       checkTitles: new Map([["c-sleep", "Sleep"]]),
-      checkQuestions: new Map([["c-sleep", { question: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered here.",
-        logLabel: null, skipLabel: null, more: false, opens: true }]]),
+      checkQuestions: new Map([["c-sleep", { question: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered.",
+        logLabel: null, skipLabel: null }]]),
       onAnswerCheck,
       onOpenCheck
     });
     act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-sleep" }).props.onPress(); });
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-log")).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-skip")).toHaveLength(0);
-    const open = tree.root.findByProps({ testID: "calendar-list-answer-open" });
-    expectCompactPill(open);
-    act(() => { open.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    expect(JSON.stringify(questions(tree)[0].props.children)).toContain("It has no complete time yet, so it can't be answered.");
+    expect(tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-"))).toHaveLength(0);
+    expect(onOpenCheck).not.toHaveBeenCalled();
     expect(onAnswerCheck).not.toHaveBeenCalled();
   });
 
@@ -745,7 +811,7 @@ describe("CalendarListView's open question (card B part 2)", () => {
       checkKinds: new Map([["c-place", "none"]]),
       checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-place", "Unknown place"]]),
-      checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }]]),
+      checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now" }]]),
       onAnswerCheck: vi.fn(),
       onOpenCheckChange
     });

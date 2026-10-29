@@ -53,10 +53,8 @@ describe("finite timer background recovery ownership", () => {
 
   it("coalesces the screen reconnect and root recovery paths in the shared outbox owner", () => {
     const owner = source("./ConnectivityRecoveryOwner.tsx");
-    const reviewScreen = source("../../app/review.tsx");
     const store = source("../lib/reviewSyncStore.ts");
 
-    expect(reviewScreen).toContain("synchroniseReviewMutations({ force: true })");
     expect(owner).toContain("await synchroniseReviewMutations()");
     expect(store).toContain("reviewCoalescer.run(account.account_key");
   });

@@ -237,6 +237,16 @@ describe("native Calendar presentation boundary", () => {
       expect(state.model.entries.map((item) => item.entryId)).toEqual(["entry-own"]);
     });
 
+    it("never draws a timer that ran into a trip as a dashed \"?\", given to the Grid or not (step 15)", () => {
+      const clash = { ...suggestion("clash", 9, 0, 60), type: "location_timer_trip_clash", eventType: "timer_trip_clash" };
+      const byEvent = { ...suggestion("clash-event", 11, 0, 30), eventType: "timer_trip_clash" };
+      const data = bootstrap([], { reviewItems: [clash, byEvent, suggestion("asking", 13, 0, 60)] });
+      expect(build(now, data).model.entries.map((item) => item.entryId)).toEqual(["review:asking"]);
+      const state = buildNativeCalendarBridgeState({ data, now, reduceMotion: false, reduceTransparency: false, refreshing: false,
+        reviewItemIds: new Set(["clash", "clash-event", "asking"]), selectedDayKey: "2026-07-10", theme: darkTheme(), transitionDirection: 1 });
+      expect(state.model.entries.map((item) => item.entryId)).toEqual(["review:asking"]);
+    });
+
     it("an older server without links still draws both (no dedupe guess)", () => {
       const state = build(now, bootstrap([needsReview("entry-legacy", 7, 45)], {
         reviewItems: [suggestion("workout", 7, 0, 45)]
@@ -324,7 +334,7 @@ describe("native Calendar presentation boundary", () => {
       expect(state.model.entries.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
         ["3 suggestions", "review", ""]
       ]);
-      expect(state.model.entries[0].accessibilityLabel).toBe("Needs review: 3 suggestions, 09:00 to 10:00. Opens the Review list.");
+      expect(state.model.entries[0].accessibilityLabel).toBe("Needs review: 3 suggestions, 09:00 to 10:00. Opens the List.");
       const onOpenReview = vi.fn();
       routeNativeCalendarOpenEvent({ actionId: "", kind: "review" }, state.actionEntries, {
         onOpenActive: vi.fn(), onOpenCompleted: vi.fn(), onOpenReview

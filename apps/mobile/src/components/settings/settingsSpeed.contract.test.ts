@@ -72,14 +72,3 @@ describe("Settings opens instantly (I1)", () => {
     expect(body).toMatch(/function goBack\(\) \{\s*router\.back\(\);\s*\}/);
   });
 });
-
-describe("Review Fix opens Sync help, which lists the same rejections (I1)", () => {
-  const review = readFileSync(resolve(__dirname, "../../../app/review.tsx"), "utf8");
-  it("routes Fix to Sync help and names it in the card copy", () => {
-    expect(review).toContain('router.push({ pathname: "/settings", params: { from: "review", section: "sync" } })');
-    expect(review).not.toContain("needs attention in Settings");
-    expect(review).toContain("Tap Fix above to choose what to do in Sync help.");
-    // Fix shows only for real rejections, the same set Sync help lists (listReviewSyncIssues).
-    expect(review).toContain("const attention = diagnostics.needsAttentionCount > 0;");
-  });
-});

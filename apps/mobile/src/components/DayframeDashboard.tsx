@@ -255,9 +255,14 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { asksAsCheck, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
+import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
+import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
+import { useDeferredReload } from "@/lib/useDeferredReload";
+import { firstCheckReachingDay } from "@/lib/reviewLinks";
 import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
@@ -358,6 +363,8 @@ type DashboardContextValue = {
   checkCount: number;
   /** Owner item A (28 Oct 2026): opens the oldest question that still asks (the Calendar tab's badge). */
   openOldestCheck: () => void;
+  /** An old Review link (step 15): opens the "?" it names, or today's first ("first"), once the data is in. */
+  openCheckLink: (check: string) => void;
 };
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -546,6 +553,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
    * their canonical synchronous view, and a publication that shows a flown block running again cancels its
    * flight before React renders it.
    */
+  // Server bootstraps that completed (a load, a recovered refresh), counted apart from every local publication.
+  const [bootstrapCompletions, setBootstrapCompletions] = useState(0);
   function publishDashboardData(next: MobileBootstrap | null) {
     dropCancelledStopFlight(stopFlightLedger.published(latestData.current?.activeEntry?.id, next?.activeEntry?.id));
     latestData.current = next;
@@ -726,6 +735,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     refreshQueued.current = false;
     loadedBootstrap.current = next;
     publishDashboardData(next);
+    // A server bootstrap landed (a recovered refresh): a completed load (Codex r6 on #615).
+    setBootstrapCompletions((count) => count + 1);
     void readOwnedPendingTimerStops(next).then((stops) => {
       const visible = latestData.current;
       if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
@@ -1080,6 +1091,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
+      // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
+      setBootstrapCompletions((count) => count + 1);
       setPendingTimerStops([...ownedPendingStops]);
       void pruneTimerIdCorrelationsAfterLoad(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -1982,7 +1995,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarCheckBase = useMemo(() => {
     // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
     // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
-    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
+    // A timer that ran into a trip (`location_timer_trip_clash`) is no ordinary "?" — not a List row, a Grid block, the
+    // badge, a chip or the reminder's count — until its block UI ships (step 15, as the web since #613).
+    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item) && !locallyDecidedIds.has(item.id)
       && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
       // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
       // abandoned record never hides it (Codex r11 on #610).
@@ -2066,7 +2081,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => {
       // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
       // The same outings the deck and Calendar › List fold (Codex r2 on #582).
-      const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);
+      const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && asksAsCheck(item));
       const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
       return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
     },
@@ -2856,15 +2871,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
+  // Calendar › List on a day with nothing selected: an old link's item that no longer asks (Codex r2 on #615). Every
+  // selection is cleared first, the same day included (Codex r3 on #615): the open question and any waiting request
+  // or scroll (so a List mounting from the Grid has nothing to replay), and an open sheet.
+  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
+  const [calendarSelectionClear, setCalendarSelectionClear] = useState(0);
+  const closeCorrectionSheet = locationCorrections.closeSheet;
+  const openListDay = useCallback((dayKey: string) => {
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    setCalendarSelectionClear((count) => count + 1);
+    closeCorrectionSheet();
+    changeCalendarLayout("list");
+    selectCalendarDay(dayKey);
+    router.navigate("/(tabs)/calendar");
+  }, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);
   // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
   // open. Used by "N to check" (the next one, oldest first), the badge, Today's chip, the reminder and the Grid's "?".
-  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
-  const openCheckOn = useCallback((checkId: string) => {
+  // `dayKey` keeps a given day selected (today, for a "?" that started yesterday; Codex r1 on #615), else its start day.
+  const openCheckOn = useCallback((checkId: string, dayKey?: string) => {
     const check = calendarChecks.checks.find((each) => each.id === checkId);
     const startedAtMs = check?.startedAt ? Date.parse(check.startedAt) : NaN;
     if (!Number.isFinite(startedAtMs)) return false;
     changeCalendarLayout("list");
-    selectCalendarDay(formatDateKey(new Date(startedAtMs)));
+    selectCalendarDay(dayKey ?? formatDateKey(new Date(startedAtMs)));
     calendarCheckRequests.current += 1;
     setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current, at: Date.now() });
     setCheckTimelineReads((count) => count + 1);
@@ -2880,12 +2910,77 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (askingChecks[0]) openCheckOn(askingChecks[0].id);
   }, [askingChecks, openCheckOn]);
   // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge opens the 7-day oldest.
+  // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
   const openTodayChecks = useCallback(() => {
-    const todayStart = dateFromKey(formatDateKey(new Date())).getTime();
-    const first = askingChecks.find((check) => Date.parse(check.stoppedAt ?? check.startedAt ?? "") > todayStart);
-    if (first && openCheckOn(first.id)) return;
-    openChecksOn(formatDateKey(new Date()));
+    const today = formatDateKey(new Date());
+    const first = firstCheckReachingDay(askingChecks, dateFromKey(today).getTime());
+    if (first && openCheckOn(first.id, today)) return;
+    openChecksOn(today);
   }, [askingChecks, openCheckOn, openChecksOn]);
+  // Apple Health's "?" brought up to date when Calendar › List is in front (step 15; Codex r1 on #615): the deck's
+  // forced reprocess on open, bounded per account (`calendarHealthReprocess.ts`), whether or not Health capture is on.
+  const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";
+  // Foreground only (Codex r2 on #615): leaving the front aborts it before its next batch, and a reload it calls for
+  // waits until Dayframe is back in front.
+  const healthReprocessOwnerRef = useRef(scopedOwnerKey);
+  healthReprocessOwnerRef.current = scopedOwnerKey;
+  const calendarListInFrontRef = useRef(calendarListInFront);
+  calendarListInFrontRef.current = calendarListInFront;
+  // One consumer for the reload it asks for: whichever comes last, the request or being in front and signed in
+  // (Codex r3 on #615).
+  const requestHealthReload = useDeferredReload(appIsForeground && authState === "authenticated",
+    () => { void loadRef.current({ silent: true }); });
+  useEffect(() => {
+    if (!calendarListInFront || !scopedOwnerKey) return;
+    const ownerKey = scopedOwnerKey;
+    const controller = new AbortController();
+    const inFront = () => calendarListInFrontRef.current && AppState.currentState === "active";
+    void reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey,
+      isInFront: inFront, signal: controller.signal })
+      .then((outcome) => {
+        if (outcome !== "changed" && outcome !== "interrupted") return;
+        if (healthReprocessOwnerRef.current !== ownerKey) return;
+        requestHealthReload();
+      })
+      .catch((error) => { if (error instanceof AuthRequiredError) transitionToSignedOut(); });
+    return () => controller.abort();
+  }, [calendarListInFront, requestHealthReload, scopedOwnerKey, transitionToSignedOut]);
+  // Old Review links and Today's ribbon (step 15, `reviewLinks.ts`): held until signed in with the bootstrap in, then
+  // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
+  const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
+    [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
+  // Completed loads only (a server bootstrap landing, the shown day's places landing; Codex r5 and r6 on #615): a named
+  // "?" an old link waits for is tried again on each; a day switch's empty first render, a timer update or any other
+  // local publication is none.
+  const checkLinkLoads = useCompletedLoadCount(bootstrapCompletions, calendarTimelineRequestedAt);
+  const openCheckLink = useCheckLinks({
+    ready: authState === "authenticated" && data !== null,
+    owner: checkLinkOwner,
+    todayKey,
+    // Only a "?" that still asks opens by its id; anything else opens its day with nothing selected (Codex r2 on #615).
+    openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),
+    openDay: openListDay,
+    openTodayFirst: openTodayChecks,
+    // Whether it still asks: open on the server, an ordinary question, and within the List's 7 days (Codex r4 on #615).
+    lookupItem: async (owner, reviewItemId) => {
+      if (!owner.backendId) return null;
+      const item = await lookupReviewLinkItem({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC");
+      if (!item) return null;
+      const asks = item.open && Boolean(item.startedAt) && checkStillAsks(
+        { startedAt: item.startedAt, stoppedAt: item.stoppedAt },
+        checkAskingStartMs(dateFromKey(formatDateKey(new Date())).getTime()));
+      return { startedAt: item.startedAt, asks };
+    },
+    selectedDayKey,
+    loads: checkLinkLoads,
+    dayKeyOf: (instant) => {
+      const ms = Date.parse(instant);
+      return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;
+    }
+  });
+  // Today's hatched ribbon blocks (step 15): their "?" in Calendar › List, as an old Review link opens it. Stable, so
+  // the memoised ribbon is not re-rendered by the per-second header.
+  const openTodayRibbonCheck = useCallback((reviewItemId: string | null) => openCheckLink(reviewItemId ?? "first"), [openCheckLink]);
   useEffect(() => {
     // The reminder opens the oldest question that still asks (no Review page, step 15).
     openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));
@@ -3673,6 +3768,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <TodayRibbonSection
                   entries={todayRibbonEntries}
                   nowMs={minuteNow}
+                  onOpenCheck={openTodayRibbonCheck}
                   onOpenEntry={openTodayEntry}
                   onOpenWhereWent={openReportsToday}
                   reduceMotion={reduceMotion}
@@ -3724,6 +3820,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  /**
+   * Opens a "?"'s own sheet (a place's or a trip's, its "?" asked at the top), or a Places lane item's (`lane:<id>`),
+   * when the day's places have it. False when it has none (Apple Health, a legacy suggestion, a place not read yet).
+   */
+  function openCheckSheet(reviewItemId: string | null | undefined) {
+    const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
+      : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
+    const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
+    if (item?.kind === "place") {
+      locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+      return true;
+    }
+    if (item?.kind === "trip") {
+      locationCorrections.openTripLeg(item, null);
+      return true;
+    }
+    return false;
+  }
+
   function renderDashboardTab(tab: DayframeDashboardTab, isFocused: boolean) {
     if (tab === "timer") return renderTodayTab(isFocused);
     if (tab === "calendar") {
@@ -3739,23 +3854,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
-            // only older needs-review entries ("") opens the Review list.
+            // Step 15: a "?" on the Grid never opens Review (there is none). Owner item A (28 Oct 2026): a Grid "?" or
+            // Places lane item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet,
+            // opens its question in the List; a crowd of only older needs-review entries ("") opens the List.
             onOpenReview: (reviewItemId) => {
-              // Step 15: a "?" on the Grid never opens Review. Owner item A (28 Oct 2026): a Grid "?" or Places lane
-              // item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet, opens its
-              // question in the List.
-              const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
-                : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
-              const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
-              if (item?.kind === "place") {
-                locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
-                return;
-              }
-              if (item?.kind === "trip") {
-                locationCorrections.openTripLeg(item, null);
-                return;
-              }
+              if (openCheckSheet(reviewItemId)) return;
               if (!reviewItemId || reviewItemId.startsWith("lane:") || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
             }
           }
@@ -3820,6 +3923,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onNextCheck={openNextCheck}
                   onSwipeDay={shiftSelectedCalendarDay}
                   openCheckRequest={calendarCheckTarget}
+                  clearSelectionRequest={calendarSelectionClear}
                   timelineReadAt={calendarTimelineRequestedAt}
                   onRequestFreshRead={() => setCheckTimelineReads((count) => count + 1)}
                   clockFormat={clockFormat}
@@ -3837,15 +3941,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     ? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)
                     : undefined}
                   onOpenCheckChange={setOpenCalendarCheckId}
-                  // Only a question's own "More…" / "Open it" (under its row) opens a suggestion on its own screen: a
-                  // place's evidence on its details screen, anything else on the deck, focused on it (Codex r10 on #582).
-                  // A place's or trip's "?" opens its sheet in the List itself (onOpenPlace, onOpenTripLeg), or asks under
-                  // its row when the day lacks its item: never this fallback (step 15; Codex r2 on #610). The editor's
-                  // Nearby search takes the native search over from the question first (Codex r1 on #600).
+                  // Step 15: there is no Review screen to open a suggestion on. A place's or trip's "?" opens its sheet
+                  // in the List itself (onOpenPlace, onOpenTripLeg), or asks under its row when the day lacks its item;
+                  // this is only the List's own fallback (a build without a backend identity, which can't answer in
+                  // place), and opens the sheet when the day has one. The sheet's Nearby search takes the native
+                  // search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
-                    const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
-                    router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
+                    openCheckSheet(reviewItemId);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onOpenPlace={locationCorrections.openPlace}
@@ -3922,7 +4025,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openOldestCheck, openCheckLink }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -4127,6 +4230,11 @@ export function useDashboardCheckCount() {
 /** Owner, 28 Oct 2026 (concern 4): the Calendar tab's badge opens the oldest question that still asks (concern 4). */
 export function useDashboardOpenOldestCheck() {
   return useContext(DashboardContext)?.openOldestCheck;
+}
+
+/** Step 15: opens the "?" an old Review link names (the Calendar tab reads the link's `check`). */
+export function useDashboardOpenCheckLink() {
+  return useContext(DashboardContext)?.openCheckLink;
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {

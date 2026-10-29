@@ -44,7 +44,7 @@ describe("mobile place editor contract", () => {
 
   it("preserves review-first visit preferences and native-unavailable controls", () => {
     expect(editorSource).toContain("Suggest visits here");
-    expect(editorSource).toContain("Show detected visits in Review.");
+    expect(editorSource).toContain("Ask about detected visits in Calendar.");
     expect(editorSource).toContain("Place search is unavailable in this build");
     expect(editorSource).toContain("Current location");
     expect(editorSource).toContain("Advanced coordinates");

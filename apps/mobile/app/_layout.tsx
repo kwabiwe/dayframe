@@ -141,10 +141,6 @@ function ThemedStack() {
           name="onboarding"
           options={{ title: "Set up Dayframe", animation: reduceMotion ? "none" : "fade", gestureEnabled: false }}
         />
-        {/* The Review deck owns horizontal drags (swipe right logs a card, and a card springing home
-            or returning after Undo can reach the screen edge): no swipe-back here at all, so nothing
-            can race a card. ‹ Today goes back. */}
-        <Stack.Screen name="review" options={{ title: "Review", gestureEnabled: false }} />
         <Stack.Screen
           name="action/[verb]"
           options={{
