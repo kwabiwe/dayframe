@@ -20,6 +20,8 @@ type HeldAnswer = ReviewDeckHeldDecision & {
   owner: string | null;
   /** The Apple place a Yes names (card B part 2): recorded there once. */
   venue?: ReviewAnswerVenue | null;
+  /** With `venue`: the activity picked under Logs as, recorded with it (Codex r1 on #620). */
+  logAsCategoryId?: string | null;
   /**
    * Answered from its sheet with changes of its own (Codex r2 on #610): its record waits, on the phone, for those
    * corrections (`reviewAnswersAfterCorrections`); the end of Undo lets it go once they are acknowledged.
@@ -292,7 +294,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       item,
       mutation: reviewAnswerMutation(item, decision.logged, {
         outingMemberIds: members.length ? ids.slice(1) : undefined,
-        venue: (decision as HeldAnswer).venue ?? null
+        venue: (decision as HeldAnswer).venue ?? null,
+        logAsCategoryId: (decision as HeldAnswer).logAsCategoryId ?? null
       }),
       clientMutationId: createReviewClientMutationId(),
       ...(members.length ? { affectedItems: affected } : {})
@@ -380,7 +383,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // registered changes): the lifecycle is read here, so an answer settling while the app is away or the List is gone
   // is saved at once, with no Undo hold, no haptic and nothing said, through its save too.
   const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean; recordOwner?: MobileAccountOwner } = {}): boolean => {
+    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean; recordOwner?: MobileAccountOwner; logAsCategoryId?: string | null } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
     const quiet = !alive.current || !inFront.current;
@@ -417,6 +420,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
+    // An outing has no way to keep a guessed venue (`confirm_outing` takes no name or Place ID), so Yes to a guess is
+    // refused for one rather than saved without it (Codex r2 on #620); neither the Calendar nor the sheet guesses one.
+    if (logged && venue && members.length) return false;
     // The whole answer set as tapped (Codex r9 on #610): an outing's membership and every member's proposal. An
     // answer after corrections is the "?" alone, so only its own proposal counts there.
     if (options.expected && (!options.afterCorrections || options.outing) && (members.length !== options.expected.members.size
@@ -438,7 +444,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       seconds: 0,
       proposal: options.expected?.proposal ?? reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
-      ...(logged && venue && !members.length ? { venue } : {}),
+      ...(logged && venue && !members.length ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {}) } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
       ...(options.recordOwner ? { recordOwner: options.recordOwner } : {}),
       ...(quiet ? { quiet: true } : {}),
@@ -522,7 +528,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * sheet's own changes). Whether it was taken now; a gated one is taken once its registration answers.
    */
   const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string } = {}): boolean => {
+    options: { afterCorrections?: string; logAsCategoryId?: string | null } = {}): boolean => {
     if (options.afterCorrections) {
       const recordOwner = accountOf(shownRef.current);
       return recordOwner
@@ -531,11 +537,14 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
-    if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue);
+    const logAs = venue && options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {};
+    if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue, logAs);
     // The answer set as tapped (its proposal, an outing's members and theirs): held against it, never against what a
     // refresh brings meanwhile (Codex r8 and r9 on #610).
     const expected = answerSetOf(listed);
     if (registering.current.has(itemId)) return false;
+    // Yes to a guessed venue on an outing: refused, never saved without its venue (Codex r2 on #620).
+    if (logged && venue && expected.members.size) return false;
     // Not answerable here now (no complete window, a waiting or rejected change of its own, already answered): refused
     // at once, never taken and dropped later (Codex r16 on #610).
     if (!canAnswer(itemId)) return false;
@@ -552,13 +561,15 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     });
     void waitForItemCorrections({ userId: data.user.id, workspaceId: data.workspace.id }, { id, itemId: segmentId, newIds: [],
       ...(memberItemIds.length ? { memberItemIds } : {}),
-      action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } }).then((record) => {
+      // A guessed venue (and a Logs as pick with it) stays with the answer, also while it waits (Codex r1 on #620).
+      action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}),
+        ...(venue && !memberIds.length ? { venue, ...logAs } : {}) } }).then((record) => {
       registering.current.delete(itemId);
       if (!record) {
-        if (ownerRef.current === owner && generation === currentMobileAccountEpoch()) holdAnswer(itemId, logged, venue, { expected });
+        if (ownerRef.current === owner && generation === currentMobileAccountEpoch()) holdAnswer(itemId, logged, venue, { expected, ...logAs });
         return;
       }
-      // Waiting for a correction: no Apple place with it (the correction says where it was). The one completion path
+      // Waiting for a correction: its record carries the venue, if any. The one completion path
       // (Codex r14 on #610): withdrawn, settled quietly, or held for Undo — never left held.
       startWaitingAnswer(itemId, logged, id, owner, { userId: data.user.id, workspaceId: data.workspace.id }, generation,
         { expected, outing: memberIds.length > 0 });

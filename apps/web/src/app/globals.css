@@ -14221,31 +14221,34 @@ button.timeline-location-hit:focus-visible {
   gap: 10px;
 }
 
-.location-correction-label {
-  margin-top: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* One layout for every place and trip dialog (owner feedback, 29 Oct 2026; brand guide "Place and trip
+   sheet"): each section a small grid, titled in sentence case and sparingly. */
+.location-correction-section {
+  display: grid;
+  gap: 8px;
 }
 
+.location-correction-label {
+  margin-top: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* A plain divider list (owner, 29 Oct 2026): the saved places and "Leave as unknown" alike, never a card. */
 .location-correction-options {
   display: grid;
-  overflow: hidden;
-  border-radius: 14px;
-  background: var(--surface-muted);
 }
 
 .location-correction-option {
   position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) 16px;
   gap: 12px;
   align-items: center;
   min-height: 52px;
   border: 0;
-  padding: 8px 14px;
+  padding: 8px 2px;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
@@ -14254,7 +14257,8 @@ button.timeline-location-hit:focus-visible {
 }
 
 .location-correction-option + .location-correction-option::before {
-  --divider-inset: 14px;
+  --divider-inset: 2px;
+  --divider-inset-start: 36px;
   position: absolute;
   top: 0;
   inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
@@ -14275,9 +14279,13 @@ button.timeline-location-hit:focus-visible {
   font-size: 12px;
 }
 
-.location-correction-option[data-checked="true"] {
-  background: var(--foreground);
-  color: var(--surface);
+/* The chosen place: a neutral check at the row's end, as on the iPhone; never a filled row. */
+.location-correction-option[data-checked="true"] b {
+  font-weight: 700;
+}
+
+.location-correction-check {
+  color: var(--text-primary);
 }
 
 /* The radio itself is visually hidden: the whole row shows the choice, and keeps the radio's keyboard. */
@@ -14294,11 +14302,6 @@ button.timeline-location-hit:focus-visible {
   /* The shared neutral focus ring, inside the row. */
   outline: 2px solid var(--focus);
   outline-offset: -2px;
-}
-
-.location-correction-option[data-checked="true"] small {
-  color: inherit;
-  opacity: 0.8;
 }
 
 .location-correction-hint {
@@ -14597,28 +14600,50 @@ button.timeline-location-hit:focus-visible {
   cursor: pointer;
 }
 
+/* "Logs as": the shared activity chips (`ActivityChipFace`) on the dialog's muted fill, compact: 32 px tall with a
+   44 px target around each, rows 12 px apart so the targets never overlap. */
 .location-correction-logs-as {
-  display: flex;
+  /* Always wraps, at every width (the deck's chips scroll sideways on narrow screens; these never do). */
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px 8px;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
 }
 
-.location-correction-pill {
-  min-height: 44px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 16px;
+.location-correction-logs-as .df-rchip {
+  position: relative;
+  min-height: 32px;
   background: var(--surface-muted);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13.5px;
-  font-weight: 650;
   cursor: pointer;
 }
 
-.location-correction-pill[aria-checked="true"] {
-  background: var(--text-primary);
-  color: var(--surface);
+.location-correction-logs-as .df-rchip::before {
+  position: absolute;
+  inset: -6px -4px;
+  content: "";
+}
+
+/* The chosen chip keeps its ring after a click too (a focused button drops its shadow otherwise). */
+.location-correction-logs-as .df-rchip.is-checked {
+  box-shadow: inset 0 0 0 2px var(--text-primary);
+}
+
+.location-correction-logs-as .df-rchip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The hint, and "Don't log" as quiet text once an activity is picked; one line either way, so nothing moves. */
+.location-correction-log-foot {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+}
+
+.location-correction-log-foot .location-correction-hint {
+  flex: 1;
 }
 
 .location-correction-save {

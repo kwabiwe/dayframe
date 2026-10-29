@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { visitedGuess } from "@dayframe/shared";
 import type { MobileReviewItem } from "../../lib/api";
 import { useAppForeground } from "../../lib/appForeground";
 import { revalidateLocationReviewEvidence } from "../../lib/locationReviewEvidenceCache";
@@ -8,14 +7,14 @@ import {
   NearbyPointOfInterestController,
   venueStayFromEvidence
 } from "../../lib/placeSearch";
-import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "../../lib/review";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
+import { venueGuessEligible } from "../../lib/venueGuessEligibility";
 
 /**
  * Card B part 2 (owner feedback, 25 Oct 2026): the best guess for an unnamed visit's "?" when it opens in
  * Calendar › List. A saved or named place is already the server's guess ("Visited Office?"); with none, the
  * iPhone asks Apple Maps what is nearby (the editor's Nearby search, foreground only) and the venue ranker
- * picks a place only when it is confident (design §6.3). Searched only for the question that is open, while
+ * picks a place when it is confident (design §6.3), or, failing that, its top destination within 50 m (PRD D23). Searched only for the question that is open, while
  * the app is in front and the Calendar is on screen, once per version of the suggestion (kept for this run of
  * the app), and cancelled when it closes. Coordinates go only to Apple; nothing is sent to Dayframe until Yes,
  * which records the place's name and Place ID once.
@@ -57,11 +56,8 @@ export function streetOf(subtitle: string | null | undefined) {
   return street ? street : null;
 }
 
-/** Whether a question can take a guess from Apple Maps: an unnamed visit with its whole window, not an outing. */
-export function venueGuessEligible(item: MobileReviewItem | null | undefined, outing: boolean) {
-  return Boolean(item && !outing && isLocationReviewItem(item) && hasV2LocationEvidence(item) &&
-    item.eventType !== "commute_detected" && hasSuggestedTimeWindow(item) && visitedGuess(item.title) == null);
-}
+// The one eligibility rule, shared with the place sheet (Codex r5 on #620).
+export { venueGuessEligible };
 
 /**
  * `release` stops the search at once and holds it until the Calendar is back on screen: the editor's Nearby
@@ -129,7 +125,9 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
         nearby = new NearbyPointOfInterestController(provider, (state) => {
           if (state.status === "error") finish(null, false);
           if (state.status !== "results" && state.status !== "no-results") return;
-          const pick = state.places.find((place) => place.suggested);
+          // The strict suggestion, else the near guess (PRD D23): a destination within 50 m of the visit.
+          // Read from the ranking itself, never the five visible rows (Codex r1 on #620).
+          const pick = state.guess ?? null;
           finish(pick ? { name: pick.title.trim(), street: streetOf(pick.subtitle), applePlaceId: pick.placeId ?? null } : null, true);
         }, () => [], () => venueStayFromEvidence(evidence));
         await nearby.load({ latitude: centre.coordinates[1], longitude: centre.coordinates[0] });

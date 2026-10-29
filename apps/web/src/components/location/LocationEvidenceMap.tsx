@@ -19,17 +19,26 @@ import {
 type BaseMapState = "loading" | "ready" | "unavailable" | "error";
 
 export function LocationEvidenceMap({
+  caption: sheetCaption,
   evidence,
-  onSelectPoint
+  onSelectPoint,
+  visitOnly = false
 }: {
+  /**
+   * The place and trip dialogs' one line in place of the evidence caption (owner feedback, 29 Oct 2026):
+   * `evidenceSheetCaption`, null for none.
+   */
+  caption?: string | null;
   evidence: LocationReviewEvidenceDto;
   onSelectPoint?: (point: { latitude: number; longitude: number }) => void;
+  /** Only the visit's own area or the trip's route: no saved places, anchors, rejected samples, gaps or mode label. */
+  visitOnly?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mode = locationEvidenceMapMode(evidence);
   const hasGeometry = hasLocationMapGeometry(evidence);
-  const caption = locationEvidenceCaption(evidence, mode);
+  const caption = sheetCaption !== undefined ? sheetCaption : locationEvidenceCaption(evidence, mode);
   const [baseMapState, setBaseMapState] = useState<BaseMapState>(
     hasGeometry ? "loading" : "unavailable"
   );
@@ -80,14 +89,14 @@ export function LocationEvidenceMap({
       map.on("load", () => {
         if (cancelled || !map) return;
         if (baseMap.available) setBaseMapState("ready");
-        addEvidenceLayers(map, evidence, {
+        addEvidenceLayers(map, evidence, visitOnly, {
           accent,
           accentSoft,
           danger,
           surfaceRaised,
           warning
         });
-        fitEvidenceBounds(map, evidence, points);
+        fitEvidenceBounds(map, evidence, points, visitOnly);
       });
       if (onSelectPoint) {
         map.on("click", (event) => onSelectPoint({
@@ -106,7 +115,7 @@ export function LocationEvidenceMap({
       mapRef.current = null;
       map?.remove();
     };
-  }, [evidence, hasGeometry, onSelectPoint]);
+  }, [evidence, hasGeometry, onSelectPoint, visitOnly]);
 
   return (
     <div className="location-evidence">
@@ -114,18 +123,19 @@ export function LocationEvidenceMap({
         {hasGeometry ? (
           <div
             ref={containerRef}
-            aria-label={`Location evidence map. ${caption}`}
+            aria-label={visitOnly ? `Map of this ${evidence.segment.kind === "commute" ? "trip" : "visit"}.${caption ? ` ${caption}` : ""}`
+              : `Location evidence map. ${caption}`}
             className="location-evidence-map"
             role="region"
           />
         ) : (
           <div className="location-evidence-empty" role="status">
             <DayframeIcon glyph="map-pin" size={22}/>
-            <strong>No mapped evidence</strong>
-            <span>{caption}</span>
+            <strong>{visitOnly ? "No map for this one" : "No mapped evidence"}</strong>
+            {caption ? <span>{caption}</span> : null}
           </div>
         )}
-        {hasGeometry ? (
+        {hasGeometry && !visitOnly ? (
           <span className="location-evidence-mode">{locationEvidenceModeLabel(mode)}</span>
         ) : null}
         {hasGeometry && baseMapState !== "ready" ? (
@@ -142,8 +152,8 @@ export function LocationEvidenceMap({
           </p>
         ) : null}
       </div>
-      {hasGeometry ? <p className="location-evidence-caption">{caption}</p> : null}
-      {evidence.map.rejectedSamples.length ? (
+      {hasGeometry && caption ? <p className="location-evidence-caption">{caption}</p> : null}
+      {!visitOnly && evidence.map.rejectedSamples.length ? (
         <p className="location-evidence-rejected">
           {evidence.map.rejectedSamples.length} noisy or invalid sample{evidence.map.rejectedSamples.length === 1 ? "" : "s"} excluded from the derived boundary.
         </p>
@@ -183,6 +193,7 @@ function tileFreeStyle(surfaceInset: string): StyleSpecification {
 function addEvidenceLayers(
   map: MapLibreMap,
   evidence: LocationReviewEvidenceDto,
+  visitOnly: boolean,
   colours: {
     accent: string;
     accentSoft: string;
@@ -201,25 +212,28 @@ function addEvidenceLayers(
     type: "line",
     paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2], "line-opacity": 0.8 }
   });
-  addGeoJson(map, "samples", {
-    type: "FeatureCollection",
-    features: evidence.map.acceptedSamples.map((sample) => ({
-      type: "Feature",
-      properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
-      geometry: sample.point
-    }))
-  }, {
-    id: "sample-points",
-    type: "circle",
-    paint: {
-      "circle-color": colours.accent,
-      "circle-opacity": 0.55,
-      "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
-      "circle-stroke-color": colours.surfaceRaised,
-      "circle-stroke-width": 1
-    }
-  });
-  addGeoJson(map, "rejected-samples", {
+  // The sheets' map shows only the visit's area or the trip's route, never its readings (Codex r3 on #620).
+  if (!visitOnly) {
+    addGeoJson(map, "samples", {
+      type: "FeatureCollection",
+      features: evidence.map.acceptedSamples.map((sample) => ({
+        type: "Feature",
+        properties: { accuracyMeters: sample.accuracyMeters ?? 0 },
+        geometry: sample.point
+      }))
+    }, {
+      id: "sample-points",
+      type: "circle",
+      paint: {
+        "circle-color": colours.accent,
+        "circle-opacity": 0.55,
+        "circle-radius": ["interpolate", ["linear"], ["get", "accuracyMeters"], 0, 4, 100, 14],
+        "circle-stroke-color": colours.surfaceRaised,
+        "circle-stroke-width": 1
+      }
+    });
+  }
+  if (!visitOnly) addGeoJson(map, "rejected-samples", {
     type: "FeatureCollection",
     features: evidence.map.rejectedSamples.flatMap((sample) => sample.point
       ? [{ type: "Feature" as const, properties: {}, geometry: sample.point }]
@@ -248,7 +262,7 @@ function addEvidenceLayers(
       paint: { "line-color": colours.accent, "line-width": 2 }
     });
   }
-  if (evidence.map.gaps.length) {
+  if (!visitOnly && evidence.map.gaps.length) {
     addGeoJson(map, "gaps", {
       type: "FeatureCollection",
       features: evidence.map.gaps.flatMap((gap) => gap.fromPoint && gap.toPoint
@@ -267,7 +281,7 @@ function addEvidenceLayers(
       paint: { "line-color": colours.warning, "line-width": 3, "line-dasharray": [2, 2] }
     });
   }
-  for (const place of evidence.map.nearbySavedPlaces) {
+  for (const place of visitOnly ? [] : evidence.map.nearbySavedPlaces) {
     const marker = document.createElement("button");
     marker.type = "button";
     marker.className = "flex h-11 w-11 items-center justify-center rounded-full border-0 bg-transparent";
@@ -280,7 +294,7 @@ function addEvidenceLayers(
       .setPopup(new maplibregl.Popup({ offset: 12 }).setText(`${place.name} · ${place.distanceMeters} m`))
       .addTo(map);
   }
-  for (const anchor of evidence.map.anchors) {
+  for (const anchor of visitOnly ? [] : evidence.map.anchors) {
     if (!anchor.point) continue;
     const marker = document.createElement("div");
     marker.className = "h-3 w-3 rounded-full border-2 border-white bg-[var(--warning)] shadow-lg";
@@ -296,13 +310,14 @@ function addEvidenceLayers(
 function fitEvidenceBounds(
   map: MapLibreMap,
   evidence: LocationReviewEvidenceDto,
-  points: [number, number][]
+  points: [number, number][],
+  visitOnly = false
 ) {
   const bounds = new maplibregl.LngLatBounds();
   for (const coordinate of [
     ...points,
-    ...evidence.map.nearbySavedPlaces.map((place) => place.point.coordinates),
-    ...evidence.map.rejectedSamples.flatMap((sample) => sample.point ? [sample.point.coordinates] : []),
+    ...(visitOnly ? [] : evidence.map.nearbySavedPlaces.map((place) => place.point.coordinates)),
+    ...(visitOnly ? [] : evidence.map.rejectedSamples.flatMap((sample) => sample.point ? [sample.point.coordinates] : [])),
     ...(evidence.map.route?.coordinates ?? []),
     ...(evidence.map.straightLineFallback?.coordinates ?? []),
     ...(evidence.map.centre ? [evidence.map.centre.coordinates] : [])

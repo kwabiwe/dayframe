@@ -129,6 +129,32 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.unmount(); });
   });
 
+  it("releases Yes to a guessed venue with its venue, and with a Logs as pick as that activity, never as log_place (Codex r1 on #620)", async () => {
+    const venue = { name: "Holland & Barrett", street: "12 High Street", applePlaceId: "IHB" };
+    for (const [id, log, edit] of [["m-v1", undefined, undefined],
+      ["m-v2", { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1" }, { categoryId: "6f000000-0000-4000-8000-0000000000c1" }]] as const) {
+      storage.clear();
+      review.enqueueReviewMutation.mockClear();
+      outbox.enqueue.mockClear();
+      outbox.pending = [{ clientCorrectionId: C1 }];
+      await answers.holdAnswerAfterCorrections(OWNER, { id, reviewItemId: "ri-1", logged: true, venue, ...(log ? { log } : {}), waitsFor: [C1] });
+      await answers.commitAnswerAfterCorrections(OWNER, id);
+      let tree!: ReturnType<typeof create>;
+      act(() => { tree = create(<Probe owner={OWNER} />); });
+      await flush();
+      expect(review.enqueueReviewMutation).not.toHaveBeenCalled();
+      await answers.noteTimelineCorrectionAcknowledged(OWNER, C1);
+      outbox.pending = [];
+      act(() => { for (const listener of outbox.listeners) listener(); });
+      await flush();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+      expect(review.enqueueReviewMutation).toHaveBeenCalledOnce();
+      expect(review.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ clientMutationId: id,
+        mutation: { action: "record_poi_once", name: "Holland & Barrett", applePlaceId: "IHB", ...(edit ? { edit } : {}) } });
+      act(() => { tree.unmount(); });
+    }
+  });
+
   it("releases a waiting outing answer as one confirm_outing with its trips (Codex r10 on #610)", async () => {
     storage.clear();
     review.enqueueReviewMutation.mockClear();

@@ -78,6 +78,9 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     });
     expect(reviewAnswerMutation(unnamed, true, { venue })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" });
     expect(reviewAnswerMutation(unnamed, true, { venue: { ...venue, applePlaceId: null } })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery" });
+    // With a Logs as pick (Codex r1 on #620): recorded there once, as that activity.
+    expect(reviewAnswerMutation(unnamed, true, { venue, logAsCategoryId: "cat-1" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
+      applePlaceId: "I1234567890ABCDEF", edit: { categoryId: "cat-1" } });
     // Not now leaves it, as ever; an outing keeps its own question and answer.
     expect(reviewAnswerMutation(unnamed, false, { venue })).toEqual({ action: "ignore_once_location" });
     expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true }).question).toBe("Where were you?");

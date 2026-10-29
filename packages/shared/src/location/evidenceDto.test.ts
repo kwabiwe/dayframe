@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LocationReviewEvidenceDtoSchema } from "./evidenceDto";
+import { LocationReviewEvidenceDtoSchema, evidenceSheetCaption } from "./evidenceDto";
 
 describe("Location Review arrival presentation contract", () => {
   it("defaults older cached DTOs without the explicit flag to existing copy", () => {
@@ -16,5 +16,17 @@ describe("Location Review arrival presentation contract", () => {
       rejectedEvidenceCount: 0
     });
     expect(segment.approximateArrival).toBe(false);
+  });
+});
+
+describe("the place and trip sheets' map line (owner feedback, 29 Oct 2026)", () => {
+  const evidence = (evidenceCount: number, evidenceExpired = false) => ({ segment: { evidenceCount }, evidenceExpired }) as never;
+  it("says at most how many readings, never the silences, and nothing for a saved place", () => {
+    expect(evidenceSheetCaption(evidence(14), { knownPlace: false })).toBe("Based on 14 readings");
+    expect(evidenceSheetCaption(evidence(1), { knownPlace: false })).toBe("Based on 1 reading");
+    expect(evidenceSheetCaption(evidence(14), { knownPlace: true })).toBeNull();
+    expect(evidenceSheetCaption(evidence(0), { knownPlace: false })).toBeNull();
+    expect(evidenceSheetCaption(evidence(14, true), { knownPlace: false })).toBeNull();
+    expect(evidenceSheetCaption(evidence(14), { knownPlace: false })).not.toMatch(/No readings|Stopped|\d:\d\d/);
   });
 });

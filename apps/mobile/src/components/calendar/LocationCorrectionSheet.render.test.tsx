@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
 
 // The place sheet's Nearby and search (native Apple Maps search) is not part of these tests.
-vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: () => null }));
+vi.mock("./SheetNearbySearch", () => ({ SheetNearbySearch: "SheetNearbySearch" }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -51,12 +51,12 @@ vi.mock("react-native-reanimated", () => ({
 }));
 vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
 vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: "TimeWheelPanel" }));
-vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
+vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon", ActivityIcon: "ActivityIcon" }));
 vi.mock("../location/LocationEvidenceMap", () => ({ LocationEvidenceMap: "LocationEvidenceMap" }));
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/timeWheel", () => ({ timeWheelAccessibilityStep: (ms: number, direction: number, _o: unknown, minutes: number) => ms + direction * minutes * 60_000 }));
 
-import { LocationCorrectionSheet, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
+import { LocationCorrectionSheet, SHEET_SECTION_ORDER, type LocationCorrectionTarget } from "./LocationCorrectionSheet";
 
 // Location v4 step 12: synthetic ids, names and times only.
 const iso = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();
@@ -265,7 +265,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("  Exampleton Bakery "); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined, null);
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
 
     const failing = mount({ kind: "place", place, label: "Unknown place" }, undefined, vi.fn(async () => { throw new Error("offline"); }));
@@ -297,7 +297,13 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const onLog = vi.fn();
     const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
     const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
-    expect(plain.tree.root.findByProps({ testID: "location-correction-log-none" }).props.accessibilityState).toEqual({ checked: true });
+    // Nothing picked is "don't log": no selected "Don't log" pill, and no activity checked.
+    expect(plain.has("location-correction-log-none")).toBe(false);
+    expect(plain.tree.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.selected).toBe(false);
+    // Picked, "Don't log" is a quiet way back.
+    plain.press("location-correction-log-cat-errands");
+    plain.press("location-correction-log-none");
+    expect(plain.has("location-correction-log-none")).toBe(false);
     plain.press("location-correction-sheet-action");
     expect(onLog).not.toHaveBeenCalled();
 
@@ -322,7 +328,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
-    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined);
+    expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined, null);
     expect(onLog).toHaveBeenCalledWith("cat-errands");
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
   });
@@ -552,7 +558,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(flat(action(tree).props.style).backgroundColor).toBe("textPrimary");
   });
 
-  it("shows the visit's own map, saved places nearest first with how far, and the rest behind More places (owner items L, N)", () => {
+  it("shows the visit's own map, saved places nearest first with how far, and the rest behind Show all saved places (owner items L, N)", () => {
     const tree = sheetWith({
       evidence: nearMap({ [NEAR]: 140, [SAVED]: 1_400, [FAR]: 8_000 }),
       places: [{ id: FAR, name: "Far Gym", role: null }, { id: SAVED, name: "Exampleton Library", role: null }, { id: NEAR, name: "Near Café", role: null }]
@@ -565,9 +571,139 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(text).toContain("Saved place · 140 m away");
     expect(text).toContain("Saved place · 1.4 km away");
     const more = tree.root.findByProps({ testID: "location-correction-more-places" });
-    expect(JSON.stringify(more.props.children)).toContain("More places (");
+    expect(JSON.stringify(more.props.children)).toContain("Show all saved places");
     act(() => { more.props.onPress(); });
     expect(shown()).toEqual([NEAR, SAVED, FAR]);
     expect(tree.root.findAll((node) => node.props.testID === "location-correction-more-places")).toHaveLength(0);
+  });
+
+  // Owner feedback, 29 Oct 2026: one layout for every sheet.
+  const order = (tree: ReturnType<typeof create>) => {
+    const ids = new Set<string>(SHEET_SECTION_ORDER);
+    const seen: string[] = [];
+    for (const node of tree.root.findAll((each) => typeof each.props.testID === "string" && ids.has(each.props.testID))) {
+      if (!seen.includes(node.props.testID)) seen.push(node.props.testID);
+    }
+    return seen;
+  };
+  const inOrder = (seen: string[]) => SHEET_SECTION_ORDER.filter((id) => seen.includes(id));
+  const ask = { text: "Where were you?", detail: null, yesLabel: null, noLabel: "Not now", onAnswer: vi.fn() };
+  const logs = { activities: [{ id: "cat-errands", name: "Errands", color: "teal", icon: null }], onLog: vi.fn() };
+  const stay = (count: number) => ({
+    map: { acceptedSamples: [], centre: null, nearbySavedPlaces: [], gaps: [{ startedAt: iso(5), stoppedAt: iso(20) }] },
+    segment: { kind: "stay", evidenceCount: count }, evidenceExpired: false
+  }) as never;
+
+  it("puts the sections in the same order for an unknown place, a saved place and a trip", () => {
+    const unknown = order(sheetWith({ question: ask, logAs: logs, onSavePlace: vi.fn(async () => undefined), target: { kind: "place", place, label: "Unknown place", notHere: true } }));
+    const home = order(sheetWith({ logAs: logs, target: { kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" } as TimelinePlace, label: "Home" } }));
+    const tripSheet = order(sheetWith({ question: { ...ask, text: "Getting around?", yesLabel: "Yes" }, target: { kind: "trip", trip, legIndex: null } }));
+    expect(unknown).toEqual([...SHEET_SECTION_ORDER]);
+    for (const seen of [unknown, home, tripSheet]) expect(seen).toEqual(inOrder(seen));
+    expect(home).toEqual(["location-correction-map", "location-correction-where", "location-correction-logs-as", "location-correction-times"]);
+    expect(tripSheet).toEqual(["location-correction-question", "location-correction-map", "location-correction-times", "location-correction-corrections"]);
+  });
+
+  it("never shows the gap list in its copy, and says nothing of readings for a saved place", () => {
+    const unknown = sheetWith({ evidence: stay(14) });
+    const map = unknown.root.findAllByType("LocationEvidenceMap" as never)[0];
+    expect(map.props.caption).toBe("Based on 14 readings");
+    expect(JSON.stringify(unknown.toJSON())).not.toMatch(/No readings|readings \d/);
+    const home = sheetWith({ evidence: stay(14), target: { kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" } as TimelinePlace, label: "Home" } });
+    expect(home.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBeNull();
+    const tripSheet = sheetWith({ evidence: stay(9), target: { kind: "trip", trip, legIndex: null } });
+    expect(tripSheet.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBe("Based on 9 readings");
+  });
+
+  it("uses the compact activity chips under Logs as, none selected and no filled Don't log by default", () => {
+    const tree = sheetWith({ logAs: logs });
+    const chip = tree.root.findByProps({ testID: "location-correction-log-cat-errands" });
+    expect(chip.props).toMatchObject({ compact: true, role: "radio", selected: false });
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-none")).toHaveLength(0);
+    // No all-caps section titles.
+    const titles = tree.root.findAll((node) => node.props.accessibilityRole === "header" && node.type === ("Text" as never));
+    for (const title of titles) expect(flat(title.props.style).textTransform).toBeUndefined();
+    expect(JSON.stringify(tree.toJSON())).not.toMatch(/Fix the shape|More places/);
+  });
+
+  it("asks a near guess as \"Visited {name}?\" with one Yes and Edit; Yes records it there, Edit sets it aside (PRD D23)", () => {
+    const onAnswer = vi.fn();
+    const venue = { name: "Holland & Barrett", street: "12 High Street", applePlaceId: "I.hb" };
+    const tree = sheetWith({ question: { ...ask, guess: venue, onAnswer } });
+    expect(JSON.stringify(tree.root.findByProps({ testID: "location-correction-question" }).props.children)).toContain("Visited Holland & Barrett?");
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-yes" && typeof node.props.onPress === "function")).toHaveLength(1);
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-question-no")).toHaveLength(0);
+    act(() => { tree.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null);
+    const edit = sheetWith({ question: { ...ask, guess: venue, onAnswer: vi.fn() } });
+    act(() => { edit.root.findByProps({ testID: "location-correction-question-edit" }).props.onPress(); });
+    expect(JSON.stringify(edit.root.findByProps({ testID: "location-correction-question" }).props.children)).toContain("Where were you?");
+    expect(edit.root.findAll((node) => node.props.testID === "location-correction-question-yes")).toHaveLength(0);
+    expect(edit.root.findAll((node) => node.props.testID === "location-correction-question-no").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a guessed venue when Yes follows a time change or a Logs as pick (Codex r1 on #620)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+    const queued = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[], generation: number) => Promise<{ start: () => void }> }) => {
+      const waiting = await options.beforeEnqueue?.(["cid-1"], 1);
+      waiting?.start();
+    });
+    const waiting = () => ({ start: vi.fn(), cancel: vi.fn(async () => undefined) });
+    // (a) A time moved, then Yes: the answer waits for the change and carries the venue.
+    const answerAfter = vi.fn(async () => waiting());
+    const onAnswer = vi.fn();
+    const timed = sheetWith({ onQueue: queued as never, question: { ...ask, guess: venue, onAnswer, answerAfter } });
+    act(() => { timed.root.findByProps({ testID: "location-correction-start" }).props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
+    act(() => { timed.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, null);
+    expect(onAnswer).not.toHaveBeenCalled();
+    // (b) Logs as picked, nothing else changed: one answer with the venue and the activity, never log_place.
+    const onLog = vi.fn();
+    const picked = sheetWith({ logAs: { activities: logs.activities, onLog }, question: { ...ask, guess: venue, onAnswer } });
+    act(() => { picked.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { picked.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, "cat-errands");
+    expect(onLog).not.toHaveBeenCalled();
+    // (b) Logs as picked with a place change: the answer waits for it, venue and activity with it; no Logs as of its own.
+    const answerAfterToo = vi.fn(async () => waiting());
+    const onLogAfter = vi.fn();
+    const both = sheetWith({ onQueue: queued as never, logAs: { activities: logs.activities, onLog, onLogAfter },
+      question: { ...ask, guess: venue, onAnswer: vi.fn(), answerAfter: answerAfterToo } });
+    act(() => { both.root.findByProps({ testID: `location-correction-place-${SAVED}` }).props.onPress(); });
+    act(() => { both.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.onPress(); });
+    act(() => { both.root.findByProps({ testID: "location-correction-question-yes" }).props.onPress(); });
+    await settle();
+    expect(answerAfterToo).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, "cat-errands");
+    expect(onLogAfter).not.toHaveBeenCalled();
+    expect(onLog).not.toHaveBeenCalled();
+  });
+
+  it("applies the sheet's own Nearby guess only to an unnamed visit, never over a name or to an outing (Codex r2, r5 on #620)", async () => {
+    const { nearbyProposalKey } = await import("../../lib/nearbyProposal");
+    const evidence = { segment: { kind: "stay", startedAt: place.startedAt, stoppedAt: place.stoppedAt, evidenceCount: 3 }, evidenceExpired: false,
+      map: { acceptedSamples: [], centre: { type: "Point", coordinates: [20, 10] }, nearbySavedPlaces: [], gaps: [] } } as never;
+    const venue = { name: "Apple Bakery", street: null, applePlaceId: "IAPPLE" };
+    const nearbyGuesses = (tree: ReturnType<typeof create>) => {
+      const nearby = tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
+      act(() => { nearby.props.onGuess(venue, nearbyProposalKey(nearby.props.centre, evidence)); });
+    };
+    const questionText = (tree: ReturnType<typeof create>) => JSON.stringify(tree.root.findByProps({ testID: "location-correction-question" }).props.children);
+    // A question already titled with a learned or saved name keeps it.
+    const named = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined),
+      question: { text: "Visited Bread run?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn(), guessable: false } });
+    nearbyGuesses(named);
+    expect(questionText(named)).toContain("Visited Bread run?");
+    expect(questionText(named)).not.toContain("Apple Bakery");
+    // An outing's stay (not guessable either): no guess.
+    const outing = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: false } });
+    nearbyGuesses(outing);
+    expect(questionText(outing)).not.toContain("Visited");
+    // An unnamed visit takes it.
+    const unnamed = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: true } });
+    nearbyGuesses(unnamed);
+    expect(questionText(unnamed)).toContain("Visited Apple Bakery?");
   });
 });

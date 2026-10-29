@@ -23,7 +23,12 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
   /** An outing's trips (their segments): their queued corrections are waited for too (Codex r10 on #610). */
   memberItemIds?: readonly string[];
   newIds: readonly string[];
-  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; outingMemberIds?: readonly string[] }
+  /**
+   * `logAsCategoryId`: Yes to a guessed venue with an activity picked (Codex r1 on #620); kept as the record's `log`
+   * beside its `venue`, and released as one `record_poi_once` with that activity, never as `log_place`.
+   */
+  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; logAsCategoryId?: string | null;
+    outingMemberIds?: readonly string[] }
     | { kind: "log"; categoryId: string };
 }) {
   return registerAfterCorrections(owner, {
@@ -31,6 +36,8 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
     reviewItemId: input.action.kind === "answer" ? input.action.reviewItemId : "",
     logged: input.action.kind === "answer" ? input.action.logged : true,
     ...(input.action.kind === "answer" && input.action.venue ? { venue: input.action.venue } : {}),
+    ...(input.action.kind === "answer" && input.action.venue && input.action.logged && input.action.logAsCategoryId
+      ? { log: { itemId: input.itemId, categoryId: input.action.logAsCategoryId } } : {}),
     ...(input.action.kind === "log" ? { log: { itemId: input.itemId, categoryId: input.action.categoryId } } : {}),
     ...(input.action.kind === "answer" && input.action.outingMemberIds?.length ? { outingMemberIds: input.action.outingMemberIds } : {}),
     newIds: input.newIds,

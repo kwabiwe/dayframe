@@ -184,6 +184,15 @@ const QA_SHEET_PLACES = [
   { id: "p-office", name: "Work", role: "work" },
   { id: "p-school", name: "Exampleton Primary", role: null }
 ];
+// Logs as and the near guess for the sheets (made-up names and colours).
+const QA_SHEET_ACTIVITIES = [
+  { id: "qa-general", name: "General", color: "slate", icon: null },
+  { id: "qa-errands", name: "Errands", color: "amber", icon: null },
+  { id: "qa-health", name: "Health", color: "green", icon: "heart-pulse" },
+  { id: "qa-getting-around", name: "Getting around", color: "orange", icon: null },
+  { id: "qa-home", name: "Home", color: "teal", icon: null }
+];
+const QA_SHEET_GUESS = { name: "Holland & Barrett", street: "12 Example Street", applePlaceId: null };
 // A made-up map for the sheets (public coordinates in central Paris, nobody's real places): readings around the
 // stay, and a trip's route with a silence in it.
 const qaPoint = (longitude: number, latitude: number) => ({ type: "Point" as const, coordinates: [longitude, latitude] as [number, number] });
@@ -216,7 +225,10 @@ function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | n
 function qaSheetTarget(sheet: string | undefined): LocationCorrectionTarget | null {
   const place = timeline.items.find((item) => item.id === "qa-unknown");
   const trip = timeline.items.find((item) => item.id === "qa-trip-1");
-  if (sheet === "place" && place?.kind === "place") return { kind: "place", place, label: "Unknown place" };
+  if (sheet === "place" && place?.kind === "place") return { kind: "place", place, label: "Unknown place", notHere: true };
+  // A saved place (Home), for the sheet's one layout (owner feedback, 29 Oct 2026).
+  const home = timeline.items.find((item) => item.id === "qa-home-2");
+  if (sheet === "home" && home?.kind === "place") return { kind: "place", place: home, label: "Home" };
   if ((sheet === "trip" || sheet === "leg") && trip?.kind === "trip") {
     return { kind: "trip", trip: { ...trip, blockIds: [], route: "Exampleton Primary → Office" }, legIndex: sheet === "leg" ? 2 : null };
   }
@@ -225,7 +237,7 @@ function qaSheetTarget(sheet: string | undefined): LocationCorrectionTarget | nu
 
 export default function CalendarQaRoute() {
   // `?check=1` opens the List at its first "?" with its question showing, as Today's chip does.
-  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string; sheet?: string }>();
+  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string; sheet?: string; asks?: string }>();
   const [cycleStep, setCycleStep] = useState(0);
   useEffect(() => {
     if (params.cycle !== "1") return;
@@ -263,7 +275,7 @@ export default function CalendarQaRoute() {
   }, [dense, layout, model]);
   // `?sheet=place|trip|leg` opens a correction sheet at once; a place or trip row (or `?check=unknown|trip`) opens
   // it too, its "?" asked at the top (owner, 28 Oct 2026).
-  const [sheet, setSheet] = useState<{ name: string; asks: boolean } | null>(params.sheet ? { name: params.sheet, asks: false } : null);
+  const [sheet, setSheet] = useState<{ name: string; asks: boolean } | null>(params.sheet ? { name: params.sheet, asks: params.asks === "1" } : null);
   const sheetTarget = qaSheetTarget(sheet?.name);
   const sheetQuestion = sheet?.asks ? QA_CHECK_QUESTIONS.get(sheet.name === "place" ? "qa-check-unknown" : "qa-check-trip") : undefined;
   if (!__DEV__) return <Redirect href="/" />;
@@ -314,7 +326,10 @@ export default function CalendarQaRoute() {
         {sheet && sheetTarget ? (
           <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(sheet.name)} key={sheet.name} onDismissed={() => setSheet(null)}
             onQueue={async () => undefined} onSavePlace={async () => undefined} places={QA_SHEET_PLACES} presentationId={1}
-            question={sheetQuestion ? { text: sheetQuestion.question, detail: null, yesLabel: sheetQuestion.logLabel, noLabel: sheetQuestion.skipLabel, onAnswer: () => undefined } : null}
+            question={sheetQuestion ? { text: sheetQuestion.question, detail: null, yesLabel: sheetQuestion.logLabel, noLabel: sheetQuestion.skipLabel, onAnswer: () => undefined,
+              // The near guess (PRD D23), as the sheet's own nearby list would make it for the unknown place.
+              guess: sheet?.name === "place" ? QA_SHEET_GUESS : null } : null}
+            logAs={sheet?.name === "place" || sheet?.name === "home" ? { activities: QA_SHEET_ACTIVITIES, onLog: () => undefined } : undefined}
             reduceMotion={false} rootHosted={false} target={sheetTarget} theme={theme} />
         ) : null}
       </View>

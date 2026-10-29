@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
-import { DAYFRAME_APP_ICONS, blockColorsFor } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, activityMarkerRadius, blockColorsFor } from "@dayframe/shared";
 import { ActivityIcon, DayframeIcon } from "./icons/DayframeIcon";
 import { colorWithAlpha } from "./today/todayBlocksLayout";
 import type { MobileTheme } from "../lib/mobileTheme";
@@ -20,26 +20,63 @@ type ChipActivity = {
 
 /** 38 points tall plus 6 of hit slop above and below: at least a 44-point target. */
 const CHIP_HIT_SLOP = { top: 6, bottom: 6 };
+/** The compact chip: 32 points tall plus 6 above and below, as the compact pill (rows sit 12 apart). */
+const COMPACT_CHIP_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
 
 /**
  * One activity chip: the activity's icon and name on a tint of its colour, solid in the activity
  * colour with measured on-block text when chosen. Tapping the chosen chip again clears it.
+ *
+ * `compact` (the place sheet's "Logs as", owner feedback 29 Oct 2026): the web's chip face on the
+ * compact pill — a neutral 32-point pill led by the activity's 20-point colour tile with its glyph
+ * (the activity picker's lead, X3 radius), the name, and for the chosen one a 2-point ring in the
+ * primary text colour and a check, so the colour stays on the tile. `role="radio"` for a one-of choice.
  */
 export function ActivityChip({
   activity,
+  compact = false,
   onPress,
+  role = "button",
   selected,
   testID,
   theme
 }: {
   activity: ChipActivity;
+  compact?: boolean;
   onPress: () => void;
+  role?: "button" | "radio";
   selected: boolean;
   testID?: string;
   theme: MobileTheme;
 }) {
   const colors = blockColorsFor(activity.color ?? activity.id, theme.mode, activity.name);
   const textColor = selected ? colors.text : theme.textPrimary;
+  if (compact) {
+    return (
+      <Pressable
+        accessibilityHint={selected ? "Double tap to clear the activity" : undefined}
+        accessibilityLabel={role === "radio" ? activity.name : `Set activity to ${activity.name}`}
+        accessibilityRole={role}
+        accessibilityState={role === "radio" ? { checked: selected } : { selected }}
+        hitSlop={COMPACT_CHIP_HIT_SLOP}
+        onPress={onPress}
+        testID={testID}
+        style={({ pressed }) => [
+          activityChipStyles.compact,
+          { backgroundColor: theme.surfaceMuted, borderColor: selected ? theme.textPrimary : "transparent" },
+          pressed ? { opacity: 0.72 } : null
+        ]}
+      >
+        <View style={[activityChipStyles.tile, { backgroundColor: colors.fill }]}>
+          <ActivityIcon color={colors.text} icon={activity.icon ?? null} name={activity.name} size={12} />
+        </View>
+        <Text {...mobileTextProps("control")} numberOfLines={1} style={[activityChipStyles.compactText, { color: theme.textPrimary }]}>
+          {activity.name}
+        </Text>
+        {selected ? <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable
@@ -140,6 +177,22 @@ export const activityChipStyles = StyleSheet.create({
     paddingRight: 14
   },
   chipMore: { paddingLeft: 11 },
+  compact: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 2,
+    flexDirection: "row",
+    gap: 6,
+    maxWidth: "100%",
+    minHeight: 32,
+    paddingLeft: 4,
+    paddingRight: 12
+  },
+  tile: { alignItems: "center", borderRadius: activityMarkerRadius(20), height: 20, justifyContent: "center", width: 20 },
+  compactText: { flexShrink: 1, fontSize: 13.5, fontWeight: "600" },
+  /** Compact chips wrap 12 apart, so their 44-point targets never overlap. */
+  compactWrap: { flexDirection: "row", flexWrap: "wrap", columnGap: 8, rowGap: 12 },
   chipText: { flexShrink: 1, fontSize: 13.5, fontWeight: "600" },
   chipCount: { fontSize: 12, fontWeight: "600" },
   /** Measures candidate chips off screen, so the visible row can be fitted. */

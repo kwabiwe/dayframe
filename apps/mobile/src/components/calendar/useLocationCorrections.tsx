@@ -38,6 +38,9 @@ type Open = ({ kind: "place"; itemId: string; label: string } | { kind: "trip"; 
  * (by id, so it shows the List's projected timeline, a leg change included), queueing and sending what Done
  * set, and saying once why a refused correction came back (the row is already back as it was).
  */
+/** How long a moved item's new times must hold before its map is read again (Codex r2 on #620). */
+const EVIDENCE_REREAD_DELAY_MS = 600;
+
 export function useLocationCorrections({
   acknowledged = [],
   clockFormat,
@@ -78,28 +81,45 @@ export function useLocationCorrections({
   const [held, setHeld] = useState<{ id: number; target: LocationCorrectionTarget } | null>(null);
   // The presentation whose Done kept corrections: its item may leave the List as the sheet closes.
   const [closingId, setClosingId] = useState<number | null>(null);
-  // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet).
-  const [evidence, setEvidence] = useState<{ itemId: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
+  // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet), with the span and account
+  // it was read for.
+  const [evidence, setEvidence] = useState<{ itemId: string; span: string; ownerKey: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
   const openItemId = open?.itemId ?? null;
   const openKind = open?.kind ?? null;
-  // The item's start as the timeline gave it when the sheet opened (its sheet's map stays with that item).
-  const [openedStart, setOpenedStart] = useState<{ id: number; startedAt: string } | null>(null);
-  if (open && openedStart?.id !== open.id) {
-    const item = timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind);
-    if (item) setOpenedStart({ id: open.id, startedAt: item.startedAt });
-  }
-  const openStartedAt = open && openedStart?.id === open.id ? openedStart.startedAt : null;
+  // The item as the List has it now: a refresh that moves its times (replay turned a 25-minute stay into 90) reads
+  // its map again, so the sheet's Nearby list and guess follow the stay as it is (Codex r2 on #620).
+  const liveItem = open ? timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind) ?? null : null;
+  const liveSpan = liveItem ? `${liveItem.startedAt}|${liveItem.stoppedAt ?? ""}` : null;
+  // The span the map is read for: the item's when the sheet opens (at once), then each new span once it has held for
+  // EVIDENCE_REREAD_DELAY_MS (a burst of refreshes reads once).
+  const [readSpan, setReadSpan] = useState<{ id: number; span: string; startedAt: string } | null>(null);
+  if (open && liveItem && liveSpan && readSpan?.id !== open.id) setReadSpan({ id: open.id, span: liveSpan, startedAt: liveItem.startedAt });
+  const openId = open?.id ?? null;
+  const liveStart = liveItem?.startedAt ?? null;
   useEffect(() => {
-    if (!openItemId || !openKind || !openStartedAt || !userId || !workspaceId) return;
+    if (openId === null || !liveSpan || !liveStart || readSpan?.id !== openId || readSpan.span === liveSpan) return;
+    const timer = setTimeout(() => setReadSpan({ id: openId, span: liveSpan, startedAt: liveStart }), EVIDENCE_REREAD_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [openId, liveSpan, liveStart, readSpan]);
+  const read = open && readSpan?.id === open.id ? readSpan : null;
+  const readStart = read?.startedAt ?? null;
+  const readKey = read?.span ?? null;
+  useEffect(() => {
+    if (!openItemId || !openKind || !readStart || !readKey || !userId || !workspaceId) return;
+    // Fenced to the account it was asked for: another account aborts it, and its answer is never shown there.
+    const forOwner = `${workspaceId}:${userId}`;
     const controller = new AbortController();
-    fetchTimelineItemEvidence({ id: openItemId, kind: openKind, startedAt: openStartedAt },
+    fetchTimelineItemEvidence({ id: openItemId, kind: openKind, startedAt: readStart },
       { owner: { userId, workspaceId }, signal: controller.signal }).then(
-      (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: result }); },
-      () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: null }); }
+      (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: result }); },
+      () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: null }); }
     );
     return () => controller.abort();
-  }, [openItemId, openKind, openStartedAt, userId, workspaceId]);
-  const shownEvidence = evidence && evidence.itemId === openItemId && open ? evidence.evidence ?? "unavailable" as const : null;
+  }, [openItemId, openKind, readStart, readKey, userId, workspaceId]);
+  // The last map read for this item and account (an older span's stays until the new one arrives; the sheet fences its
+  // guess to the times it describes).
+  const shownEvidence = evidence && evidence.itemId === openItemId && evidence.ownerKey === ownerKey && open
+    ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
     if (!ownerKey) return;
@@ -379,7 +399,8 @@ export function useLocationCorrections({
   const activities = useMemo(() => [...(data?.categories ?? [])]
     .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
     .slice(0, 8)
-    .map((category) => ({ id: category.id, name: category.name })), [data?.categories]);
+    // Each with its colour and icon, for the compact activity chips (owner feedback, 29 Oct 2026).
+    .map((category) => ({ id: category.id, name: category.name, color: category.color ?? null, icon: category.icon ?? null })), [data?.categories]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
@@ -456,6 +477,9 @@ export function useLocationCorrections({
           return waiting;
         }
       } : undefined}
+      // The sheet hands over a Nearby pick's Apple Place ID (PRD D23), but a saved place and a timeline correction
+      // have no field for it yet (that needs a server change), so it is not sent: only the "?"'s Yes to a guess
+      // (`record_poi_once`) adds to the venue history today.
       onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
         ? (name, rest, beforeEnqueue) => savePlace(open.id, open.ownerKey, shown.place, name, rest, beforeEnqueue) : undefined}
       places={places}

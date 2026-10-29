@@ -231,6 +231,22 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
     });
 
+    it("refuses Yes to a guessed venue on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      // Through the gate (the stay has its segment) and without it: refused, nothing held or saved.
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
+        const { result } = mount(items);
+        let taken = true;
+        act(() => { taken = result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1" }); });
+        expect(taken).toBe(false);
+        expect(result.current.held).toBeNull();
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      }
+    });
+
     it("never queues confirm_outing when an outing's trip changed while it registered (Codex r9 on #610)", async () => {
       // The outing's stay has its segment, so its Yes goes through the gate.
       const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"

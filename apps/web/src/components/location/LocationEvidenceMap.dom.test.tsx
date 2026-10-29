@@ -114,6 +114,32 @@ describe("LocationEvidenceMap", () => {
     expect(screen.getByText("Endpoint estimate")).not.toBeNull();
   });
 
+  it("draws only the visit's area on the sheets' map, never its readings, rejected readings, gaps, saved places or anchors (Codex r3 on #620)", async () => {
+    mocks.clientFetch.mockResolvedValue(new Response(JSON.stringify({ error: "unavailable" }), { status: 503 }));
+    const point = (longitude: number, latitude: number) => ({ type: "Point" as const, coordinates: [longitude, latitude] as [number, number] });
+    const stay = evidence({
+      segment: { ...evidence().segment, kind: "stay", evidenceCount: 2 },
+      map: {
+        ...evidence().map, straightLineFallback: null, centre: point(0.1, 51.5), stayRadiusMeters: 60,
+        acceptedSamples: [{ id: "s1", point: point(0.1, 51.5), occurredAt: "2026-08-14T09:10:00.000Z", accuracyMeters: 10, kind: "location", role: null },
+          { id: "s2", point: point(0.1001, 51.5001), occurredAt: "2026-08-14T09:20:00.000Z", accuracyMeters: 10, kind: "location", role: null }],
+        rejectedSamples: [{ id: "r1", point: point(0.2, 51.6), occurredAt: "2026-08-14T09:30:00.000Z", kind: "location", reason: "accuracy" }],
+        gaps: [{ startedAt: "2026-08-14T09:30:00.000Z", stoppedAt: "2026-08-14T09:40:00.000Z", durationSeconds: 600, fromPoint: point(0.1, 51.5), toPoint: point(0.1001, 51.5001) }]
+      } as LocationReviewEvidenceDto["map"]
+    });
+    const layers = async () => {
+      await waitFor(() => expect(mocks.maps.at(-1)?.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "stay-radius-line" })));
+      return (mocks.maps.at(-1)!.addLayer.mock.calls as Array<[{ id: string }]>).map(([layer]) => layer.id);
+    };
+    const sheet = render(<LocationEvidenceMap caption="Based on 2 readings" evidence={stay} visitOnly />);
+    expect(await layers()).toEqual(["route-line", "straight-line-fallback-line", "stay-radius-fill", "stay-radius-line"]);
+    expect(screen.getByText("Based on 2 readings")).not.toBeNull();
+    sheet.unmount();
+    // The full map, for comparison, still draws them.
+    render(<LocationEvidenceMap evidence={stay} />);
+    expect(await layers()).toEqual(expect.arrayContaining(["sample-points", "rejected-sample-points", "gap-lines"]));
+  });
+
   it("does not initialize MapLibre when there is no map geometry", async () => {
     render(<LocationEvidenceMap evidence={evidence({
       map: { ...evidence().map, straightLineFallback: null }
