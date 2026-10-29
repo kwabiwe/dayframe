@@ -2076,16 +2076,56 @@ function scheduleAccuracyBurstGuard(lease: AccuracyBurstLease, delayMs: number) 
   accuracyBurstTimer = setTimeout(() => {
     accuracyBurstTimer = null;
     void accuracyBurstGuardTick(lease).then((again) => {
-      if (again && accuracyBurstLease === lease) scheduleAccuracyBurstGuard(lease, ACCURACY_BURST_RETRY_MS);
+      if (again && accuracyBurstLease === lease) scheduleAccuracyBurstGuard(lease, nextGuardTickMs(lease));
     }, () => {
-      if (accuracyBurstLease === lease) scheduleAccuracyBurstGuard(lease, ACCURACY_BURST_RETRY_MS);
+      if (accuracyBurstLease === lease) scheduleAccuracyBurstGuard(lease, nextGuardTickMs(lease));
     });
   }, delayMs);
+}
+
+/**
+ * The next try: 30 seconds on, but never past the lease's hard stop, so a failing restore is stopped at that moment,
+ * never up to 30 seconds after it (the day's allowance holds; Codex r24 on #619).
+ */
+function nextGuardTickMs(lease: AccuracyBurstLease) {
+  const untilStop = lease.stopInMs - (monotonicNow() - lease.takenAt);
+  return untilStop > 0 ? Math.min(ACCURACY_BURST_RETRY_MS, Math.ceil(untilStop)) : ACCURACY_BURST_RETRY_MS;
+}
+
+/**
+ * The admission guard's step: options this process never set are lowered to normal capture when updates are
+ * running (never stopped or started, so no owner's capture is ever stranded stopped and none is started without
+ * consent); only after 5 minutes of failing to lower them are updates stopped, and an admitted wake then starts
+ * normal capture again (Codex r24 on #619). True while there is more to do.
+ */
+async function admissionGuardTick(lease: AccuracyBurstLease) {
+  const outcome = await withNativeLocationOptions(async () => {
+    if (accuracyBurstLease !== lease || nativeLocationMode !== "unknown") return "done" as const;
+    const running = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
+    if (running === false) return "done" as const;
+    if (running && await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false)) {
+      nativeLocationMode = "normal";
+      nativeOptionsOwner = null;
+      return "ended" as const;
+    }
+    if (monotonicNow() - lease.takenAt < lease.stopInMs) return "retry" as const;
+    if (!await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false)) return "retry" as const;
+    nativeLocationMode = "stopped";
+    nativeOptionsOwner = null;
+    return "ended" as const;
+  });
+  if (outcome === "retry") return true;
+  confirmLeaseDone(lease);
+  if (outcome === "ended") noteNativeBurstEnd(lease.nativeDoneAt!);
+  if (accuracyBurstLease === lease) accuracyBurstLease = null;
+  settlePendingAccuracyBursts();
+  return false;
 }
 
 /** One step of the guard; true while there is more to do. */
 async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
   if (accuracyBurstLease !== lease) return false;
+  if (isAdmissionGuard(lease)) return admissionGuardTick(lease);
   // A lifetime that ended has its own teardown, which stops updates and ends the burst. If that teardown failed and
   // its options are still the last ones set (no newer capture has set its own), the guard keeps stopping them; a
   // newer capture's start has replaced them, so there is nothing of this lease's left to stop (Codex r13 on #619).
@@ -2233,21 +2273,21 @@ function guardInheritedAccuracyOptions(capture: LocationCaptureSnapshot) {
 const WAKE_ADMISSION_GUARD_MS = 30_000;
 
 /** The admission guard's lease: options this process never set, held from a wake's first line (Codex r19 on #619). */
-const isAdmissionGuard = (lease: AccuracyBurstLease | null) => Boolean(lease && lease.startedAt === UNKNOWN_BURST && lease.capture === STOPPED_CAPTURE);
+const isAdmissionGuard = (lease: AccuracyBurstLease | null) => Boolean(lease && lease.startedAt === UNKNOWN_BURST && lease.capture === ADMISSION_CAPTURE);
 
 /** The lease, unless it's only the admission guard, which any surer guard or a capture's own options replace. */
 const heldGuardLease = () => isAdmissionGuard(accuracyBurstLease) ? null : accuracyBurstLease;
 
 /**
  * Every wake, and every foreground capture start or refresh, of a process that hasn't set the options yet starts
- * here, before any read, write or await: options a relaunch may have inherited are stopped 30 seconds on unless a
- * capture in this process has set them by then (an admitted wake or a refresh does at once), so a wake or refresh
- * that's rejected, slow, or whose cleanup does nothing never leaves them running (Codex r19, r21 on #619). A
- * capture's own options, or a guard bound to an admitted capture, end it; an admitted wake restarts what it stopped.
+ * here, before any read, write or await: options a relaunch may have inherited are lowered to normal capture 30
+ * seconds on unless a capture in this process has set them by then (an admitted wake or a refresh does at once), so
+ * a wake or refresh that's rejected, slow, or whose cleanup does nothing never leaves best accuracy running (Codex
+ * r19, r21, r24 on #619). A capture's own options, or a guard bound to an admitted capture, end it.
  */
 function guardWakeAdmission() {
   if (accuracyBurstLease || nativeLocationMode !== "unknown") return;
-  takeAccuracyBurstLease(STOPPED_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, WAKE_ADMISSION_GUARD_MS);
+  takeAccuracyBurstLease(ADMISSION_CAPTURE, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS, WAKE_ADMISSION_GUARD_MS);
 }
 registerLocationAdmissionGuard(guardWakeAdmission);
 
@@ -2294,6 +2334,8 @@ async function protectInheritedAccuracyOptions() {
 }
 /** No capture lifetime at all (a teardown's): never current, so a guard holding it only ever stops updates. */
 const STOPPED_CAPTURE: LocationCaptureSnapshot = { revision: -1, binding: null, context: null };
+/** The admission guard's: no capture yet, never current; its guard lowers inherited options (`admissionGuardTick`). */
+const ADMISSION_CAPTURE: LocationCaptureSnapshot = { revision: -2, binding: null, context: null };
 
 /** This capture lifetime's lease while its burst may still run (not confirmed over, within its elapsed 3 minutes). */
 function liveAccuracyBurstLease(capture: LocationCaptureSnapshot) {

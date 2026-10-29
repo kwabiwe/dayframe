@@ -1743,5 +1743,17 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
       captureState.current = true;
     }
   });
+
+  it("a failing restore is stopped at the day's last allowed second, never up to 30 seconds past it (Codex r24 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 895 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(186_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
 });
 

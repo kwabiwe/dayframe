@@ -1244,8 +1244,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
     }
   });
 
-  it("a wake made stale during admission, whose cleanup does nothing, still has inherited options stopped (Codex r19 on #619)", async () => {
-    await relaunchedDuringBurst();
+  it("a wake made stale during admission, whose cleanup does nothing, still has inherited options lowered (Codex r19, r24 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     try {
       h.stopExpo.mockClear();
@@ -1253,7 +1253,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       store.invalidateLocationCaptureOwnership(); // signed out while the wake was being admitted
       await wake;
       await vi.advanceTimersByTimeAsync(31_000);
-      expect(h.stopExpo).toHaveBeenCalled();
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
     } finally {
       geofence.__resetAccuracyBurstForTests();
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -1280,8 +1281,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       const wake = learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
       await vi.advanceTimersByTimeAsync(32_000);
       await wake;
-      expect(h.stopExpo).toHaveBeenCalled();
       expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
     } finally {
       storage.getItem.mockImplementation(read);
       geofence.__resetAccuracyBurstForTests();
@@ -1289,8 +1290,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
     }
   });
 
-  it("a foreground refresh held in admission still has inherited options stopped (Codex r21 on #619)", async () => {
-    await relaunchedDuringBurst();
+  it("a foreground refresh held in admission still has inherited options lowered (Codex r21, r24 on #619)", async () => {
+    const start = await relaunchedDuringBurst();
     h.stopExpo.mockClear();
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
     const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
@@ -1303,7 +1304,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       });
       const refreshing = geofence.refreshGeofencesForPlaces([place]).catch(() => undefined);
       await vi.advanceTimersByTimeAsync(31_000);
-      expect(h.stopExpo).toHaveBeenCalled();
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
       held.resolve();
       await refreshing;
     } finally {
@@ -1313,7 +1315,7 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
     }
   });
 
-  it("a bootstrap held in admission has inherited options stopped, then gives a consenting owner normal capture back (Codex r22 on #619)", async () => {
+  it("a bootstrap held in admission has inherited options lowered, and its owner keeps normal capture (Codex r22, r24 on #619)", async () => {
     const start = await relaunchedDuringBurst();
     h.stopExpo.mockClear();
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
@@ -1331,7 +1333,8 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       });
       const configuring = runtime.configureLocationIntelligence(bootstrap(A, [place]));
       await vi.advanceTimersByTimeAsync(31_000);
-      expect(h.stopExpo).toHaveBeenCalled();
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled(); // lowered, never stopped (Codex r24 on #619)
       held.resolve();
       await configuring;
       expect(start).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
@@ -1378,6 +1381,37 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
     try {
       await expect(geofence.startGeofences([place], A)).rejects.toThrow("registration failed");
       await vi.advanceTimersByTimeAsync(31_000);
+      expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+      expect(h.stopExpo).not.toHaveBeenCalled();
+    } finally {
+      storage.getItem.mockImplementation(read);
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
+
+  it("an admission that fails after its guard fired never strands a consenting owner's capture stopped (Codex r24 on #619)", async () => {
+    await signIn(A, [place]);
+    geofence.__resetAccuracyBurstForTests();
+    const start = vi.mocked((await import("expo-location")).startLocationUpdatesAsync);
+    start.mockClear(); h.stopExpo.mockClear();
+    const storage = vi.mocked((await import("@react-native-async-storage/async-storage")).default);
+    const read = storage.getItem.getMockImplementation()!;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let first = true;
+      storage.getItem.mockImplementation(async (k: string) => {
+        if (k.startsWith("dayframe.location.learning.enabled") && first) {
+          first = false;
+          await new Promise((resolve) => setTimeout(resolve, 31_000));
+          throw new Error("consent unreadable");
+        }
+        return read(k);
+      });
+      const registering = expect(geofence.startGeofences([place], A)).rejects.toThrow("consent unreadable");
+      await vi.advanceTimersByTimeAsync(32_000);
+      await registering;
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
       expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
       expect(h.stopExpo).not.toHaveBeenCalled();
     } finally {
