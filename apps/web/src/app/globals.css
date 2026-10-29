@@ -14185,7 +14185,9 @@ button.timeline-location-hit:focus-visible {
 .timeline-check-answers {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* Rows 12 px apart: each 32 px pill's 44 px hit area reaches 6 px past it, so wrapped answers'
+     targets meet without overlapping (Codex r2 on #614). */
+  gap: 12px 8px;
   margin-top: 4px;
 }
 
@@ -14631,7 +14633,9 @@ button.timeline-location-hit:focus-visible {
 .location-correction-question-answers {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* Rows 12 px apart: each 32 px pill's 44 px hit area reaches 6 px past it, so wrapped answers'
+     targets meet without overlapping (Codex r2 on #614). */
+  gap: 12px 8px;
 }
 
 /* Calendar (owner items B, D, E, H, K). */

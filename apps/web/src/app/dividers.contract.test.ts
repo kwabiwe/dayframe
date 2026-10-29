@@ -164,7 +164,6 @@ function sourceFiles(dir: string, pattern = /\.tsx$/): string[] {
 /** Files allowed to keep a Tailwind divider, with the reason. */
 const MARKUP_EXEMPT: Record<string, string> = {
   "components/TimeReviewViews.tsx": "the Calendar time axis's hour lines are grid structure",
-  "components/location/LocationReviewPanel.tsx": "trip stops inside a p-4 section, which insets the lines",
   "components/MetricStrip.tsx": "not rendered anywhere",
   "components/TimeAllocationPie.tsx": "not rendered anywhere"
 };
@@ -256,5 +255,14 @@ describe("compact answer pills", () => {
     expect(hitArea?.selector).toContain(".location-correction-question-answers > .ui-button::before");
     expect(hitArea?.body).toMatch(/width: max\(100%, 44px\);/);
     expect(hitArea?.body).toMatch(/height: max\(100%, 44px\);/);
+    // A long "Log …" answer can wrap "Not now" onto a new row: the rows must sit far enough apart that
+    // the 44 px hit areas never overlap (jsdom has no layout to hit-test, so this is checked in CSS).
+    const pillHeight = Number(sizing!.body.match(/min-height:\s*(\d+)px/)![1]);
+    for (const container of [".timeline-check-answers", ".location-correction-question-answers"]) {
+      const gap = ruleBody(container).match(/(?:^|[;\s])gap:\s*(\d+)px(?:\s+(\d+)px)?;/);
+      expect(gap, container).toBeTruthy();
+      expect(Number(gap![1]), `${container} row gap`).toBeGreaterThanOrEqual(44 - pillHeight);
+      expect(Number(gap![2] ?? gap![1]), `${container} column gap`).toBe(8);
+    }
   });
 });
