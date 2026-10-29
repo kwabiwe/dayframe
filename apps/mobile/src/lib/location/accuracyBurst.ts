@@ -177,10 +177,11 @@ function dayParts(fromMs: number, toMs: number, offsetMinutes: number) {
  * seconds at best accuracy are counted as they really ran, each local day its own part, and the cooldown starts
  * from now (Codex r1 on #619).
  */
-export function endAccuracyBurst(state: AccuracyBurstState, now: Date): AccuracyBurstState {
+export function endAccuracyBurst(state: AccuracyBurstState, now: Date, elapsedMs?: number): AccuracyBurstState {
   if (!state.active) return state;
   const started = Date.parse(state.active.startedAt);
-  const ended = Math.max(started, now.getTime());
+  // Elapsed time measured while it ran wins over wall-clock timestamps, which a clock change moves (Codex r7 on #619).
+  const ended = elapsedMs != null && Number.isFinite(elapsedMs) ? started + Math.max(0, elapsedMs) : Math.max(started, now.getTime());
   const trigger = state.active.trigger;
   const days = { ...state.days };
   const offsetMinutes = state.active.offsetMinutes ?? new Date(started).getTimezoneOffset();
@@ -194,7 +195,7 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date): Accuracy
     days[part.key] = { ...day, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}) };
   }
   const { active: _active, ...rest } = withTrialProgress(state, now);
-  return { ...rest, lastEndedAt: new Date(ended).toISOString(), days };
+  return { ...rest, lastEndedAt: new Date(elapsedMs != null ? now.getTime() : ended).toISOString(), days };
 }
 
 /** Sync help's line: "Accuracy trial day 3 of 14 · bursts on · 2 bursts today (6m)". */

@@ -862,20 +862,30 @@ async function startLocationLearningUnsafe(
   if (!isLocationCaptureSnapshotCurrent(capture)) return false;
   // The accuracy trial starts the first time capture runs (card K); a burst still running keeps its options, one
   // past its 3 minutes ends here.
-  const burst = await withAccuracyBurstState(async (state) => {
-    const now = new Date();
-    const next = state ?? startAccuracyBurstTrial(now);
-    // This lifetime's burst still within its 3 minutes keeps best accuracy; another lifetime's, or one past them,
-    // never resumes (Codex r2 on #619).
-    const keep = next.active && next.active.captureId === capture.binding?.id && !accuracyBurstDue(next, now) ? next.active : null;
-    return { state: next === UNREADABLE_ACCURACY_TRIAL ? next : withTrialProgress(next, now), result: keep };
-  }).catch(() => null);
+  // A lease held in this process decides, on elapsed time: a burst it already confirmed done never restarts, and
+  // one past its 3 minutes doesn't either (Codex r7 on #619). Without one, the stored burst decides.
+  const held = accuracyBurstLease && accuracyBurstLease.capture.binding?.id === capture.binding?.id ? accuracyBurstLease : null;
+  const burst = held
+    ? (held.nativeDoneAt == null && monotonicNow() - held.takenAt < held.endsInMs ? held.startedAt : null)
+    : await withAccuracyBurstState(async (state) => {
+      const now = new Date();
+      const next = state ?? startAccuracyBurstTrial(now);
+      // This lifetime's burst still within its 3 minutes keeps best accuracy; another lifetime's, or one past them,
+      // never resumes (Codex r2 on #619).
+      const keep = next.active && next.active.captureId === capture.binding?.id && !accuracyBurstDue(next, now) ? next.active : null;
+      if (keep) takeAccuracyBurstLease(capture, keep.startedAt, Date.parse(keep.endsAt), Date.parse(keep.stopBy ?? keep.endsAt));
+      return { state: next === UNREADABLE_ACCURACY_TRIAL ? next : withTrialProgress(next, now), result: keep ? keep.startedAt : null };
+    }).catch(() => null);
   await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(burst)));
   if (burst) {
-    takeAccuracyBurstLease(capture, burst.startedAt, Date.parse(burst.endsAt), Date.parse(burst.stopBy ?? burst.endsAt));
+    if (accuracyBurstLease && !accuracyBurstTimer) scheduleAccuracyBurstGuard(accuracyBurstLease, ACCURACY_BURST_RETRY_MS);
   } else {
-    // Normal options are in place: any recorded burst (past its 3 minutes, or another lifetime's) ends now.
-    await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
+    // Normal options are in place: any recorded burst (past its 3 minutes, done, or another lifetime's) ends now,
+    // at its confirmed moment when this process holds its lease.
+    const lease = held;
+    if (lease) confirmLeaseDone(lease);
+    await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, lease) : state, result: undefined }))
+      .then(() => { if (lease && accuracyBurstLease === lease) accuracyBurstLease = null; })
       .catch(() => undefined);
   }
   await updateLocationDiagnostics({
@@ -1654,10 +1664,11 @@ export async function stopLocationLearningIfStarted() {
     });
   }
   clearAccuracyBurstTimer();
+  const lease = accuracyBurstLease;
   accuracyBurstLease = null;
   // Capture stopped (sign-out, an account change, location off), so best accuracy did too: a burst ends now,
   // counted for what it ran.
-  await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
+  await withAccuracyBurstState(async (state) => ({ state: state?.active ? settleAccuracyBurst(state, lease) : state, result: undefined }))
     .catch(() => undefined);
 }
 
@@ -1780,9 +1791,33 @@ type AccuracyBurstLease = {
   capture: LocationCaptureSnapshot; startedAt: string;
   /** Monotonic: when it was taken, and how long from then to the burst's end and its hard stop (Codex r5 on #619). */
   takenAt: number; endsInMs: number; stopInMs: number;
-  /** When normal capture (or none) was confirmed back, wall clock: the burst is settled at that moment. */
+  /** How long it had run when the lease was taken (from the wall clock, once). */
+  priorMs: number;
+  /** When normal capture (or none) was confirmed back: wall clock, and monotonic for its elapsed time. */
   nativeDoneAt: number | null;
+  nativeDoneMono: number | null;
 };
+
+/** How long the lease's burst ran at best accuracy, on elapsed time (Codex r7 on #619). */
+const leaseElapsedMs = (lease: AccuracyBurstLease) => lease.priorMs + ((lease.nativeDoneMono ?? monotonicNow()) - lease.takenAt);
+
+/** The lease's native end, confirmed now unless already confirmed earlier (the earliest wins). */
+function confirmLeaseDone(lease: AccuracyBurstLease) {
+  if (lease.nativeDoneAt == null) {
+    lease.nativeDoneAt = Date.now();
+    lease.nativeDoneMono = monotonicNow();
+  }
+}
+
+/** Settles a burst's time from its lease when one is held: the confirmed moment and elapsed time, never a later one. */
+function settleAccuracyBurst(state: AccuracyBurstState, lease: AccuracyBurstLease | null) {
+  if (!state.active) return state;
+  if (lease && lease.startedAt === state.active.startedAt) {
+    confirmLeaseDone(lease);
+    return endAccuracyBurst(state, new Date(lease.nativeDoneAt!), leaseElapsedMs(lease));
+  }
+  return endAccuracyBurst(state, new Date());
+}
 let accuracyBurstLease: AccuracyBurstLease | null = null;
 
 /** Elapsed time that a clock set back or forward never changes. */
@@ -1799,7 +1834,8 @@ function takeAccuracyBurstLease(capture: LocationCaptureSnapshot, startedAt: str
   const now = Date.now();
   accuracyBurstLease = {
     capture, startedAt, takenAt: monotonicNow(),
-    endsInMs: Math.max(0, endsAt - now), stopInMs: Math.max(0, stopBy - now), nativeDoneAt: null
+    endsInMs: Math.max(0, endsAt - now), stopInMs: Math.max(0, stopBy - now),
+    priorMs: Math.max(0, Math.min(now - Date.parse(startedAt), stopBy - Date.parse(startedAt))), nativeDoneAt: null, nativeDoneMono: null
   };
   scheduleAccuracyBurstGuard(accuracyBurstLease, accuracyBurstLease.endsInMs + 1_000);
 }
@@ -1841,14 +1877,13 @@ async function accuracyBurstGuardTick(lease: AccuracyBurstLease) {
       if (!pastStopBy) return false;
       return Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, () => false);
     });
-    if (done) lease.nativeDoneAt = Date.now();
+    if (done) confirmLeaseDone(lease);
   }
   if (lease.nativeDoneAt == null) return true;
   // Normal capture (or none) is in place: settle the burst once storage takes it, at the moment that was
-  // confirmed, never the later moment storage came back (Codex r5 on #619).
-  const doneAt = new Date(lease.nativeDoneAt);
+  // confirmed and on elapsed time, never the later moment storage came back (Codex r5–r7 on #619).
   await withAccuracyBurstState(async (state) => ({
-    state: state?.active?.startedAt === lease.startedAt ? endAccuracyBurst(state, doneAt) : state,
+    state: state?.active?.startedAt === lease.startedAt ? settleAccuracyBurst(state, lease) : state,
     result: undefined
   }));
   if (accuracyBurstLease === lease) accuracyBurstLease = null;
@@ -1879,11 +1914,10 @@ export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
   if (!restored) return false;
   // The earliest confirmed moment wins: one the guard already confirmed is kept (Codex r6 on #619).
   const lease = accuracyBurstLease?.startedAt === due ? accuracyBurstLease : null;
-  if (lease && lease.nativeDoneAt == null) lease.nativeDoneAt = Date.now();
-  const doneAt = new Date(lease?.nativeDoneAt ?? Date.now());
+  if (lease) confirmLeaseDone(lease);
   const ended = await withAccuracyBurstState(async (state) => {
     if (!state?.active || state.active.startedAt !== due) return { state, result: false };
-    return { state: endAccuracyBurst(state, doneAt), result: true };
+    return { state: settleAccuracyBurst(state, lease), result: true };
   });
   if (ended && accuracyBurstLease?.startedAt === due) {
     accuracyBurstLease = null;
