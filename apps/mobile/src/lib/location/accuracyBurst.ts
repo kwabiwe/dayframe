@@ -36,7 +36,13 @@ export type AccuracyBurstState = {
   /** The furthest trial day reached: a clock set back never turns an off or finished trial on again. */
   furthestTrialDay?: number;
   /** The running burst, until normal capture is back (it stays while a restore hasn't succeeded). */
-  active?: { kind: AccuracyBurstKind; trigger?: AccuracyBurstTrigger; startedAt: string; endsAt: string };
+  active?: {
+    kind: AccuracyBurstKind; trigger?: AccuracyBurstTrigger; startedAt: string; endsAt: string;
+    /** The capture lifetime that started it: another one never resumes or ends it (Codex r2 on #619). */
+    captureId?: string;
+    /** The time zone offset when it started (minutes, as `getTimezoneOffset`): its days are counted on that basis. */
+    offsetMinutes?: number;
+  };
   lastEndedAt?: string;
   /** Bursts by local day: how many started, and their seconds at best accuracy. */
   days: Record<string, AccuracyBurstDay>;
@@ -49,6 +55,9 @@ export const accuracyBurstTrigger = (kind: AccuracyBurstKind, source: "saved_pla
 export function localDayKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
+
+/** The calendar day of a moment at a fixed offset (minutes, as `getTimezoneOffset`). */
+const dayKeyAtOffset = (ms: number, offsetMinutes: number) => new Date(ms - offsetMinutes * 60_000).toISOString().slice(0, 10);
 
 function dayNumber(key: string) {
   const [year, month, day] = key.split("-").map(Number);
@@ -114,7 +123,8 @@ export function accuracyBurstDecision(
 }
 
 export function startAccuracyBurst(
-  state: AccuracyBurstState, kind: AccuracyBurstKind, now: Date, trigger: AccuracyBurstTrigger = accuracyBurstTrigger(kind, "saved_place")
+  state: AccuracyBurstState, kind: AccuracyBurstKind, now: Date, trigger: AccuracyBurstTrigger = accuracyBurstTrigger(kind, "saved_place"),
+  captureId?: string
 ): AccuracyBurstState {
   const key = localDayKey(now);
   const today = state.days[key] ?? { count: 0, seconds: 0 };
@@ -122,7 +132,10 @@ export function startAccuracyBurst(
   const forTrigger = byTrigger[trigger] ?? { count: 0, seconds: 0 };
   return {
     ...withTrialProgress(state, now),
-    active: { kind, trigger, startedAt: now.toISOString(), endsAt: new Date(now.getTime() + ACCURACY_BURST_DURATION_MS).toISOString() },
+    active: {
+      kind, trigger, startedAt: now.toISOString(), endsAt: new Date(now.getTime() + ACCURACY_BURST_DURATION_MS).toISOString(),
+      ...(captureId ? { captureId } : {}), offsetMinutes: now.getTimezoneOffset()
+    },
     days: { ...state.days, [key]: { ...today, count: today.count + 1, byTrigger: { ...byTrigger, [trigger]: { ...forTrigger, count: forTrigger.count + 1 } } } }
   };
 }
@@ -132,15 +145,19 @@ export function accuracyBurstDue(state: AccuracyBurstState, now: Date) {
   return Boolean(state.active && Date.parse(state.active.endsAt) <= now.getTime());
 }
 
-/** The local days between two moments, so a burst across midnight charges each day its own part. */
-function localDayParts(fromMs: number, toMs: number) {
+/**
+ * The days between two moments on the burst's own time-zone basis (the offset when it started), so a burst
+ * across midnight charges each day its own part and a time-zone change mid-burst never splits its count from
+ * its seconds (Codex r2 on #619).
+ */
+function dayParts(fromMs: number, toMs: number, offsetMinutes: number) {
   const parts: Array<{ key: string; seconds: number }> = [];
   let cursor = fromMs;
   while (cursor < toMs) {
-    const next = new Date(cursor);
-    next.setHours(24, 0, 0, 0);
-    const end = next.getTime() > cursor ? Math.min(toMs, next.getTime()) : toMs;
-    parts.push({ key: localDayKey(new Date(cursor)), seconds: (end - cursor) / 1000 });
+    const key = dayKeyAtOffset(cursor, offsetMinutes);
+    const nextMidnight = Date.parse(`${key}T00:00:00.000Z`) + 86_400_000 + offsetMinutes * 60_000;
+    const end = Math.min(toMs, nextMidnight > cursor ? nextMidnight : toMs);
+    parts.push({ key, seconds: (end - cursor) / 1000 });
     cursor = end;
   }
   return parts;
@@ -157,7 +174,8 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date): Accuracy
   const ended = Math.max(started, now.getTime());
   const trigger = state.active.trigger;
   const days = { ...state.days };
-  for (const part of localDayParts(started, ended)) {
+  const offsetMinutes = state.active.offsetMinutes ?? new Date(started).getTimezoneOffset();
+  for (const part of dayParts(started, ended, offsetMinutes)) {
     const day = days[part.key] ?? { count: 0, seconds: 0 };
     const seconds = Math.round(part.seconds);
     const byTrigger = trigger ? {

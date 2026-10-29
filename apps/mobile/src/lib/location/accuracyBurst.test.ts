@@ -61,6 +61,17 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(accuracyBurstDecision(state, day(3, 20))).toEqual({ start: false, reason: "daily_time" });
   });
 
+  it("counts a burst on the time zone it started in, whatever the zone when it ends (Codex r2 on #619)", () => {
+    const started = startAccuracyBurst(trial, "departure", day(2, 12));
+    // It started where the clock read 23:59 (an hour behind UTC, say), and ended 3 minutes later in another zone.
+    const startedAt = Date.parse("2026-11-03T00:59:00.000Z");
+    const elsewhere: AccuracyBurstState = { ...started, days: { "2026-11-02": { count: 1, seconds: 0 } },
+      active: { ...started.active!, startedAt: new Date(startedAt).toISOString(), endsAt: new Date(startedAt + 180_000).toISOString(), offsetMinutes: 60 } };
+    const ended = endAccuracyBurst(elsewhere, new Date(startedAt + 180_000));
+    expect(ended.days["2026-11-02"]).toMatchObject({ count: 1, seconds: 60 });
+    expect(ended.days["2026-11-03"]).toMatchObject({ count: 0, seconds: 120 });
+  });
+
   it("caps a day at 6 bursts and 18 minutes, under the 20-minute best-accuracy budget", () => {
     let state: AccuracyBurstState = trial;
     for (let i = 0; i < 6; i += 1) {

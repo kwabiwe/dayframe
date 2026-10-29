@@ -13,7 +13,7 @@ import {
   type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
-import { accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
+import { ACCURACY_BURST_DURATION_MS, accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
   withTrialProgress, type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
 import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
@@ -865,12 +865,16 @@ async function startLocationLearningUnsafe(
   const burst = await withAccuracyBurstState(async (state) => {
     const now = new Date();
     const next = state ?? startAccuracyBurstTrial(now);
-    // Still within its 3 minutes: keep best accuracy; past them (or unreadable state): normal capture.
-    return { state: withTrialProgress(next, now), result: next.active && !accuracyBurstDue(next, now) ? next.active.startedAt : null };
+    // This lifetime's burst still within its 3 minutes keeps best accuracy; another lifetime's, or one past them,
+    // never resumes (Codex r2 on #619).
+    const keep = next.active && next.active.captureId === capture.binding?.id && !accuracyBurstDue(next, now) ? next.active.startedAt : null;
+    return { state: next === UNREADABLE_ACCURACY_TRIAL ? next : withTrialProgress(next, now), result: keep };
   }).catch(() => null);
   await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(burst)));
-  // Normal options are in place again: a burst that ran past its 3 minutes (across a relaunch, say) ends now.
-  if (!burst) {
+  if (burst) {
+    scheduleAccuracyBurstEnd(capture, 1_000);
+  } else {
+    // Normal options are in place: any recorded burst (past its 3 minutes, or another lifetime's) ends now.
     await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
       .catch(() => undefined);
   }
@@ -1638,8 +1642,18 @@ export async function stopGeofencesIfStarted() {
 }
 
 export async function stopLocationLearningIfStarted() {
-  const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false);
-  if (started) await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK);
+  // An unknown native state is not a stopped one: stop anyway, and end a burst only once updates have really
+  // stopped, so sign-out or location off never leaves best accuracy running untracked (Codex r2 on #619).
+  const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => null);
+  let stopped = started === false;
+  if (started !== false) {
+    stopped = await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).then(() => true, (error) => {
+      if (started) throw error;
+      return false;
+    });
+  }
+  if (!stopped) return;
+  clearAccuracyBurstTimer();
   // Capture stopped (sign-out, an account change, location off), so best accuracy did too: a burst ends now,
   // counted for what it ran.
   await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }))
@@ -1649,7 +1663,17 @@ export async function stopLocationLearningIfStarted() {
 const ACCURACY_BURST_STATE_KEY = "dayframe.location.burstTrial.v1";
 /** A stored trial that can't be read as one: treated as finished (no bursts), and never overwritten by a new one. */
 const UNREADABLE_ACCURACY_TRIAL: AccuracyBurstState = { startedDay: "0001-01-01", furthestTrialDay: Number.MAX_SAFE_INTEGER, days: {} };
+/** A burst still recorded this long past its 3 minutes stops location updates outright (the next refresh restarts them). */
+const ACCURACY_BURST_FORCE_STOP_MS = 5 * 60_000;
+/** While a burst runs past its 3 minutes, normal capture is tried again this often, readings or not. */
+const ACCURACY_BURST_RETRY_MS = 30_000;
 let accuracyBurstChain: Promise<unknown> = Promise.resolve();
+let accuracyBurstTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearAccuracyBurstTimer() {
+  if (accuracyBurstTimer) clearTimeout(accuracyBurstTimer);
+  accuracyBurstTimer = null;
+}
 
 /**
  * The trial's state on this iPhone, read and written one change at a time (both location tasks change it). A
@@ -1677,9 +1701,16 @@ function withAccuracyBurstState<T>(
   return run;
 }
 
-/** The accuracy trial's state, for Sync help and shared diagnostics. */
+/**
+ * The accuracy trial's state, for Sync help and shared diagnostics. The trial day it shows is kept, so a clock
+ * set back after seeing an off day never turns bursts on again (Codex r2 on #619).
+ */
 export function readAccuracyBurstState() {
-  return withAccuracyBurstState(async (state) => ({ state: state === UNREADABLE_ACCURACY_TRIAL ? null : state, result: state === UNREADABLE_ACCURACY_TRIAL ? null : state }));
+  return withAccuracyBurstState(async (state) => {
+    if (!state || state === UNREADABLE_ACCURACY_TRIAL) return { state, result: null };
+    const progressed = withTrialProgress(state, new Date());
+    return { state: progressed, result: progressed };
+  });
 }
 
 /**
@@ -1714,45 +1745,79 @@ export async function maybeStartAccuracyBurst(
   kind: AccuracyBurstKind, capture: LocationCaptureSnapshot, source: "saved_place" | "visit" = "saved_place"
 ) {
   const trigger = accuracyBurstTrigger(kind, source);
-  if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
+  const captureId = capture.binding?.id;
+  if (!captureId || !isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
   if (!await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)) return false;
   await maybeEndAccuracyBurst(capture);
   // Ownership is checked inside the change, so a stale lifetime's callback never starts one (Codex r1 on #619).
   const started = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    if (!state || !isLocationCaptureSnapshotCurrent(capture) || !accuracyBurstDecision(state, now, trigger).start) return { state, result: false };
-    return { state: startAccuracyBurst(state, kind, now, trigger), result: true };
+    if (!state || !isLocationCaptureSnapshotCurrent(capture) || !accuracyBurstDecision(state, now, trigger).start) return { state, result: null };
+    const next = startAccuracyBurst(state, kind, now, trigger, captureId);
+    return { state: next, result: next.active!.startedAt };
   });
   if (!started) return false;
   const ok = isLocationCaptureSnapshotCurrent(capture) &&
     await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(true)).then(() => true, () => false);
   if (!ok) {
-    // Best accuracy never started: the burst ends at once (it ran for no time).
-    await withAccuracyBurstState(async (state) => ({ state: state?.active ? endAccuracyBurst(state, new Date()) : state, result: undefined }));
+    // Best accuracy never started: this burst (and only this one) ends at once, having run for no time.
+    await withAccuracyBurstState(async (state) => ({
+      state: state?.active?.startedAt === started && state.active.captureId === captureId ? endAccuracyBurst(state, new Date()) : state,
+      result: undefined
+    }));
     return false;
   }
+  scheduleAccuracyBurstEnd(capture, ACCURACY_BURST_DURATION_MS + 1_000);
   return true;
 }
 
 /**
- * A reading after a burst's 3 minutes brings normal capture back. The burst stays recorded until normal options
- * are really in place, so a failed restore is tried again with the next reading, and its time counts in full
- * (Codex r1 on #619). Only the capture lifetime that owns the task restores it.
+ * A safety bound that needs no reading: the burst's end is tried again on a timer while the process runs, and a
+ * burst still recorded 5 minutes past its 3 stops location updates outright, so best accuracy never outlives the
+ * daily budget because readings stopped or a restore keeps failing (Codex r2 on #619).
+ */
+function scheduleAccuracyBurstEnd(capture: LocationCaptureSnapshot, delayMs: number) {
+  clearAccuracyBurstTimer();
+  accuracyBurstTimer = setTimeout(() => {
+    accuracyBurstTimer = null;
+    void maybeEndAccuracyBurst(capture).then(async (ended) => {
+      if (ended) return;
+      const state = await readAccuracyBurstState().catch(() => null);
+      if (!state?.active || state.active.captureId !== capture.binding?.id || !isLocationCaptureSnapshotCurrent(capture)) return;
+      if (Date.now() - Date.parse(state.active.endsAt) >= ACCURACY_BURST_FORCE_STOP_MS) {
+        await stopLocationLearningIfStarted().catch(() => undefined);
+        return;
+      }
+      scheduleAccuracyBurstEnd(capture, ACCURACY_BURST_RETRY_MS);
+    }).catch(() => undefined);
+  }, delayMs);
+}
+
+/**
+ * A reading (or the safety timer) after a burst's 3 minutes brings normal capture back. The burst stays recorded
+ * until normal options are really in place, so a failed restore is tried again, and its time counts in full
+ * (Codex r1 on #619). Only the capture lifetime that started it restores it. The trial starts here on the first
+ * admitted wake, a headless one too, when there is none yet (Codex r2 on #619).
  */
 export async function maybeEndAccuracyBurst(capture: LocationCaptureSnapshot) {
   const due = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    const result = state && isLocationCaptureSnapshotCurrent(capture) && accuracyBurstDue(state, now) ? state.active!.startedAt : null;
-    return { state: state ? withTrialProgress(state, now) : state, result };
+    if (!isLocationCaptureSnapshotCurrent(capture)) return { state, result: null };
+    const current = state ?? startAccuracyBurstTrial(now);
+    const result = current.active && current.active.captureId === capture.binding?.id && accuracyBurstDue(current, now)
+      ? current.active.startedAt : null;
+    return { state: current === UNREADABLE_ACCURACY_TRIAL ? current : withTrialProgress(current, now), result };
   });
   if (!due) return false;
   const restored = isLocationCaptureSnapshotCurrent(capture) &&
     await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(false)).then(() => true, () => false);
   if (!restored) return false;
-  return withAccuracyBurstState(async (state) => {
+  const ended = await withAccuracyBurstState(async (state) => {
     if (!state?.active || state.active.startedAt !== due) return { state, result: false };
     return { state: endAccuracyBurst(state, new Date()), result: true };
   });
+  if (ended) clearAccuracyBurstTimer();
+  return ended;
 }
 
 function geofenceSource(radiusMeters: number): "geofence_specific" | "geofence_broad" {
