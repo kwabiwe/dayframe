@@ -416,7 +416,11 @@ svg[data-glyph]:not([stroke-width="0"]) {
   stroke-width: var(--icon-stroke);
 }
 
-:where(.df-block, .df-cmd-go, [style*="--block"]) svg[data-glyph]:not([stroke-width="0"]) {
+/* Only a glyph drawn on the colour itself: an element that carries the activity colour as its own
+   fill (.df-block), or whose inline style sets it and holds the glyph directly. The running timer
+   form carries the colour too, so a descendant match would thicken its neutral menus (Codex r1 on #628). */
+:where(.df-block, .df-cmd-go) > svg[data-glyph]:not([stroke-width="0"]),
+[style*="--block"] > svg[data-glyph]:not([stroke-width="0"]) {
   stroke-width: 2;
 }
 
@@ -7241,7 +7245,9 @@ dialog.ui-dialog.df-range-custom {
   flex: 0 1 auto;
   align-items: center;
   gap: 4px;
-  overflow: hidden;
+  /* Clip sideways only: each tag's 44 px hit area overhangs a 36 px field (Codex r1 on #628). */
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .inline-selected-tag,
