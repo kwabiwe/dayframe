@@ -177,3 +177,16 @@ describe("row sub-line contrast (WCAG 1.4.3, Codex r2 on #495)", () => {
     }
   });
 });
+
+describe("Calendar › List on phones (UI review W1; Codex r1 on #632)", () => {
+  it("fits the screen with times stacked and one action per row, none of them lost", () => {
+    const phone = styles.slice(styles.indexOf("/* Phones (UI review W1"));
+    expect(phone).toMatch(/@media \(max-width: 760px\) \{\s*\.timeline-list-table \{\s*min-width: 0;/);
+    expect(phone).toMatch(/\.timeline-inline-time\[data-clock="12h"\]\.is-running \{[^}]*grid-template-columns: max-content;[^}]*justify-items: end;/);
+    expect(phone).toMatch(/\.timeline-list-actions :is\(\[data-tip="Start again"\], \[data-tip="Restart"\], \[data-tip="Delete"\]\) \{\s*display: none;/);
+    // The running row keeps Restart (the timer bar edits it); a group keeps Delete all (occurrences keep Edit).
+    expect(phone).toMatch(/\.timeline-list-actions:has\(\[data-tip="Restart"\]\) \[data-tip="Restart"\],\s*\.timeline-list-actions:has\(\[aria-label\^="Delete all"\]\) \[aria-label\^="Delete all"\] \{\s*display: inline-flex;/);
+    // The Yes pill (about 49 px) fits its 56 px column.
+    expect(phone).toMatch(/col\.timeline-list-col-actions \{\s*width: 56px;/);
+  });
+});

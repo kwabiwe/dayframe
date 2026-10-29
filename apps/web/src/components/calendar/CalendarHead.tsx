@@ -36,7 +36,7 @@ export function CalendarHead({
     const chosenRect = chosen.getBoundingClientRect();
     if (chosenRect.right > stripRect.right) strip.scrollLeft += chosenRect.right - stripRect.right;
     else if (chosenRect.left < stripRect.left) strip.scrollLeft -= stripRect.left - chosenRect.left;
-  }, [selectedKey]);
+  }, [selectedKey, showDays]); // showDays: the strip comes back when the Week grid gives way to Day or List (Codex r1 on #632).
 
   return (
     <div className="df-cal-week">
