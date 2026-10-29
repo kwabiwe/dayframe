@@ -132,26 +132,48 @@ export function LocationEvidenceMap({
       mapRef.current = created;
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       // Glitch fix 4: one bad tile is not a broken map. Only most of the first view's tiles failing is.
+      let styleFailed = !baseMap.available;
       const closeFirstLoadWindow = () => {
         if (!firstLoadWindowOpen) return;
         firstLoadWindowOpen = false;
         if (windowTimer) clearTimeout(windowTimer);
         windowTimer = null;
-        if (cancelled || !baseMap.available) return;
+        if (cancelled || styleFailed) return;
         setBaseMapState(tileRequests > 0 && tileErrors * 2 > tileRequests ? "degraded" : "ready");
       };
       windowTimer = setTimeout(closeFirstLoadWindow, FIRST_LOAD_WINDOW_MS);
-      created.on("error", (event) => {
-        if (firstLoadWindowOpen && isBaseTileError(event as unknown as { sourceId?: string; tile?: unknown })) tileErrors += 1;
-      });
-      created.on("load", closeFirstLoadWindow);
-      // The evidence is drawn as soon as the style is there, not after the tiles.
+      // The evidence is drawn as soon as the style is there, not after the tiles, from the newest content: a leg
+      // opened before the style loaded is drawn and fitted at once (Codex r1 on #626).
       const drawFirst = () => {
         if (cancelled || drawn.current) return;
         const current = latest.current;
         drawn.current = { key: current.contentKey, colours, markers: [] };
         drawEvidence(created, current.evidence, current.visitOnly, colours, drawn.current.markers);
+        const newest = evidenceBounds(current.evidence, current.visitOnly);
+        if (newest && !sameBounds(newest, bounds)) {
+          created.fitBounds(newest, { padding: BOUNDS_PADDING, maxZoom: BOUNDS_MAX_ZOOM, duration: 0, animate: false });
+        }
       };
+      // A style that fails (an error with no tile or source, as a custom style URL that can't load gives) is the
+      // base map unavailable: the soft note, and the evidence on a blank style, never "ready" with nothing drawn
+      // (Codex r1 on #626).
+      const failStyle = () => {
+        if (styleFailed || cancelled) return;
+        styleFailed = true;
+        setBaseMapState("unavailable");
+        for (const marker of drawn.current?.markers ?? []) marker.remove();
+        drawn.current = null;
+        created.setStyle(tileFreeStyle(surfaceInset), { diff: false });
+      };
+      created.on("error", (event) => {
+        const detail = event as unknown as { sourceId?: string; tile?: unknown };
+        if (!detail.tile && !detail.sourceId) {
+          failStyle();
+          return;
+        }
+        if (firstLoadWindowOpen && isBaseTileError(detail)) tileErrors += 1;
+      });
+      created.on("load", closeFirstLoadWindow);
       created.on("style.load", drawFirst);
       if (created.isStyleLoaded?.()) drawFirst();
       created.on("click", (event) => latest.current.onSelectPoint?.({
@@ -406,6 +428,8 @@ export function evidenceBounds(
   let south = Infinity;
   let east = -Infinity;
   let north = -Infinity;
+  let wrappedWest = Infinity;
+  let wrappedEast = -Infinity;
   for (const [longitude, latitude] of [
     ...evidence.map.acceptedSamples.map((sample) => sample.point.coordinates),
     ...(visitOnly ? [] : evidence.map.nearbySavedPlaces.map((place) => place.point.coordinates)),
@@ -417,10 +441,23 @@ export function evidenceBounds(
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
     west = Math.min(west, longitude);
     east = Math.max(east, longitude);
+    const shifted = longitude < 0 ? longitude + 360 : longitude;
+    wrappedWest = Math.min(wrappedWest, shifted);
+    wrappedEast = Math.max(wrappedEast, shifted);
     south = Math.min(south, latitude);
     north = Math.max(north, latitude);
   }
-  return Number.isFinite(west) ? [[west, south], [east, north]] : null;
+  if (!Number.isFinite(west)) return null;
+  // Across the antimeridian (±180°): the narrower box, with its east edge past 180°, as MapLibre takes it.
+  if (east - west > 180 && Number.isFinite(wrappedWest)) {
+    const wrappedSpan = wrappedEast - wrappedWest;
+    if (wrappedSpan < east - west) return [[wrappedWest, south], [wrappedEast, north]];
+  }
+  return [[west, south], [east, north]];
+}
+
+function sameBounds(left: [[number, number], [number, number]], right: [[number, number], [number, number]] | null) {
+  return Boolean(right) && left.every((corner, index) => corner.every((value, axis) => value === right![index][axis]));
 }
 
 function fallbackCentre(evidence: LocationReviewEvidenceDto): [number, number] {

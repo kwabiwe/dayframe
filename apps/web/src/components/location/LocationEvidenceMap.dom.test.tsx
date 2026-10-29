@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   reducedMotion: false,
   /** false: the test fires the first view's `load` itself, after its tile requests and errors. */
   autoLoad: true,
+  /** false: the test fires `style.load` itself (a slow style). */
+  autoStyle: true,
   maps: [] as Array<{
     options: Record<string, unknown>;
     handlers: Record<string, Array<(event?: unknown) => void>>;
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     fitBounds: ReturnType<typeof vi.fn>;
     sources: Map<string, { setData: ReturnType<typeof vi.fn> }>;
     remove: ReturnType<typeof vi.fn>;
+    setStyle: ReturnType<typeof vi.fn>;
     emit: (event: string, payload?: unknown) => void;
   }>
 }));
@@ -36,12 +39,14 @@ vi.mock("maplibre-gl", () => {
     getSource = vi.fn((id: string) => this.sources.get(id));
     isStyleLoaded = vi.fn(() => false);
     remove = vi.fn();
+    setStyle = vi.fn();
 
     constructor(options: Record<string, unknown>) {
       this.options = options;
       mocks.maps.push(this);
       // The style loads first, then the first view's tiles (MapLibre's own order).
       queueMicrotask(() => {
+        if (!mocks.autoStyle) return;
         this.emit("style.load");
         if (mocks.autoLoad) queueMicrotask(() => this.emit("load"));
       });
@@ -88,6 +93,8 @@ describe("LocationEvidenceMap", () => {
     mocks.maps.length = 0;
     mocks.reducedMotion = false;
     mocks.autoLoad = true;
+    mocks.autoStyle = true;
+    vi.unstubAllEnvs();
     resetLocationMapStyleCache();
   });
   afterEach(() => cleanup());
@@ -212,6 +219,70 @@ describe("LocationEvidenceMap", () => {
     expect(map.addSource).toHaveBeenCalledTimes(sourcesAdded);
     expect(map.sources.get("straight-line-fallback")?.setData).toHaveBeenCalledWith(moved.map.straightLineFallback);
     expect(map.fitBounds).toHaveBeenCalledWith([[0.3, 51.7], [0.4, 51.8]], expect.objectContaining({ duration: 300, animate: true }));
+  });
+
+  it("draws and fits the newest content when it changed before the style loaded (Codex r1 on #626)", async () => {
+    mocks.autoStyle = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    const view = render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    const map = mocks.maps[0]!;
+    // A leg opened while the style is still loading.
+    const leg = evidence({ map: { ...evidence().map, straightLineFallback: { type: "LineString", coordinates: [[0.3, 51.7], [0.4, 51.8]] } } });
+    view.rerender(<LocationEvidenceMap evidence={leg} visitOnly />);
+    expect(map.addSource).not.toHaveBeenCalled();
+
+    act(() => map.emit("style.load"));
+    expect(map.addSource).toHaveBeenCalledWith("straight-line-fallback", { type: "geojson", data: leg.map.straightLineFallback });
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    expect(map.fitBounds).toHaveBeenCalledWith([[0.3, 51.7], [0.4, 51.8]], expect.objectContaining({ duration: 0, animate: false }));
+  });
+
+  it("does not refit at style load when the content is what the map opened with", async () => {
+    mocks.autoStyle = false;
+    mocks.clientFetch.mockResolvedValue(styleResponse());
+    render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+    await waitFor(() => expect(mocks.maps).toHaveLength(1));
+    act(() => mocks.maps[0]!.emit("style.load"));
+    expect(mocks.maps[0]!.addSource).toHaveBeenCalled();
+    expect(mocks.maps[0]!.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("treats a custom style's failure as the base map unavailable, drawing the evidence on a blank style (Codex r1 on #626)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL", "https://maps.example.test/style.json");
+    mocks.autoStyle = false;
+    mocks.autoLoad = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(<LocationEvidenceMap evidence={evidence()} visitOnly />);
+      await vi.waitFor(() => expect(mocks.maps).toHaveLength(1));
+      const map = mocks.maps[0]!;
+      expect(map.options.style).toBe("https://maps.example.test/style.json");
+      expect(mocks.clientFetch).not.toHaveBeenCalled();
+      // The style can't load: an error with no tile or source.
+      act(() => map.emit("error", { error: new Error("Failed to fetch style") }));
+      expect(map.setStyle).toHaveBeenCalledWith(expect.objectContaining({ version: 8, sources: {}, layers: [expect.objectContaining({ type: "background" })] }), { diff: false });
+      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      // The blank style loads and the route is drawn on it.
+      act(() => map.emit("style.load"));
+      expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "straight-line-fallback-line" }));
+      // The first load window ends without tiles: still the note, never "ready".
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => map.emit("load"));
+      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fits evidence across the antimeridian in the narrow box", async () => {
+    const { evidenceBounds } = await import("./LocationEvidenceMap");
+    const across = evidence({ map: { ...evidence().map, straightLineFallback: { type: "LineString", coordinates: [[179.9, -16.5], [-179.9, -16.6]] } } });
+    const bounds = evidenceBounds(across, true)!;
+    expect(bounds[0][1]).toBeCloseTo(-16.6);
+    expect(bounds[0][0]).toBeCloseTo(179.9);
+    expect(bounds[1][0]).toBeCloseTo(180.1);
+    expect(evidenceBounds(evidence(), true)).toEqual([[0.1, 51.5], [0.2, 51.6]]);
   });
 
   it("jumps to new bounds at once under Reduce Motion", async () => {

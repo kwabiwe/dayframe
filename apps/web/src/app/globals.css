@@ -14529,8 +14529,10 @@ button.timeline-location-hit:focus-visible {
 }
 
 /* Location v4 step 15 on the web: the correction dialog opens with the map, then the choices. */
+/* The frame's height is held throughout: the placeholder, the map's chunk loading, then the map (Codex r1 on #626). */
 .location-correction-map {
   overflow: hidden;
+  min-height: var(--location-evidence-frame-height);
   margin: 0 0 4px;
   border-radius: 14px;
   background: var(--surface-muted);

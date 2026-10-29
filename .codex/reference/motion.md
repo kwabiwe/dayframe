@@ -463,7 +463,7 @@ Removed in location v4 step 15: the web Review page and its card deck are gone; 
 - Owner: one MapLibre instance per mount and item in `LocationEvidenceMap`; its camera (`fitBounds`) is the only motion. The dialog keeps the map mounted (one keyed `EvidenceMap`) across the trip and leg views.
 - Entrance/update/exit: no camera move on first paint (the map is constructed at the evidence's bounds); the loading placeholder is the frame's exact size, so the map replaces it in place. New content swaps its sources' data in place and eases the camera to its bounds over 300 ms (ease-out cubic); equal content does nothing. The map leaves with the dialog (Web dialogs).
 - Surrounding layout: nothing moves: the frame keeps `--location-evidence-frame-height`; the provider note floats over the map.
-- Interruption: a second swap mid-ease retargets from where the camera is (MapLibre's own `fitBounds`); the newest content wins.
+- Interruption: a second swap mid-ease retargets from where the camera is (MapLibre's own `fitBounds`); the newest content wins. Content that changes before the style loads is drawn when it loads, and the camera jumps to its bounds then (no ease: nothing has been seen yet).
 - Async outcome: a style failure or most of the first view's tiles failing shows a soft note; the evidence stays drawn; isolated tile errors are ignored.
 - Accessibility: Reduce Motion jumps to the new bounds (duration 0, no animation).
 

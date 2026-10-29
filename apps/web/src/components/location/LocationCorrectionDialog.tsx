@@ -24,7 +24,12 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
 
 // The map is client-only (MapLibre), loaded when a dialog opens with the map first (step 15: the map first on every sheet).
-const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap), { ssr: false });
+// While its chunk loads, an empty frame of the map's own size holds the sheet still (Codex r1 on #626).
+export function EvidenceMapChunkLoading() {
+  return <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" />;
+}
+const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
+  { loading: EvidenceMapChunkLoading, ssr: false });
 
 /**
  * Correcting the location timeline on the web (location v4 step 13, mock-up #web-list inspector):

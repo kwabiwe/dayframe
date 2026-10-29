@@ -27,7 +27,15 @@ describe("the map's placeholder and frame are one size (glitch fix 3)", () => {
     expect(placeholder).toMatch(/(?:^|\s)height: var\(--location-evidence-frame-height\);/);
     expect(placeholder).toMatch(/box-sizing: border-box;/);
     expect(placeholder).not.toMatch(/padding/);
-    // The wrapper no longer sets its own minimum.
-    expect(blocks(".location-correction-map").join("\n")).not.toMatch(/min-height/);
+    // The wrapper holds the frame's height while the map's chunk loads (Codex r1 on #626).
+    expect(blocks(".location-correction-map").join("\n")).toMatch(/min-height: var\(--location-evidence-frame-height\);/);
+  });
+});
+
+describe("the map's chunk loading holds the frame (Codex r1 on #626)", () => {
+  it("gives the dynamic import a loading fallback that is the frame itself", () => {
+    const dialog = readFileSync(new URL("./LocationCorrectionDialog.tsx", import.meta.url), "utf8");
+    expect(dialog).toMatch(/loading: EvidenceMapChunkLoading, ssr: false/);
+    expect(dialog).toMatch(/className="location-evidence-frame" data-testid="evidence-map-loading"/);
   });
 });
