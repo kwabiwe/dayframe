@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Codex r1 on #626: on a cold load the map's chunk arrives after the evidence; the real `next/dynamic` shows its
@@ -39,9 +39,12 @@ describe("the map's chunk loading (Codex r1 on #626)", () => {
       target={{ kind: "place", place: { kind: "place", id: "seg-cafe", status: "finalised", startedAt: at, stoppedAt: at, placeId: null,
         learnedPlaceId: null, name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] } as never, label: "Unknown place" }} />);
 
-    const loading = await screen.findByTestId("evidence-map-loading");
-    expect(loading.className).toBe("location-evidence-frame");
-    expect(loading.closest(".location-correction-map")).not.toBeNull();
+    // The map's own chunk is gated: wait for its loading frame, past the provider probe's (Codex r1 on #633).
+    await waitFor(() => {
+      const frame = screen.getByTestId("evidence-map-loading");
+      expect(frame.className).toBe("location-evidence-frame");
+      expect(frame.closest(".location-correction-map")).not.toBeNull();
+    });
     expect(screen.queryByTestId("evidence-map")).toBeNull();
 
     chunk.release();

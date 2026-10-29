@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -55,7 +56,55 @@ declare global {
   }
 }
 
+/** How long a token request may take before MapKit is given up on for the page. */
+const TOKEN_TIMEOUT_MS = 10_000;
+
 let loading: Promise<MapKit> | null = null;
+/**
+ * MapKit failed for this page (a token request that failed or stalled, an authorisation error, the script not
+ * loading): every map, mounted now or later, falls back to MapLibre (Codex r1 on #633).
+ */
+let pageFailed = false;
+const failureListeners = new Set<() => void>();
+
+function failPage() {
+  if (pageFailed) return;
+  pageFailed = true;
+  for (const listener of [...failureListeners]) listener();
+}
+
+/** Test seam: a fresh page. */
+export function resetMapKitPage() {
+  loading = null;
+  pageFailed = false;
+  failureListeners.clear();
+}
+
+/** Calls `listener` once MapKit has failed for the page (at once if it already has); returns the unsubscribe. */
+function onPageFailure(listener: () => void) {
+  if (pageFailed) {
+    listener();
+    return () => undefined;
+  }
+  failureListeners.add(listener);
+  return () => failureListeners.delete(listener);
+}
+
+/** A token for MapKit, or a page failure: a non-2xx answer, a body without a token, a network error or a stall. */
+async function fetchToken(): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
+  try {
+    const response = await clientFetch("/api/mapkit-token", { signal: controller.signal });
+    if (!response.ok) return null;
+    const body = await response.json() as { token?: unknown };
+    return typeof body.token === "string" && body.token ? body.token : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Loads MapKit JS once per page and initialises it with tokens from `/api/mapkit-token`. */
 export function loadMapKit(): Promise<MapKit> {
@@ -69,14 +118,15 @@ export function loadMapKit(): Promise<MapKit> {
       }
       mapkit.init({
         authorizationCallback: (done) => {
-          void clientFetch("/api/mapkit-token", { cache: "no-store" })
-            .then((response) => (response.ok ? response.json() : null))
-            .then((body: { token?: string } | null) => {
-              if (body?.token) done(body.token);
-            })
-            .catch(() => undefined);
+          void fetchToken().then((token) => {
+            if (token) done(token);
+            else failPage();
+          });
         }
       });
+      // One page-wide owner for MapKit's own errors (an authorisation refused, too many requests), so a failure
+      // that lands while no dialog is open still counts for the next one.
+      mapkit.addEventListener("error", failPage);
       resolve(mapkit);
     };
     if (window.mapkit?.loadedLibraries?.length) {
@@ -90,7 +140,10 @@ export function loadMapKit(): Promise<MapKit> {
     script.crossOrigin = "anonymous";
     script.dataset.callback = "__dayframeMapKitReady";
     script.dataset.libraries = "map,overlays";
-    script.onerror = () => reject(new Error("MapKit JS did not load"));
+    script.onerror = () => {
+      failPage();
+      reject(new Error("MapKit JS did not load"));
+    };
     document.head.append(script);
   }).catch((error: unknown) => {
     loading = null;
@@ -134,9 +187,9 @@ export function MapKitEvidenceMap({
     let cancelled = false;
     let map: MkMap | null = null;
     let mapkitRef: MapKit | null = null;
-    const fail = (event: { status?: string }) => {
-      if (!cancelled && event.status !== "Initialized" && event.status !== "Refreshed") latest.current.onUnavailable();
-    };
+    const unsubscribe = onPageFailure(() => {
+      if (!cancelled) latest.current.onUnavailable();
+    });
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
     const applyScheme = () => {
       if (map && mapkitRef) map.colorScheme = pageIsDark() ? mapkitRef.Map.ColorSchemes.Dark : mapkitRef.Map.ColorSchemes.Light;
@@ -146,7 +199,6 @@ export function MapKitEvidenceMap({
     void loadMapKit().then((mapkit) => {
       if (cancelled) return;
       mapkitRef = mapkit;
-      mapkit.addEventListener("error", fail);
       map = new mapkit.Map(container, {
         colorScheme: pageIsDark() ? mapkit.Map.ColorSchemes.Dark : mapkit.Map.ColorSchemes.Light,
         isRotationEnabled: false,
@@ -163,14 +215,14 @@ export function MapKitEvidenceMap({
       media?.addEventListener("change", applyScheme);
       setReady(true);
     }).catch(() => {
-      if (!cancelled) latest.current.onUnavailable();
+      failPage();
     });
 
     return () => {
       cancelled = true;
+      unsubscribe();
       themeObserver.disconnect();
       media?.removeEventListener("change", applyScheme);
-      mapkitRef?.removeEventListener("error", fail);
       live.current = null;
       map?.destroy();
     };
@@ -182,6 +234,21 @@ export function MapKitEvidenceMap({
     if (!current || current.key === contentKey) return;
     draw(current, evidence, !prefersReducedMotion());
   }, [contentKey, evidence]);
+
+  if (!hasGeometry) {
+    // Expired or coordinate-free evidence: the same empty state as the MapLibre map (Codex r1 on #633).
+    return (
+      <div className="location-evidence">
+        <div className="location-evidence-frame">
+          <div className="location-evidence-empty" role="status">
+            <DayframeIcon glyph="map-pin" size={22} />
+            <strong>No map for this one</strong>
+            {caption ? <span>{caption}</span> : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="location-evidence">
