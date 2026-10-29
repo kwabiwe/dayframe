@@ -215,6 +215,18 @@ async function learningEnabledOrGuard() {
   });
 }
 
+/**
+ * A wake this capture no longer owns stops what it can. Its diagnostics never come first (a failed write can't skip
+ * the stop), and a stop that fails leaves options this process never set to the guard, which keeps stopping them
+ * until a stop succeeds or a capture in this process sets them (Codex r18 on #619).
+ */
+async function stopRejectedWakeCapture(capture: LocationCaptureSnapshot) {
+  await stopUnownedLocationCapture(capture).catch(async (error) => {
+    await withNativeLocationOptions(async () => guardInheritedAccuracyOptions(STOPPED_CAPTURE)).catch(() => undefined);
+    throw error;
+  });
+}
+
 /** A task's owner, read first; when it can't be read, inherited options are put back first (Codex r17 on #619). */
 async function admittedCapture(captured: Promise<LocationCaptureSnapshot>) {
   return captured.then(hydrateLegacyCapture).catch(async (error) => {
@@ -227,8 +239,9 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   const captured = captureLocationOwnership();
   const capture = await admittedCapture(captured);
   if (!isLocationCaptureSnapshotCurrent(capture) || !await learningEnabledOrGuard() || !isLocationCaptureSnapshotCurrent(capture)) {
-    await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1);
-    await stopUnownedLocationCapture(capture);
+    await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1)
+      .catch(() => undefined);
+    await stopRejectedWakeCapture(capture);
     return;
   }
   // An admitted wake puts inherited best-accuracy options back (and ends a burst past its 3 minutes) before anything
@@ -286,13 +299,16 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
   const capture = await admittedCapture(captured);
   if (!isLocationCaptureSnapshotCurrent(capture)) {
     const count = (data as {locations?: unknown[]} | undefined)?.locations?.length ?? 0;
-    if (count) await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", count);
-    await stopUnownedLocationCapture(capture);
+    if (count) {
+      await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", count)
+        .catch(() => undefined);
+    }
+    await stopRejectedWakeCapture(capture);
     return;
   }
   const enabled = await learningEnabledOrGuard();
   if (!enabled) {
-    await stopUnownedLocationCapture(capture);
+    await stopRejectedWakeCapture(capture);
     return;
   }
   // A burst past its 3 minutes ends with this wake (card K), before an error or a failed write can return early
@@ -894,6 +910,9 @@ async function startLocationLearningUnsafe(
   // storage, whatever the clock says, so after a relaunch the stored burst simply ends here at normal capture.
   // The options first, before any storage (Codex r13 on #619); the lease a normal start ends is bound right there.
   const applied = await withNativeLocationOptions(async () => {
+    // Ownership again, in the queue: a refresh queued behind a burst's start never sets options once capture is
+    // turned off or changes hands; opt-out and sign-out end the snapshot synchronously (Codex r18 on #619).
+    if (!isLocationCaptureSnapshotCurrent(capture)) return null;
     const held = liveAccuracyBurstLease(capture);
     try {
       await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, learningUpdateOptions(Boolean(held)));
@@ -904,6 +923,7 @@ async function startLocationLearningUnsafe(
     nativeOptionsOwner = capture.binding?.id ?? null;
     return { error: null, held, ended: held ? null : endHeldLeaseAtNormal() };
   });
+  if (!applied) return false;
   if (applied.error) {
     // Inherited (or a burst's) options may still be in place: the guard retries and stops them 5 minutes on.
     if (!accuracyBurstLease) takeAccuracyBurstLease(capture, UNKNOWN_BURST, 0, ACCURACY_BURST_FORCE_STOP_MS);

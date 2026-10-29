@@ -1716,5 +1716,27 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
     expect((await readAccuracyBurstState())?.active).toBeUndefined();
   });
+
+  it("a refresh queued behind a burst's start never sets options once capture is turned off (Codex r18 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeEndAccuracyBurst(await capture());
+    let release!: () => void;
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    locationMocks.startLocationUpdatesAsync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    captureState.current = false;
+    try {
+      release();
+      await starting;
+      await refreshing.catch(() => undefined);
+      expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      captureState.current = true;
+    }
+  });
 });
 

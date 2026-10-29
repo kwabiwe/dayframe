@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   clearAll: vi.fn(),
   stopExpo: vi.fn(),
   beforeInsert: null as (() => Promise<void>) | null,
-  failRead: null as ((args: unknown[]) => boolean) | null,
+  failRead: null as ((args: unknown[], sql: string) => boolean) | null,
   motionStatus: "authorized",
   motionRecords: [] as Array<{ startMs: number; activity: "stationary" | "walking" | "automotive"; confidence: "high" }>,
   queryActivities: vi.fn()
@@ -100,7 +100,7 @@ function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
     getFirstAsync: async (sql: string, ...args: never[]) => {
-      if (h.failRead?.(args)) throw new Error("read failed");
+      if (h.failRead?.(args, sql)) throw new Error("read failed");
       return db.prepare(sql).get(...args) ?? null;
     },
     getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
@@ -1211,6 +1211,37 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       storage.getItem.mockImplementation(read);
     }
     expect(start).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK", normal);
+  });
+
+  async function relaunchedAfterOptOut() {
+    await relaunchedDuringBurst();
+    await geofence.setLocationLearningEnabled(false, [place]);
+    geofence.__resetAccuracyBurstForTests(); // relaunched again: what was stopped is unknown to this process
+    h.stopExpo.mockClear();
+  }
+
+  it("a rejected wake whose discard diagnostics can't be written still stops capture (Codex r18 on #619)", async () => {
+    await relaunchedAfterOptOut();
+    h.failRead = (_args, sql) => sql.includes("capture_rejections");
+    await learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+    h.failRead = null;
+    expect(h.stopExpo).toHaveBeenCalled();
+  });
+
+  it("a rejected wake whose cleanup can't read the binding leaves a guard that stops updates (Codex r18 on #619)", async () => {
+    await relaunchedAfterOptOut();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      let reads = 0;
+      h.failRead = (args) => args.includes("capture_binding_v1") && ++reads > 1;
+      await expect(learningTask()({ data: { locations: [fix(Date.now())] }, error: null })).rejects.toThrow("read failed");
+      h.failRead = null;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.stopExpo).toHaveBeenCalled();
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
   });
 });
 
