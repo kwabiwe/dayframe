@@ -1973,7 +1973,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // server has them; their "?" stay out of the List and Grid meanwhile.
   const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
-    onDropped: (reviewItemId) => checkAnswers.restoreAnswered([reviewItemId]) });
+    onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
   // the same transaction, as their own "Not now" (#609), so they leave at once, until the day is read again.
   const resolvedByCorrections = useMemo(() => new Set(correctionQueue.acknowledged.flatMap((item) => item.resolvedReviewItemIds ?? [])),
@@ -1983,11 +1983,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // answers held for Undo or saving (part 3b), waiting for corrections, or resolved by one.
     const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
       && !checkAnswers.hiddenIds.has(item.id) && !resolvedByCorrections.has(item.id)
-      // A waiting answer given up (its record couldn't be let go) shows its "?" again even while the record lingers.
-      && !(answersAfterCorrections.waitingIds.has(item.id) && !checkAnswers.abandonedIds.has(item.id))
+      // Hidden while a waiting record (held, committing or committed) answers it, the stay or an outing's trip; an
+      // abandoned record never hides it (Codex r11 on #610).
+      && !answersAfterCorrections.waitingIds.has(item.id)
       && !(typeof item.rawPayload?.clientSegmentId === "string" && answersAfterCorrections.waitingSegments.has(item.rawPayload.clientSegmentId)));
     return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, checkAnswers.abandonedIds, answersAfterCorrections.waitingIds,
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
     answersAfterCorrections.waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.

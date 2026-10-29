@@ -27,7 +27,23 @@ const store = vi.hoisted(() => ({
     (await store.reviewItemsDecidedLocally(bootstrap, ids)) ? new Set(ids) : new Set())
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
-const waiting = vi.hoisted(() => ({ commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined), cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined) }));
+const waiting = vi.hoisted(() => {
+  const mock = {
+    commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
+    settleOutcome: null as null | "committed" | "committing" | "abandoned",
+    settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
+      try {
+        await mock.commitAnswerAfterCorrections(id);
+        return mock.settleOutcome ?? "committed";
+      } catch {
+        return mock.settleOutcome ?? "committing";
+      }
+    })
+  };
+  return mock;
+});
 vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
 // The one gate every answer goes through (Codex r7 on #610): by default nothing is queued for its item.
 const gate = vi.hoisted(() => ({ waitForItemCorrections: vi.fn(async (..._args: unknown[]): Promise<unknown> => null) }));
@@ -117,9 +133,10 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.hiddenIds.has("a")).toBe(true);
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-1");
-    // Never into the Review outbox from here: the record goes once its corrections are acknowledged.
+    // Never into the Review outbox from here: the record goes once its corrections are acknowledged. Its record now
+    // keeps the "?" out (the Dashboard's waiting set, Codex r11 on #610), not this hook.
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
-    expect(result.current.hiddenIds.has("a")).toBe(true);
+    expect(result.current.held).toBeNull();
     act(() => { result.current.answer("b", false, null, { afterCorrections: "m-2" }); });
     act(() => { result.current.undo(); });
     await act(async () => { vi.advanceTimersByTime(10_000); });
@@ -128,9 +145,9 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 
-  it("brings a dropped waiting answer's “?” back at once (Codex r3 on #610)", async () => {
+  it("brings a dropped waiting answer's “?” back at once, its saving copy too (Codex r3 on #610)", async () => {
     const { result } = mount(bootstrap([suggestion("a")]));
-    act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    act(() => { result.current.answer("a", true); });
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(result.current.hiddenIds.has("a")).toBe(true);
     act(() => { result.current.restoreAnswered(["a"]); });
@@ -282,47 +299,28 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
     });
 
-    it("never leaves a waiting answer hidden when its record can't be let go: tried again, then given up (Codex r10 on #610)", async () => {
+    it("leaves a waiting answer's recovery to the store, and says not-saved in front when the store gives it up (Codex r10 and r11 on #610)", async () => {
       const flush = () => act(async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); });
-      // A failure, then success: tried again at once, and stays answered.
-      waiting.commitAnswerAfterCorrections.mockReset();
-      waiting.commitAnswerAfterCorrections.mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
+      vi.mocked(Alert.alert).mockClear();
+      waiting.settleAnswerAfterCorrections.mockClear();
+      // Still being tried: nothing said, nothing held; its record (not this hook) keeps the "?" out.
+      waiting.settleOutcome = "committing";
       const retried = mount(withAccount([suggestion("a")]));
       act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       await flush();
-      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(2);
-      expect(retried.result.current.hiddenIds.has("a")).toBe(true);
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" }, "m-1", { inFront: true });
+      expect(retried.result.current.held).toBeNull();
       expect(Alert.alert).not.toHaveBeenCalled();
-      // Failing twice in front: given up — its record goes, its "?" comes back, the not-saved words are said.
-      waiting.commitAnswerAfterCorrections.mockReset();
-      waiting.commitAnswerAfterCorrections.mockRejectedValue(new Error("disk full"));
-      waiting.cancelAnswerAfterCorrections.mockClear();
+      // Given up in front: the not-saved words.
+      waiting.settleOutcome = "abandoned";
       const given = mount(withAccount([suggestion("b")]));
       act(() => { given.result.current.answer("b", true, null, { afterCorrections: "m-2" }); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       await flush();
-      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("m-2");
-      expect(given.result.current.held).toBeNull();
       expect(given.result.current.hiddenIds.has("b")).toBe(false);
-      expect(given.result.current.abandonedIds.has("b")).toBe(true);
       expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
-      // Away: quiet, and tried again on the next return to the front.
-      vi.mocked(Alert.alert).mockClear();
-      waiting.commitAnswerAfterCorrections.mockReset();
-      waiting.commitAnswerAfterCorrections.mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
-      const away = mount(withAccount([suggestion("c")]));
-      act(() => { away.result.current.answer("c", true, null, { afterCorrections: "m-3" }); });
-      act(() => { appState.listener?.("background"); });
-      await flush();
-      expect(Alert.alert).not.toHaveBeenCalled();
-      expect(away.result.current.hiddenIds.has("c")).toBe(true);
-      act(() => { appState.listener?.("active"); });
-      await flush();
-      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledTimes(2);
-      expect(Alert.alert).not.toHaveBeenCalled();
-      waiting.commitAnswerAfterCorrections.mockReset();
-      waiting.commitAnswerAfterCorrections.mockResolvedValue(undefined);
+      waiting.settleOutcome = null;
     });
 
     it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {

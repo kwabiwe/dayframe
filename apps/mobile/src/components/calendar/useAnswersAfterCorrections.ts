@@ -5,7 +5,9 @@ import { isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation } from "../../lib/reviewAnswer";
 import { reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import {
-  readAnswersAfterCorrections,
+  answeredReviewItemIds,
+  readAnswersAfterCorrectionsWithState,
+  recoverAnswersAfterCorrections,
   releaseAnswersAfterCorrections,
   subscribeAnswersAfterCorrections,
   type AnswerAfterCorrectionsRelease
@@ -18,7 +20,7 @@ import {
   subscribeTimelineCorrectionOutbox,
   synchroniseTimelineCorrections
 } from "../../lib/timelineCorrectionOutbox";
-import { AppState } from "react-native";
+import { AccessibilityInfo, Alert, AppState } from "react-native";
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -32,8 +34,11 @@ const NONE: ReadonlySet<string> = new Set();
  */
 export function useAnswersAfterCorrections({ data, onDropped, owner, release }: {
   data: MobileBootstrap | null;
-  /** A waiting answer dropped (its change refused): its "?" is shown again at once (Codex r3 on #610). */
-  onDropped?: (reviewItemId: string) => void;
+  /**
+   * A waiting answer dropped (its change refused) or given up (its record couldn't be let go): its "?" — and an
+   * outing's trips — shown again at once (Codex r3 and r11 on #610).
+   */
+  onDropped?: (reviewItemIds: readonly string[]) => void;
   owner: MobileAccountOwner | null;
   /** Tests: what a release does (the Review outbox otherwise). */
   release?: AnswerAfterCorrectionsRelease;
@@ -86,10 +91,23 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       void synchroniseReviewMutations().catch(() => undefined);
       return "released";
     };
+    // Hiding comes from the records themselves (Codex r11 on #610): held, committing and committed records hide their
+    // "?" and an outing's trips; an abandoned one hides nothing, even while its deletion is still being tried.
     const read = () => {
-      void readAnswersAfterCorrections(who).then((records) => {
-        if (live) setWaiting({ key: ownerKey, ids: new Set(records.flatMap((record) => record.reviewItemId ? [record.reviewItemId] : [])),
-          segments: new Set(records.flatMap((record) => record.log ? [record.log.itemId] : [])) });
+      void readAnswersAfterCorrectionsWithState(who).then((records) => {
+        const hiding = records.filter((each) => each.state !== "abandoned").map((each) => each.record);
+        if (live) setWaiting({ key: ownerKey, ids: new Set(hiding.flatMap(answeredReviewItemIds)),
+          segments: new Set(hiding.flatMap((record) => record.log ? [record.log.itemId] : [])) });
+      }, () => undefined);
+    };
+    // The store's recovery runner, in front: on mount, and each return to the front. One given up here says so.
+    const recover = () => {
+      if (AppState.currentState !== "active") return;
+      void recoverAnswersAfterCorrections(who).then(({ abandoned, abandonedReviewItemIds }) => {
+        if (!live || !abandoned.length) return;
+        if (abandonedReviewItemIds.length) droppedRef.current?.(abandonedReviewItemIds);
+        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+        Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
       }, () => undefined);
     };
     let draining = false;
@@ -102,7 +120,10 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       draining = true;
       void releaseAnswersAfterCorrections({ owner: who, readPending: readPendingTimelineCorrections,
         readAcknowledged: (owner) => readAcknowledgedTimelineCorrections(owner), release: releaseRef.current ?? viaReviewOutbox,
-        onDropped: (record) => { if (live && record.reviewItemId) droppedRef.current?.(record.reviewItemId); } })
+        onDropped: (record) => {
+          const ids = answeredReviewItemIds(record);
+          if (live && ids.length) droppedRef.current?.(ids);
+        } })
         .catch(() => undefined)
         .finally(() => {
           draining = false;
@@ -114,6 +135,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
     };
     read();
     drain();
+    recover();
+    const foreground = AppState.addEventListener("change", (state) => { if (state === "active") recover(); });
     const offAnswers = subscribeAnswersAfterCorrections(() => {
       read();
       drain();
@@ -123,6 +146,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       live = false;
       offAnswers();
       offCorrections();
+      foreground.remove();
     };
   }, [dataRead, userId, workspaceId]);
   const ids = waiting && waiting.key === key ? waiting.ids : NONE;

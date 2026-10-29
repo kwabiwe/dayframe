@@ -118,8 +118,8 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     expect(dashboard).toContain("checkAnswers.answer(check.id, yes, null, { afterCorrections: id })");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
-    expect(dashboard).toContain("onDropped: (reviewItemId) => checkAnswers.restoreAnswered([reviewItemId]) });");
-    expect(dashboard).toContain("&& !(answersAfterCorrections.waitingIds.has(item.id) && !checkAnswers.abandonedIds.has(item.id))");
+    expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
+    expect(dashboard).toContain("&& !answersAfterCorrections.waitingIds.has(item.id)");
   });
 
   it("hides the \"?\" a Logs as resolved on the server (#609) at once", () => {
@@ -145,7 +145,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { abandonedIds, answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };");
+    expect(hook).toContain("return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };");
     expect(hook).not.toMatch(/return \{[^}]*holdAnswer/);
   });
 

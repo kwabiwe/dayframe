@@ -10,7 +10,7 @@ import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAn
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
-import { cancelAnswerAfterCorrections, commitAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
+import { cancelAnswerAfterCorrections, settleAnswerAfterCorrections } from "../../lib/reviewAnswersAfterCorrections";
 import { waitForItemCorrections } from "../../lib/afterCorrections";
 
 /** A held answer, with the account that gave it. */
@@ -26,7 +26,6 @@ type HeldAnswer = ReviewDeckHeldDecision & {
   /** Settled while the app was away or the List gone: saved at once, with nothing said (Codex r8 and r9 on #610). */
   quiet?: boolean;
 };
-const NO_IDS: ReadonlySet<string> = new Set();
 /** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
 type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
@@ -151,12 +150,20 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const heldIds = [decision.itemId, ...(decision.outing?.members.map((member) => member.itemId) ?? [])];
     if (decision.afterCorrections) {
       // Its corrections change the suggestion, so it is not checked against the copy answered: its record waits
-      // for them and then answers the "?" as the server has it (reviewAnswersAfterCorrections). Out of the List
-      // until the Review outbox's record takes over; its waiting record keeps it out meanwhile.
-      setSaving((now) => now?.owner === owner
-        ? { ...now, ids: new Set([...now.ids, ...heldIds]), awaiting: new Set([...now.awaiting, ...heldIds]) }
-        : { owner, ids: new Set(heldIds), awaiting: new Set(heldIds) });
-      commitWaitingRef.current(decision.afterCorrections, owner, heldIds, decision.title, Boolean(decision.quiet), 0);
+      // for them and then answers the "?" as the server has it (reviewAnswersAfterCorrections). Its record, not this
+      // hook, keeps its "?" (an outing's trips too) out of the List from now: held, committing or committed records
+      // hide them; an abandoned one shows them (Codex r11 on #610). The store's recovery runner carries on with a
+      // record whose Undo's end couldn't be written, whatever becomes of this hook.
+      const bootstrap = dataRef.current;
+      const recordOwner = bootstrap?.user?.id && bootstrap.workspace?.id ? { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id } : null;
+      const id = decision.afterCorrections;
+      void settleAnswerAfterCorrections(recordOwner, id, { inFront: alive.current && inFront.current }).then((outcome) => {
+        if (outcome !== "abandoned" || ownerRef.current !== owner) return;
+        restore(owner, heldIds);
+        if (!alive.current || decision.quiet) return;
+        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+        Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
+      });
       return;
     }
     const unhide = (ids: readonly string[]) => {
@@ -264,43 +271,6 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       notSaved(error);
     });
   };
-  /**
-   * Lets a waiting answer's record go once its Undo ends (Codex r10 on #610). A failed write is never swallowed: in
-   * front it is tried once more at once; away (or gone) it waits quietly for Dayframe's next return to the front.
-   * One that still can't be written gives the answer up: its record goes (tried again on return if that fails too),
-   * its "?" comes back at once — never left hidden behind a record nothing will release — and, in front, the deck's
-   * not-saved words are said.
-   */
-  const retryCommits = useRef(new Map<string, { owner: string | null; heldIds: readonly string[]; title: string }>());
-  const [abandoned, setAbandoned] = useState<{ owner: string | null; ids: ReadonlySet<string> } | null>(null);
-  const commitWaiting = (id: string, owner: string | null, heldIds: readonly string[], title: string, quiet: boolean, attempt: number) => {
-    void commitAnswerAfterCorrections(id).then(() => {
-      retryCommits.current.delete(id);
-    }, () => {
-      if (ownerRef.current !== owner) return;
-      const here = alive.current && inFront.current;
-      if (!here) {
-        retryCommits.current.set(id, { owner, heldIds, title });
-        return;
-      }
-      if (attempt === 0) {
-        commitWaitingRef.current(id, owner, heldIds, title, quiet, 1);
-        return;
-      }
-      retryCommits.current.delete(id);
-      void cancelAnswerAfterCorrections(id).catch(() => undefined);
-      setAbandoned((now) => ({ owner, ids: new Set([...(now && now.owner === owner ? now.ids : []), ...heldIds]) }));
-      setSaving((now) => now && now.owner === owner
-        ? { ...now, ids: new Set([...now.ids].filter((each) => !heldIds.includes(each))), awaiting: new Set([...now.awaiting].filter((each) => !heldIds.includes(each))) }
-        : now);
-      restore(owner, heldIds);
-      if (quiet) return;
-      AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
-      Alert.alert("Calendar", "Couldn’t save this answer on this iPhone.");
-    });
-  };
-  const commitWaitingRef = useRef(commitWaiting);
-  commitWaitingRef.current = commitWaiting;
   const saveRef = useRef(save);
   // The latest values for the hold's later callbacks (never written during render).
   useLayoutEffect(() => {
@@ -354,10 +324,6 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const subscription = AppState.addEventListener("change", (state) => {
       inFront.current = state === "active";
       if (state !== "active") hold.flush();
-      // Back in front: a waiting answer whose record couldn't be let go while away is tried again (Codex r10 on #610).
-      if (state === "active") {
-        for (const [id, retry] of [...retryCommits.current]) commitWaitingRef.current(id, retry.owner, retry.heldIds, retry.title, false, 1);
-      }
     });
     return () => {
       subscription.remove();
@@ -419,9 +385,6 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     known.current.set(listed.id, listed);
     for (const member of members) known.current.set(member.id, member);
     token.current += 1;
-    // Answered again: no longer given up.
-    setAbandoned((now) => now && [listed.id, ...members.map((member) => member.id)].some((id) => now.ids.has(id))
-      ? { ...now, ids: new Set([...now.ids].filter((id) => id !== listed.id && !members.some((member) => member.id === id))) } : now);
     const title = listed.title?.trim() || "Suggestion";
     const decision: HeldAnswer = {
       kind: "single",
@@ -558,7 +521,5 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     ...(shownHeld ? [shownHeld.itemId, ...(shownHeld.outing?.members.map((member) => member.itemId) ?? [])] : [])
   ]), [ownerKey, saving, shownHeld]);
 
-  /** "?" whose waiting answer had to be given up (Codex r10 on #610): shown again even while its record lingers. */
-  const abandonedIds = abandoned && abandoned.owner === ownerKey ? abandoned.ids : NO_IDS;
-  return { abandonedIds, answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
+  return { answer, data: shown, held: shownHeld, hiddenIds, restoreAnswered, undo };
 }

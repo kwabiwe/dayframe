@@ -6,15 +6,31 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-const storage = vi.hoisted(() => new Map<string, string>());
+const storage = vi.hoisted(() => Object.assign(new Map<string, string>(), { failWrites: 0 }));
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: async (key: string) => storage.get(key) ?? null,
-    removeItem: async (key: string) => { storage.delete(key); },
-    setItem: async (key: string, value: string) => { storage.set(key, value); }
+    removeItem: async (key: string) => {
+      if (storage.failWrites > 0) {
+        storage.failWrites -= 1;
+        throw new Error("disk full");
+      }
+      storage.delete(key);
+    },
+    setItem: async (key: string, value: string) => {
+      if (storage.failWrites > 0) {
+        storage.failWrites -= 1;
+        throw new Error("disk full");
+      }
+      storage.set(key, value);
+    }
   }
 }));
-vi.mock("react-native", () => ({ AppState: { currentState: "active" } }));
+vi.mock("react-native", () => ({
+  AccessibilityInfo: { announceForAccessibility: vi.fn() },
+  Alert: { alert: vi.fn() },
+  AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) }
+}));
 const outbox = vi.hoisted(() => ({
   pending: [] as Array<{ clientCorrectionId: string; failureKind?: string }>,
   listeners: new Set<() => void>(),
@@ -137,6 +153,82 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.unmount(); });
   });
 
+  it("keeps a waiting outing's trips hidden after a remount, with its stay (Codex r11 on #610)", async () => {
+    storage.clear();
+    outbox.pending = [{ clientCorrectionId: C1 }];
+    await answers.registerAfterCorrections(OWNER, { id: "m-out", reviewItemId: "ri-1", logged: true, outingMemberIds: ["ri-in", "ri-out"],
+      newIds: [C1], itemIds: ["seg-a"] }, { readPending: async () => [], readAcknowledged: () => [] });
+    await answers.commitAnswerAfterCorrections("m-out");
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    act(() => { tree.unmount(); });
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    expect([...probe.current!.waitingIds].sort()).toEqual(["ri-1", "ri-in", "ri-out"]);
+    act(() => { tree.unmount(); });
+  });
+
+  it("carries on with a failed commit after the Dashboard goes away and comes back to the front (Codex r11 on #610)", async () => {
+    storage.clear();
+    outbox.pending = [{ clientCorrectionId: C1 }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-c", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    // Undo ends while away: the write fails, and the record is `committing` (still hiding its "?").
+    storage.failWrites = 1;
+    expect(await answers.settleAnswerAfterCorrections(OWNER, "m-c", { inFront: false })).toBe("committing");
+    act(() => { tree.unmount(); });
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER))[0].state).toBe("committing");
+    // A new Dashboard, in front: the store's runner tries again, and it is committed.
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER))[0].state).toBe("committed");
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(true);
+    act(() => { tree.unmount(); });
+    // Failing again on that return: given up, and its "?" shows (its deletion still being tried).
+    storage.clear();
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-d", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    storage.failWrites = 1;
+    await answers.settleAnswerAfterCorrections(OWNER, "m-d", { inFront: false });
+    dropped.mockClear();
+    storage.failWrites = 1;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    // Given up: its record went (or, its deletion failing, would be abandoned), and its "?" shows again.
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER)).filter((each) => each.state !== "abandoned")).toEqual([]);
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
+    expect(dropped).toHaveBeenCalledWith(["ri-1"]);
+    act(() => { tree.unmount(); });
+    storage.failWrites = 0;
+  });
+
+  it("keeps an abandoned answer's \"?\" visible through a new answer and its Undo, while its deletion fails (Codex r11 on #610)", async () => {
+    storage.clear();
+    outbox.pending = [{ clientCorrectionId: C1 }];
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-old", reviewItemId: "ri-1", logged: true, waitsFor: [C1] });
+    // Given up, and its deletion fails: abandoned, so it hides nothing.
+    storage.failWrites = 3;
+    expect(await answers.settleAnswerAfterCorrections(OWNER, "m-old", { inFront: true })).toBe("abandoned");
+    storage.failWrites = 0;
+    // Its record is still there (its deletion failed), abandoned.
+    expect((await answers.readAnswersAfterCorrectionsWithState(OWNER)).map((each) => [each.record.id, each.state])).toEqual([["m-old", "abandoned"]]);
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe owner={OWNER} />); });
+    await flush();
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
+    // Answered again (a new record, held), then Undo: the old record never hides it again.
+    await answers.registerAfterCorrections(OWNER, { id: "m-new", reviewItemId: "ri-1", logged: true, newIds: [C1], itemIds: ["seg-a"] },
+      { readPending: async () => [], readAcknowledged: () => [] });
+    await flush();
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(true);
+    await answers.cancelAnswerAfterCorrections("m-new");
+    await flush();
+    expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
   it("says at once which \"?\" to show again when its change is refused (Codex r3 on #610)", async () => {
     storage.clear();
     dropped.mockClear();
@@ -145,7 +237,7 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     await answers.commitAnswerAfterCorrections("m-3");
     act(() => { create(<Probe owner={OWNER} />); });
     await flush();
-    expect(dropped).toHaveBeenCalledWith("ri-1");
+    expect(dropped).toHaveBeenCalledWith(["ri-1"]);
     expect(probe.current!.waitingIds.has("ri-1")).toBe(false);
     expect(review.enqueueReviewMutation).not.toHaveBeenCalledWith(expect.objectContaining({ clientMutationId: "m-3" }));
   });

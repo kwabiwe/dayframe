@@ -54,6 +54,9 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Calendar"', // a waiting answer's record couldn't be let go, so the answer was given up (Codex r10 on #610)
     '"Calendar"' // an answer couldn't be registered behind a queued correction on this iPhone (Codex r7 on #610)
   ],
+  "src/components/calendar/useAnswersAfterCorrections.ts": [
+    '"Calendar"' // the recovery runner gave a waiting answer up on return to the front (Codex r11 on #610)
+  ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',
     '"Unable to add time"',
