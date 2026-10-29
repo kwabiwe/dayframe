@@ -7269,9 +7269,9 @@ dialog.ui-dialog.df-range-custom {
   .timeline-list-table .timeline-inline-time[data-clock="12h"],
   .timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
     grid-template-columns: max-content;
-    grid-auto-rows: 20px;
+    grid-auto-rows: 24px;
     justify-items: end;
-    padding: 2px;
+    padding: 0 2px;
     font-size: 12px;
   }
 
@@ -7282,22 +7282,12 @@ dialog.ui-dialog.df-range-custom {
   .timeline-list-table .timeline-inline-time-control,
   .timeline-list-table .timeline-inline-time-input,
   .timeline-list-table .timeline-inline-running {
-    height: 20px;
-    min-height: 20px;
+    height: 24px;
+    min-height: 24px;
   }
 
   .timeline-list-table .timeline-inline-time > :last-child .timeline-inline-time-input {
     text-align: right;
-  }
-
-  .timeline-location-span.is-stacked {
-    display: grid;
-    justify-items: end;
-    font-size: 12px;
-  }
-
-  .timeline-location-span.is-stacked > span + span::before {
-    content: none;
   }
 
   .timeline-list-duration {
@@ -7309,14 +7299,74 @@ dialog.ui-dialog.df-range-custom {
     display: none;
   }
 
-  .timeline-list-actions:has([data-tip="Restart"]) [data-tip="Restart"],
-  .timeline-list-actions:has([aria-label^="Delete all"]) [aria-label^="Delete all"] {
+  .timeline-list-actions[data-running] [data-tip="Restart"],
+  .timeline-list-actions[data-grouped] [data-tip="Delete"] {
     display: inline-flex;
   }
 
-  .timeline-list-actions:has([data-tip="Restart"]) [data-tip="Edit"],
-  .timeline-list-actions:has([aria-label^="Delete all"]) [data-tip="Edit"] {
+  .timeline-list-actions:is([data-running], [data-grouped]) [data-tip="Edit"] {
     display: none;
+  }
+
+  /* A trip's legs toggle sits under its duration (Codex r2 on #632). */
+  .timeline-list-duration-content {
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  /* Place rows stack their span as the block rows do (after the base rules, so it wins). */
+  .timeline-list-table .timeline-location-span.is-stacked {
+    display: grid;
+    justify-items: end;
+    font-size: 12px;
+  }
+
+  .timeline-list-table .timeline-location-span.is-stacked > span + span::before {
+    content: none;
+  }
+}
+
+/* The narrowest phones: a tighter lead and action column so even a group's title keeps room. */
+@media (max-width: 360px) {
+  .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:first-child {
+    padding-inline: 4px 2px;
+  }
+
+  .timeline-list-table .timeline-task-block,
+  .timeline-list-table .timeline-location-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .timeline-list-table .timeline-location-hit {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .timeline-list-table .timeline-task-cell {
+    gap: 6px;
+  }
+
+  .timeline-list-table[data-clock="12h"] col.timeline-list-col-time {
+    width: 64px;
+  }
+
+  .timeline-list-table[data-clock="12h"] .timeline-inline-time {
+    font-size: 11px;
+  }
+
+  .timeline-list-table col.timeline-list-col-duration {
+    width: 48px;
+  }
+
+  .timeline-list-table col.timeline-list-col-actions {
+    width: 48px;
+  }
+
+  .timeline-list-table .timeline-row-yes {
+    padding-inline: 8px;
   }
 }
 
