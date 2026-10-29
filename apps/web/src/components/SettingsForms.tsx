@@ -467,7 +467,7 @@ export function TripLoggingSwitch({ refresh, revision, stored, userId }: {
       <label className="place-suggestion-toggle df-set-trips">
         <span>
           <strong>Log trips automatically</strong>
-          <small id="df-set-trips-hint">Trips between your places become blocks when it’s clear how you travelled. Anything unclear waits in Review.</small>
+          <small id="df-set-trips-hint">Trips between your places become blocks when it’s clear how you travelled. Anything unclear is asked in Calendar.</small>
         </span>
         <input
           aria-describedby="df-set-trips-hint"

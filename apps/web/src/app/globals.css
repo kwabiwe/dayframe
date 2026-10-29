@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/* Row dividers (owner rule, 28 Oct 2026): a divider line never touches its container's edges; it is
+   inset on both sides, in lists, sheets, dialogs, menus and popovers alike. Every row-divider hairline
+   is a 1 px pseudo-element placed with
+   `inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset)`; table rows
+   use a background line sized by the same two values. Each hairline rule sets them itself, matching
+   its row's horizontal padding, and sets `--divider-inset-start` only where the line starts past a
+   lead icon. Neither inherits, so a list's values never leak into a menu or dialog opened inside it.
+   `.df-divider-top` is the same hairline for markup that isn't a list row. Full-width lines that are
+   frames, not row dividers (calendar grid lines, the sticky timer band's scroll edge, keycaps), stay.
+   `dividers.contract.test.ts` guards it. */
+@property --divider-inset {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 16px;
+}
+
+@property --divider-inset-start {
+  syntax: "*";
+  inherits: false;
+}
+
 /* X3: every activity/category marker is a small rounded-square block, never a round dot.
    Percentage keeps the Blocks chip proportion (~4px on a 12px marker) at any marker size. */
 :root {
@@ -821,10 +842,11 @@ textarea.ui-control {
 }
 
 .ui-settings-row + .ui-settings-row::before {
+  --divider-inset: 16px;
+  --divider-inset-start: 46px;
   content: "";
   position: absolute;
-  left: 46px;
-  right: 16px;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
   top: 0;
   border-top: 1px solid var(--line);
 }
@@ -834,7 +856,22 @@ textarea.ui-control {
 }
 
 .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
-  left: 16px;
+  --divider-inset-start: 16px;
+}
+
+.df-divider-top {
+  position: relative;
+}
+
+.df-divider-top::before {
+  --divider-inset: 16px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .ui-settings-row strong,
@@ -877,12 +914,12 @@ textarea.ui-control {
 }
 
 .settings-group .ui-settings-row + .ui-settings-row::before {
-  left: 52px;
-  right: 18px;
+  --divider-inset: 18px;
+  --divider-inset-start: 52px;
 }
 
 .settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
-  left: 18px;
+  --divider-inset-start: 18px;
 }
 
 .settings-group .ui-settings-row > svg {
@@ -1338,8 +1375,19 @@ textarea.ui-control {
 }
 
 .settings-section-feedback {
-  border-top: 1px solid var(--line);
+  position: relative;
   padding: 10px 18px;
+}
+
+.settings-section-feedback::before {
+  --divider-inset: 18px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .settings-inline-form {
@@ -1444,8 +1492,8 @@ textarea.ui-control {
 
   .settings-group .ui-settings-row + .ui-settings-row::before,
   .settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
-    left: 16px;
-    right: 16px;
+    --divider-inset: 16px;
+    --divider-inset-start: 16px;
   }
 
   .settings-group .ui-settings-row-action {
@@ -1650,9 +1698,21 @@ dialog.ui-dialog::backdrop {
   min-height: 68px;
   align-items: center;
   justify-content: space-between;
+  position: relative;
   gap: var(--web-gap-lg);
-  border-bottom: 1px solid var(--line);
   padding: var(--web-gap-md) var(--web-dialog-padding-inline);
+}
+
+/* ::after, because a phone sheet's header draws its grabber with ::before. */
+.ui-dialog-header::after {
+  --divider-inset: var(--web-dialog-padding-inline);
+  position: absolute;
+  bottom: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .ui-dialog-header h2,
@@ -1683,12 +1743,23 @@ dialog.ui-dialog::backdrop {
 }
 
 .ui-dialog-actions {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--web-gap-sm);
-  border-top: 1px solid var(--line);
   padding: var(--web-gap-md) var(--web-dialog-padding-inline);
+}
+
+.ui-dialog-actions::before {
+  --divider-inset: var(--web-dialog-padding-inline);
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 dialog.ui-dialog.ui-popover-panel {
@@ -2835,15 +2906,26 @@ kbd {
 }
 
 .landing-preview-topline {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--line);
   padding: 18px 20px;
   color: var(--muted);
   font-size: 13px;
   font-weight: 750;
   text-transform: uppercase;
+}
+
+.landing-preview-topline::after {
+  --divider-inset: 20px;
+  position: absolute;
+  bottom: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .landing-preview-topline strong {
@@ -3546,9 +3628,28 @@ dialog.ui-dialog.df-range-custom {
   min-height: 72px;
   align-items: center;
   justify-content: space-between;
+  position: relative;
   gap: 16px;
-  border-bottom: 1px solid var(--line);
   padding: 14px 18px;
+}
+
+.places-list-section > header::after,
+.place-list-row + .place-list-row::before {
+  --divider-inset: 18px;
+  position: absolute;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
+}
+
+.places-list-section > header::after {
+  bottom: 0;
+}
+
+.place-list-row + .place-list-row::before {
+  top: 0;
 }
 
 .places-list-section > header h2,
@@ -3585,16 +3686,13 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .place-list-row {
+  position: relative;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   min-height: 84px;
   padding: 14px 18px;
-}
-
-.place-list-row + .place-list-row {
-  border-top: 1px solid var(--line);
 }
 
 .place-list-icon,
@@ -3818,8 +3916,19 @@ dialog.ui-dialog.df-range-custom {
   cursor: pointer;
 }
 
-.place-search-option + .place-search-option {
-  border-top: 1px solid var(--line);
+.place-search-option {
+  position: relative;
+}
+
+.place-search-option + .place-search-option::before {
+  --divider-inset: 12px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .place-search-option[aria-selected="true"],
@@ -4132,7 +4241,6 @@ dialog.ui-dialog.df-range-custom {
   grid-template-columns: minmax(300px, 1fr) minmax(390px, auto);
   align-items: center;
   gap: var(--web-gap-lg);
-  border-top: 1px solid var(--line);
   border-radius: 0 0 var(--web-radius-group) var(--web-radius-group);
   background: var(--surface);
   padding: var(--web-gap-lg);
@@ -4461,7 +4569,6 @@ dialog.ui-dialog.df-range-custom {
   display: flex;
   min-height: 40px;
   align-items: center;
-  border-bottom: 1px solid var(--line);
   padding: 0 var(--web-panel-padding);
   font-size: 13px;
 }
@@ -5055,10 +5162,10 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .category-picker-create-option::before {
+  --divider-inset: 12px;
   position: absolute;
   top: -7px;
-  right: 12px;
-  left: 12px;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
   height: 1px;
   background: var(--line);
   content: "";
@@ -5395,7 +5502,13 @@ dialog.ui-dialog.df-range-custom {
   background-color: var(--surface);
 }
 
+/* The List's table is at least 760 px wide, so it scrolls sideways in narrower Lists (phones, and
+   beside the Places column). Its scroll viewport is inset 10 px from the panel on both sides, so the
+   clip edge that row lines run into never touches the container (owner divider rule, 28 Oct 2026);
+   the table's and the "N to check" bar's own sides give the 10 px back, so nothing moves at rest. */
 .timeline-list-scroll {
+  --timeline-list-clip-inset: 10px;
+  margin-inline: var(--timeline-list-clip-inset);
   overflow: auto;
 }
 
@@ -6163,7 +6276,6 @@ dialog.ui-dialog.df-range-custom {
   height: 64px;
   min-height: 64px;
   max-height: 64px;
-  border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }
 
@@ -6850,12 +6962,22 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .swiss-timeline-surface .timeline-range-toolbar {
+  position: relative;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
-  border-top: 0;
-  border-bottom: 1px solid var(--line);
   border-radius: 0;
   padding: 10px 14px;
+}
+
+.swiss-timeline-surface .timeline-range-toolbar::after {
+  --divider-inset: 14px;
+  position: absolute;
+  bottom: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .swiss-timeline-surface .timeline-range-navigation {
@@ -8742,10 +8864,11 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-erow + .df-erow::before {
+  --divider-inset: 10px;
+  --divider-inset-start: 60px;
   position: absolute;
   top: 0;
-  right: 10px;
-  left: 60px;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
   height: 1px;
   background: var(--border);
   content: "";
@@ -8932,10 +9055,11 @@ dialog.ui-dialog.df-palette {
 .df-erow + .df-erow-group > .df-erow::before,
 .df-erow-group + .df-erow::before,
 .df-erow-group + .df-erow-group > .df-erow::before {
+  --divider-inset: 10px;
+  --divider-inset-start: 60px;
   position: absolute;
   top: 0;
-  right: 10px;
-  left: 60px;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
   height: 1px;
   background: var(--border);
   content: "";
@@ -10391,38 +10515,18 @@ dialog.ui-dialog.df-palette {
  * inset instead of a full-width border.
  */
 .df-library .places-list-section > header {
-  position: relative;
   min-height: 60px;
-  border-bottom: 0;
 }
 
 .df-library .places-list-section > header::after,
 .df-library .place-list-row + .place-list-row::before {
-  position: absolute;
-  right: 18px;
-  left: 18px;
-  height: 1px;
   background: var(--border);
-  content: "";
-}
-
-.df-library .places-list-section > header::after {
-  bottom: 0;
 }
 
 /* Management rows are one height (web UI audit WUI-029): 56 px, as `df-srow`. */
 .df-library .place-list-row {
-  position: relative;
   min-height: 56px;
   padding: 8px 18px;
-}
-
-.df-library .place-list-row + .place-list-row {
-  border-top: 0;
-}
-
-.df-library .place-list-row + .place-list-row::before {
-  top: 0;
 }
 
 .df-library .place-list-icon {
@@ -11935,7 +12039,6 @@ dialog.ui-dialog.df-palette {
 /* Blocks entry editor (audit UIA-201; prototype "Edit block"): eyebrow and title head, a large
    description, activity chips with "All activities", time cards, and Delete · Start again · Save. */
 .calendar-compact-editor-header.df-ed-head {
-  border-bottom: 0;
   background: transparent;
 }
 
@@ -12463,7 +12566,6 @@ dialog.ui-dialog.df-palette {
 
 .df-cmd-time .swiss-start-time-popover-header {
   min-height: 0;
-  border-bottom: 0;
 }
 
 .df-cmd-time .swiss-start-time-popover .swiss-compact-time-editor {
@@ -12609,7 +12711,7 @@ dialog.ui-dialog.df-palette {
    appear on hover or focus (always on touch screens and phones). */
 .timeline-list-table {
   border-spacing: 0;
-  padding: 0 12px 12px;
+  padding: 0 calc(12px - var(--timeline-list-clip-inset)) 12px;
 }
 
 .timeline-list-table .timeline-list-day-heading > td {
@@ -12645,8 +12747,26 @@ dialog.ui-dialog.df-palette {
 }
 
 .timeline-list-row + .timeline-list-row > td:first-child {
-  background-position: 60px 0;
-  background-size: calc(100% - 60px) 1px;
+  --divider-inset-start: 60px;
+  background-position: var(--divider-inset-start) 0;
+  background-size: calc(100% - var(--divider-inset-start)) 1px;
+}
+
+.timeline-list-row + .timeline-list-row > td:last-child {
+  --divider-inset: 10px;
+  background-size: calc(100% - var(--divider-inset)) 1px;
+}
+
+/* Right to left the first cell is the rightmost and the last the leftmost, so each line keeps its gap
+   at the row's outer edge: the start gap moves to the first cell's right, the end gap to the last
+   cell's left. A `[dir="rtl"]` ancestor, not `:dir(rtl)`: the CSS build rewrites `:dir()` into a
+   `:lang()` list, which ignores the dir attribute. */
+[dir="rtl"] .timeline-list-row + .timeline-list-row > td:first-child {
+  background-position: 0 0;
+}
+
+[dir="rtl"] .timeline-list-row + .timeline-list-row > td:last-child {
+  background-position: var(--divider-inset) 0;
 }
 
 .timeline-list-row > td:first-child {
@@ -13848,7 +13968,7 @@ button.timeline-location-hit:focus-visible {
   height: 0;
   overflow: visible;
   justify-content: center;
-  padding: 0 12px;
+  padding: 0 calc(12px - var(--timeline-list-clip-inset));
 }
 
 @media (max-width: 760px) {
@@ -14071,7 +14191,9 @@ button.timeline-location-hit:focus-visible {
 .timeline-check-answers {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* Rows 12 px apart: each 32 px pill's 44 px hit area reaches 6 px past it, so wrapped answers'
+     targets meet without overlapping (Codex r2 on #614). */
+  gap: 12px 8px;
   margin-top: 4px;
 }
 
@@ -14105,7 +14227,6 @@ button.timeline-location-hit:focus-visible {
   align-items: center;
   min-height: 52px;
   border: 0;
-  border-top: 1px solid var(--border);
   padding: 8px 14px;
   background: transparent;
   color: var(--text-primary);
@@ -14114,8 +14235,15 @@ button.timeline-location-hit:focus-visible {
   cursor: pointer;
 }
 
-.location-correction-option:first-child {
-  border-top: 0;
+.location-correction-option + .location-correction-option::before {
+  --divider-inset: 14px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  content: "";
+  pointer-events: none;
 }
 
 .location-correction-option span {
@@ -14399,13 +14527,13 @@ button.timeline-location-hit:focus-visible {
 }
 
 .location-correction-leg {
+  position: relative;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 16px;
   gap: 12px;
   align-items: center;
   min-height: 52px;
   border: 0;
-  border-top: 1px solid var(--border);
   padding: 8px 14px;
   background: transparent;
   color: var(--text-primary);
@@ -14414,8 +14542,15 @@ button.timeline-location-hit:focus-visible {
   cursor: pointer;
 }
 
-.location-correction-leg:first-child {
-  border-top: 0;
+.location-correction-leg + .location-correction-leg::before {
+  --divider-inset: 14px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  content: "";
+  pointer-events: none;
 }
 
 .location-correction-leg small,
@@ -14504,7 +14639,9 @@ button.timeline-location-hit:focus-visible {
 .location-correction-question-answers {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* Rows 12 px apart: each 32 px pill's 44 px hit area reaches 6 px past it, so wrapped answers'
+     targets meet without overlapping (Codex r2 on #614). */
+  gap: 12px 8px;
 }
 
 /* Calendar (owner items B, D, E, H, K). */
@@ -14525,7 +14662,12 @@ button.timeline-location-hit:focus-visible {
   background: var(--surface-muted);
 }
 
-.timeline-row-yes {
+/* The compact pill (owner rule, 28 Oct 2026): the Calendar row's Yes pill is the size for every inline
+   question or sheet answer pill (Yes / Edit / Not now): 32 px tall, the compact 14 px sides, with a
+   44 px hit area below. */
+.timeline-row-yes,
+.timeline-check-answers > .ui-button,
+.location-correction-question-answers > .ui-button {
   min-height: 32px;
 }
 
@@ -14587,11 +14729,15 @@ button.timeline-location-hit:focus-visible {
    places filter and the Grid's Places-lane items keep their drawn size, with an invisible hit area of at least
    44 × 44 px centred on each. */
 .timeline-row-yes,
+.timeline-check-answers > .ui-button,
+.location-correction-question-answers > .ui-button,
 .timeline-places-filter button {
   position: relative;
 }
 
 .timeline-row-yes::before,
+.timeline-check-answers > .ui-button::before,
+.location-correction-question-answers > .ui-button::before,
 .timeline-places-filter button::before,
 .calendar-places-item::before {
   position: absolute;
@@ -14601,6 +14747,62 @@ button.timeline-location-hit:focus-visible {
   height: max(100%, 44px);
   content: "";
   transform: translate(-50%, -50%);
+}
+
+/* Row dividers in forced colours (Codex r1 on #614): a forced palette repaints backgrounds with the
+   system Canvas and drops gradient images, which would erase every shared hairline. There each one is a
+   system-coloured border instead, at the same inset; the Calendar List's background line becomes a
+   cell pseudo-element inset logically, so it also holds right to left. */
+@media (forced-colors: active) {
+  .ui-settings-row + .ui-settings-row::before,
+  .df-divider-top::before,
+  .settings-section-feedback::before,
+  .ui-dialog-header::after,
+  .ui-dialog-actions::before,
+  .landing-preview-topline::after,
+  .places-list-section > header::after,
+  .place-list-row + .place-list-row::before,
+  .place-search-option + .place-search-option::before,
+  .category-picker-create-option::before,
+  .swiss-timeline-surface .timeline-range-toolbar::after,
+  .df-erow + .df-erow::before,
+  .df-erow + .df-erow-group > .df-erow::before,
+  .df-erow-group + .df-erow::before,
+  .df-erow-group + .df-erow-group > .df-erow::before,
+  .location-correction-option + .location-correction-option::before,
+  .location-correction-leg + .location-correction-leg::before {
+    height: 0;
+    border-top: 1px solid CanvasText;
+    background: none;
+  }
+
+  .timeline-list-row + .timeline-list-row > td {
+    position: relative;
+  }
+
+  .timeline-list-row + .timeline-list-row > td::before {
+    position: absolute;
+    top: 0;
+    inset-inline: 0;
+    border-top: 1px solid CanvasText;
+    content: "";
+    pointer-events: none;
+  }
+
+  .timeline-list-row + .timeline-list-row > td:first-child::before {
+    inset-inline-start: 60px;
+  }
+
+  .timeline-list-row + .timeline-list-row > td:last-child::before {
+    inset-inline-end: 10px;
+  }
+
+  .timeline-list-row:hover > td::before,
+  .timeline-list-row:has(:focus-visible) > td::before,
+  .timeline-list-row:hover + .timeline-list-row > td::before,
+  .timeline-list-row:has(:focus-visible) + .timeline-list-row > td::before {
+    border-top-color: transparent;
+  }
 }
 
 @media (any-pointer: coarse) {

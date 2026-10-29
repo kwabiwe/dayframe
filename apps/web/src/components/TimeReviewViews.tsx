@@ -2189,7 +2189,7 @@ export function CalendarReview({
         />
       ) : null}
       {resizeDraft ? (
-        <div className="border-t border-[var(--line)] px-4 py-2">
+        <div className="df-divider-top px-4 py-2">
           <OverlapNotice
             candidate={{
               startedAt: resizeDraft.startedAt,
@@ -2211,7 +2211,7 @@ export function CalendarReview({
         </div>
       ) : null}
       {resizeError ? (
-        <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
+        <p className="df-divider-top px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
           {resizeError}
         </p>
       ) : null}
