@@ -126,4 +126,11 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     // One that never started natively runs for no time.
     expect(endAccuracyBurst(reserved, day(2, 23, 58), 0).days["2026-11-03"]).toMatchObject({ count: 1, seconds: 0 });
   });
+
+  it("a clock set back behind a burst's start counts it to its hard stop, never as nothing (Codex r19 on #619)", () => {
+    const started = startAccuracyBurst(trial, "departure", day(2, 8, 0));
+    const ended = endAccuracyBurst(started, day(2, 7, 8));
+    expect(ended.days["2026-11-03"]).toMatchObject({ count: 1, seconds: 8 * 60 });
+  });
 });
+

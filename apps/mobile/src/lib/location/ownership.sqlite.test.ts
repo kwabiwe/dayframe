@@ -1243,5 +1243,21 @@ describe("Accuracy bursts — headless wakes that fail early (Codex r15 on #619)
       vi.useFakeTimers({ toFake: ["Date"] });
     }
   });
+
+  it("a wake made stale during admission, whose cleanup does nothing, still has inherited options stopped (Codex r19 on #619)", async () => {
+    await relaunchedDuringBurst();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    try {
+      h.stopExpo.mockClear();
+      const wake = learningTask()({ data: { locations: [fix(Date.now())] }, error: null });
+      store.invalidateLocationCaptureOwnership(); // signed out while the wake was being admitted
+      await wake;
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(h.stopExpo).toHaveBeenCalled();
+    } finally {
+      geofence.__resetAccuracyBurstForTests();
+      vi.useFakeTimers({ toFake: ["Date"] });
+    }
+  });
 });
 
