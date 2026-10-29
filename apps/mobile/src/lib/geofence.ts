@@ -13,7 +13,7 @@ import {
   type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
-import { accuracyBurstDecision, accuracyBurstDue, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
+import { accuracyBurstDecision, accuracyBurstDue, accuracyBurstTrigger, endAccuracyBurst, startAccuracyBurst, startAccuracyBurstTrial,
   type AccuracyBurstKind, type AccuracyBurstState } from "./location/accuracyBurst";
 import { reverseGeocodeLocation } from "./locationGeocoding";
 import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
@@ -1692,14 +1692,20 @@ function learningUpdateOptions(burst: boolean): Location.LocationTaskOptions {
   };
 }
 
-/** A saved place's exit (a departure) or entry (an arrival) starts a burst when the trial allows one. */
-export async function maybeStartAccuracyBurst(kind: AccuracyBurstKind, capture: LocationCaptureSnapshot) {
+/**
+ * A saved place's exit (a departure) or entry (an arrival), or an iOS Visit's departure or arrival at any place,
+ * starts a burst when the trial allows one; a Visit never takes the day's last one.
+ */
+export async function maybeStartAccuracyBurst(
+  kind: AccuracyBurstKind, capture: LocationCaptureSnapshot, source: "saved_place" | "visit" = "saved_place"
+) {
+  const trigger = accuracyBurstTrigger(kind, source);
   if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled()) return false;
   if (!await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)) return false;
   const started = await withAccuracyBurstState(async (state) => {
     const now = new Date();
-    if (!state || !accuracyBurstDecision(state, now).start) return { state, result: false };
-    return { state: startAccuracyBurst(state, kind, now), result: true };
+    if (!state || !accuracyBurstDecision(state, now, trigger).start) return { state, result: false };
+    return { state: startAccuracyBurst(state, kind, now, trigger), result: true };
   });
   if (!started) return false;
   const ok = isLocationCaptureSnapshotCurrent(capture) &&

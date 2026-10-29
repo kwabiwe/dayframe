@@ -333,7 +333,8 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
     // already in flight from running after B's monitoring starts.
     const current = await readLocationCaptureBinding();
     if (!current || current.id === capture.binding?.id) await native.clearAllSignals();
-    return { transferredCount: 0, drainedCount: 0, pendingAccount: true, positionSignalCount: 0, latestPosition: null };
+    return { transferredCount: 0, drainedCount: 0, pendingAccount: true, positionSignalCount: 0, latestPosition: null,
+      latestVisitDepartureAt: null, latestVisitArrivalAt: null };
   }
   const context = capture.context!;
   const signals = await native.drainSignals(limit);
@@ -377,6 +378,9 @@ type NativePositionSignal = { at: number; fix: GeofencePositionFix | null };
 function nativePositionSignals(evidence: LocationEvidence[]) {
   let positionSignalCount = 0;
   let latestPosition: NativePositionSignal | null = null;
+  // The newest Visit departure and arrival report, for card K's bursts (times only).
+  let latestVisitDepartureAt: number | null = null;
+  let latestVisitArrivalAt: number | null = null;
   for (const item of evidence) {
     if (item.kind !== "visit" && item.kind !== "significant_change") continue;
     positionSignalCount += 1;
@@ -385,11 +389,15 @@ function nativePositionSignals(evidence: LocationEvidence[]) {
     const at = Date.parse(departed ? item.endedAt! : item.kind === "visit"
       ? item.metadata?.nativeCallbackAt ?? item.occurredAt : item.occurredAt);
     if (!Number.isFinite(at)) continue;
+    if (item.kind === "visit") {
+      if (departed) latestVisitDepartureAt = Math.max(latestVisitDepartureAt ?? 0, at);
+      else latestVisitArrivalAt = Math.max(latestVisitArrivalAt ?? 0, at);
+    }
     const fix = departed || item.latitude == null || item.longitude == null ? null
       : { latitude: item.latitude, longitude: item.longitude, accuracy: item.horizontalAccuracyMeters ?? null, timestamp: at };
     if (!latestPosition || at >= latestPosition.at) latestPosition = { at, fix };
   }
-  return { positionSignalCount, latestPosition };
+  return { positionSignalCount, latestPosition, latestVisitDepartureAt, latestVisitArrivalAt };
 }
 
 export function drainNativeLocationSignalsInBatches() {
@@ -401,6 +409,18 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
   // Motion & Fitness history joins the same wake, after native signals; a
   // failure there never fails the drain.
   if (!result.pendingAccount) await captureMotionActivitySafelyUnsafe(await captured);
+  // A fresh Visit departure or arrival, at any place (an unknown one too), starts an accuracy burst
+  // (card K); one drained long after it happened doesn't. It never fails the drain.
+  if (!result.pendingAccount) {
+    const now = Date.now();
+    const fresh = (at: number | null) => at != null && now - at >= 0 && now - at <= VISIT_BURST_FRESHNESS_MS;
+    const kind = fresh(result.latestVisitDepartureAt) ? "departure" : fresh(result.latestVisitArrivalAt) ? "arrival" : null;
+    if (kind) {
+      await import("../geofence")
+        .then(geofence => captured.then(capture => geofence.maybeStartAccuracyBurst(kind, capture, "visit")))
+        .catch(() => undefined);
+    }
+  }
   // Every drain (task wakes, bootstrap, foreground sync) lets an admitted Visit or significant
   // change pick the nearest saved places again, in this same lane; it never fails the drain.
   if (!result.pendingAccount && result.positionSignalCount > 0) {
@@ -411,17 +431,25 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
   }
   return result;
 }
+/** A Visit drained more than this long after its departure or report starts no burst (card K). */
+const VISIT_BURST_FRESHNESS_MS = 10 * 60_000;
+
 async function drainNativeSignalPassesUnsafe(captured: Promise<LocationCaptureSnapshot>) {
   let transferredCount = 0;
   let positionSignalCount = 0;
   let latestPosition: NativePositionSignal | null = null;
+  let latestVisitDepartureAt: number | null = null;
+  let latestVisitArrivalAt: number | null = null;
   const outcome = (pendingAccount: boolean) =>
-    ({ transferredCount, pendingAccount, positionSignalCount, latestPositionFix: latestPosition?.fix ?? null });
+    ({ transferredCount, pendingAccount, positionSignalCount, latestPositionFix: latestPosition?.fix ?? null,
+      latestVisitDepartureAt, latestVisitArrivalAt });
   for (let pass = 0; pass < MAX_LOCATION_NATIVE_DRAIN_PASSES; pass += 1) {
     const result = await drainNativeLocationSignalsUnsafe(100, captured);
     transferredCount += result.transferredCount;
     positionSignalCount += result.positionSignalCount;
     if (result.latestPosition && (!latestPosition || result.latestPosition.at >= latestPosition.at)) latestPosition = result.latestPosition;
+    if (result.latestVisitDepartureAt != null) latestVisitDepartureAt = Math.max(latestVisitDepartureAt ?? 0, result.latestVisitDepartureAt);
+    if (result.latestVisitArrivalAt != null) latestVisitArrivalAt = Math.max(latestVisitArrivalAt ?? 0, result.latestVisitArrivalAt);
     if (result.pendingAccount || result.drainedCount < 100) return outcome(result.pendingAccount);
   }
   return outcome(false);

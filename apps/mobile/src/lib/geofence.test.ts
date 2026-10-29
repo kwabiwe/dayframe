@@ -1054,6 +1054,6 @@ describe("departure and arrival accuracy bursts (card K, location v4 §10)", () 
     await stopLocationLearningIfStarted();
     const state = await readAccuracyBurstState();
     expect(state?.active).toBeUndefined();
-    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70 });
+    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70, byTrigger: { saved_entry: { count: 1, seconds: 70 } } });
   });
 });

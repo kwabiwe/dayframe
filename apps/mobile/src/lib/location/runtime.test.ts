@@ -35,13 +35,15 @@ vi.mock("../mobileAccount", () => ({
   mobileAccountOwnersEqual: (a: typeof state.owner, b: typeof state.owner) => a?.userId === b?.userId && a?.workspaceId === b?.workspaceId,
   deactivateMobileAccount: vi.fn()
 }));
+const burstMocks = vi.hoisted(() => ({ maybeStartAccuracyBurst: vi.fn(async (..._args: unknown[]) => true) }));
 vi.mock("../geofence", () => ({
   migrateLegacyLocationOptIn: async () => undefined,
   getLocationLearningEnabled: async () => true,
   stopLocationLearningIfStarted: async () => undefined,
   stopGeofencesIfStarted: async () => undefined,
   clearLocationCaptureCaches: async () => undefined,
-  refreshNearestGeofencesInLifecycleLane: async () => 0
+  refreshNearestGeofencesInLifecycleLane: async () => 0,
+  maybeStartAccuracyBurst: burstMocks.maybeStartAccuracyBurst
 }));
 vi.mock("./store", () => ({
   configureLocationAccount: mocks.configureLocationAccount,
@@ -160,6 +162,31 @@ describe("location runtime binding and drain", () => {
     expect(byId.get("slc-2")?.metadata).not.toHaveProperty("nativeCallbackAt");
     expect(byId.get("slc-legacy")).toMatchObject({ speedMetersPerSecond: null });
     expect(byId.get("slc-legacy")?.metadata).not.toHaveProperty("nativeCallbackAt");
+  });
+  it("a fresh Visit departure at any place starts an accuracy burst; one drained long after it doesn't (card K)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.parse("2026-08-11T12:20:00Z"));
+    try {
+      await configureLocationIntelligence(bootstrap());
+      const visit = (id: string, endedAt: string | null) => ({ id, kind: "visit" as const, occurredAt: "2026-08-11T11:00:00.000Z", endedAt,
+        latitude: 51.5, longitude: -0.1, horizontalAccuracyMeters: 30, metadata: endedAt ? {} : { visitDepartureOpen: "true" } });
+      burstMocks.maybeStartAccuracyBurst.mockClear();
+      mocks.drainSignals.mockResolvedValueOnce([visit("visit-left", "2026-08-11T12:15:00.000Z")]);
+      mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 1, admittedIds: ["visit-left"] } as never);
+      await drainNativeLocationSignalsInBatches();
+      expect(burstMocks.maybeStartAccuracyBurst).toHaveBeenCalledWith("departure", expect.anything(), "visit");
+      burstMocks.maybeStartAccuracyBurst.mockClear();
+      mocks.drainSignals.mockResolvedValueOnce([visit("visit-old", "2026-08-11T11:50:00.000Z")]);
+      mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 1, admittedIds: ["visit-old"] } as never);
+      await drainNativeLocationSignalsInBatches();
+      expect(burstMocks.maybeStartAccuracyBurst).not.toHaveBeenCalled();
+      // A Visit not admitted (another owner's, or before the binding) starts nothing.
+      mocks.drainSignals.mockResolvedValueOnce([visit("visit-other", "2026-08-11T12:18:00.000Z")]);
+      mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 0, admittedIds: [] } as never);
+      await drainNativeLocationSignalsInBatches();
+      expect(burstMocks.maybeStartAccuracyBurst).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("records Motion & Fitness history after the native drain, from the binding's cursor", async () => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.parse("2026-08-11T09:00:00Z"));

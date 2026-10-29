@@ -16,13 +16,25 @@ export const ACCURACY_BURST_TRIAL_DAYS = 14;
 
 export type AccuracyBurstKind = "departure" | "arrival";
 export type AccuracyBurstArm = "on" | "off" | "done";
+/**
+ * What started a burst: a saved place's geofence, or an iOS Visit at any place (an unknown one too, such as a
+ * parked car at a restaurant; orchestrator, 29 Oct 2026). Recorded per burst, so the readout can compare them.
+ */
+export type AccuracyBurstTrigger = "saved_exit" | "saved_entry" | "visit_departure" | "visit_arrival";
 
-export type AccuracyBurstDay = { count: number; seconds: number };
+export type AccuracyBurstDay = {
+  count: number;
+  seconds: number;
+  byTrigger?: Partial<Record<AccuracyBurstTrigger, { count: number; seconds: number }>>;
+};
+
+export const accuracyBurstTrigger = (kind: AccuracyBurstKind, source: "saved_place" | "visit"): AccuracyBurstTrigger =>
+  source === "visit" ? (kind === "departure" ? "visit_departure" : "visit_arrival") : (kind === "departure" ? "saved_exit" : "saved_entry");
 
 export type AccuracyBurstState = {
   /** The trial's first day, this iPhone's local date (YYYY-MM-DD). */
   startedDay: string;
-  active?: { kind: AccuracyBurstKind; startedAt: string; endsAt: string };
+  active?: { kind: AccuracyBurstKind; trigger?: AccuracyBurstTrigger; startedAt: string; endsAt: string };
   lastEndedAt?: string;
   /** Bursts by local day: how many started, and their seconds at best accuracy. */
   days: Record<string, AccuracyBurstDay>;
@@ -61,8 +73,13 @@ export type AccuracyBurstDecision =
   | { start: true }
   | { start: false; reason: "trial_off" | "trial_done" | "active" | "cooldown" | "daily_count" | "daily_time" };
 
-/** Whether a departure or arrival now starts a burst. */
-export function accuracyBurstDecision(state: AccuracyBurstState, now: Date): AccuracyBurstDecision {
+/**
+ * Whether a departure or arrival now starts a burst. A Visit never takes the day's last burst, so when the caps
+ * bind a saved place's exit still gets one (orchestrator, 29 Oct 2026).
+ */
+export function accuracyBurstDecision(
+  state: AccuracyBurstState, now: Date, trigger: AccuracyBurstTrigger = "saved_exit"
+): AccuracyBurstDecision {
   const arm = accuracyBurstArm(state, now);
   if (arm === "off") return { start: false, reason: "trial_off" };
   if (arm === "done") return { start: false, reason: "trial_done" };
@@ -70,19 +87,26 @@ export function accuracyBurstDecision(state: AccuracyBurstState, now: Date): Acc
   const lastEnded = state.lastEndedAt ? Date.parse(state.lastEndedAt) : NaN;
   if (Number.isFinite(lastEnded) && now.getTime() - lastEnded < ACCURACY_BURST_COOLDOWN_MS) return { start: false, reason: "cooldown" };
   const today = state.days[localDayKey(now)] ?? { count: 0, seconds: 0 };
-  if (today.count >= ACCURACY_BURST_MAX_PER_DAY) return { start: false, reason: "daily_count" };
-  // Room for a whole burst, so the day never passes its cap.
-  if (today.seconds + ACCURACY_BURST_DURATION_MS / 1000 > ACCURACY_BURST_MAX_SECONDS_PER_DAY) return { start: false, reason: "daily_time" };
+  const reserved = trigger === "visit_departure" || trigger === "visit_arrival" ? 1 : 0;
+  if (today.count + reserved >= ACCURACY_BURST_MAX_PER_DAY) return { start: false, reason: "daily_count" };
+  // Room for a whole burst (and, for a Visit, one more after it), so the day never passes its cap.
+  if (today.seconds + (1 + reserved) * ACCURACY_BURST_DURATION_MS / 1000 > ACCURACY_BURST_MAX_SECONDS_PER_DAY) {
+    return { start: false, reason: "daily_time" };
+  }
   return { start: true };
 }
 
-export function startAccuracyBurst(state: AccuracyBurstState, kind: AccuracyBurstKind, now: Date): AccuracyBurstState {
+export function startAccuracyBurst(
+  state: AccuracyBurstState, kind: AccuracyBurstKind, now: Date, trigger: AccuracyBurstTrigger = accuracyBurstTrigger(kind, "saved_place")
+): AccuracyBurstState {
   const key = localDayKey(now);
   const today = state.days[key] ?? { count: 0, seconds: 0 };
+  const byTrigger = today.byTrigger ?? {};
+  const forTrigger = byTrigger[trigger] ?? { count: 0, seconds: 0 };
   return {
     ...state,
-    active: { kind, startedAt: now.toISOString(), endsAt: new Date(now.getTime() + ACCURACY_BURST_DURATION_MS).toISOString() },
-    days: { ...state.days, [key]: { ...today, count: today.count + 1 } }
+    active: { kind, trigger, startedAt: now.toISOString(), endsAt: new Date(now.getTime() + ACCURACY_BURST_DURATION_MS).toISOString() },
+    days: { ...state.days, [key]: { ...today, count: today.count + 1, byTrigger: { ...byTrigger, [trigger]: { ...forTrigger, count: forTrigger.count + 1 } } } }
   };
 }
 
@@ -102,8 +126,17 @@ export function endAccuracyBurst(state: AccuracyBurstState, now: Date): Accuracy
   const seconds = Math.max(0, Math.round((ended - started) / 1000));
   const key = localDayKey(new Date(started));
   const day = state.days[key] ?? { count: 0, seconds: 0 };
+  const trigger = state.active.trigger;
+  const byTrigger = trigger ? {
+    ...day.byTrigger,
+    [trigger]: { count: day.byTrigger?.[trigger]?.count ?? 0, seconds: (day.byTrigger?.[trigger]?.seconds ?? 0) + seconds }
+  } : day.byTrigger;
   const { active: _active, ...rest } = state;
-  return { ...rest, lastEndedAt: new Date(ended).toISOString(), days: { ...state.days, [key]: { ...day, seconds: day.seconds + seconds } } };
+  return {
+    ...rest,
+    lastEndedAt: new Date(ended).toISOString(),
+    days: { ...state.days, [key]: { ...day, seconds: day.seconds + seconds, ...(byTrigger ? { byTrigger } : {}) } }
+  };
 }
 
 /** Sync help's line: "Accuracy trial day 3 of 14 · on · 2 bursts today (6m)". */
@@ -124,6 +157,7 @@ export function accuracyBurstDiagnostics(state: AccuracyBurstState | null | unde
     day,
     arm: armForTrialDay(dayNumber(day) - dayNumber(state.startedDay)),
     count: value.count,
-    seconds: value.seconds
+    seconds: value.seconds,
+    ...(value.byTrigger ? { byTrigger: value.byTrigger } : {})
   }));
 }

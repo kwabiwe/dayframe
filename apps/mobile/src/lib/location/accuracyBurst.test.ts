@@ -32,7 +32,8 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(accuracyBurstDue(started, day(1, 8, 3))).toBe(true);
     const ended = endAccuracyBurst(started, day(1, 8, 4));
     // Counted up to its 3 minutes, never the extra minute before the next reading came.
-    expect(ended.days["2026-11-02"]).toEqual({ count: 1, seconds: ACCURACY_BURST_DURATION_MS / 1000 });
+    expect(ended.days["2026-11-02"]).toEqual({ count: 1, seconds: ACCURACY_BURST_DURATION_MS / 1000,
+      byTrigger: { saved_exit: { count: 1, seconds: 180 } } });
     expect(ended.active).toBeUndefined();
     expect(accuracyBurstDecision(ended, day(1, 8, 7))).toEqual({ start: false, reason: "cooldown" });
     expect(accuracyBurstDecision(ended, day(1, 8, 8))).toEqual({ start: true });
@@ -40,7 +41,7 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
 
   it("counts a burst ended early (sign-out, location off) for the time it really ran", () => {
     const ended = endAccuracyBurst(startAccuracyBurst(trial, "arrival", day(2, 18, 0)), new Date(day(2, 18, 0).getTime() + 70_000));
-    expect(ended.days["2026-11-03"]).toEqual({ count: 1, seconds: 70 });
+    expect(ended.days["2026-11-03"]).toMatchObject({ count: 1, seconds: 70 });
   });
 
   it("caps a day at 6 bursts and 18 minutes, under the 20-minute best-accuracy budget", () => {
@@ -48,7 +49,7 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     for (let i = 0; i < 6; i += 1) {
       state = endAccuracyBurst(startAccuracyBurst(state, "departure", day(3, 8 + i)), day(3, 8 + i, 3));
     }
-    expect(state.days["2026-11-04"]).toEqual({ count: 6, seconds: 18 * 60 });
+    expect(state.days["2026-11-04"]).toMatchObject({ count: 6, seconds: 18 * 60 });
     expect(accuracyBurstDecision(state, day(3, 20))).toEqual({ start: false, reason: "daily_count" });
     // Five full bursts and a part one leave no room for another whole one.
     const nearly: AccuracyBurstState = { ...trial, days: { "2026-11-04": { count: 5, seconds: 16 * 60 } } };
@@ -63,6 +64,21 @@ describe("accuracy burst trial (card K, location v4 §10)", () => {
     expect(accuracyBurstSummaryLine(state, day(9, 12))).toBe("Accuracy trial day 10 of 14 · bursts off · 0 bursts today (0m)");
     expect(accuracyBurstSummaryLine(state, day(20))).toBe("Accuracy trial finished");
     expect(accuracyBurstSummaryLine(null, day(0))).toBe("Accuracy trial: not started");
-    expect(accuracyBurstDiagnostics(state)).toEqual([{ day: "2026-11-03", arm: "on", count: 1, seconds: 180 }]);
+    expect(accuracyBurstDiagnostics(state)).toEqual([{ day: "2026-11-03", arm: "on", count: 1, seconds: 180,
+      byTrigger: { saved_exit: { count: 1, seconds: 180 } } }]);
+  });
+
+  it("records what started each burst, and never lets a Visit take the day's last one (Visit departures for any place)", () => {
+    const visit = endAccuracyBurst(startAccuracyBurst(trial, "departure", day(5, 12), "visit_departure"), day(5, 12, 3));
+    expect(visit.days["2026-11-06"]).toEqual({ count: 1, seconds: 180, byTrigger: { visit_departure: { count: 1, seconds: 180 } } });
+    // Five used: a saved place's exit still gets the sixth, a Visit doesn't.
+    const five: AccuracyBurstState = { ...trial, days: { "2026-11-06": { count: 5, seconds: 15 * 60 } } };
+    expect(accuracyBurstDecision(five, day(5, 20), "visit_departure")).toEqual({ start: false, reason: "daily_count" });
+    expect(accuracyBurstDecision(five, day(5, 20), "visit_arrival")).toEqual({ start: false, reason: "daily_count" });
+    expect(accuracyBurstDecision(five, day(5, 20), "saved_exit")).toEqual({ start: true });
+    // Time too: with 13 minutes used a Visit's burst would leave no room for an exit's.
+    const longDay: AccuracyBurstState = { ...trial, days: { "2026-11-06": { count: 4, seconds: 13 * 60 } } };
+    expect(accuracyBurstDecision(longDay, day(5, 20), "visit_departure")).toEqual({ start: false, reason: "daily_time" });
+    expect(accuracyBurstDecision(longDay, day(5, 20), "saved_entry")).toEqual({ start: true });
   });
 });
