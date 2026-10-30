@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { UI_PREVIEW_STORAGE_KEY } from "@/lib/ui-preview";
+import { useKeyboardFocusMarks } from "@/components/useKeyboardFocusRing";
 
 const listeners = new Set<() => void>();
 
@@ -29,6 +30,8 @@ export function useUiNext() {
  */
 export function UiNextToggle() {
   const next = useSyncExternalStore(subscribe, readPreview, () => false);
+  // Proposed fields ring for keyboard focus only (ui-next.css reads `data-kb-focus`).
+  useKeyboardFocusMarks();
 
   function choose(value: boolean) {
     if (value) document.documentElement.setAttribute("data-ui", "next");

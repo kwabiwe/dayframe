@@ -15,7 +15,7 @@ import {
   type TripLeg,
   type TripLegMode
 } from "@dayframe/shared";
-import { Check } from "lucide-react";
+import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { blockStyle } from "@/lib/block-style";
@@ -23,6 +23,8 @@ import { Button, ModalDialog } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
 import { useMapProvider } from "@/components/location/PlaceSheetMap";
+import { useUiNext } from "@/components/UiNextToggle";
+import { TimeField } from "@/components/ui/TimeField";
 
 // The map is client-only (MapLibre), loaded when a dialog opens with the map first (step 15: the map first on every sheet).
 // While its chunk loads, an empty frame of the map's own size holds the sheet still (Codex r1 on #626).
@@ -310,6 +312,11 @@ export function LocationCorrectionDialog({
   const shownPlaces = distances && !morePlaces ? sortedPlaces.filter((option) => isNear(option.id)) : sortedPlaces;
   const hiddenPlaces = distances && !morePlaces ? sortedPlaces.filter((option) => !isNear(option.id)) : [];
   const [busy, setBusy] = useState(false);
+  // Proposed (UI review round 2, owner 30 Oct 2026): one search for Apple's places and the saved ones, and the rest
+  // of the dialog behind "More options".
+  const uiNext = useUiNext();
+  const [query, setQuery] = useState("");
+  const [moreOptions, setMoreOptions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -352,7 +359,7 @@ export function LocationCorrectionDialog({
     }
   }
 
-  function corrections(): TimelineCorrectionRequest[] | string {
+  function corrections(choice: string = picked): TimelineCorrectionRequest[] | string {
     // Only what changed is sent: an untouched leg, place or time is left as it is.
     if (target.kind === "trip") return [];
     if (target.kind === "leg") {
@@ -362,10 +369,10 @@ export function LocationCorrectionDialog({
     }
     const { place } = target;
     const out: TimelineCorrectionRequest[] = [];
-    if (picked !== saved.picked) {
+    if (choice !== saved.picked) {
       out.push({ kind: "place", subject: "place", itemId: place.id,
-        placeId: picked.startsWith("saved:") ? picked.slice(6) : null,
-        learnedPlaceId: picked.startsWith("learned:") ? picked.slice(8) : null });
+        placeId: choice.startsWith("saved:") ? choice.slice(6) : null,
+        learnedPlaceId: choice.startsWith("learned:") ? choice.slice(8) : null });
     }
     if (saved.stoppedAt) {
       const startChanged = start !== timeValue(saved.startedAt);
@@ -386,8 +393,10 @@ export function LocationCorrectionDialog({
     return out;
   }
 
-  async function apply() {
-    const pending = corrections();
+  /** Saves what changed; `choice` (Proposed: a tapped place) answers with that place, with any other edits. */
+  async function apply(choice: string = picked) {
+    if (choice !== picked) setPicked(choice);
+    const pending = corrections(choice);
     if (typeof pending === "string") {
       setError(pending);
       return;
@@ -410,7 +419,7 @@ export function LocationCorrectionDialog({
         return;
       }
       savedAny = true;
-      setSaved((current) => correction.kind === "place" ? { ...current, picked }
+      setSaved((current) => correction.kind === "place" ? { ...current, picked: choice }
         : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
           : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
@@ -469,9 +478,9 @@ export function LocationCorrectionDialog({
   }
 
   /** "Save this place": a saved place where the map puts the visit, under the name typed, and the visit set to it. */
-  async function saveThisPlace() {
+  async function saveThisPlace(chosenName?: string) {
     if (target.kind !== "place" || !evidence || evidence === "unavailable" || !evidence.map.centre) return;
-    const name = newPlaceName.trim();
+    const name = (chosenName ?? newPlaceName).trim();
     if (!name) {
       setError("Give the place a name.");
       return;
@@ -650,6 +659,153 @@ export function LocationCorrectionDialog({
   const { place } = target;
   const open = place.stoppedAt == null;
   const logActivities = activities.slice(0, 8);
+
+  if (uiNext) {
+    // The dialog is the question (owner, 30 Oct 2026): the map, a short list where a tap answers, and the footer.
+    // The list: Apple's three nearest places, then up to two saved places within about 1 km; everything else
+    // through the one search. "Logs as", the times and "Save this place" wait behind "More options".
+    const centre = evidence && evidence !== "unavailable" ? evidence.map.centre : null;
+    const text = query.trim();
+    const needle = text.toLowerCase();
+    const savedRows = needle
+      ? places.filter((option) => option.name.toLowerCase().includes(needle)).slice(0, 3)
+      : distances
+        ? sortedPlaces.filter((option) => option.id !== currentPlaceId && (distances.get(option.id) ?? Infinity) <= 1_000).slice(0, 2)
+        : [];
+    const currentRow = place.placeId
+      ? places.find((option) => option.id === place.placeId) ?? null : null;
+    const placeGlyph = (option: CorrectionPlace) => option.role === "home" ? DAYFRAME_APP_ICONS.placeHome
+      : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
+    const rows = [
+      ...(currentRow && !needle ? [{ key: `saved:${currentRow.id}`, glyph: placeGlyph(currentRow), name: currentRow.name, note: "This place" }] : []),
+      ...(place.learnedPlaceId && !place.placeId && !needle
+        ? [{ key: original, glyph: DAYFRAME_APP_ICONS.places, name: place.name ?? "Learned place", note: "Learned place" }] : []),
+      ...savedRows.filter((option) => option.id !== currentRow?.id || needle).map((option) => ({ key: `saved:${option.id}`, glyph: placeGlyph(option), name: option.name,
+        note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place" }))
+    ];
+    const canSaveNew = !place.placeId && Boolean(centre);
+    const yesQuestion = question?.yesLabel ? question : null;
+    const footerNext = (
+      <>
+        {question ? <Button disabled={busy} onClick={() => void answer(false)} variant="ghost">{question.noLabel}</Button> : null}
+        {yesQuestion && !changed
+          ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
+          : <Button disabled={busy} onClick={() => void apply()} variant="primary">Save</Button>}
+      </>
+    );
+    return (
+      <ModalDialog busy={busy} className="location-correction-dialog is-next" description={open ? `Since ${formatTime(place.startedAt, clock)}`
+        : `${formatTime(place.startedAt, clock)}–${formatTime(place.stoppedAt!, clock)}`}
+        footer={footerNext} onClose={onClose} size="compact" title={target.label}>
+        <div className="location-correction is-next">
+          {question && question.text !== "Where were you?" ? <p className="location-correction-ask">{question.text}</p> : null}
+          <EvidenceMap evidence={evidence} knownPlace={Boolean(place.placeId || place.learnedPlaceId)} />
+          <div className="location-correction-section" data-section="where">
+            <label className="ui-compound-control df-flist-search location-correction-search">
+              <DayframeIcon glyph="search" size={16} />
+              <input aria-label="Search places" disabled={busy} onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search places" type="text" value={query} />
+            </label>
+            {!place.placeId && mapProvider === "mapkit" && centre ? (
+              <NearbyPlaces
+                centre={{ latitude: centre.coordinates[1], longitude: centre.coordinates[0] }}
+                disabled={busy}
+                onPick={(name) => void saveThisPlace(name)}
+                onUnavailable={() => setMapProvider("maplibre")}
+                pickLabel="Saves it as a place and sets this visit to it"
+                query={query}
+                rows={3}
+              />
+            ) : null}
+            {rows.length || (text && canSaveNew) ? (
+              <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
+                {rows.map((row) => (
+                  <li key={row.key}>
+                    <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
+                      onClick={() => void apply(row.key)} type="button">
+                      <DayframeIcon glyph={row.glyph} size={18} />
+                      <span><b>{row.name}</b>{row.note ? <small>{row.note}</small> : null}</span>
+                      {picked === row.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
+                    </button>
+                  </li>
+                ))}
+                {text && canSaveNew ? (
+                  <li>
+                    <button className="location-correction-option is-save" disabled={busy} onClick={() => void saveThisPlace(text)} type="button">
+                      <DayframeIcon glyph="plus" size={18} />
+                      <span><b>Save “{text}” as a place</b></span>
+                    </button>
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
+          </div>
+          <button aria-controls={`location-correction-more-${place.id}`} aria-expanded={moreOptions} className="location-correction-disclosure"
+            disabled={busy} onClick={() => setMoreOptions((value) => !value)} type="button">
+            <span>More options</span>
+            {moreOptions ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
+          </button>
+          {moreOptions ? (
+            <div className="location-correction-more-options" id={`location-correction-more-${place.id}`}>
+              {!place.blockIds.length ? (
+                <div className="location-correction-section" data-section="logs-as">
+                  <span className="location-correction-label" id="location-correction-logs-as">Logs as</span>
+                  <div aria-labelledby="location-correction-logs-as" className="df-rchips location-correction-logs-as" role="radiogroup">
+                    {logActivities.map((activity) => (
+                      <button aria-checked={logAs === activity.id} className={`df-rchip${logAs === activity.id ? " is-checked" : ""}`}
+                        ref={(element) => { if (element) logAsChips.current.set(activity.id, element); else logAsChips.current.delete(activity.id); }}
+                        disabled={busy} key={activity.id} onClick={() => setLogAs(logAs === activity.id ? null : activity.id)} role="radio"
+                        style={blockStyle(activity.color ?? null, activity.name)} type="button">
+                        <ActivityChipFace activity={{ color: activity.color ?? activity.id, icon: activity.icon ?? null, name: activity.name }} checked={logAs === activity.id} />
+                      </button>
+                    ))}
+                  </div>
+                  {logAs ? <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p> : null}
+                </div>
+              ) : null}
+              {open ? null : (
+                <div aria-label="Times" className="location-correction-times" data-section="times" role="group">
+                  <label className="location-correction-time"><span>Start</span>
+                    <TimeField clock={clock} disabled={busy} label="Start time" onChange={setStart} value={start} />
+                  </label>
+                  <label className="location-correction-time"><span>End</span>
+                    <TimeField clock={clock} disabled={busy} label="End time" onChange={setEnd} placeholder="09:15" value={end} />
+                  </label>
+                </div>
+              )}
+              {canSaveNew ? (
+                <div aria-label="Save this place" className="location-correction-save" role="group">
+                  <input aria-label="Name for this place" className="ui-control" disabled={busy} onChange={(event) => setNewPlaceName(event.target.value)}
+                    ref={newPlaceNameRef} placeholder="Save this place as…" type="text" value={newPlaceName} />
+                  <Button disabled={busy || !newPlaceName.trim()} onClick={() => void saveThisPlace()}>Save place</Button>
+                </div>
+              ) : null}
+              {original !== "unknown" ? (
+                <button className="location-correction-more" disabled={busy} onClick={() => void apply("unknown")} type="button">Leave as unknown</button>
+              ) : null}
+              {!open && target.joinsTrips ? (
+                <div aria-label="Fix this place" className="location-correction-shape" role="group">
+                  {confirmingRemove ? (
+                    <div className="location-correction-confirm">
+                      <p>Take this place off your day? The trips either side become one trip.</p>
+                      <div className="location-correction-confirm-actions">
+                        <Button disabled={busy} onClick={() => void removePlace()} variant="danger">Take it off your day</Button>
+                        <Button disabled={busy} onClick={() => setConfirmingRemove(false)}>Keep it</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button disabled={busy} onClick={() => setConfirmingRemove(true)}>I wasn&apos;t here</Button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {error ? <p className="location-correction-error" role="alert">{error}</p> : null}
+        </div>
+      </ModalDialog>
+    );
+  }
+
   return (
     <ModalDialog busy={busy} description={open ? `Since ${formatTime(place.startedAt, clock)}`
       : `${formatTime(place.startedAt, clock)}–${formatTime(place.stoppedAt!, clock)}`}

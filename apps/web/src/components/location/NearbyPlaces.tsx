@@ -36,18 +36,28 @@ export function NearbyPlaces({
   centre,
   disabled,
   onPick,
-  onUnavailable
+  onUnavailable,
+  pickLabel = "Names this visit; you can then save it",
+  query: controlledQuery,
+  rows = NEARBY_ROWS
 }: {
   centre: { latitude: number; longitude: number };
   disabled: boolean;
   onPick: (name: string) => void;
+  /** What a pick does, for assistive tech (Proposed: the pick answers the question). */
+  pickLabel?: string;
+  /** The dialog's own search text (Proposed, round 2): this list then draws no search field of its own. */
+  query?: string;
+  /** How many nearby places show before a search (Proposed: 3). */
+  rows?: number;
   /** MapKit failed for the page: the dialog drops this list. */
   onUnavailable: () => void;
 }) {
   const [nearby, setNearby] = useState<State>({ status: "loading", rows: [] });
   // The latest search's answer, kept with the text it was for, so a newer query never shows an older answer.
   const [searched, setSearched] = useState<{ query: string; state: State } | null>(null);
-  const [query, setQuery] = useState("");
+  const [ownQuery, setQuery] = useState("");
+  const query = controlledQuery ?? ownQuery;
   const latest = useRef({ onUnavailable });
   useEffect(() => {
     latest.current = { onUnavailable };
@@ -67,14 +77,14 @@ export function NearbyPlaces({
           setNearby({ status: "unavailable", rows: [] });
           return;
         }
-        const rows = toRows(data?.places ?? [], { latitude, longitude }).slice(0, NEARBY_ROWS);
-        setNearby({ status: rows.length ? "results" : "empty", rows });
+        const found = toRows(data?.places ?? [], { latitude, longitude }).slice(0, rows);
+        setNearby({ status: found.length ? "results" : "empty", rows: found });
       });
     }).catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [latitude, longitude]);
+  }, [latitude, longitude, rows]);
 
   useEffect(() => {
     const text = query.trim();
@@ -109,16 +119,18 @@ export function NearbyPlaces({
       : { status: "loading", rows: [] };
   return (
     <div className="location-correction-nearby" data-section="nearby">
-      <label className="location-correction-nearby-search">
-        <DayframeIcon glyph="search" size={16} />
-        <input aria-label="Search places" disabled={disabled} onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search places" type="search" value={query} />
-      </label>
+      {controlledQuery === undefined ? (
+        <label className="location-correction-nearby-search">
+          <DayframeIcon glyph="search" size={16} />
+          <input aria-label="Search places" disabled={disabled} onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search places" type="search" value={query} />
+        </label>
+      ) : null}
       {shown.rows.length ? (
         <ul aria-label={typed ? "Places found" : "Places nearby"} className="location-correction-options">
           {shown.rows.map((row) => (
             <li key={row.key}>
-              <button aria-label={`${row.title}, ${row.detail}. Names this visit; you can then save it`} className="location-correction-option is-nearby"
+              <button aria-label={`${row.title}, ${row.detail}. ${pickLabel}`} className="location-correction-option is-nearby"
                 disabled={disabled} onClick={() => onPick(row.title)} type="button">
                 <DayframeIcon glyph={DAYFRAME_APP_ICONS.places} size={18} />
                 <span><b>{row.title}</b><small>{row.detail}</small></span>

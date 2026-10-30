@@ -15,6 +15,8 @@ import { evidenceBounds } from "@/lib/location/evidence-bounds";
  */
 
 const MAPKIT_SCRIPT_URL = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.core.js";
+/** Room around the visit or route, in px. It widens the region, never `map.padding`: MapKit places its logo and Legal
+ * inside that padding, which put them in the middle of the small map (owner, 30 Oct 2026). */
 const BOUNDS_PADDING = 48;
 /** The narrowest region shown, about a street's length: MapLibre's max zoom 16 in the other map. */
 const MIN_SPAN_DEGREES = 0.004;
@@ -25,7 +27,7 @@ type MkOverlay = object;
 type MkStyle = object;
 type MkMap = {
   colorScheme: string;
-  padding: object;
+  element?: HTMLElement;
   addOverlays(overlays: MkOverlay[]): void;
   removeOverlays(overlays: MkOverlay[]): void;
   setRegionAnimated(region: object, animate?: boolean): void;
@@ -235,8 +237,7 @@ export function MapKitEvidenceMap({
         showsMapTypeControl: false,
         showsScale: mapkit.FeatureVisibility.Hidden,
         showsUserLocationControl: false,
-        showsZoomControl: true,
-        padding: new mapkit.Padding(BOUNDS_PADDING, BOUNDS_PADDING, BOUNDS_PADDING, BOUNDS_PADDING)
+        showsZoomControl: true
       });
       live.current = { mapkit, map, overlays: [], key: "" };
       draw(live.current, latest.current.evidence, false);
@@ -327,6 +328,10 @@ function draw(current: { mapkit: MapKit; map: MkMap; overlays: MkOverlay[]; key:
   if (!bounds) return;
   const [[west, south], [east, north]] = bounds;
   const centre = new mapkit.Coordinate((north + south) / 2, (east + west) / 2);
-  const span = new mapkit.CoordinateSpan(Math.max(north - south, MIN_SPAN_DEGREES) * 1.1, Math.max(east - west, MIN_SPAN_DEGREES) * 1.1);
+  // The span grows so the bounds fill the frame less BOUNDS_PADDING on each side (a 160 px map: 64 px tall inside).
+  const width = map.element?.clientWidth ?? 0;
+  const height = map.element?.clientHeight ?? 0;
+  const grow = (size: number) => size > BOUNDS_PADDING * 3 ? size / (size - BOUNDS_PADDING * 2) : 1.6;
+  const span = new mapkit.CoordinateSpan(Math.max(north - south, MIN_SPAN_DEGREES) * grow(height), Math.max(east - west, MIN_SPAN_DEGREES) * grow(width));
   map.setRegionAnimated(new mapkit.CoordinateRegion(centre, span), animate);
 }

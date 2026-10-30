@@ -574,3 +574,193 @@
     height: 48px;
   }
 }
+
+/* ---------- Buttons and fields (owner rule, 30 Oct 2026): 36 px slim pills, fill-led fields ---------- */
+/* Every web button is the control height (36 px with a mouse, 44 px on touch) and a slim pill; the compact inline
+   answer pill keeps its 32 px (owner rule, 28 Oct). The block editor no longer forces 44 px with a mouse. */
+:root[data-ui="next"] :is(.df-rbtn, .df-rbtn--sm) {
+  min-height: var(--web-control-height);
+  padding-inline: 16px;
+}
+
+@media (min-width: 761px) and (not (any-pointer: coarse)) {
+  :root[data-ui="next"] :is(.calendar-compact-editor, .time-entry-quick-editor-modal) {
+    --web-control-height: 36px;
+  }
+}
+
+/* Fields: the inset fill with no border at rest or after a click; the neutral ring only for keyboard focus
+   (`data-kb-focus`, set page-wide by useKeyboardFocusMarks); an invalid field keeps its danger underline. */
+:root[data-ui="next"] :is(.ui-control, .ui-compound-control, .location-correction-save input, .df-time-field),
+:root[data-ui="next"] :is(.ui-control, .ui-compound-control, .location-correction-save input, .df-time-field):is(:focus, :focus-within) {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+:root[data-ui="next"] :is(.ui-control, .location-correction-save input, .df-time-field)[data-kb-focus],
+:root[data-ui="next"] .ui-compound-control:has([data-kb-focus]) {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root[data-ui="next"] :is(.ui-control, .df-time-field)[aria-invalid="true"],
+:root[data-ui="next"] .ui-compound-control:has([aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root[data-ui="next"] :is(.ui-control, .df-time-field)[aria-invalid="true"][data-kb-focus],
+:root[data-ui="next"] .ui-compound-control:has([aria-invalid="true"]):has([data-kb-focus]) {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* The one time field (`TimeField`), and the block editor's Start, End and Duration boxes in the same look. */
+:root[data-ui="next"] .df-time-field {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--web-control-height);
+  border: 0;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel :is(.calendar-compact-date-time-controls, .calendar-compact-duration-input input, .calendar-compact-duration, .calendar-compact-running-value) {
+  min-height: var(--web-control-height);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel :is(.calendar-compact-date-time-controls > input, .calendar-compact-duration-input input, .calendar-compact-duration > .tabular, .calendar-compact-running-value) {
+  font-size: 15px;
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within,
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-duration-input input:focus {
+  box-shadow: none;
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-time-controls:has([data-kb-focus]),
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-duration-input input[data-kb-focus] {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]),
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]):has([data-kb-focus]),
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"][data-kb-focus] {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-trigger {
+  height: var(--web-control-height);
+}
+
+/* ---------- The place dialog (owner, 30 Oct 2026): the dialog is the question ---------- */
+:root[data-ui="next"] dialog.ui-dialog.ui-dialog--compact:has(.location-correction.is-next) {
+  width: min(400px, calc(100vw - 24px));
+}
+
+:root[data-ui="next"] .location-correction.is-next {
+  gap: 10px;
+}
+
+:root[data-ui="next"] .location-correction-ask {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--type-body);
+  font-weight: var(--fw-medium);
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-search {
+  margin: 0;
+}
+
+:root[data-ui="next"] .location-correction.is-next :is(.location-correction-options, .location-correction-nearby) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-option {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 2px;
+}
+
+:root[data-ui="next"] .location-correction.is-next li + li .location-correction-option::before,
+:root[data-ui="next"] .location-correction.is-next .location-correction-nearby + .location-correction-options li:first-child .location-correction-option::before {
+  --divider-inset: 2px;
+  --divider-inset-start: 36px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  content: "";
+  pointer-events: none;
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-option:hover:not(:disabled) b {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-option:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-option.is-save b {
+  font-weight: var(--fw-medium);
+}
+
+:root[data-ui="next"] .location-correction-nearby-note {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui="next"] .location-correction-disclosure {
+  display: flex;
+  height: var(--web-control-height);
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 2px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+:root[data-ui="next"] .location-correction-disclosure:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+:root[data-ui="next"] .location-correction-disclosure:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+:root[data-ui="next"] .location-correction-more-options {
+  display: grid;
+  gap: 12px;
+}
+
+:root[data-ui="next"] .location-correction.is-next .location-correction-save input {
+  min-height: var(--web-control-height);
+}
