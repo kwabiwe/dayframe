@@ -16,19 +16,20 @@ export function useTimelineDeleteUndo({
   onSynced
 }: {
   entryIds: ReadonlySet<string>;
-  onSynced: () => Promise<void>;
+  /** After a delete commits, with the deleted blocks' ids. */
+  onSynced: (entryIds: readonly string[]) => Promise<void>;
 }) {
   const [state, setState] = useState<TimelineDeleteUndoState>(initialTimelineDeleteUndoState);
   // The controller outlives renders; a delete that commits after a period change must reload the
   // period shown then, so it calls the newest onSynced, never the first render's (WEB-UI-3).
   const [{ controller, latest }] = useState(() => {
     let latestOnSynced = onSynced;
-    const latest = { set: (next: () => Promise<void>) => { latestOnSynced = next; } };
+    const latest = { set: (next: (entryIds: readonly string[]) => Promise<void>) => { latestOnSynced = next; } };
     const controller = new TimelineDeleteUndoController(
       async (transaction, options) => {
         await commitTimelineDelete(transaction, options);
         try {
-          await latestOnSynced();
+          await latestOnSynced(transaction.ids);
         } catch {
           // The server commit succeeded. Keep the transaction hidden until a later reconciliation.
         }

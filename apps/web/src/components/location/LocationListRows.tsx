@@ -17,7 +17,7 @@ import {
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
-import { inListRefreshWindow, listRefreshWindow, sweptListRefreshWindow } from "@/lib/timeline-view";
+import { inListRefreshWindow, listRefreshWindow } from "@/lib/timeline-view";
 
 /**
  * The day's location timeline for Calendar › List (location v4 step 10): fetched for the shown day and
@@ -44,6 +44,9 @@ export function useLocationTimeline(date: string | null, refreshKey: unknown, ow
   return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
 
+/** Of the edited blocks' own days outside the window, at most this many are read again at once. */
+export const LOCATION_EDITED_DAYS_READ_ON_EDIT = 8;
+
 /** Location reads in flight at once while the List loads its days. */
 export const LOCATION_TIMELINE_CONCURRENCY = 3;
 
@@ -54,9 +57,11 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * `staleKey` changes (an edit or a correction). A day asked for again while its read is out is read
  * once more when that read lands, so no refresh is lost.
  *
- * With a `focusDate` (the List's top day), an edit re-reads at once only the days within LIST_REFRESH_RADIUS_DAYS of
- * it; every other day read is marked stale and read again when the List scrolls it into that window (request-storm
- * fix, 30 Oct 2026: an edit used to re-read every day the List had ever loaded, 69 reads after nine weeks of scroll).
+ * With a `focusDate` (the List's top day), an edit re-reads at once only the days read within LIST_REFRESH_RADIUS_DAYS of
+ * it and the edited blocks' own days (`affectedDates`); every other day read is stale, as is every day but the live ones
+ * after a bootstrap refresh, and is read again when the List's top day comes within that radius of it. A failed read
+ * leaves the day stale (request-storm fix, 30 Oct 2026: an edit used to re-read every day the List had ever loaded, 69
+ * reads after nine weeks of scroll).
  *
  * Days belong to one owner lifetime (workspace and user): every owner change starts a new generation,
  * dropping the days read and aborting the reads in flight, so even an A → B → A round trip never shows
@@ -64,7 +69,7 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * copy; a day without one shows blocks (and its checks) only, as before.
  */
 export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
-  owner: string, enabled = true, focusDate: string | null = null): ReadonlyMap<string, LocationTimeline> {
+  owner: string, enabled = true, focusDate: string | null = null, affectedDates: readonly string[] = []): ReadonlyMap<string, LocationTimeline> {
   // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
   const [scope, setScope] = useState({ owner, generation: 0 });
   let generation = scope.generation;
@@ -106,12 +111,19 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     const queue = queueFor(generation);
     queue.want(datesKey ? datesKey.split(",") : [], false);
   }, [datesKey, enabled, generation]);
-  // The selected day and today again with each bootstrap refresh.
+  // The selected day and today again with each bootstrap refresh; every other day read is stale (read when visited).
+  const lastLiveKeyRef = useRef(liveKey);
   useEffect(() => {
     if (!enabled) return;
-    queueFor(generation).want(liveDatesKey ? liveDatesKey.split(",") : [], true);
+    const queue = queueFor(generation);
+    const live = liveDatesKey ? liveDatesKey.split(",") : [];
+    if (lastLiveKeyRef.current !== liveKey) {
+      lastLiveKeyRef.current = liveKey;
+      queue.markStale([...queue.asked].filter((date) => !live.includes(date)));
+    }
+    queue.want(live, true);
   }, [enabled, liveDatesKey, liveKey, generation]);
-  // After an edit: the days near the List's top day at once, every other day read when it comes near (stale).
+  // After an edit: the days near the List's top day and the edited days at once; every other day read is stale.
   const refreshWindow = listRefreshWindow(focusDate);
   const windowKey = refreshWindow ? `${refreshWindow.from}..${refreshWindow.to}` : "";
   const lastStaleRef = useRef(staleKey);
@@ -120,27 +132,20 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     lastStaleRef.current = staleKey;
     if (!enabled) return;
     const queue = queueFor(generation);
-    const now: string[] = [];
-    for (const date of queue.asked) {
-      if (inListRefreshWindow(date, refreshWindow)) {
-        now.push(date);
-        queue.stale.delete(date);
-      } else queue.stale.add(date);
-    }
-    queue.want(now, true);
-    // The window is read from this render; the effect runs only for a new edit.
+    const asked = [...queue.asked];
+    queue.markStale(asked);
+    const edited = new Set(affectedDates.filter((date) => queue.asked.has(date)).slice(0, LOCATION_EDITED_DAYS_READ_ON_EDIT));
+    queue.want(asked.filter((date) => inListRefreshWindow(date, refreshWindow) || edited.has(date)), true);
+    // The window and the edited days are read from this render; the effect runs only for a new edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, staleKey]);
-  // A stale day the List scrolls near (or past) is read again, once.
-  const sweptFromRef = useRef(refreshWindow);
+  // The stale days of the window the List's top day has come to (only the destination: days passed over on the way
+  // stay stale until visited), at most 2 × LIST_REFRESH_RADIUS_DAYS + 1. A day still being read is left to that read.
   useEffect(() => {
-    const swept = sweptListRefreshWindow(sweptFromRef.current, refreshWindow);
-    sweptFromRef.current = refreshWindow;
     if (!enabled) return;
     const queue = queueRef.current;
     if (!queue || queue.generation !== generation || !queue.stale.size) return;
-    const due = [...queue.stale].filter((date) => inListRefreshWindow(date, swept));
-    for (const date of due) queue.stale.delete(date);
+    const due = [...queue.stale.keys()].filter((date) => inListRefreshWindow(date, refreshWindow) && !queue.reading(date));
     if (due.length) queue.want(due, true);
     // `windowKey` stands for the window.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,8 +163,12 @@ type TimelineQueue = {
   generation: number;
   /** Days ever asked for in this lifetime. */
   asked: Set<string>;
-  /** Days read before an edit and not read since: read again when the List scrolls near them. */
-  stale: Set<string>;
+  /** Days whose copy may be out of date (after an edit or a bootstrap refresh), each with its mark. */
+  stale: Map<string, number>;
+  /** Marks days stale: only a read started after this, and successful, clears them. */
+  markStale: (dates: readonly string[]) => void;
+  /** Whether a day's read is out. */
+  reading: (date: string) => boolean;
   /** Asks for days: unread ones always; with `again`, read ones too (after a read in flight lands). */
   want: (dates: readonly string[], again: boolean) => void;
   dispose: () => void;
@@ -170,7 +179,8 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
   const inFlight = new Map<string, AbortController>();
   const againAfterFlight = new Set<string>();
   const asked = new Set<string>();
-  const stale = new Set<string>();
+  const stale = new Map<string, number>();
+  let mark = 0;
   let disposed = false;
   const drain = () => {
     while (!disposed && inFlight.size < LOCATION_TIMELINE_CONCURRENCY && due.size) {
@@ -179,13 +189,19 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
       const controller = new AbortController();
       inFlight.set(date, controller);
       asked.add(date);
+      const startedAt = mark;
       clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store", signal: controller.signal })
         .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
         .catch(() => null)
         .then((next) => {
           if (disposed) return;
           inFlight.delete(date);
-          if (next && next.date === date) onRead(date, next);
+          if (next && next.date === date) {
+            onRead(date, next);
+            // Fresh only when read after it was marked; a failed read leaves it stale, so the next visit reads it again.
+            const marked = stale.get(date);
+            if (marked !== undefined && marked <= startedAt) stale.delete(date);
+          }
           if (againAfterFlight.delete(date)) due.add(date);
           drain();
         });
@@ -195,6 +211,11 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
     generation,
     asked,
     stale,
+    markStale(dates) {
+      mark += 1;
+      for (const date of dates) stale.set(date, mark);
+    },
+    reading: (date) => inFlight.has(date),
     want(dates, again) {
       if (disposed) return;
       for (const date of dates) {

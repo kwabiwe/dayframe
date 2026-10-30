@@ -22,7 +22,7 @@ import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
-import { EntriesTable } from "@/components/EntriesTable";
+import { EntriesTable, type ListChange } from "@/components/EntriesTable";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -254,12 +254,24 @@ export function TimeReviewViews({
   const refreshData = useCallback(async () => {
     await refresh();
   }, [refresh]);
-  // An edit or delete in the List also reads its loaded weeks (and their places) again.
-  const [listRefreshToken, setListRefreshToken] = useState(0);
-  const refreshList = useCallback(async () => {
-    setListRefreshToken((token) => token + 1);
+  // An edit or delete in the List also reads its loaded weeks (and their places) again: those near the List's top day
+  // and the changed blocks' own days at once (their days before the change, from the blocks shown, and after it).
+  const [listRefresh, setListRefresh] = useState<{ token: number; affected: readonly string[] }>({ token: 0, affected: [] });
+  const listRefreshToken = listRefresh.token;
+  const shownEntriesRef = useRef<readonly TimeEntryRow[]>([]);
+  const refreshList = useCallback(async (change?: ListChange) => {
+    const entryIds = change?.entryIds ?? [];
+    const times = change?.times ?? [];
+    const before = shownEntriesRef.current.filter((entry) => entryIds.includes(entry.id))
+      .flatMap((entry) => [entry.startedAt, entry.stoppedAt]);
+    const affected = [...new Set([...before, ...times].flatMap((time) => {
+      const at = time ? new Date(time) : null;
+      return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
+    }))];
+    setListRefresh((current) => ({ token: current.token + 1, affected }));
     await refresh();
   }, [refresh]);
+  const refreshDeleted = useCallback((entryIds: readonly string[]) => refreshList({ entryIds }), [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
@@ -444,16 +456,22 @@ export function TimeReviewViews({
     anchorWeekStart: ranges.week.start,
     currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
     enabled: isList && hydrated,
+    affectedDates: listRefresh.affected,
     focusDate: listFocusDate,
     owner: listOwner,
-    refreshToken: listRefreshToken
+    refreshToken: listRefreshToken,
+    staleKey: data
+  });
+  // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.
+  useLayoutEffect(() => {
+    shownEntriesRef.current = [...data.weekEntries, ...data.entries, ...listWeeks.entries];
   });
   const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
-    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate);
+    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);
   // Location v4 steps 16–17: the Grid's days' places and trips, for trip leg strips and the Places lane.
   const gridDayKeys = isList ? NO_DAY_KEYS
     : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));
@@ -497,7 +515,7 @@ export function TimeReviewViews({
     failedDelete,
     dismissDeleteError,
     undoPendingDelete
-  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshList });
+  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshDeleted });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
   // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
   const [deletedMoveEventId, setDeletedMoveEventId] = useState<string | null>(null);

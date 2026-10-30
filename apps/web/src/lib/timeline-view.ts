@@ -222,10 +222,10 @@ export function addCalendarDays(date: Date, days: number) {
 }
 
 /**
- * Calendar › List refreshes (performance.md, request-storm fix 30 Oct 2026): an edit re-reads at once only the loaded
- * days within this many days of the List's top day (and the weeks that overlap them). Every other loaded day is marked
- * stale and read again only when the List scrolls it into this window, so an edit costs a fixed number of requests
- * however much history the List has loaded.
+ * Calendar › List refreshes (performance.md, request-storm fix 30 Oct 2026): an edit re-reads at once the loaded days
+ * within this many days of the List's top day (and the weeks that overlap them), plus the edited blocks' own days.
+ * Every other loaded day is stale and read again only when the List's top day comes within this many days of it, so a
+ * scroll reads at most this window (15 days, 3 weeks) however much history the List has loaded.
  */
 export const LIST_REFRESH_RADIUS_DAYS = 7;
 
@@ -237,15 +237,6 @@ export function listRefreshWindow(focusKey: string | null | undefined) {
     from: toTimelineDateKey(addCalendarDays(focus, -LIST_REFRESH_RADIUS_DAYS)),
     to: toTimelineDateKey(addCalendarDays(focus, LIST_REFRESH_RADIUS_DAYS))
   };
-}
-
-/**
- * The span the List's top day has swept from one window to the next: a fast scroll (or days with no rows of their own)
- * can move the top day by more than a window, and the days passed over count as seen.
- */
-export function sweptListRefreshWindow(previous: { from: string; to: string } | null, next: { from: string; to: string } | null) {
-  if (!previous || !next) return next;
-  return { from: previous.from < next.from ? previous.from : next.from, to: previous.to > next.to ? previous.to : next.to };
 }
 
 /** Whether a day key falls in the refresh window (every day does without one). */

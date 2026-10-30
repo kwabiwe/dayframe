@@ -255,6 +255,9 @@ function emptyDayTimeline(day: DateRange): LocationTimeline {
   return { date: "", timeZone: "", dayStart: day.start.toISOString(), dayEnd: day.end.toISOString(), items: [], openTrip: null, gaps: [] };
 }
 
+/** What a save in the List changed: the blocks (their days before it) and their new times (their days after it). */
+export type ListChange = { entryIds?: readonly string[]; times?: readonly (string | null | undefined)[] };
+
 export function EntriesTable({
   entries: loadedEntries,
   categories,
@@ -280,7 +283,8 @@ export function EntriesTable({
   tags?: TagRow[];
   groupByDay?: boolean;
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
-  onChanged?: () => Promise<void>;
+  /** After a save here: which blocks changed and their new times, so the List reads their own days again at once. */
+  onChanged?: (change?: ListChange) => Promise<void>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   displayRange?: DateRange;
@@ -1290,7 +1294,7 @@ export function EntriesTable({
         }
       });
       setInlineStatus(`Updated ${current.target.entryIds.length} grouped blocks.`);
-      await onChanged?.();
+      await onChanged?.({ entryIds: current.target.entryIds });
       if (nextGroupKey) focusGroupedDescription(nextGroupKey);
       startTransition(() => router.refresh());
       return;
@@ -1300,7 +1304,7 @@ export function EntriesTable({
       inlineEditorRef.current = null;
       setInlineEditor(null);
     }
-    await onChanged?.();
+    await onChanged?.({ entryIds: [entry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] });
     startTransition(() => router.refresh());
   }
 
@@ -1896,7 +1900,7 @@ export function EntriesTable({
               ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
               : await updateActiveEntryFromCalendar({ plan });
             if (outcome.ok) {
-              await onChanged?.();
+              await onChanged?.({ entryIds: [editingEntry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] });
               startTransition(() => router.refresh());
             }
             return outcome;
@@ -1906,7 +1910,7 @@ export function EntriesTable({
             const outcome = await splitTimeEntry(clientFetch, editingEntry, atMs);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.();
+              await onChanged?.({ entryIds: [editingEntry.id] });
               startTransition(() => router.refresh());
             }
             return outcome;
@@ -1915,7 +1919,7 @@ export function EntriesTable({
             const outcome = await duplicateTimeEntry(clientFetch, editingEntry);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.();
+              await onChanged?.({ entryIds: [editingEntry.id] });
               startTransition(() => router.refresh());
             }
             return outcome;
