@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { UI_PREVIEW_STORAGE_KEY } from "@/lib/ui-preview";
 import { useKeyboardFocusMarks } from "@/components/useKeyboardFocusRing";
 
@@ -27,7 +27,15 @@ function readPreview() {
  * structural Proposed changes only take over after hydration on staging.
  */
 export function useUiNext() {
-  return useSyncExternalStore(subscribe, readPreview, () => false);
+  // Read after mount, then on every change: the store's hydration hand-off alone left Proposed pages on Current until
+  // the switch was pressed (the owner's Preview, 30 Oct 2026).
+  const [next, setNext] = useState(false);
+  useEffect(() => {
+    const read = () => setNext(readPreview());
+    read();
+    return subscribe(read);
+  }, []);
+  return next;
 }
 
 /**
