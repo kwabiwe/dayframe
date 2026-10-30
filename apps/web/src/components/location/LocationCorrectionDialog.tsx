@@ -22,14 +22,18 @@ import { blockStyle } from "@/lib/block-style";
 import { Button, ModalDialog } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
+import { useMapProvider } from "@/components/location/PlaceSheetMap";
 
 // The map is client-only (MapLibre), loaded when a dialog opens with the map first (step 15: the map first on every sheet).
 // While its chunk loads, an empty frame of the map's own size holds the sheet still (Codex r1 on #626).
 export function EvidenceMapChunkLoading() {
   return <div aria-hidden className="location-evidence-frame" data-testid="evidence-map-loading" />;
 }
-const LocationEvidenceMap = dynamic(() => import("@/components/location/LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
+// Apple MapKit JS when the server has its key, else MapLibre (UI review, owner 29 Oct 2026).
+const PlaceSheetMap = dynamic(() => import("@/components/location/PlaceSheetMap").then((module) => module.PlaceSheetMap),
   { loading: EvidenceMapChunkLoading, ssr: false });
+// Apple's nearby places, with MapKit JS only (UI review, owner 29 Oct 2026; PRD D19 A7).
+const NearbyPlaces = dynamic(() => import("@/components/location/NearbyPlaces").then((module) => module.NearbyPlaces), { ssr: false });
 
 /**
  * Correcting the location timeline on the web (location v4 step 13, mock-up #web-list inspector):
@@ -133,7 +137,7 @@ function EvidenceMap({ evidence, knownPlace, leg = null }: {
   // visit's own area (or the trip's route), and one plain line at most: never the silences (owner, 29 Oct 2026).
   return (
     <div className="location-correction-map" data-section="map">
-      <LocationEvidenceMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} visitOnly />
+      <PlaceSheetMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} />
     </div>
   );
 }
@@ -289,6 +293,10 @@ export function LocationCorrectionDialog({
   const pendingCreation = useRef<{ name: string; latitude: number; longitude: number } | null>(null);
   const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
+  const newPlaceNameRef = useRef<HTMLInputElement | null>(null);
+  // Asked only where Apple's nearby places could show: an unknown place whose evidence has a centre.
+  const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place" && !target.place.placeId
+    && Boolean(evidence && evidence !== "unavailable" && evidence.map.centre));
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
   // Owner item N): saved places nearest the visit first, as far as the map knows; places further
   // than 2 km (or not near at all) wait behind "Show all saved places".
@@ -654,6 +662,18 @@ export function LocationCorrectionDialog({
           {question?.text === "Where were you?" ? null : (
             <span className="location-correction-label" id="location-correction-place">Where were you?</span>
           )}
+          {/* Apple's nearby places first, as on the iPhone; a pick names the visit for "Save this place". */}
+          {!place.placeId && mapProvider === "mapkit" && evidence && evidence !== "unavailable" && evidence.map.centre ? (
+            <NearbyPlaces
+              centre={{ latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] }}
+              disabled={busy}
+              onPick={(name) => {
+                setNewPlaceName(name);
+                newPlaceNameRef.current?.focus();
+              }}
+              onUnavailable={() => setMapProvider("maplibre")}
+            />
+          ) : null}
           <div aria-label={question?.text === "Where were you?" ? "Where were you?" : undefined}
             aria-labelledby={question?.text === "Where were you?" ? undefined : "location-correction-place"}
             className="location-correction-options" role="radiogroup">
@@ -663,14 +683,14 @@ export function LocationCorrectionDialog({
               ...shownPlaces.map((option) => ({ key: `saved:${option.id}`, name: option.name,
                 note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
                 glyph: option.role === "home" ? DAYFRAME_APP_ICONS.placeHome : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places })),
-              { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: "Keeps its “?” until you name it" }
+              { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: null }
             ].map((option) => (
               // Native radios: one tab stop, arrow keys move the choice. The chosen row shows a neutral check, as on the iPhone.
               <label className="location-correction-option" data-checked={picked === option.key} key={option.key}>
                 <input checked={picked === option.key} className="location-correction-radio" disabled={busy} name={`location-correction-place-${place.id}`}
                   onChange={() => setPicked(option.key)} type="radio" value={option.key} />
                 <DayframeIcon glyph={option.glyph} size={18} />
-                <span><b>{option.name}</b><small>{option.note}</small></span>
+                <span><b>{option.name}</b>{option.note ? <small>{option.note}</small> : null}</span>
                 {picked === option.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
               </label>
             ))}
@@ -680,7 +700,6 @@ export function LocationCorrectionDialog({
               Show all saved places
             </button>
           ) : null}
-          <p className="location-correction-hint">Apple’s nearby places show on your iPhone; here you pick from the places you saved.</p>
         </div>
         {!place.blockIds.length ? (
           <div className="location-correction-section" data-section="logs-as">
@@ -698,7 +717,7 @@ export function LocationCorrectionDialog({
               ))}
             </div>
             <div className="location-correction-log-foot">
-              <p className="location-correction-hint">{logAs ? "Fills only the time your own blocks don’t cover." : "Not logged. Pick one to fill the time your blocks don’t cover."}</p>
+              {logAs ? <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p> : null}
               {logAs ? (
                 <button className="location-correction-more" disabled={busy} onClick={() => {
                   const cleared = logAs;
@@ -727,7 +746,7 @@ export function LocationCorrectionDialog({
               <>
                 <span className="location-correction-label" id="location-correction-save">Not listed? Save this place</span>
                 <div aria-labelledby="location-correction-save" className="location-correction-save" role="group">
-                  <input aria-label="Name for this place" disabled={busy} onChange={(event) => setNewPlaceName(event.target.value)}
+                  <input aria-label="Name for this place" disabled={busy} onChange={(event) => setNewPlaceName(event.target.value)} ref={newPlaceNameRef}
                     placeholder="Name it, for example Pret" type="text" value={newPlaceName} />
                   <Button compact disabled={busy || !evidence || evidence === "unavailable" || !evidence.map.centre} onClick={() => void saveThisPlace()}>Save place</Button>
                 </div>
