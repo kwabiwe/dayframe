@@ -12,7 +12,6 @@ import {
   legDetail,
   legModeLabel,
   type ClockFormat,
-  type DayframeGlyph,
   type TimelineItemEvidenceDto,
   type TimelinePlace,
   type TimelineTrip,
@@ -25,13 +24,13 @@ import { DayframeIcon } from "../icons/DayframeIcon";
 import { LocationEvidenceMap } from "../location/LocationEvidenceMap";
 import { playHaptic } from "../../lib/haptics";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { formatPlaceDistance } from "../../lib/placeCategories";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
-import { SheetNearbySearch } from "./SheetNearbySearch";
+import { SheetNearbySearch, type SheetSavedRow } from "./SheetNearbySearch";
 import { ActivityChip, activityChipStyles } from "../ActivityChips";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { nearbyProposalKey } from "../../lib/nearbyProposal";
-import { InsetDivider } from "../InsetDivider";
 import { COMPACT_PILL_HIT_SLOP, compactPillStyles } from "../compactPill";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
@@ -50,18 +49,17 @@ import {
 } from "../../lib/locationCorrectionDraft";
 
 /**
- * The iPhone correction sheets (location v4 step 12, mock-up #ios-list editors): a place's place and times;
- * a trip's legs, times and "This wasn't a trip"; a leg's mode, pushed inside the trip sheet with a back
- * button. One `BottomSheetShell` owns presentation (its spring in, its swipe or backdrop out, Done pinned at
- * the bottom); the leg view pushes and pops inside it with a short fade-and-slide (a fade with Reduce
- * Motion). Done queues only what changed (`locationCorrectionDraft`): the List shows it at once and the
- * correction queue sends it. Only what the timeline API can set is offered.
+ * The iPhone place and trip sheets (location v4 step 12; the web's approved design, #636 and #639, brought over; brand
+ * guide "Place and trip sheet"): the sheet is the question. One `BottomSheetShell` owns presentation (its spring in, its
+ * handle, ✕ or backdrop out with no change, the footer pinned at the bottom); a trip's leg pushes and pops inside it with
+ * a short fade-and-slide (a fade with Reduce Motion).
  *
- * One layout for every sheet (owner feedback, 29 Oct 2026; brand guide "Place and trip sheet"): the title and
- * times; the "?" with its compact answers (one Yes); the map (the visit's area or the trip's route, with at most
- * "Based on N readings"); "Where were you?" (places: Apple's nearby places first, then saved places nearest
- * first); "Logs as" (compact activity chips; none picked is "don't log"); the times; then the corrections (Save
- * this place, a trip's legs, I wasn't here / I didn't leave / This wasn't a trip). `SHEET_SECTION_ORDER` names it.
+ * Top to bottom, the ones that apply (`SHEET_SECTION_ORDER`): the title, times and ✕; "Visited {name}?" with Yes and Edit
+ * when Apple has a guess, or the plain question's line; a 160-point map; a place's one search over five fixed rows
+ * (Apple's three nearest, up to two saved places within about 1 km, a tap answers) or a trip's legs; "More options" (Logs
+ * as, the times, the corrections). The footer is a quiet Not now and the primary Save, or the question's Yes until
+ * something changes, as the web's. Save queues only what changed (`locationCorrectionDraft`): the List shows it at once
+ * and the correction queue sends it. Only what the timeline API can set is offered.
  */
 
 /** The sheet's sections, top to bottom, as their testIDs; a sheet shows the ones that apply, in this order. */
@@ -69,10 +67,20 @@ export const SHEET_SECTION_ORDER = [
   "location-correction-question",
   "location-correction-map",
   "location-correction-where",
+  "location-correction-legs",
+  "location-correction-more"
+] as const;
+/** What "More options" holds, in this order. */
+export const SHEET_MORE_OPTIONS_ORDER = [
   "location-correction-logs-as",
   "location-correction-times",
   "location-correction-corrections"
 ] as const;
+
+/** Saved places listed without a search: at most this many, within this far of the visit (the web's rule). */
+export const SHEET_SAVED_ROWS = 2;
+export const SHEET_SAVED_RADIUS_METERS = 1_000;
+export const SHEET_MAP_HEIGHT = 160;
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
 /** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
@@ -87,7 +95,6 @@ export type LocationCorrectionTarget =
   | { kind: "trip"; trip: TimelineTrip & { route?: string }; legIndex: number | null; didntLeave?: boolean };
 
 type Join = "remove" | "not_here" | "didnt_leave";
-type Confirming = Join | "save_place";
 
 const LEG_MODES: TripLegMode[] = ["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram"];
 const TIME_FIELD_ACCESSIBILITY_ACTIONS = [
@@ -220,8 +227,14 @@ export function LocationCorrectionSheet({
   const intent = useRef<Join | null>(null);
   // Kept on the phone: the next commit closes the sheet.
   const kept = useRef(false);
-  // Logs as waiting for this Done's corrections to be kept.
+  // Logs as waiting for this Save's corrections to be kept.
   const pendingLog = useRef<(() => void) | null>(null);
+  // The place a tap answered with, for the commit it starts.
+  const pickedNow = useRef<PlaceChoice | null>(null);
+  // ✕: the shell's own discard, as the handle and backdrop.
+  const discardRef = useRef<(() => void) | null>(null);
+  // The footer's primary is the question's Yes, as of the last render.
+  let footerYes = false;
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -282,6 +295,12 @@ export function LocationCorrectionSheet({
   function apply() {
     if (kept.current) return true;
     if (stale || saving) return false;
+    // A tap on a place answers with that place, whatever the footer says.
+    const picked = pickedNow.current ?? choice;
+    if (footerYes && !pickedNow.current) {
+      answerFromSheet(true);
+      return false;
+    }
     if (intent.current) {
       // A join is offered only while the List allows it; one that no longer is (a neighbour in a block now) is
       // not sent (Codex r1 on #606).
@@ -310,8 +329,13 @@ export function LocationCorrectionSheet({
       return false;
     }
     if (problem) return false;
+    // A name typed under More options is saved with the rest, as the web's Save (Codex r1 on #636).
+    if (!pickedNow.current && onSavePlace && placeName.trim()) {
+      savePlace();
+      return false;
+    }
     const corrections = target.kind === "place"
-      ? placeCorrections(target.place, { choice, times }, places)
+      ? placeCorrections(target.place, { choice: picked, times }, places)
       : tripCorrections(target.trip, { times });
     // Logs as is held for Undo and sent after the place's own changes, which it then logs.
     const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
@@ -331,22 +355,41 @@ export function LocationCorrectionSheet({
     return false;
   }
 
+  /** A tap on a place answers (the web's rule): that place, with any other edits, and the sheet closes. */
+  function commitChoice(next: PlaceChoice) {
+    if (frozen() || stale) return;
+    if (problem) {
+      setSaveError("Those times don't work yet. Fix them, then save.");
+      return;
+    }
+    setChoice(next);
+    pickedNow.current = next;
+    commitRef.current?.();
+    pickedNow.current = null;
+  }
+
   // "This wasn't a trip", "I wasn't here" and "I didn't leave" each ask once, in place (UIA-005: no system alert).
-  const [confirming, setConfirming] = useState<Confirming | null>(null);
+  const [confirming, setConfirming] = useState<Join | null>(null);
+  // The name typed under More options.
   const [placeName, setPlaceName] = useState("");
-  // Where "Save this place" was asked from: a Nearby pick asks under the list, the corrections row in place.
-  const [saveFrom, setSaveFrom] = useState<"nearby" | "corrections">("corrections");
-  // The Apple place picked from Nearby, kept with its name while the name is still that pick's.
-  const [nearbyPick, setNearbyPick] = useState<{ name: string; placeId: string | null } | null>(null);
   // The near guess from the sheet's own nearby list (PRD D23), and whether Edit set the guess aside.
   // Kept with the visit it was ranked for (`nearbyProposalKey`; Codex r1 on #620).
   const [nearbyGuess, setNearbyGuess] = useState<{ venue: ReviewAnswerVenue | null; proposal: string } | null>(null);
   const [guessSetAside, setGuessSetAside] = useState(false);
   // The activity picked under Logs as; none is "Don't log", as the place is now.
   const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
-  function savePlace() {
-    if (!onSavePlace || !placeName.trim() || frozen() || target.kind !== "place") return;
-    if (problem) return;
+  const [moreOptions, setMoreOptions] = useState(false);
+  /**
+   * "Save this place": `chosenName` is a tap (an Apple place, or "Save “X” as a place"), otherwise the name typed under
+   * More options. The place saved and the visit set to it, then the sheet's other changes and its Logs as, in one step.
+   */
+  function savePlace(chosenName?: string, applePlaceId: string | null = null) {
+    const name = (chosenName ?? placeName).trim();
+    if (!onSavePlace || !name || frozen() || stale || target.kind !== "place") return;
+    if (problem) {
+      setSaveError("Those times don't work yet. Fix them, then save.");
+      return;
+    }
     // The place saved, then the sheet's other changes (its times) and its Logs as, in one Done (Codex r1 on #606).
     const rest = placeCorrections(target.place, { choice: { kind: "keep" }, times }, places);
     // With a Logs as picked, the log waits on the phone until the server has the place's corrections (the place
@@ -357,8 +400,7 @@ export function LocationCorrectionSheet({
     const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
     setSaving(true);
     setSaveError(null);
-    const applePlaceId = nearbyPick && nearbyPick.name === placeName.trim() ? nearbyPick.placeId : null;
-    onSavePlace(placeName.trim(), rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined,
+    onSavePlace(name, rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined,
       applePlaceId).then(() => {
       setSaving(false);
       kept.current = true;
@@ -371,10 +413,10 @@ export function LocationCorrectionSheet({
   }
   /**
    * The "?" at the top answered, in one tap (owner, 28 Oct 2026; Codex r2 on #610). With no changes of its own the
-   * answer is held for Undo at once. With changes, they are kept as Done keeps them (the correction outbox, shown in
+   * answer is held for Undo at once. With changes, they are kept as Save keeps them (the correction outbox, shown in
    * the List at once) and the answer waits on the phone until the server has acknowledged them, so it can never
    * reach the server first; a refused change drops it, and the "?" stays. A Logs as pick is never lost (Codex r3 on
-   * #610): Yes with an activity picked is Logs as — Done's own flow, the sheet's corrections and then `log_place`
+   * #610): Yes with an activity picked is Logs as — Save's own flow, the sheet's corrections and then `log_place`
    * with that activity, which closes the "?" on the server (#609) — and no separate answer is sent. Not now with an
    * activity picked answers Not now and drops the pick: Not now means "don't log".
    */
@@ -411,7 +453,7 @@ export function LocationCorrectionSheet({
     }
     const answerAfter = question.answerAfter;
     if (!answerAfter) {
-      setSaveError("Save your changes with Done; the question updates after.");
+      setSaveError("Save your changes first; the question updates after.");
       return;
     }
     keep(corrections, "close", (ids, generation) => venue
@@ -450,37 +492,57 @@ export function LocationCorrectionSheet({
   // The near guess the "?" asks about (PRD D23): only for a place whose "?" can be answered here, until Edit.
   const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null
     ? question.guess ?? (question.guessable ? nearbyGuessNow : null) : null;
-  // "Save this place", asked under Nearby after a pick or in place in the corrections.
-  const saveForm = (
-    <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.confirm}
-      testID="location-correction-save-form">
-      <TextInput accessibilityLabel="Name of this place" autoFocus onChangeText={(text) => { if (!frozen()) setPlaceName(text); }} onSubmitEditing={savePlace}
-        placeholder="Name this place" placeholderTextColor={theme.textSecondary} returnKeyType="done"
-        style={[styles.nameInput, { backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
-        testID="location-correction-place-name" value={placeName} />
-      <View style={compactPillStyles.answers}>
-        <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving || !placeName.trim() }} hitSlop={COMPACT_PILL_HIT_SLOP}
-          disabled={saving || !placeName.trim()} onPress={savePlace} testID="location-correction-confirm-save-place"
-          style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed || !placeName.trim() ? 0.5 : 1 }]}>
-          <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>Save this place</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={keepAsIs} testID="location-correction-keep-save-place"
-          style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
-          <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Keep it</Text>
-        </Pressable>
-      </View>
-    </Reanimated.View>
-  );
-  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || (!problem && (target.kind === "place"
+  // The question's own line: not when the guess asks instead, and not when it only says what the sheet already asks.
+  const asks = question && !leg && !guess && !(guessSetAside && target.kind === "place") && question.text !== "Where were you?" ? question.text : null;
+  const placeCanSave = target.kind === "place" && !target.place.placeId && Boolean(onSavePlace) && !stale;
+  const placeIsNamed = target.kind === "place" && Boolean(target.place.placeId || target.place.learnedPlaceId);
+  const currentPlaceId = target.kind === "place" ? target.place.placeId : null;
+  // How far each saved place is from the visit, as far as the map knows.
+  const distances = evidence && evidence !== "unavailable" && evidence.map.centre
+    ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : null;
+  const glyphOf = (role: string | null) => role === "home" ? DAYFRAME_APP_ICONS.placeHome : role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
+  const isPicked = (key: string) => (choice.kind === "saved" ? choice.id : choice.kind === "unknown" ? null
+    : currentPlaceId ?? (target.kind === "place" && target.place.learnedPlaceId ? "learned" : null)) === key;
+  /** The saved places shown: the place itself first, then at most two within about 1 km; a search finds any by name. */
+  const savedRows = (text: string): SheetSavedRow[] => {
+    if (target.kind !== "place") return [];
+    const needle = text.trim().toLowerCase();
+    const row = (option: CorrectionPlaceOption, detail: string): SheetSavedRow => ({
+      key: option.id, title: option.name, detail, glyph: glyphOf(option.role), checked: isPicked(option.id),
+      onPress: () => commitChoice(option.id === currentPlaceId ? { kind: "keep" } : { kind: "saved", id: option.id })
+    });
+    const away = (option: CorrectionPlaceOption) => distances?.has(option.id)
+      ? `Saved place · ${formatPlaceDistance(distances.get(option.id)!)} away` : "Saved place";
+    if (needle) return places.filter((option) => option.name.toLowerCase().includes(needle)).slice(0, 3).map((option) => row(option, away(option)));
+    const near = distances ? [...places]
+      .filter((option) => option.id !== currentPlaceId && (distances.get(option.id) ?? Infinity) <= SHEET_SAVED_RADIUS_METERS)
+      .sort((a, b) => distances.get(a.id)! - distances.get(b.id)!).slice(0, SHEET_SAVED_ROWS) : [];
+    const current = places.find((option) => option.id === currentPlaceId);
+    return [
+      ...(current ? [row(current, "This place")] : []),
+      ...(target.place.learnedPlaceId && !currentPlaceId && target.place.name ? [{
+        key: "learned", title: target.place.name, detail: "Learned place", glyph: DAYFRAME_APP_ICONS.places, checked: isPicked("learned"),
+        onPress: () => commitChoice({ kind: "keep" })
+      }] : []),
+      ...near.map((option) => row(option, away(option)))
+    ];
+  };
+  const placeSection = target.kind === "place" && !stale && (correctable(target.place) || nearbyCentre);
+  const hasMore = !leg && (target.kind === "place"
+    ? !stale && (Boolean(logAs) || (correctable(item) && Boolean(item.stoppedAt)) || placeCanSave || (placeIsNamed && correctable(item)) || Boolean(target.notHere))
+    : correctable(item));
+  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || Boolean(placeName.trim()) || (!problem && (target.kind === "place"
     ? placeCorrections(target.place, { choice, times }, places).length > 0
     : tripCorrections(target.trip, { times }).length > 0));
+  // The footer: a question with a Yes shows its Yes until something changes (the web's rule). A guess has its Yes in its card.
+  footerYes = Boolean(question?.yesLabel && !guess && !leg && !guessSetAside && !sheetChanged);
+  const notNow = question?.noLabel && !leg ? question.noLabel : null;
   return (
     <BottomSheetShell
-      action="Done"
-      // Owner item O (28 Oct 2026): Done looks secondary until something has changed.
-      actionTone={sheetChanged ? "neutral" : "quiet"}
+      action={footerYes ? question!.yesLabel! : "Save"}
       calendarLayout={false}
       commitRef={commitRef}
+      discardRef={discardRef}
       // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
       // left. A kept change always closes.
       disabled={!closeKept && (stale || saving || (!leg && !confirming && Boolean(problem)))}
@@ -489,15 +551,16 @@ export function LocationCorrectionSheet({
       presentationId={presentationId}
       reduceMotion={reduceMotion}
       rootHosted={rootHosted}
+      secondaryAction={notNow ? { disabled: stale || saving, label: notNow, onPress: () => answerFromSheet(false), testID: "location-correction-question-no" } : undefined}
       testID="location-correction-sheet"
       theme={theme}
       title={title}
     >
-      {/* 1. The title and times. */}
+      {/* The title, its times and ✕ (closes with no change, as the handle). */}
       <View style={styles.head}>
         {leg ? (
           <Pressable accessibilityLabel="Back to the trip" accessibilityRole="button" hitSlop={6} onPress={backToTrip}
-            style={[styles.back, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-back">
+            style={[styles.round, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-back">
             <DayframeIcon color={theme.textPrimary} glyph="arrow-left" size={18} />
           </Pressable>
         ) : null}
@@ -505,45 +568,40 @@ export function LocationCorrectionSheet({
           <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
         </View>
+        <Pressable accessibilityLabel="Close" accessibilityRole="button" hitSlop={6} onPress={() => discardRef.current?.()}
+          style={[styles.round, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-close">
+          <DayframeIcon color={theme.textPrimary} glyph="x" size={18} />
+        </Pressable>
       </View>
-      {question && !leg ? (
-        // 2. The "?" (owner items A, B, I, 28 Oct 2026), with the compact inline pills (each still a 44-point
-        // target) and one Yes at most. With a near guess (PRD D23) it asks "Visited {name}?" with Yes and Edit;
-        // Edit sets the guess aside for the plain question, whose own Yes (if any) was the guess's.
-        <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
-          <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionText, { color: theme.textPrimary }]}>
-            {guess ? `Visited ${guess.name}?` : guessSetAside && target.kind === "place" ? "Where were you?" : question.text}
-          </Text>
-          {guess && guess.street ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{guess.street}</Text>
-            : !guess && question.detail && !guessSetAside ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
-          <View style={compactPillStyles.answers}>
-            {guess || (question.yesLabel && !guessSetAside) ? (
-              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(true, guess)}
-                style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
-                <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>{guess ? "Yes" : question.yesLabel}</Text>
-              </Pressable>
-            ) : null}
-            {guess ? (
-              <Pressable accessibilityHint="Pick or name the place below instead" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP}
-                onPress={() => { if (!frozen()) setGuessSetAside(true); }}
-                style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-edit">
-                <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Edit</Text>
-              </Pressable>
-            ) : question.noLabel ? (
-              <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(false)}
-                style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-no">
-                <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>{question.noLabel}</Text>
-              </Pressable>
-            ) : null}
+      {guess && !leg ? (
+        // The near guess (PRD D23), the one card the sheet keeps: Yes records it once; Edit sets it aside for the search below.
+        <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}
+          style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-question">
+          <View style={styles.headText}>
+            <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" numberOfLines={2} style={[styles.questionText, { color: theme.textPrimary }]}>{`Visited ${guess.name}?`}</Text>
+            {guess.street ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: theme.textSecondary }]}>{guess.street}</Text> : null}
           </View>
-        </View>
+          <View style={compactPillStyles.answers}>
+            <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={() => answerFromSheet(true, guess)}
+              style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-yes">
+              <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>Yes</Text>
+            </Pressable>
+            <Pressable accessibilityHint="Pick or name the place below instead" accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP}
+              onPress={() => { if (!frozen()) setGuessSetAside(true); }}
+              style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]} testID="location-correction-question-edit">
+              <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Edit</Text>
+            </Pressable>
+          </View>
+        </Reanimated.View>
+      ) : asks ? (
+        <Text {...mobileTextProps("body")} style={[styles.ask, { color: theme.textPrimary }]} testID="location-correction-ask">{asks}</Text>
       ) : null}
-      {/* 3. The map: the visit's own area, or the trip's route; it stays put as a leg pushes and pops. */}
+      {/* The map: the visit's own area, or the trip's route; it stays put as a leg pushes and pops. */}
       <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
         {evidence && evidence !== "unavailable" ? (
           <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
-            caption={evidenceSheetCaption(evidence, { knownPlace: target.kind === "place" && Boolean(target.place.placeId || target.place.learnedPlaceId) })}
-            dangerColor={theme.danger} evidence={evidence} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
+            caption={evidenceSheetCaption(evidence, { knownPlace: placeIsNamed })}
+            dangerColor={theme.danger} evidence={evidence} height={SHEET_MAP_HEIGHT} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
             textColor={theme.textSecondary} visitOnly />
         ) : (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>
@@ -559,90 +617,20 @@ export function LocationCorrectionSheet({
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
         style={styles.view}
       >
-        {target.kind === "place" ? (
-          // 4. "Where were you?": Apple's nearby places first (an unknown place; a pick offers to save it), then the
-          // saved places nearest first. Its title is left out when the "?" above already asks it.
-          <PlaceView choice={choice} correctableItem={correctable(target.place)} onChoose={(next) => { if (!frozen()) setChoice(next); }} place={target.place}
-            distances={evidence && evidence !== "unavailable"
-              ? new Map(evidence.map.nearbySavedPlaces.map((saved) => [saved.id, saved.distanceMeters] as const)) : undefined}
-            label={question && !guess && (guessSetAside || question.text === "Where were you?") ? null : "Where were you?"}
-            nearby={nearbyCentre ? (
-              <SheetNearbySearch centre={nearbyCentre} evidence={evidence && evidence !== "unavailable" ? evidence : null}
-                onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })}
-                onPick={(name, applePlaceId) => {
-                  if (frozen()) return;
-                  setPlaceName(name);
-                  setNearbyPick({ name, placeId: applePlaceId });
-                  setSaveFrom("nearby");
-                  setConfirming("save_place");
-                }} theme={theme} />
-            ) : null}
-            after={confirming === "save_place" && saveFrom === "nearby" ? saveForm : null}
-            places={places} theme={theme} />
-        ) : null}
-        {target.kind === "place" && logAs && !stale ? (
-          // 5. "Logs as": the compact activity chips (glyph on its colour tile). None picked is "don't log", so
-          // "Don't log" is only a quiet way back once one is picked, never a selected default.
-          <Section label="Logs as" testID="location-correction-logs-as" theme={theme}>
-            <View accessibilityLabel="Logs as" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-              {logAs.activities.map((activity) => (
-                <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
-                  onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
-                  testID={`location-correction-log-${activity.id}`} theme={theme} />
-              ))}
-            </View>
-            <View style={styles.logFoot}>
-              <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.logHint, { color: theme.textSecondary }]}>
-                {logCategoryId ? "Fills only the time your own blocks don't cover." : "Not logged. Pick one to fill the time your blocks don't cover."}
-              </Text>
-              {logCategoryId ? (
-                <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { if (!frozen()) setLogCategoryId(null); }}
-                  style={({ pressed }) => [styles.quiet, { opacity: pressed ? 0.6 : 1 }]} testID="location-correction-log-none">
-                  <Text {...mobileTextProps("control")} style={[styles.quietText, { color: theme.textSecondary }]}>Don't log</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </Section>
+        {placeSection ? (
+          <View style={styles.section} testID="location-correction-where">
+            <SheetNearbySearch centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
+              onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })}
+              onPick={(name, applePlaceId) => savePlace(name, applePlaceId)}
+              onSaveTyped={placeCanSave ? (name) => savePlace(name) : undefined}
+              reduceMotion={reduceMotion} savedRows={savedRows} theme={theme} />
+          </View>
         ) : null}
         {trip && leg ? (
           <LegModes mode={legMode ?? leg.mode} onPick={(mode) => { if (!frozen()) setLegMode(mode); }} theme={theme} />
         ) : null}
-        {/* 6. The times. */}
-        {!leg && correctable(item) && item.stoppedAt ? (
-          <TimesSection clockFormat={clockFormat} onChange={setTimes} problem={problem} reduceMotion={reduceMotion}
-            hint={target.kind === "trip" ? "The places either side move with it." : "Moving an edge moves the trip next to it."}
-            theme={theme} times={times} />
-        ) : null}
-        {!leg && !correctable(item) ? (
-          <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>
-            {target.kind === "trip" ? "This trip is in a block: its times are the block's." : "This place is in a block. Edit the block instead."}
-          </Text>
-        ) : null}
-        {/* 7. The corrections: Save this place and I wasn't here; a trip's legs, I didn't leave and This wasn't a trip. */}
-        {target.kind === "place" && (target.notHere || onSavePlace) && !stale ? (
-          <View style={styles.corrections} testID="location-correction-corrections">
-            {confirming === "not_here" && target.notHere ? (
-              <ConfirmRow confirmLabel="Take it off your day" danger message="It comes off your day, and the trips either side become one."
-                onConfirm={() => confirmJoin("not_here")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="not-here" theme={theme} />
-            ) : confirming === "save_place" && saveFrom === "corrections" ? saveForm : (
-              <View style={compactPillStyles.answers}>
-                {onSavePlace ? (
-                  <ShapeAction label="Not listed? Save this place" onPress={() => {
-                    if (frozen()) return;
-                    setSaveFrom("corrections");
-                    setConfirming("save_place");
-                  }} testID="location-correction-save-place" theme={theme} />
-                ) : null}
-                {target.notHere ? (
-                  <ShapeAction danger label="I wasn't here" onPress={() => { if (!frozen()) setConfirming("not_here"); }} testID="location-correction-not-here" theme={theme} />
-                ) : null}
-              </View>
-            )}
-          </View>
-        ) : null}
         {trip && !leg ? (
-          <View style={styles.corrections} testID="location-correction-corrections">
-            <Section label="Legs" theme={theme} hint="Tap a leg to change how you travelled.">
+          <Section label="Legs" testID="location-correction-legs" theme={theme}>
               {/* Each leg its own card, as the List's legs (mock-up #ios-list trip editor). */}
               <View style={styles.legs}>
                 {trip.legs.map((each, index) => {
@@ -665,9 +653,83 @@ export function LocationCorrectionSheet({
                   );
                 })}
               </View>
-            </Section>
-            {correctable(trip) ? (
-              confirming === "didnt_leave" && target.kind === "trip" && target.didntLeave ? (
+          </Section>
+        ) : null}
+        {!leg && !correctable(item) ? (
+          <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>
+            {target.kind === "trip" ? "This trip is in a block: its times are the block's." : "This place is in a block. Edit the block instead."}
+          </Text>
+        ) : null}
+        {hasMore ? (
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded: moreOptions }} hitSlop={2}
+            onPress={() => setMoreOptions((value) => !value)} style={({ pressed }) => [styles.more, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}
+            testID="location-correction-more">
+            <Text {...mobileTextProps("control")} style={[styles.moreText, { color: theme.textPrimary }]}>More options</Text>
+            <View style={{ transform: [{ rotate: moreOptions ? "-90deg" : "90deg" }] }}>
+              <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+            </View>
+          </Pressable>
+        ) : null}
+        {hasMore && moreOptions ? (
+          <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} style={styles.view}
+            testID="location-correction-more-options">
+            {target.kind === "place" && logAs && !stale ? (
+              // Compact activity chips; none picked is "don't log", so "Don't log" is only a quiet way back once one is picked.
+              <Section label="Logs as" testID="location-correction-logs-as" theme={theme}>
+                <View accessibilityLabel="Logs as" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
+                  {logAs.activities.map((activity) => (
+                    <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
+                      onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
+                      testID={`location-correction-log-${activity.id}`} theme={theme} />
+                  ))}
+                </View>
+                {logCategoryId ? (
+                  <View style={styles.logFoot}>
+                    <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.logHint, { color: theme.textSecondary }]}>Fills only the time your own blocks don't cover.</Text>
+                    <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { if (!frozen()) setLogCategoryId(null); }}
+                      style={({ pressed }) => [styles.quiet, { opacity: pressed ? 0.6 : 1 }]} testID="location-correction-log-none">
+                      <Text {...mobileTextProps("control")} style={[styles.quietText, { color: theme.textSecondary }]}>Don't log</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </Section>
+            ) : null}
+            {correctable(item) && item.stoppedAt ? (
+              <TimesSection clockFormat={clockFormat} onChange={setTimes} problem={problem} reduceMotion={reduceMotion} theme={theme} times={times} />
+            ) : null}
+            {target.kind === "place" ? (
+              <View style={styles.corrections} testID="location-correction-corrections">
+                {placeCanSave ? (
+                  <View style={styles.saveRow} testID="location-correction-save-form">
+                    <TextInput accessibilityLabel="Name for this place" onChangeText={(text) => { if (!frozen()) setPlaceName(text); }} onSubmitEditing={() => savePlace()}
+                      placeholder="Save this place as…" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+                      style={[styles.nameInput, { backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+                      testID="location-correction-place-name" value={placeName} />
+                    <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving || !placeName.trim() }} hitSlop={COMPACT_PILL_HIT_SLOP}
+                      disabled={saving || !placeName.trim()} onPress={() => savePlace()} testID="location-correction-confirm-save-place"
+                      style={({ pressed }) => [compactPillStyles.pill, styles.savePill, { backgroundColor: theme.textPrimary, opacity: pressed || !placeName.trim() ? 0.5 : 1 }]}>
+                      <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.surface }]}>Save place</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                {confirming === "not_here" && target.notHere ? (
+                  <ConfirmRow confirmLabel="Take it off your day" danger message="It comes off your day, and the trips either side become one."
+                    onConfirm={() => confirmJoin("not_here")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="not-here" theme={theme} />
+                ) : (
+                  <View style={compactPillStyles.answers}>
+                    {placeIsNamed && correctable(item) ? (
+                      <ShapeAction label="Leave as unknown" onPress={() => commitChoice({ kind: "unknown" })} testID="location-correction-place-unknown" theme={theme} />
+                    ) : null}
+                    {target.notHere && !stale ? (
+                      <ShapeAction danger label="I wasn't here" onPress={() => { if (!frozen()) setConfirming("not_here"); }} testID="location-correction-not-here" theme={theme} />
+                    ) : null}
+                  </View>
+                )}
+              </View>
+            ) : null}
+            {trip && correctable(trip) ? (
+              <View style={styles.corrections} testID="location-correction-corrections">
+              {confirming === "didnt_leave" && target.kind === "trip" && target.didntLeave ? (
                 <ConfirmRow confirmLabel="Make it one stay" message="The trip comes off your day, and the visits either side become one stay."
                   onConfirm={() => confirmJoin("didnt_leave")} onKeep={keepAsIs} reduceMotion={reduceMotion} testID="didnt-leave" theme={theme} />
               ) : confirming === "remove" ? (
@@ -680,9 +742,10 @@ export function LocationCorrectionSheet({
                   ) : null}
                   <ShapeAction danger label="This wasn't a trip" onPress={() => { if (!frozen()) setConfirming("remove"); }} testID="location-correction-not-a-trip" theme={theme} />
                 </View>
-              )
+              )}
+              </View>
             ) : null}
-          </View>
+          </Reanimated.View>
         ) : null}
         {stale ? (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]} testID="location-correction-stale">
@@ -732,6 +795,7 @@ function ConfirmRow({ confirmLabel, danger = false, message, onConfirm, onKeep, 
   );
 }
 
+
 /** A sentence-case section (owner feedback, 29 Oct 2026: no all-caps headers); a section may have no title. */
 function Section({ children, hint, label, testID, theme }: {
   children: React.ReactNode; hint?: string; label: string | null; testID?: string; theme: MobileTheme;
@@ -743,88 +807,6 @@ function Section({ children, hint, label, testID, theme }: {
       {hint ? <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>{hint}</Text> : null}
     </View>
   );
-}
-
-function PlaceView({ after, choice, correctableItem, distances, label, nearby, onChoose, place, places: allPlaces, theme }: {
-  /** Under the list: "Save this place" after a Nearby pick. */
-  after?: React.ReactNode;
-  choice: PlaceChoice; correctableItem: boolean;
-  /**
-   * Owner item N (28 Oct 2026): how far each saved place is from the visit, when known. Places then sort
-   * nearest first; places further than 2 km (or not near at all) wait behind "Show all saved places".
-   */
-  distances?: ReadonlyMap<string, number>;
-  /** The section's title; null when the "?" above already asks it. */
-  label: string | null;
-  /** Apple's nearby places and search, first (an unknown place). */
-  nearby?: React.ReactNode;
-  onChoose: (choice: PlaceChoice) => void; place: TimelinePlace;
-  places: readonly CorrectionPlaceOption[]; theme: MobileTheme;
-}) {
-  const [morePlaces, setMorePlaces] = useState(false);
-  if (!correctableItem && !nearby) return null;
-  const near = (id: string) => (distances?.get(id) ?? Infinity) <= 2_000 || id === place.placeId;
-  const sorted = distances ? [...allPlaces].sort((a, b) => (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity)) : allPlaces;
-  const hidden = distances && !morePlaces ? sorted.filter((option) => !near(option.id)) : [];
-  const places = distances && !morePlaces ? sorted.filter((option) => near(option.id)) : sorted;
-  // What is ticked: the pick, or the place as it is (its saved place, or unknown).
-  const selected = choice.kind === "saved" ? choice.id : choice.kind === "unknown" ? null
-    : place.placeId ?? (place.learnedPlaceId ? "learned" : null);
-  const options: Array<{ key: string; title: string; detail: string; glyph: DayframeGlyph; pick: PlaceChoice }> = [
-    ...(place.learnedPlaceId && place.name
-      ? [{ key: "learned", title: place.name, detail: "Named before", glyph: DAYFRAME_APP_ICONS.places as DayframeGlyph, pick: { kind: "keep" } as PlaceChoice }]
-      : []),
-    ...places.map((option) => ({
-      key: option.id,
-      title: option.name,
-      // Owner item N: how far, when known.
-      detail: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place",
-      glyph: (option.role === "home" ? "house" : DAYFRAME_APP_ICONS.places) as DayframeGlyph,
-      pick: { kind: "saved", id: option.id } as PlaceChoice
-    })),
-    { key: "unknown", title: "Leave as unknown", detail: "Keeps its “?” until you name it", glyph: "circle-question-mark" as DayframeGlyph, pick: { kind: "unknown" } }
-  ];
-  return (
-    <Section label={label} testID="location-correction-where" theme={theme}>
-      {nearby}
-      {after}
-      {correctableItem ? (
-        // A plain divider list, as the Nearby rows above it: the saved places and "Leave as unknown" alike, with a tick
-        // on the one chosen, never a card (owner, 29 Oct 2026).
-        <View accessibilityRole="radiogroup" accessibilityLabel="Place" style={styles.group}>
-          {options.map((option, index) => {
-            const checked = option.key === "unknown" ? selected === null : selected === option.key;
-            return (
-              <Pressable key={option.key} accessibilityLabel={`${option.title}, ${option.detail}`} accessibilityRole="radio"
-                accessibilityState={{ checked }} onPress={() => onChoose(option.pick)}
-                style={({ pressed }) => [styles.option, { opacity: pressed ? 0.7 : 1 }]}
-                testID={`location-correction-place-${option.key}`}>
-                {/* Past the 18-point icon (18 + 12), as the Nearby rows. */}
-                <DayframeIcon color={theme.textSecondary} glyph={option.glyph} size={18} />
-                <View style={styles.optionText}>
-                  <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.optionTitle, { color: theme.textPrimary }]}>{option.title}</Text>
-                  <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: theme.textSecondary }]}>{option.detail}</Text>
-                </View>
-                {checked ? <DayframeIcon color={theme.textPrimary} glyph="check" size={16} /> : <View style={styles.tickSpace} />}
-                {index > 0 || nearby ? <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={30} /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-      {correctableItem && hidden.length ? (
-        <Pressable accessibilityHint="Shows your saved places further away" accessibilityRole="button" onPress={() => setMorePlaces(true)}
-          style={({ pressed }) => [styles.morePlaces, { opacity: pressed ? 0.7 : 1 }]} testID="location-correction-more-places">
-          <Text {...mobileTextProps("control")} style={[styles.quietText, { color: theme.textSecondary }]}>Show all saved places</Text>
-        </Pressable>
-      ) : null}
-    </Section>
-  );
-}
-
-/** "120 m", "1.4 km". */
-function formatMetres(metres: number) {
-  return metres < 1_000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1_000).toFixed(1)} km`;
 }
 
 function LegModes({ mode, onPick, theme }: { mode: TripLegMode; onPick: (mode: TripLegMode) => void; theme: MobileTheme }) {
@@ -847,8 +829,8 @@ function LegModes({ mode, onPick, theme }: { mode: TripLegMode; onPick: (mode: T
   );
 }
 
-function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, theme, times }: {
-  clockFormat: ClockFormat; hint: string; onChange: (times: CorrectionTimes) => void; problem: string | null; reduceMotion: boolean;
+function TimesSection({ clockFormat, onChange, problem, reduceMotion, theme, times }: {
+  clockFormat: ClockFormat; onChange: (times: CorrectionTimes) => void; problem: string | null; reduceMotion: boolean;
   theme: MobileTheme; times: CorrectionTimes;
 }) {
   // The wheel serves one field at a time; a second tap on the field closes it (as the Location editor).
@@ -882,7 +864,7 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
   }
 
   return (
-    <Section label={null} testID="location-correction-times" theme={theme} hint={problem ?? hint}>
+    <Section label={null} testID="location-correction-times" theme={theme} hint={problem ?? undefined}>
       <View style={styles.times}>
         {(["start", "end"] as const).map((target) => (
           <Pressable key={target} accessibilityActions={TIME_FIELD_ACCESSIBILITY_ACTIONS} accessibilityLabel={target === "start" ? "Start" : "End"}
@@ -897,13 +879,10 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
               else if (name === "activate") toggle(target);
             }}
             onPress={() => toggle(target)}
-            style={[styles.timeCard, { backgroundColor: theme.surfaceMuted, borderColor: wheel?.target === target ? theme.textPrimary : "transparent" }]}
+            style={[styles.timeCard, { backgroundColor: wheel?.target === target ? theme.surfaceInset : theme.surfaceMuted }]}
             testID={`location-correction-${target}`}>
-            <View style={styles.timeText}>
-              <Text {...mobileTextProps("metadata")} style={[styles.fieldLabel, { color: theme.textSecondary }]}>{target === "start" ? "Start" : "End"}</Text>
-              <Text {...mobileTextProps("numeric")} style={[styles.timeValue, { color: theme.textPrimary }]}>{formatClockTime(new Date(value(target)), clockFormat)}</Text>
-            </View>
-            <DayframeIcon color={theme.textSecondary} glyph="clock" size={18} />
+            <Text {...mobileTextProps("metadata")} style={[styles.fieldLabel, { color: theme.textSecondary }]}>{target === "start" ? "Start" : "End"}</Text>
+            <Text {...mobileTextProps("numeric")} style={[styles.timeValue, { color: theme.textPrimary }]}>{formatClockTime(new Date(value(target)), clockFormat)}</Text>
           </Pressable>
         ))}
       </View>
@@ -934,34 +913,33 @@ function TimesSection({ clockFormat, hint, onChange, problem, reduceMotion, them
 }
 
 const styles = StyleSheet.create({
-  // Owner items A, N (28 Oct 2026): the "?" at the top of the sheet, and "Show all saved places".
-  question: { gap: 6, borderRadius: 16, padding: 14, marginBottom: 12 },
-  questionText: { fontSize: 17, fontWeight: "700" },
-  morePlaces: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
-  head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 6 },
+  // The near guess: the one card on the sheet.
+  question: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, padding: 12, marginBottom: 8 },
+  questionText: { fontSize: 16, fontWeight: "700" },
+  ask: { fontSize: 15, lineHeight: 20, paddingBottom: 8 },
+  head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 8 },
   headText: { flex: 1, gap: 2 },
-  back: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
+  round: { width: 36, height: 36, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
   title: { fontSize: 20, fontWeight: "700", lineHeight: 25 },
   meta: { fontSize: 13, lineHeight: 18, fontVariant: ["tabular-nums"] },
-  view: { gap: 18 },
-  map: { minHeight: 180, borderRadius: 14, overflow: "hidden", justifyContent: "center", marginBottom: 6 },
+  view: { gap: 14 },
+  map: { height: SHEET_MAP_HEIGHT, borderRadius: 14, overflow: "hidden", justifyContent: "center", marginBottom: 10 },
   mapNote: { textAlign: "center", padding: 16 },
   section: { gap: 8 },
   // Sentence-case titles, sparingly (owner feedback, 29 Oct 2026).
   label: { fontSize: 15, fontWeight: "650" as never, lineHeight: 20 },
-  fieldLabel: { fontSize: 12.5, fontWeight: "600" },
+  fieldLabel: { fontSize: 13, fontWeight: "600" },
+  more: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingHorizontal: 14 },
+  moreText: { fontSize: 15, fontWeight: "600" },
   logFoot: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44 },
   logHint: { flex: 1 },
-  // "Don't log" and "Show all saved places": quiet text, never a filled pill.
+  // "Don't log": quiet text, never a filled pill.
   quiet: { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
   quietText: { fontSize: 15, fontWeight: "600" },
   corrections: { gap: 14 },
   hint: { fontSize: 13, lineHeight: 18 },
-  group: {},
-  option: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
   optionText: { flex: 1, gap: 1 },
   optionTitle: { fontSize: 16, fontWeight: "600", lineHeight: 21 },
-  tickSpace: { width: 16 },
   modes: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   // Four square tiles a row, the icon over its name (mock-up #ios-list leg editor).
   mode: { width: "23%", flexGrow: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 4, borderRadius: 14 },
@@ -969,9 +947,11 @@ const styles = StyleSheet.create({
   legs: { gap: 4 },
   legCard: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14 },
   times: { flexDirection: "row", gap: 10 },
-  timeCard: { flex: 1, minHeight: 60, borderRadius: 14, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 8, flexDirection: "row", alignItems: "center" },
-  timeText: { flex: 1, gap: 2 },
-  timeValue: { fontSize: 20, fontWeight: "600", fontVariant: ["tabular-nums"] },
+  // Slim and fill-led: the fill says which field the wheel is on.
+  timeCard: { flex: 1, minHeight: 44, borderRadius: 12, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  timeValue: { fontSize: 16, fontWeight: "600", fontVariant: ["tabular-nums"] },
   confirm: { gap: 10 },
-  nameInput: { minHeight: 44, borderRadius: 12, paddingHorizontal: 14, fontSize: 17 },
+  saveRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  nameInput: { flex: 1, minHeight: 44, borderRadius: 12, paddingHorizontal: 14, fontSize: 16 },
+  savePill: { alignSelf: "center" }
 });

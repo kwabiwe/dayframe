@@ -688,6 +688,18 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Async outcome: none. On today it only moves the view: waiting link, "?" and tap requests are cancelled, and anything open stays open (an Apple Health question under its row).
 - Accessibility: Reduce Motion jumps without animation. VoiceOver focus stays on the pill; its hint says which of the two it will do. The pill's text follows Dynamic Type up to the header's cap.
 
+## iPhone place and trip sheets, v3 (owner, 30 Oct 2026)
+
+- Trigger: a row, the search field, More options, Edit on a guess, ✕, the handle, Save, Not now.
+- Owner: `BottomSheetShell` / `SwipeDismissSheet` own presentation and every exit; ✕ takes the shell's own discard, so it leaves as a swipe does. A leg still pushes in its keyed view.
+- Entrance/update/exit: the guess card and More options fade in and out with the local presence fades (no travel); the map and the results area hold their heights, so typing moves nothing. Results swap in place; the search spinner shows only while Apple is asked.
+- Interruption: a tap while a change is being kept does nothing (`frozen`); a refused keep leaves the sheet open with its message.
+- Accessibility: Reduce Motion uses the shorter opacity fades and holds the spinner still. Rows are 52-point buttons named with their distance; ✕ and More options are labelled, and More options reports expanded.
+
+## Day swipe tick (owner, 30 Oct 2026)
+
+- One selection tick for each day a swipe changes, from the gesture's owner: `handleHorizontalPan` in `DayframeCalendarScrollCoordinator` for the Grid (`DayframeCalendarDaySwipeTickGate`), `playDaySwipeTick` from the List's pan. Both thin swipes under 120 ms apart and follow the Dayframe switch; iOS follows System Haptics. The Today pill, the week strip, the chip and links keep their own behaviour and never tick through here. Nothing moves, so Reduce Motion has no other path.
+
 ## Time wheel swipes in sheets (owner, 30 Oct 2026)
 
 - Trigger: a vertical swipe that starts in a `TimeWheelPanel` inside a `SwipeDismissSheet`.

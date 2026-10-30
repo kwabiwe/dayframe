@@ -195,7 +195,6 @@ describe("iPhone row dividers are inset on both sides", () => {
 
   it("covers the sheets, Settings, menus and Library lists", () => {
     for (const path of [
-      "src/components/calendar/LocationCorrectionSheet.tsx",
       "src/components/calendar/SheetNearbySearch.tsx",
       "src/components/settings/SettingsBlocks.tsx",
       "src/components/places/PlaceRoleSheet.tsx",

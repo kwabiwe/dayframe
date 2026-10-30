@@ -197,6 +197,8 @@ const QA_SHEET_GUESS = { name: "Holland & Barrett", street: "12 Example Street",
 // A made-up map for the sheets (public coordinates in central Paris, nobody's real places): readings around the
 // stay, and a trip's route with a silence in it.
 const qaPoint = (longitude: number, latitude: number) => ({ type: "Point" as const, coordinates: [longitude, latitude] as [number, number] });
+const qaSaved = (id: string, name: string, distanceMeters: number) =>
+  ({ id, name, distanceMeters, point: qaPoint(2.3524, 48.8567), radiusMeters: 100, matchClass: "outside" as const });
 function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | null {
   const trip = sheet === "trip" || sheet === "leg";
   const samples = Array.from({ length: trip ? 14 : 9 }, (_, index) => ({
@@ -217,7 +219,7 @@ function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | n
       route: trip ? { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) } : null,
       straightLineFallback: null, acceptedSamples: samples, rejectedSamples: [], anchors: [],
       gaps: trip ? [{ startedAt: iso(9, 20), stoppedAt: iso(9, 41), durationSeconds: 1_260, fromPoint: null, toPoint: null }] : [],
-      nearbySavedPlaces: []
+      nearbySavedPlaces: trip ? [] : [qaSaved("p-school", "Exampleton Primary", 120), qaSaved("p-office", "Work", 640), qaSaved("p-home", "Home", 900)]
     },
     stops: [], suggestedSplitPoints: [], evidenceExpiresAt: null, evidenceExpired: false, rawEvidenceAvailable: true, textualSummary: ""
   } as TimelineItemEvidenceDto;

@@ -796,6 +796,21 @@ public enum DayframeCalendarScrollToNowMath {
   }
 }
 
+/// One light tick per day a swipe changes, thinned for very fast swipes (the JavaScript List's gate in
+/// `daySwipeHaptic.ts` uses the same interval).
+public struct DayframeCalendarDaySwipeTickGate: Equatable {
+  public static let minimumInterval: TimeInterval = 0.12
+  private var lastTick: TimeInterval?
+
+  public init() {}
+
+  public mutating func shouldTick(at now: TimeInterval) -> Bool {
+    if let lastTick, now - lastTick < Self.minimumInterval, now >= lastTick { return false }
+    lastTick = now
+    return true
+  }
+}
+
 public enum DayframeCalendarScrollToNowDecision: Equatable {
   case drop
   case run

@@ -256,6 +256,17 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)?.props.stale).toBe(true);
   });
 
+  it("offers Save this place, and so Nearby and its guess, for any place not saved yet, as the web's: never a saved one", async () => {
+    for (const [matchKind, placeId, offered] of [["ambiguous", null, true], ["saved", "p-1", false]] as const) {
+      const item = { ...place, matchKind, placeId };
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} timeline={{ items: [item] } as unknown as LocationTimeline} />); });
+      act(() => { api!.openPlace(item, "Near saved places"); });
+      await settle();
+      expect(Boolean(sheetOf(tree)!.props.onSavePlace)).toBe(offered);
+    }
+  });
+
   it("saves an unknown place at the visit's centre, then sets the visit to it (step 12 part 4)", async () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} />); });

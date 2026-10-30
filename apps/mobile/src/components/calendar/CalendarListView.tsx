@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { runOnJS } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { playDaySwipeTick } from "../../lib/daySwipeHaptic";
 import { SHOW_ALL_PLACES_STORAGE_KEY } from "../../lib/calendarPreferences";
 import {
   DAYFRAME_APP_ICONS,
@@ -465,14 +466,19 @@ export function CalendarListView({
     tryScroll();
   });
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
+  // The swipe owns its haptic: the selected day changes because of this gesture, not by a tap or a link.
+  const swipedDay = useCallback((days: number) => {
+    playDaySwipeTick();
+    onSwipeDay?.(days);
+  }, [onSwipeDay]);
   const swipeDay = useMemo(() => Gesture.Pan()
     .enabled(Boolean(onSwipeDay))
     .activeOffsetX([-24, 24])
     .failOffsetY([-12, 12])
     .onEnd((event) => {
       "worklet";
-      if (onSwipeDay && (Math.abs(event.translationX) > 64 || Math.abs(event.velocityX) > 700)) runOnJS(onSwipeDay)(event.translationX < 0 ? 1 : -1);
-    }), [onSwipeDay]);
+      if (onSwipeDay && (Math.abs(event.translationX) > 64 || Math.abs(event.velocityX) > 700)) runOnJS(swipedDay)(event.translationX < 0 ? 1 : -1);
+    }), [onSwipeDay, swipedDay]);
   const toggleLegs = (id: string) => setOpenLegs((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);

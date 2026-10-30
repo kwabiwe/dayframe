@@ -78,6 +78,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private let longPressGesture = UILongPressGestureRecognizer()
     private let refreshControl = UIRefreshControl()
     private let selectionHaptic = UISelectionFeedbackGenerator()
+    private var daySwipeTick = DayframeCalendarDaySwipeTickGate()
     private let displayLinkProxy = DisplayLinkProxy()
     private let zoomDisplayLinkProxy = ZoomDisplayLinkProxy()
     private var zoomDisplayLink: CADisplayLink?
@@ -349,6 +350,12 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       let velocity = gesture.velocity(in: view)
       let committed = abs(translation.x) >= 22 || abs(velocity.x) >= 260
       guard committed else { return }
+      // The gesture's owner ticks, once per day it changes: Today, the strip and links never come through here.
+      if model?.presentation.hapticsEnabled == true,
+         daySwipeTick.shouldTick(at: ProcessInfo.processInfo.systemUptime) {
+        selectionHaptic.selectionChanged()
+        selectionHaptic.prepare()
+      }
       actions.changeDay(translation.x < 0 ? 1 : -1)
     }
 
