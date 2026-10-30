@@ -207,9 +207,8 @@ export function useCalendarListWeeks({
       });
     }).then((committed) => {
       if (generationRef.current === generation) setStatus({ generation, loading: null, error: null });
-      // Loaded while an edit landed: what it read may predate the edit, so it is stale (read at once when it is in the
-      // window the List's top day is in, as a week loading at the List's end usually is).
-      // Loaded through a bootstrap refresh only: stale, read when visited (Codex r3 on #634).
+      // Loaded through an edit or a bootstrap refresh: what it read may predate it, so it is stale (Codex r3 on #634), and
+      // read once more at once when it is in the window the List's top day is in (Codex r4).
       if (committed && invalidationRef.current !== invalidationAtStart) {
         loadedDuringEditRef.current(generation, startKey, refreshTokenRef.current !== tokenAtStart);
       }
@@ -356,7 +355,9 @@ export function useCalendarListWeeks({
       const stale = staleFor(forGeneration);
       stale.mark += 1;
       stale.weeks.set(startKey, stale.mark);
-      if (edit && weekInListRefreshWindow(startKey, refreshWindow)) revalidate(forGeneration, startKey, true);
+      // In the List's current window it is read once more now, whether an edit or only a bootstrap refresh made it stale
+      // (Codex r4 on #634); that read starts after the mark, so it never re-reads itself. Elsewhere it waits for a visit.
+      if (weekInListRefreshWindow(startKey, windowRef.current)) revalidate(forGeneration, startKey, edit);
     };
   });
   const retryWeek = useCallback((startKey: string) => {

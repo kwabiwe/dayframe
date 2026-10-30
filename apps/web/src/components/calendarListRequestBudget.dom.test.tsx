@@ -688,3 +688,55 @@ describe("Calendar › List reads in flight across invalidations (Codex r3 on #6
     expect(ids(view.result.current.entries)).not.toContain(`week-${loading}`);
   });
 });
+
+describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #634)", () => {
+  it("re-reads once a week whose first load a bootstrap refresh overtook, when it lands in the current window (TimeReviewViews)", { timeout: 30_000 }, async () => {
+    const remote = new Map<string, TimeEntryRow[]>();
+    const held: Array<() => void> = [];
+    let holding = false;
+    clientFetch.mockImplementation((url: string) => {
+      const path = url.split("?")[0];
+      if (path !== "/api/bootstrap") return Promise.resolve(respond(url));
+      const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
+      const [year, month, day] = date.split("-").map(Number);
+      // The week as it is when asked: a held answer is that old copy.
+      const entries = remote.get(date) ?? [entry(`week-${date}`, new Date(year, month - 1, day + 2, 9))];
+      const answer = { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: entries }) };
+      if (!holding) return Promise.resolve(answer);
+      return new Promise((resolve) => held.push(() => resolve(answer)));
+    });
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null} initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    const view = render(page(bootstrap()));
+    await flush();
+    for (let week = 1; week <= 3; week += 1) {
+      act(() => listed.continuous!.onLoad("earlier"));
+      await flush();
+      await flush();
+    }
+    // 7 Oct at the top: its window (30 Sep – 14 Oct) reaches into the week of 28 Sep, whose first load is held.
+    act(() => listed.continuous!.onVisibleDay!(local(10, 7).getTime()));
+    await flush();
+    holding = true;
+    act(() => listed.continuous!.onLoad("earlier"));
+    await flush();
+    expect(held).toHaveLength(1);
+    // Its block is deleted elsewhere, a bootstrap refresh lands, then the old answer.
+    remote.set("2026-09-28", []);
+    view.rerender(page(bootstrap()));
+    await flush();
+    holding = false;
+    while (held.length) await act(async () => { held.shift()!(); await vi.advanceTimersByTimeAsync(0); });
+    for (let pass = 0; pass < 4; pass += 1) await flush();
+    expect(listed.entries.map((row) => row.id)).not.toContain("week-2026-09-28");
+    // One re-read, no more (and none while further refreshes only mark it stale).
+    const weekReads = () => clientFetch.mock.calls.filter(([url]) => String(url) === "/api/bootstrap?date=2026-09-28").length;
+    expect(weekReads()).toBe(2);
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      view.rerender(page(bootstrap()));
+      await flush();
+    }
+    await seconds(60);
+    expect(weekReads()).toBe(2);
+  });
+});
