@@ -900,6 +900,43 @@ describe("CalendarListView (location v4 step 9)", () => {
         expect(scrollTo).not.toHaveBeenCalled();
       });
 
+      it("uses up a request that arrives during a drag: no scroll, even once its measurement could answer", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        // It stays used up after the finger lifts, and the next request runs.
+        act(() => { scroller(tree).props.onScrollEndDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        act(() => { tree.update(list({ scrollToNowRequest: 2 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("acknowledges a first-check request that arrives during a drag, without scrolling", () => {
+        const onScrolled = vi.fn();
+        const tree = mountLate();
+        const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+        const shown = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ ...shown, scrollToFirstCheck: 3 })); });
+        expect(onScrolled).toHaveBeenCalledWith(3);
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("runs again once the scroll has settled after momentum", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { scroller(tree).props.onMomentumScrollEnd(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
       it("keeps a request that arrives with the new day", () => {
         const tree = mountLate();
         act(() => { tree.update(list({ scrollToNowRequest: 1, dayStartMs: at(24), dayEndMs: at(48) })); });

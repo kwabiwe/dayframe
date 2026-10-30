@@ -280,6 +280,9 @@ export function CalendarListView({
   const pendingScroll = useRef<{ target: string; dayStartMs: number; request?: number } | null>(null);
   const shownDayStartMs = useRef(dayStartMs);
   shownDayStartMs.current = dayStartMs;
+  // A finger owns the List from the start of a drag until it lifts or the scroll settles: a request arriving then is
+  // used up, not started (Codex r3 on #640).
+  const dragging = useRef(false);
   const dropPendingScroll = () => {
     const dropped = pendingScroll.current;
     pendingScroll.current = null;
@@ -309,7 +312,9 @@ export function CalendarListView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayStartMs]);
   useEffect(() => {
-    if (scrollToFirstCheck) pendingScroll.current = { target: "first", dayStartMs, request: scrollToFirstCheck };
+    if (!scrollToFirstCheck) return;
+    pendingScroll.current = { target: "first", dayStartMs, request: scrollToFirstCheck };
+    if (dragging.current) dropPendingScroll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToFirstCheck]);
   // The Today pill on today: the same one scroll owner and row measurement as a "?" (a drag stops it; a repeat
@@ -318,6 +323,7 @@ export function CalendarListView({
   useEffect(() => {
     if (!scrollToNowRequest || scrollToNowRequest === handledNowRequest.current) return;
     handledNowRequest.current = scrollToNowRequest;
+    if (dragging.current) return;
     const key = nowRowKey(items.filter((item) => rowViews.current.has(item.key)), nowMs);
     pendingScroll.current = key ? { target: key, dayStartMs } : null;
     if (key) tryScroll();
@@ -477,7 +483,12 @@ export function CalendarListView({
   return (
     <ScrollView
       contentContainerStyle={styles.content}
-      onScrollBeginDrag={dropPendingScroll}
+      onMomentumScrollEnd={() => { dragging.current = false; }}
+      onScrollBeginDrag={() => {
+        dragging.current = true;
+        dropPendingScroll();
+      }}
+      onScrollEndDrag={() => { dragging.current = false; }}
       ref={scroller}
       refreshControl={<RefreshControl colors={[theme.accent]} onRefresh={onRefresh} refreshing={refreshing} tintColor={theme.accent} />}
       style={{ backgroundColor: theme.background }}
