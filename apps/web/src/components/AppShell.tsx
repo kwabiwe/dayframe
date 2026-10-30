@@ -379,33 +379,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
       </header>
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
-        {isTimeline ? (
-          <section className="swiss-timeline-surface" aria-label="Calendar">
-            <div
-              className="swiss-persistent-timer-shell"
-              data-scrolled={contentUnderBand ? "true" : undefined}
-              ref={timerBandRef}
-            >
-              {persistentTimer}
-            </div>
-            {/* The Calendar grid scrolls inside this panel, which never moves under the band, so
-                its own scrolling never shows the hairline. */}
-            <main className="swiss-timeline-main" ref={pageMainRef}>{children}</main>
-          </section>
-        ) : (
-          <>
-            <div
-              className="swiss-persistent-timer-shell"
-              data-scrolled={contentUnderBand ? "true" : undefined}
-              ref={timerBandRef}
-            >
-              {persistentTimer}
-            </div>
-            <main ref={pageMainRef}>
-              {children}
-            </main>
-          </>
-        )}
+        {/* One tree for every page (UI review round 2, owner 30 Oct 2026): the timer band and its quick start never
+            move or remount between Today, Calendar, Reports and Library. Off Calendar the surface lays out as if it
+            weren't there (display: contents). */}
+        <section aria-label={isTimeline ? "Calendar" : undefined} className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}>
+          <div
+            className="swiss-persistent-timer-shell"
+            data-scrolled={contentUnderBand ? "true" : undefined}
+            ref={timerBandRef}
+          >
+            {persistentTimer}
+          </div>
+          {/* On Calendar the grid scrolls inside this panel, which never moves under the band, so its own scrolling
+              never shows the hairline. */}
+          <main className={isTimeline ? "swiss-timeline-main" : undefined} ref={pageMainRef}>{children}</main>
+        </section>
       </div>
 
       <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} />

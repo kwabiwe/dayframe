@@ -15,6 +15,9 @@ export function CalendarHead({
   model,
   onSelectDay,
   showDays = true,
+  showSelected = true,
+  showTotal = true,
+  variant = "strip",
   weekReportHref
 }: {
   disabled: boolean;
@@ -22,8 +25,18 @@ export function CalendarHead({
   onSelectDay: (dateKey: string) => void;
   /** False in the Week grid, whose day columns already show each date and total (UI review E). */
   showDays?: boolean;
+  /** False in Week, which highlights no single day (only today's coral circle). */
+  showSelected?: boolean;
+  /** False where the toolbar shows the total itself (UI review round 2): the strip is then its own row. */
+  showTotal?: boolean;
+  /**
+   * "row" (UI review round 2, owner 30 Oct 2026): the one day row over the Day and Week grids — letter and date,
+   * dots, today's coral circle, each day's total in its tip, laid out in the grid's own columns (the host's CSS).
+   */
+  variant?: "strip" | "row";
   weekReportHref: string;
 }) {
+  const row = variant === "row";
   const daysRef = useRef<HTMLDivElement | null>(null);
   const selectedKey = model.days.find((day) => day.selected)?.key;
   // On the narrowest phones the strip scrolls sideways; keep the chosen day in view (inside the strip
@@ -44,8 +57,9 @@ export function CalendarHead({
         {model.days.map((day) => (
           <button
             aria-label={day.accessibleName}
-            aria-pressed={day.selected}
-            className={`df-cal-day${day.isToday ? " is-today" : ""}`}
+            aria-pressed={showSelected ? day.selected : undefined}
+            className={`df-cal-day${day.isToday ? " is-today" : ""}${showSelected && day.selected ? " is-selected" : ""}`}
+            data-tip={row ? day.tip : undefined}
             disabled={disabled}
             key={day.key}
             onClick={() => onSelectDay(day.key)}
@@ -53,7 +67,7 @@ export function CalendarHead({
           >
             <small aria-hidden="true">{day.initial}</small>
             <b aria-hidden="true" className="df-tnum">{day.dateNumber}</b>
-            <span aria-hidden="true" className="df-cal-day-total df-tnum">{day.total}</span>
+            {row ? null : <span aria-hidden="true" className="df-cal-day-total df-tnum">{day.total}</span>}
             <span aria-hidden="true" className="df-cal-day-bars">
               {day.bars.map((bar) => (
                 <i
@@ -66,10 +80,12 @@ export function CalendarHead({
           </button>
         ))}
       </div> : null}
-      <Link aria-label={`${model.weekTotalLabel}. Open in Reports`} className="df-cal-weektotal df-tnum" href={weekReportHref}
-        title={model.weekTotalLabel}>
-        {model.weekTotal}
-      </Link>
+      {showTotal ? (
+        <Link aria-label={`${model.weekTotalLabel}. Open in Reports`} className="df-cal-weektotal df-tnum" href={weekReportHref}
+          title={model.weekTotalLabel}>
+          {model.weekTotal}
+        </Link>
+      ) : null}
     </div>
   );
 }

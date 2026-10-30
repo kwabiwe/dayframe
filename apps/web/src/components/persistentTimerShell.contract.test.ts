@@ -54,7 +54,10 @@ describe("persistent block shell contract", () => {
       inlineTags.indexOf('<span className="sr-only"')
     );
 
-    expect(compoundControl).toContain('className={`inline-tag-picker-trigger');
+    // The Tags button is one element placed before or after the field (`tagButtonFirst`), always inside it.
+    expect(inlineTags).toMatch(/const tagButton = \(\s*<button[\s\S]*?className=\{`inline-tag-picker-trigger/);
+    expect(compoundControl).toContain("{tagButtonFirst ? tagButton : null}");
+    expect(compoundControl).toContain("{tagButtonFirst ? null : tagButton}");
     expect(timer).toContain('className="sr-only swiss-timer-description-label"');
     expect(timer).toContain('ariaLabelledBy="persistent-timer-category-label"');
     expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");

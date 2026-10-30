@@ -41,7 +41,8 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
 
     const chip = screen.getByRole("button", { name: "Start from 10:15, after Write report" });
     expect(chip.textContent).toBe("From 10:15");
-    expect(chip.querySelector("svg")?.getAttribute("data-glyph")).toBe("arrow-left");
+    // UI review round 2: a small text button in the clock's fixed slot, with no glyph.
+    expect(chip.classList.contains("df-cmd-from-text")).toBe(true);
     startsBlock(view, entries);
     await act(async () => { fireEvent.click(chip); });
 

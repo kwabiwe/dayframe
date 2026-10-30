@@ -110,7 +110,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
 
     // The List reports the 8th at its top: the week before.
     act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
-    expect(container.querySelector(".timeline-range-navigation")?.textContent).toContain("Thu, 8 Oct 2026");
+    expect(container.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent).toContain("Thu 8 Oct");
     expect(dayLabels(container)[0]).toMatch(/5 Oct/);
     expect(dayLabels(container)[6]).toMatch(/11 Oct/);
     expect(pressedDay(container)).toMatch(/8 Oct/);
@@ -164,16 +164,16 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
       for (const link of [sidebar, tabBar]) {
         // Scrolled into the week before.
         act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
-        expect(container.querySelector(".timeline-range-navigation")?.textContent).toContain("Thu, 8 Oct 2026");
+        expect(container.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent).toContain("Thu 8 Oct");
         expect(dayLabels(container)[0]).toMatch(/5 Oct/);
         const before = listed.continuous!.focusRequest;
         await userEvent.setup({ advanceTimers: () => undefined }).click(link);
         // A fresh request for the URL's day, today.
         expect(listed.continuous!.focusRequest).not.toBe(before);
         expect(listed.continuous!.focusRequest.startsWith("2026-10-18")).toBe(true);
-        // The List lands there and says so: the header reads Today, in today's week.
+        // The List lands there and says so: the header names today, in today's week.
         act(() => listed.continuous!.onVisibleDay!(local(18, 0).getTime()));
-        expect(container.querySelector(".timeline-range-navigation")?.textContent).toContain("Today");
+        expect(container.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent).toContain("Sun 18 Oct");
         expect(pressedDay(container)).toMatch(/18 Oct/);
       }
     } finally {

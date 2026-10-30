@@ -166,6 +166,35 @@ export function shouldAdvanceStaleTimelineToToday(
  * "Today", "Sun 12 Oct 2026" or a week's span. `now` is the current time, or today's date key
  * (null when today is not known yet, which never reads "Today").
  */
+/**
+ * The Calendar toolbar's date (UI review round 2, owner 30 Oct 2026): "26 Oct – 1 Nov" for a week, "Fri 30 Oct" for a
+ * day, with the year only when it isn't the current year (both years when a week spans two).
+ */
+export function formatCalendarRangeLabel(
+  scope: TimelineScope,
+  ranges: TimelineRanges,
+  today: Date | string | null = new Date(),
+  { nameToday = true }: { nameToday?: boolean } = {}
+) {
+  const currentYear = today instanceof Date ? today.getFullYear() : today ? Number(today.slice(0, 4)) : new Date().getFullYear();
+  const withYear = (date: Date) => date.getFullYear() !== currentYear;
+  if (scope === "day") {
+    const day = ranges.day.start;
+    // Today names itself ("Today · 30 Oct", owner 30 Oct 2026); other days keep their weekday.
+    if (nameToday && today != null && toTimelineDateKey(day) === (today instanceof Date ? toTimelineDateKey(startOfLocalDay(today)) : today)) {
+      return `Today · ${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(day)}`;
+    }
+    const options: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short", ...(withYear(day) ? { year: "numeric" } : {}) };
+    return new Intl.DateTimeFormat("en-GB", options).format(day).replace(",", "");
+  }
+  const start = ranges.weekDays[0];
+  const end = ranges.weekDays[6];
+  const spansYears = start.getFullYear() !== end.getFullYear();
+  const format = (date: Date, year: boolean) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}) }).format(date);
+  // The year once, after the end, unless the week spans two years ("22 Sept – 28 Sept 2025").
+  return `${format(start, spansYears)} – ${format(end, spansYears || withYear(end))}`;
+}
+
 export function formatTimelinePeriodLabel(
   scope: TimelineScope,
   ranges: TimelineRanges,

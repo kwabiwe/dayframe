@@ -8,6 +8,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { AppLoadingState } from "@/components/AppLoadingState";
 import { AppShell } from "@/components/AppShell";
 import { ClockFormatProvider } from "@/components/ClockFormat";
+import { KeyboardFocusMarks } from "@/components/KeyboardFocusMarks";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 import { CLOCK_FORMAT_COOKIE, clockFormatFromCookieValue } from "@/lib/clock-format";
 
@@ -15,6 +16,8 @@ import { CLOCK_FORMAT_COOKIE, clockFormatFromCookieValue } from "@/lib/clock-for
 // it is the Blocks display face for titles, the timer and large totals only.
 const displayFont = localFont({
   src: [
+    // SemiBold for the timer's digits (UI review round 2, owner 30 Oct 2026); same upstream release as Bold.
+    { path: "./fonts/BricolageGrotesque-SemiBold.ttf", weight: "600", style: "normal" },
     { path: "./fonts/BricolageGrotesque-Bold.ttf", weight: "700", style: "normal" },
     { path: "./fonts/BricolageGrotesque-ExtraBold.ttf", weight: "800", style: "normal" }
   ],
@@ -52,6 +55,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
           </Suspense>
         </ClockFormatProvider>
+        <KeyboardFocusMarks />
       </body>
     </html>
   );

@@ -33,7 +33,6 @@ import type { BootstrapData, CategoryRow, PlaceRow, ReviewItemRow, TimeEntryRow 
 import { pendingReviewSpans } from "@/lib/today-view";
 import {
   dateTimeLocalInputToIso,
-  formatDate,
   formatDuration,
   formatTime
 } from "@/lib/format";
@@ -65,7 +64,7 @@ import {
 import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
-  formatTimelinePeriodLabel,
+  formatCalendarRangeLabel,
   addCalendarDays,
   resetTimelineState,
   resolveTimelineRanges,
@@ -121,15 +120,10 @@ const NOW_PILL_HALF_HEIGHT = 10;
 const CALENDAR_FUTURE_CREATE_NOTICE = "Blocks can't start in the future";
 const CALENDAR_CREATE_NOTICE_MS = 3_000;
 const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
-
-const scopeItems: Array<{ id: TimelineScope; label: string }> = [
-  { id: "day", label: "Day" },
-  { id: "week", label: "Week" }
-];
-const viewItems: Array<{ id: TimelineView; label: string }> = [
-  { id: "calendar", label: "Calendar" },
-  { id: "list", label: "List" }
-];
+// The widest labels the Calendar's date box can show (`formatCalendarRangeLabel`): a week across two years, a week
+// with long months outside this year, and a day outside this year. The box takes the widest of them, so it never
+// resizes between views or dates.
+const CALENDAR_DATEBOX_SIZERS = ["28 Dec 2026 – 3 Jan 2027", "29 Sept – 5 Oct 2025", "Wed 30 Sept 2025", "Today · 30 Sept"];
 
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
   fullDay: { label: "24h", startHour: 0, endHour: 24 }
@@ -427,11 +421,6 @@ export function TimeReviewViews({
     });
   }
 
-  function updateScope(scope: TimelineScope) {
-    if (isDateLoading) return;
-    navigate({ scope });
-  }
-
   // Calendar › List shows continuous days (owner, 24 Oct 2026): the selected week from the shell's data,
   // and whole weeks before and after it, loaded as the List scrolls. The period controls don't apply.
   const listTodayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
@@ -581,7 +570,14 @@ export function TimeReviewViews({
   // scrolling can leave the List on another day, and the two must agree (owner bug, 29 Oct 2026).
   const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
   const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
-  const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
+  // The toolbar's date box (UI review round 2): its words and arrows. List moves a week at a time, as its strip shows one.
+  const navScope: TimelineScope = isList ? "week" : state.scope;
+  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList });
+  const goPeriod = (direction: "previous" | "next") => {
+    if (isDateLoading) return;
+    const shifted = shiftTimelineState({ ...state, date: headerDayKey, scope: navScope }, direction);
+    void navigate(isList ? { date: shifted.date } : shiftTimelineState(state, direction), isList ? { reposition: true } : undefined);
+  };
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
@@ -604,6 +600,12 @@ export function TimeReviewViews({
     weekDays: headerRanges.weekDays,
     weekLoggedSeconds: headWeekSeconds
   });
+  // The Proposed toolbar's total (round 2): the day's in Day, else the week's.
+  const headDay = headModel.days.find((day) => day.selected);
+  const toolbarTotal = !isList && state.scope === "day" && headDay
+    // The day's total opens the day's report; the week's, the week's (Codex r1 on #636).
+    ? { value: headDay.total, label: `Day total ${headDay.total}, ${rangeLabel}`, href: reportsHrefForCustomRange(headDay.key, headDay.key) }
+    : { value: headModel.weekTotal, label: headModel.weekTotalLabel, href: reportsHrefForCustomRange(weekReportFrom, weekReportTo) };
 
   return (
     <section className="timeline-workspace">
@@ -611,96 +613,93 @@ export function TimeReviewViews({
           week totals, Day | Week and Calendar | List — wrapping only where the screen is too narrow.
           The month stays the page's heading for assistive tech; the period label shows the date. */}
       <h1 className="sr-only">{headModel.month}</h1>
-      <section
-        className="timeline-range-toolbar df-cal-toolbar"
-        aria-busy={isDateLoading}
-        aria-label="Calendar period and view controls"
-      >
-        {/* In List the period arrows and Day | Week don't apply (continuous days), so they leave the row (UI review
-            W8, owner 29 Oct 2026; they were shown greyed); the date stays, naming the List's top day. */}
-        <div aria-disabled={isList || undefined} className="timeline-range-navigation" data-unused-in-list={isList || undefined}>
-          {isList ? null : (
-            <IconButton
-              disabled={isDateLoading}
-              label={`Previous ${state.scope}`}
-              onClick={() => void navigate(shiftTimelineState(state, "previous"))}
-            >
-              <ChevronLeft size={18} />
-            </IconButton>
-          )}
-          <DatePickerPopover
-            disabled={isDateLoading}
-            label={periodLabel}
-            unavailable={isList ? "Not used in List" : undefined}
-            onChange={(date) => void navigate({ date }, { reposition: true })}
-            portal
-            portalAlign="center"
-            today={todayKey ?? state.date}
-            value={headerDayKey}
-          />
-          {isList ? null : (
-            <IconButton
-              disabled={isDateLoading}
-              label={`Next ${state.scope}`}
-              onClick={() => void navigate(shiftTimelineState(state, "next"))}
-            >
-              <ChevronRight size={18} />
-            </IconButton>
-          )}
-          {/* List has its own way back to today (it scrolls there), so only the grid shows this one. */}
-          {showsToday || isList ? null : (
-            <button
-              className="timeline-today-button"
-              disabled={isDateLoading}
-              onClick={() => {
-                if (todayKey) void navigate({ date: todayKey });
-              }}
-              type="button"
-            >
-              Today
-            </button>
-          )}
-        </div>
-
-        <CalendarHead
-          disabled={isDateLoading}
-          model={headModel}
-          onSelectDay={(date) => void navigate({ date }, { reposition: true })}
-          showDays={!(state.view === "calendar" && state.scope === "week")}
-          weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
-        />
-
-        <div className="timeline-range-controls">
-          {isList ? null : (
+      <>
+          {/* UI review round 2 (owner 30 Oct 2026): one toolbar, identical and one height in every view —
+              one date box with ‹ › inside it and Today on the left, the period's total in the middle, one Day · Week · List
+              control on the right. The 7-day strip is the row beneath it (in Week, the day columns are that row). */}
+          <section aria-busy={isDateLoading} aria-label="Calendar period and view controls" className="timeline-range-toolbar df-cal-toolbar is-next">
+            <div className="df-cal-nav">
+              <div className="df-cal-datebox" role="group" aria-label="Calendar period">
+                <IconButton disabled={isDateLoading} label={`Previous ${navScope}`} onClick={() => goPeriod("previous")}>
+                  <ChevronLeft size={16} />
+                </IconButton>
+                {/* One fixed width for every view and date: the longest labels sit invisibly in the same cell. */}
+                <span className="df-cal-datebox-label">
+                  {CALENDAR_DATEBOX_SIZERS.map((sizer) => (
+                    <span aria-hidden="true" className="df-cal-datebox-sizer" key={sizer}>{sizer}</span>
+                  ))}
+                  <DatePickerPopover
+                    disabled={isDateLoading}
+                    label={rangeLabel}
+                    onChange={(date) => void navigate({ date }, { reposition: true })}
+                    panelClassName="df-cal-date-panel"
+                    portal
+                    portalAlign="center"
+                    today={todayKey ?? state.date}
+                    value={headerDayKey}
+                  />
+                </span>
+                <IconButton disabled={isDateLoading} label={`Next ${navScope}`} onClick={() => goPeriod("next")}>
+                  <ChevronRight size={16} />
+                </IconButton>
+              </div>
+              <button
+                className="timeline-today-button"
+                disabled={isDateLoading || (!isList && showsToday)}
+                onClick={() => {
+                  if (todayKey) void navigate({ date: todayKey }, { reposition: true });
+                }}
+                type="button"
+              >
+                Today
+              </button>
+            </div>
+            <Link aria-label={`${toolbarTotal.label}. Open in Reports`} className="df-cal-weektotal df-tnum"
+              href={toolbarTotal.href} title={toolbarTotal.label}>
+              {toolbarTotal.value}
+            </Link>
             <SegmentedControl
-              ariaLabel="Calendar scope"
-              onChange={updateScope}
-              options={scopeItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
-              value={state.scope}
+              ariaLabel="Calendar view"
+              onChange={(next) => {
+                if (next === "list") updateView("list");
+                else if (isDateLoading) return;
+                else navigate({ view: "calendar", scope: next as TimelineScope });
+              }}
+              options={[
+                { value: "day", label: "Day", disabled: isDateLoading },
+                { value: "week", label: "Week", disabled: isDateLoading },
+                { value: "list", label: "List", disabled: isDateLoading }
+              ]}
+              value={isList ? "list" : state.scope}
             />
+          </section>
+          {/* List keeps the 7-day picker as its own row; Day and Week draw the shared day row inside the grid. */}
+          {!isList ? null : (
+            <div className="df-cal-striprow">
+              <CalendarHead
+                disabled={isDateLoading}
+                model={headModel}
+                onSelectDay={(date) => void navigate({ date }, { reposition: true })}
+                showTotal={false}
+                weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+              />
+            </div>
           )}
-          {/* Card C item 5 (owner, 25 Oct 2026): a visible Calendar | List switch like Day | Week; the
-              round view-icon menu is the iPhone's only. */}
-          <SegmentedControl
-            ariaLabel="Calendar view"
-            onChange={updateView}
-            options={viewItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
-            value={state.view}
-          />
-        </div>
-      </section>
+      </>
       {dateLoadError || isDateLoading ? (
         <p
           aria-atomic="true"
           aria-live={dateLoadError ? "assertive" : "polite"}
-          className={`timeline-range-feedback${dateLoadError ? " is-error" : ""}`}
+          // Loading never adds a row (owner, 30 Oct 2026): it is announced only, and the shown period dims until the
+          // new one arrives; an error still shows.
+          className={dateLoadError ? "timeline-range-feedback is-error" : "sr-only"}
           role={dateLoadError ? "alert" : "status"}
         >
           {dateLoadError ?? "Loading period…"}
         </p>
       ) : null}
 
-      <div className="timeline-view-stage">
+      <div className={`timeline-view-stage${isDateLoading ? " is-date-loading" : ""}`}>
         {state.view === "calendar" ? (
           <CalendarReview
             calendarHoursMode={calendarHoursMode}
@@ -719,6 +718,20 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+            dayRow={(
+              <CalendarHead
+                disabled={isDateLoading}
+                model={headModel}
+                // Week highlights no day: choosing one there opens it in Day.
+                onSelectDay={(date) => void (state.scope === "week"
+                  ? navigate({ date, view: "calendar", scope: "day" }, { reposition: true })
+                  : navigate({ date }, { reposition: true }))}
+                showSelected={state.scope === "day"}
+                showTotal={false}
+                variant="row"
+                weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+              />
+            )}
             locations={{ timelines: gridTimelines, asking: gridCorrection.askingBySegment ?? NO_ASKING, onOpen: gridCorrection.open }}
           />
         ) : null}
@@ -834,7 +847,8 @@ export function CalendarReview({
   todayKeyHint = null,
   undoToastVisible = false,
   visibleDays,
-  locations
+  locations,
+  dayRow
 }: {
   /**
    * A block's "?" (a block that ran into a trip, location v4 design §7) answered from its editor: through the shared
@@ -857,6 +871,8 @@ export function CalendarReview({
   tags: BootstrapData["tags"];
   /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
   todayKeyHint?: string | null;
+  /** The shared day row (`CalendarHead variant="row"`, UI review round 2), the grid's sticky first row. */
+  dayRow?: ReactNode;
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
@@ -1655,7 +1671,7 @@ export function CalendarReview({
   }, [axisMarks, clock, nowTop]);
 
   return (
-    <section className="timeline-calendar-workspace">
+    <section className="timeline-calendar-workspace" data-one-day={visibleDays.length === 1 || undefined} data-zoom={zoomLevel}>
       {/* Phones: the narrow time gutter has no room for the corner's zoom, so it floats over the
           grid's lower right corner instead (CSS shows one or the other). */}
       <span className="calendar-phone-zoom" role="group" aria-label="Calendar zoom">
@@ -1690,8 +1706,13 @@ export function CalendarReview({
           // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
           style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
         >
-          <div className="calendar-grid-corner">
-            <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
+          {/* One day row for Day and Week (UI review round 2), in seven columns after the zoom's cell, so each day sits
+              over its Week column and at the same place in Day; switching views moves only the highlight. */}
+          <div
+            className="df-cal-dayrow"
+            style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(7, ${visibleDays.length === 1 ? "minmax(0, 1fr)" : "minmax(var(--calendar-day-min-width), 1fr)"})` }}
+          >
+            <span className="calendar-corner-zoom df-cal-dayrow-zoom" role="group" aria-label="Calendar zoom">
               <button
                 type="button"
                 disabled={zoomIndex === 0}
@@ -1709,43 +1730,8 @@ export function CalendarReview({
                 +
               </button>
             </span>
+            {dayRow}
           </div>
-          {visibleDays.map((day) => {
-            const dayStart = startOfDay(day);
-            const total = analyzeTimeIntervals(
-              gridEntries.map((entry) => ({
-                id: entry.id,
-                startedAt: entry.startedAt,
-                stoppedAt: entry.stoppedAt
-              })),
-              {
-                range: { start: dayStart, end: addDays(dayStart, 1) },
-                now: capturedNow
-              }
-            );
-            const loggedLabel = formatDuration(total.loggedSeconds);
-            return (
-              <div
-                key={day.toISOString()}
-                className={[
-                  "calendar-day-heading",
-                  isToday(day) ? "is-today" : ""
-                ].join(" ")}
-              >
-                <div className="calendar-day-date" aria-label={formatDate(day)}>
-                  <small aria-hidden="true">{formatCalendarWeekday(day)}</small>
-                  <b aria-hidden="true">{day.getDate()}</b>
-                </div>
-                <div
-                  aria-hidden={localTimeReady ? undefined : true}
-                  aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
-                  className="calendar-day-total tabular"
-                >
-                  {total.loggedSeconds > 0 ? loggedLabel : "–"}
-                </div>
-              </div>
-            );
-          })}
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
             {nowTop !== null ? (
@@ -1838,6 +1824,9 @@ export function CalendarReview({
                   className="calendar-now-line"
                   style={{ top: nowTop ?? 0 }}
                 />
+              ) : nowTop !== null ? (
+                // Strong across today, faint across the week's other days (UI review round 2).
+                <span aria-hidden="true" className="calendar-now-line is-faint" style={{ top: nowTop }} />
               ) : null}
               {dayBrackets.map((bracket) => {
                 // From the first part's drawn top to the last part's drawn bottom (the blocks' own
@@ -2627,10 +2616,6 @@ function calendarDurationSeconds(
   capturedNow: Date
 ) {
   return calendarEntrySliceDetails(entry, draft, day, capturedNow).durationSeconds;
-}
-
-function formatCalendarWeekday(day: Date) {
-  return new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day);
 }
 
 function dayBodyPointHitsSemanticBlock(dayBody: HTMLElement, clientX: number, clientY: number) {

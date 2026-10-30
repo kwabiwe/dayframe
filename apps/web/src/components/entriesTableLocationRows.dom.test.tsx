@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@/lib/location/location-timeline-service";
 import type { TimeEntryRow } from "@/lib/queries";
@@ -189,9 +189,11 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     // The whole row is the button that opens it (owner item A); there is no separate Correct button.
     expect(screen.queryByRole("button", { name: /^Correct / })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: /^Unknown place, / }));
-    expect(screen.getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    // The place dialog (UI review round 2): its one search, and the ✕ closes it with no change.
+    const placeDialog = screen.getByRole("dialog");
+    expect(within(placeDialog).getByRole("textbox", { name: "Search places" })).toBeTruthy();
     expect(clientFetch.mock.calls.some(([url]) => String(url).startsWith("/api/timeline/items/cafe/evidence?kind=place"))).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(placeDialog).getByRole("button", { name: /^Close / }));
     fireEvent.click(screen.getByRole("button", { name: "Show the legs of Getting around" }));
     fireEvent.click(screen.getByRole("button", { name: /Change how you travelled: Underground or train\?/ }));
     expect(screen.getByRole("group", { name: "How did you travel?" })).toBeTruthy();

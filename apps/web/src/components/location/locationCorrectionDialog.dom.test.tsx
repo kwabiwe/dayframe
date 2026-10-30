@@ -53,6 +53,15 @@ const sent = () => bodies().map((body) => {
   void clientCorrectionId;
   return rest;
 });
+/** "More options": Logs as, the times, Save this place, Leave as unknown and I wasn't here wait behind it (UI review round 2). */
+const moreOptions = () => fireEvent.click(screen.getByRole("button", { name: "More options" }));
+/** A TimeField commits what was typed on blur. */
+const typeTime = (label: "Start time" | "End time", value: string) => {
+  const field = screen.getByLabelText(label);
+  fireEvent.focus(field);
+  fireEvent.change(field, { target: { value } });
+  fireEvent.blur(field);
+};
 
 describe("correcting the location timeline on the web (location v4 step 13)", () => {
   beforeEach(() => {
@@ -74,9 +83,11 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={onCorrected} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    fireEvent.click(screen.getByRole("radio", { name: /Exampleton Library/ }));
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:45" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    moreOptions();
+    typeTime("Start time", "08:45");
+    // A tapped saved place answers at once, with the other edits (no visit centre here, so it is found by search).
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "library" } });
+    fireEvent.click(within(screen.getByRole("list", { name: "Saved places found" })).getByRole("button", { name: /Exampleton Library/ }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(sent()).toEqual([
       { kind: "place", subject: "place", itemId: "seg-cafe", placeId: places[1].id, learnedPlaceId: null },
@@ -90,8 +101,8 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place({ learnedPlaceId: "00000000-0000-4000-8000-000000000201", name: "Corner café", matchKind: "learned" }), label: "Corner café" }} />);
-    expect((screen.getByRole("radio", { name: /Corner café/ }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(within(screen.getByRole("list", { name: "Saved places nearby" })).getByRole("button", { name: /Corner café/ }).getAttribute("aria-current")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(clientFetch).not.toHaveBeenCalled();
   });
@@ -131,8 +142,9 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     // 00:30 BST → 01:30 GMT on 25 Oct: the end (01:30 GMT) is untouched.
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place({ startedAt: "2026-10-24T23:30:00.000Z", stoppedAt: "2026-10-25T01:30:00.000Z" }), label: "Unknown place" }} />);
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "00:45" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    moreOptions();
+    typeTime("Start time", "00:45");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(sent()).toEqual([{ kind: "times", subject: "place", itemId: "seg-cafe", startedAt: "2026-10-24T23:45:00.000Z", stoppedAt: "2026-10-25T01:30:00.000Z" }]);
   });
@@ -155,17 +167,20 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       .mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
     render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={onCorrected} places={places}
       target={{ kind: "place", place: place({ learnedPlaceId: "00000000-0000-4000-8000-000000000201", name: "Corner café", matchKind: "learned" }), label: "Corner café" }} />);
-    fireEvent.click(screen.getByRole("radio", { name: /Leave as unknown/ }));
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:50" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    moreOptions();
+    typeTime("Start time", "08:50");
+    // Leave as unknown applies at once, with the edited time.
+    fireEvent.click(screen.getByRole("button", { name: "Leave as unknown" }));
     expect((await screen.findByRole("alert")).textContent).toBe("New times must overlap the item's times.");
     expect(onCorrected).toHaveBeenCalledTimes(1);
+    expect(sent().slice(0, 2).map((body) => body.kind)).toEqual(["place", "times"]);
     // Back to the learned place, times as they were: that is a change from what saved (unknown).
-    fireEvent.click(screen.getByRole("radio", { name: /Corner café/ }));
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:40" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    typeTime("Start time", "08:40");
+    fireEvent.click(within(screen.getByRole("list", { name: "Saved places nearby" })).getByRole("button", { name: /Corner café/ }));
     await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(3));
-    expect((screen.getByRole("radio", { name: /Leave as unknown/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((within(screen.getByRole("list", { name: "Saved places nearby" })).getByRole("button", { name: /Corner café/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Leave as unknown" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
     expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: null, learnedPlaceId: "00000000-0000-4000-8000-000000000201" });
     release({ ok: true, json: async () => ({ ok: true }) });
   });
@@ -175,6 +190,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={onCorrected} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place", joinsTrips: true }} />);
+    moreOptions();
     fireEvent.click(screen.getByRole("button", { name: "I wasn't here" }));
     expect(clientFetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
@@ -189,10 +205,12 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
   it("offers I wasn't here only between two trips, and never for a place you are still at", () => {
     render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    moreOptions();
     expect(screen.queryByRole("button", { name: "I wasn't here" })).toBeNull();
     cleanup();
     render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place({ stoppedAt: null }), label: "Unknown place", joinsTrips: true }} />);
+    moreOptions();
     expect(screen.queryByRole("button", { name: "I wasn't here" })).toBeNull();
   });
 
@@ -201,6 +219,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place", joinsTrips: true }} />);
+    moreOptions();
     fireEvent.click(screen.getByRole("button", { name: "I wasn't here" }));
     fireEvent.click(screen.getByRole("button", { name: "Take it off your day" }));
     expect((await screen.findByRole("alert")).textContent).toContain("already in a block");
@@ -215,20 +234,28 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(evidenceFetch.mock.calls[0][0]).toBe(`/api/timeline/items/seg-cafe/evidence?kind=place&startedAt=${encodeURIComponent(at(8, 40))}`);
   });
 
-  it("keeps Done secondary until something changes (owner item O)", () => {
+  it("offers the question's Yes as the primary until something is edited, then Save (owner item O, round 2)", async () => {
+    // With the visit's centre, so "Save this place" shows.
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
     render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn() }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    const done = () => screen.getByRole("button", { name: "Done" });
-    expect(done().className).toContain("ui-button-secondary");
-    expect(done().className).not.toContain("ui-button-primary");
-    fireEvent.click(screen.getByRole("radio", { name: /Exampleton Library/ }));
-    expect(done().className).toContain("ui-button-primary");
-    // Back as it was: nothing to send, so secondary again.
-    fireEvent.click(screen.getByRole("radio", { name: /Leave as unknown/ }));
-    expect(done().className).toContain("ui-button-secondary");
+    const primary = () => document.querySelector(".ui-button-primary")?.textContent;
+    expect(primary()).toBe("Yes");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // No Cancel/Done pair on a place: the ✕ closes, Not now answers no.
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("Start time", "08:45");
+    expect(primary()).toBe("Save");
+    // Back as it was: nothing to send, so the question's Yes again.
+    typeTime("Start time", "08:40");
+    expect(primary()).toBe("Yes");
     // Typing a name for "Save this place" is a change too.
     fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
-    expect(done().className).toContain("ui-button-primary");
+    expect(primary()).toBe("Save");
   });
 
   it("asks the row's \"?\" at the top, and an answer closes the dialog (owner item A)", () => {
@@ -237,9 +264,12 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    const question = screen.getByRole("group", { name: "Visited Boots?" });
-    // First in the dialog, above the map and the choices.
+    // No question card: the question is a plain line, first in the dialog, above the map and the choices.
+    expect(document.querySelector(".location-correction-question")).toBeNull();
+    const question = document.querySelector("p.location-correction-ask")!;
+    expect(question.textContent).toBe("Visited Boots?");
     expect(question.parentElement?.firstElementChild).toBe(question);
+    // Its Yes is the footer's primary.
     fireEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(onAnswer).toHaveBeenCalledWith(true);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -247,24 +277,26 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       question={{ text: "Where were you?", yesLabel: null, noLabel: "Not now", onAnswer }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    // A place it can't name has no Yes: Not now, or a choice below.
+    // A place it can't name has no Yes: Not now, or a choice below; "Where were you?" isn't repeated as a line.
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(document.querySelector(".location-correction-ask")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(onAnswer).toHaveBeenLastCalledWith(false);
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it("hands focus to the cleared activity chip when Don't log takes the pick away (Codex r5 on #620)", () => {
+  it("clears a Logs as pick from its own chip, keeping focus on it (Codex r5 on #620; Don't log removed in round 2)", () => {
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands", color: "teal" }]} clock="24h" onClose={vi.fn()}
       onCorrected={vi.fn()} places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    moreOptions();
     const chip = screen.getByRole("radio", { name: "Errands" });
     chip.focus();
     fireEvent.click(chip);
-    const dontLog = screen.getByRole("button", { name: "Don't log" });
-    // Reached by keyboard and pressed: it goes, and focus lands on the chip it cleared, never on the page.
-    dontLog.focus();
-    expect(document.activeElement).toBe(dontLog);
-    fireEvent.click(dontLog);
+    expect(chip.getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByRole("button", { name: "Don't log" })).toBeNull();
+    // Pressed again, the pick goes, and focus stays on the chip it cleared, never on the page.
+    fireEvent.click(chip);
     expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Errands" }));
     expect(screen.getByRole("radio", { name: "Errands" }).getAttribute("aria-checked")).toBe("false");
   });
@@ -273,16 +305,17 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
       places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    moreOptions();
     // Nothing picked is "don't log": no "Don't log" choice to select, and no activity checked.
     expect(screen.queryByRole("radio", { name: "Don't log" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Don't log" })).toBeNull();
     expect(screen.getByRole("radio", { name: "Errands" }).getAttribute("aria-checked")).toBe("false");
-    // Picked, "Don't log" is a quiet way back; picked again, it logs.
+    // Picked, the chip again is the way back; picked again, it logs.
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    fireEvent.click(screen.getByRole("button", { name: "Don't log" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
     expect(screen.getByRole("radio", { name: "Errands" }).getAttribute("aria-checked")).toBe("false");
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
     expect(sent()).toEqual([{ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands" }]);
@@ -297,9 +330,12 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={onCorrected}
       places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:45" } });
+    moreOptions();
+    typeTime("Start time", "08:45");
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    // Edited, the primary saves the edits instead of answering Yes.
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     // The time correction first, so log_place reads the corrected place.
     expect(sent()).toEqual([
@@ -317,22 +353,27 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
       places={places} question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn() }}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    moreOptions();
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("button", { name: "Save" }).className).toContain("ui-button-primary");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Your blocks already cover this place's time.");
     expect(onClose).not.toHaveBeenCalled();
   });
 
   it("starts its fields again from the place a refresh moved, once nothing is saving (Codex r2 on #609)", () => {
-    const view = render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+    const onClose = vi.fn();
+    const ask = { text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn() };
+    const view = render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places} question={ask}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
-    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("08:40");
-    view.rerender(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+    moreOptions();
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("08:40");
+    view.rerender(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places} question={ask}
       target={{ kind: "place", place: place({ startedAt: at(8, 50) }), label: "Unknown place" }} />);
-    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("08:50");
-    // Nothing changed from the new copy: Done is secondary and sends nothing.
-    expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-secondary");
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("08:50");
+    // Nothing changed from the new copy: the primary is still the question's Yes, not Save.
+    expect(screen.getByRole("button", { name: "Yes" }).className).toContain("ui-button-primary");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     // Its map is read again for the new times.
     expect(evidenceFetch.mock.calls.map(([url]) => url)).toEqual([
       `/api/timeline/items/seg-cafe/evidence?kind=place&startedAt=${encodeURIComponent(at(8, 40))}`,
@@ -362,6 +403,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     await screen.findByTestId("evidence-map");
+    moreOptions();
     fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
     fireEvent.click(screen.getByRole("button", { name: "Save place" }));
     expect((await screen.findByRole("alert")).textContent).toBe("That place changed. Try again.");
@@ -371,16 +413,131 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
   });
 
-  it("sorts saved places nearest first when the map knows the visit's centre, the far ones behind Show all saved places", async () => {
-    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence([{ id: places[1].id, distanceMeters: 120 }, { id: places[0].id, distanceMeters: 5_400 }]) });
-    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+  it("saves a typed name from the footer Save with the other edits, and a search's new place with them too (Codex r1 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    const { unmount } = render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     await screen.findByTestId("evidence-map");
-    const names = () => within(screen.getByRole("radiogroup", { name: "Where were you?" })).getAllByRole("radio").map((radio) => radio.closest("label")?.querySelector("b")?.textContent);
-    expect(names()).toEqual(["Exampleton Library", "Leave as unknown"]);
+    moreOptions();
+    typeTime("Start time", "08:45");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/places", "/api/timeline/corrections", "/api/timeline/corrections"]);
+    expect(sent()[1]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
+    expect(sent()[2]).toMatchObject({ kind: "times", itemId: "seg-cafe" });
+    unmount();
+
+    // The same through a search's "Save “…” as a place".
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-two" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const closed = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={closed} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("End time", "09:50");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Bakery” as a place" }));
+    await waitFor(() => expect(closed).toHaveBeenCalledTimes(1));
+    expect(sent()[1]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-two", learnedPlaceId: null });
+    expect(sent()[2]).toMatchObject({ kind: "times", itemId: "seg-cafe" });
+  });
+
+  it("keeps an edited time for the retry when a save stops after the new place was set (Codex r2 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Couldn't change the times." }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    const dialog = (patch: Partial<TimelinePlace>) => (
+      <LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+        target={{ kind: "place", place: place(patch), label: "Unknown place" }} />
+    );
+    const view = render(dialog({}));
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("Start time", "08:45");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Couldn't change the times.");
+    // The refresh after the partial save: the visit is now at the new place, its times unchanged.
+    view.rerender(dialog({ placeId: "place-new" }));
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("08:45");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(sent().at(-1)).toMatchObject({ kind: "times", itemId: "seg-cafe" });
+  });
+
+  it("looks up a search's lost creation from the footer Save before setting the visit (Codex r2 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    const created = { id: "place-bakery", name: "Bakery", latitude: 51.5, longitude: -0.1 };
+    clientFetch.mockReset()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ places: [...places.map((each) => ({ ...each, latitude: 10, longitude: 20 })), created] }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Bakery” as a place" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("needs a connection");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const calls = clientFetch.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${url}`);
+    expect(calls).toEqual(["POST /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+    // (With a question that has a Yes, the footer offers Save while the creation is unknown: Codex r3 on #636.)
+    const last = JSON.parse((clientFetch.mock.calls.at(-1)![1] as RequestInit).body as string);
+    expect(last).toMatchObject({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-bakery", learnedPlaceId: null });
+  });
+
+  it("offers Save, not the question's Yes, while a creation's outcome is unknown (Codex r3 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset().mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const onAnswer = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Bakery” as a place" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("lists at most two saved places within 1 km, nearest first, and finds the far ones by search", async () => {
+    const shop = { id: "00000000-0000-4000-8000-000000000103", name: "Corner Shop", role: null };
+    const park = { id: "00000000-0000-4000-8000-000000000104", name: "Exampleton Park", role: null };
+    const nearby = [...places, shop, park];
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence([
+      { id: park.id, distanceMeters: 900 }, { id: places[1].id, distanceMeters: 120 }, { id: shop.id, distanceMeters: 600 }, { id: places[0].id, distanceMeters: 5_400 }
+    ]) });
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={nearby}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    const names = (list: string) => within(screen.getByRole("list", { name: list })).getAllByRole("button").map((button) => button.querySelector("b")?.textContent);
+    expect(names("Saved places nearby")).toEqual(["Exampleton Library", "Corner Shop"]);
     expect(screen.getByText("Saved place · 120 m away")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show all saved places" }));
-    expect(names()).toEqual(["Exampleton Library", "Home", "Leave as unknown"]);
+    // No "Show all saved places" and no radio "Leave as unknown" row: the far ones are a search away.
+    expect(screen.queryByRole("button", { name: "Show all saved places" })).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "home" } });
+    expect(names("Saved places found")).toEqual(["Home", "Save “home” as a place"]);
+    expect(screen.getByText("Saved place · 5.4 km away")).not.toBeNull();
+    // At most three by search.
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "e" } });
+    expect(names("Saved places found")).toHaveLength(4);
   });
 
   it("gives a trip its own dialog: its legs, I didn't leave and This wasn't a trip", async () => {
@@ -409,8 +566,10 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const view = render(<LocationCorrectionDialog {...props} />);
     await screen.findByTestId("evidence-map");
     // Typing, a choice and a re-render from above (the clock's tick) change nothing for the map.
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "08:45" } });
-    fireEvent.change(screen.getByLabelText("End"), { target: { value: "09:55" } });
+    moreOptions();
+    typeTime("Start time", "08:45");
+    typeTime("End time", "09:55");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "lib" } });
     view.rerender(<LocationCorrectionDialog {...props} />);
     expect(mapStandIn.mounts).toBe(1);
     expect(mapStandIn.evidence.length).toBeGreaterThan(2);
@@ -466,10 +625,11 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const onClose = vi.fn();
     render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands" }]} clock="24h" onClose={onClose} onCorrected={vi.fn()}
       places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    moreOptions();
     fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Check your connection");
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const [first, retry] = bodies();
     expect(first.clientCorrectionId).toMatch(/^[0-9a-f-]{36}$/);
@@ -548,6 +708,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     await screen.findByTestId("evidence-map");
+    moreOptions();
     fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
     fireEvent.click(screen.getByRole("button", { name: "Save place" }));
     expect((await screen.findByRole("alert")).textContent).toContain("needs a connection");
@@ -570,6 +731,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
     await screen.findByTestId("evidence-map");
+    moreOptions();
     fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
     fireEvent.click(screen.getByRole("button", { name: "Save place" }));
     await screen.findByRole("alert");
@@ -589,6 +751,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
         target={{ kind: "place", place: place(), label: "Unknown place" }} />);
       await screen.findByTestId("evidence-map");
+      moreOptions();
       fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
       fireEvent.click(screen.getByRole("button", { name: "Save place" }));
       await screen.findByRole("alert");
@@ -622,6 +785,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
         target={{ kind: "place", place: place(), label: "Unknown place" }} />);
       await screen.findByTestId("evidence-map");
+      moreOptions();
       fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
       fireEvent.click(screen.getByRole("button", { name: "Save place" }));
       await screen.findByRole("alert");
@@ -640,6 +804,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
         target={{ kind: "place", place: place(), label: "Unknown place" }} />);
       await screen.findByTestId("evidence-map");
+      moreOptions();
       fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
       fireEvent.click(screen.getByRole("button", { name: "Save place" }));
       await screen.findByRole("alert");
@@ -677,11 +842,16 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       render(<LocationCorrectionDialog activities={activities} clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places} question={ask}
         target={{ kind: "place", place: place(), label: "Unknown place", joinsTrips: true }} />);
       await screen.findByTestId("evidence-map");
-      expect(sections()).toEqual([...DIALOG_SECTION_ORDER]);
+      // A place is the question itself (round 2): no question card; the rest waits behind More options.
+      expect(sections()).toEqual(["map", "where"]);
+      moreOptions();
+      expect(sections()).toEqual(["map", "where", "logs-as", "times"]);
+      expect(sections()).toEqual(inOrder(sections()));
       cleanup();
       render(<LocationCorrectionDialog activities={activities} clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
         target={{ kind: "place", place: home(), label: "Home" }} />);
       await screen.findByTestId("evidence-map");
+      moreOptions();
       expect(sections()).toEqual(["map", "where", "logs-as", "times"]);
       cleanup();
       render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
@@ -710,6 +880,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     it("never selects Don't log as a filled pill: the Logs as chips are the shared activity chips", () => {
       render(<LocationCorrectionDialog activities={[{ id: "cat-errands", name: "Errands", color: "teal" }]} clock="24h" onClose={vi.fn()}
         onCorrected={vi.fn()} places={places} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+      moreOptions();
       const group = screen.getByRole("radiogroup", { name: "Logs as" });
       expect(within(group).getAllByRole("radio").map((radio) => radio.className)).toEqual(["df-rchip"]);
       expect(group.querySelector(".df-rchip-block.df-block")).not.toBeNull();

@@ -43,9 +43,9 @@ describe("the band's styles and wiring", () => {
     const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
     expect(shell).toContain("useBandScrolled(timerBandRef, pageMainRef, pathname)");
     expect(shell).toContain('data-scrolled={contentUnderBand ? "true" : undefined}');
-    expect(shell).toContain("<main ref={pageMainRef}>");
-    // Calendar measures against its own panel, which its grid scrolls inside.
-    expect(shell).toContain('<main className="swiss-timeline-main" ref={pageMainRef}>');
-    expect(shell.match(/data-scrolled=\{contentUnderBand \? "true" : undefined\}/g)).toHaveLength(2);
+    // One tree for every page (UI review round 2): one band and one main; Calendar's main is its own panel, which its
+    // grid scrolls inside.
+    expect(shell).toContain('<main className={isTimeline ? "swiss-timeline-main" : undefined} ref={pageMainRef}>');
+    expect(shell.match(/data-scrolled=\{contentUnderBand \? "true" : undefined\}/g)).toHaveLength(1);
   });
 });

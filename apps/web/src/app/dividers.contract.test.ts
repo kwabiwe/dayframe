@@ -56,7 +56,6 @@ const EXEMPT: Record<string, string> = {
   ".landing-hero": "signed-out landing page: a section rule in the centred page column, not in a surface",
   ".landing-footer": "signed-out landing page: the footer rule in the centred page column",
   ".swiss-persistent-timer-shell::after": "the sticky timer band's scroll edge (owner design C1): a frame",
-  ".calendar-grid-corner, .calendar-day-heading": "calendar grid lines are structure, not row dividers",
   ".timeline-list-table th": "the table header underline; the header row is visually hidden in Blocks",
   ".timeline-list-day-heading > td": "legacy day heading; `.timeline-list-table .timeline-list-day-heading > td` removes it",
   ".report-data-table": "inside the Reports card, whose padding insets the line",

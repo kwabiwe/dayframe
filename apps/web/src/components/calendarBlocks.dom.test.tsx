@@ -384,14 +384,6 @@ describe("Calendar in Blocks", () => {
     expect(answer).toHaveBeenCalledWith(clash, true, expect.stringMatching(/^Ended Deep work at /));
     await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).toBeNull());
   });
-
-  it("labels each day heading with its full date and its logged total", () => {
-    renderCalendar([entry({ id: "a", startedAt: local(9), stoppedAt: local(10) })]);
-    const heading = document.querySelector(".calendar-day-heading")!;
-    expect(heading.querySelector(".calendar-day-date small")?.textContent).toBe("Sun");
-    expect(heading.querySelector(".calendar-day-date b")?.textContent).toBe("2");
-    expect(heading.querySelector(".calendar-day-total")?.getAttribute("aria-label")).toBe("1h logged");
-  });
 });
 
 describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {

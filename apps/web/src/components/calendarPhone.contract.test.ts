@@ -34,7 +34,8 @@ describe("Calendar phone layout", () => {
     expect(views).toContain('className="calendar-phone-zoom" role="group" aria-label="Calendar zoom"');
     expect(styles).toMatch(/\.calendar-phone-zoom \{\s*display: none;/);
     const phone = styles.slice(styles.lastIndexOf("/* Calendar phone layout"));
-    expect(phone).toMatch(/\.calendar-grid-corner \.calendar-corner-zoom \{\s*display: none;/);
+    // The day row keeps its zoom cell on phones (the days keep their columns); only its buttons go (UI review round 2).
+    expect(styles).toMatch(/\.df-cal-dayrow-zoom \{\s*overflow: hidden;\s*visibility: hidden;/);
     expect(phone).toMatch(/\.calendar-phone-zoom button \{[^}]*width: 44px;[^}]*height: 44px;/);
     expect(phone).toMatch(/\.calendar-now-pill \{[^}]*white-space: nowrap;/);
   });

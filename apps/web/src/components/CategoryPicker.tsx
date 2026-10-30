@@ -34,6 +34,7 @@ import {
   FloatingListSearch,
   restoreFocusIfDropped
 } from "@/components/FloatingList";
+import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention } from "@/lib/command-parse";
 
@@ -54,6 +55,7 @@ export function CategoryPicker({
   onOpenChange,
   onSelect,
   open,
+  panelWidth,
   portal: portalProp = false,
   scope,
   selectedId,
@@ -66,6 +68,11 @@ export function CategoryPicker({
    * Description, where the typed `@` list opens), and becomes the phone sheet under it.
    */
   anchorRef?: RefObject<HTMLElement | null>;
+  /**
+   * Proposed (UI review round 2): the list's fixed width, under its own trigger, the same as the timer bar's other
+   * floating lists (Tags, Suggestions), instead of the Description's width.
+   */
+  panelWidth?: number;
   ariaLabelledBy?: string;
   categories: CategoryRow[];
   className?: string;
@@ -132,6 +139,7 @@ export function CategoryPicker({
   const searchable = variant === "more" || blockPanel;
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchFocusRing = useKeyboardFocusRing();
   const selectedCategory = categories.find((category) => category.id === selectedId) ?? null;
   const trimmedQuery = query.trim();
   const listedCategories = useMemo(() => {
@@ -307,13 +315,13 @@ export function CategoryPicker({
       const margin = 12;
       const gap = 6;
       // The block's Activities list lines up with the Description field, where `@` opens it.
-      const anchor = blockPanel ? anchorRef?.current ?? root : null;
+      const anchor = blockPanel && !panelWidth ? anchorRef?.current ?? root : null;
       const triggerRect = (anchor ?? trigger).getBoundingClientRect();
       const rootRect = (anchor ?? root).getBoundingClientRect();
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
       // The "All activities" chip is narrow; its menu takes a comfortable width of its own.
       const width = Math.min(
-        blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width,
+        panelWidth ?? (blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width),
         availableWidth
       );
       // The typed lists' 19rem plus the search field (22.5rem), so as many rows show; they scroll inside.
@@ -359,7 +367,7 @@ export function CategoryPicker({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [anchorRef, blockPanel, listPanel, open, portal, searchable, triggerRef]);
+  }, [anchorRef, blockPanel, listPanel, open, panelWidth, portal, searchable, triggerRef]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -1021,6 +1029,8 @@ export function CategoryPicker({
               aria-label="Search activities"
               autoComplete="off"
               className="ui-control category-picker-search"
+              data-focus-ring={searchFocusRing.focusRing}
+              {...searchFocusRing.handlers}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setActiveIndex(0);
