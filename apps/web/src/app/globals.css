@@ -6216,6 +6216,11 @@ dialog.ui-dialog.df-range-custom {
   min-height: var(--location-evidence-frame-height);
 }
 
+/* MapKit JS sizes its view to the container's own height, not a minimum (a 0 px view draws nothing). */
+.location-evidence-map.is-mapkit {
+  height: var(--location-evidence-frame-height);
+}
+
 .location-evidence-empty {
   display: grid;
   place-content: center;
