@@ -29,6 +29,8 @@ type Props = {
    * `evidenceSheetCaption`, null for none. The gaps and stops are in Settings › Location details (`app/location-details.tsx`).
    */
   caption?: string | null;
+  /** The map's height, when not the full map's 280 points (the sheets' 160). */
+  height?: number;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
   reduceMotion?: boolean;
   /** Changes once per place chosen from a list; each change shows `selectedPoint` with the stay. */
@@ -51,6 +53,7 @@ export function LocationEvidenceMap({
   showDetails = true,
   visitOnly = false,
   caption,
+  height,
   reduceMotion = false,
   revealChoiceToken,
   onSelectPoint,
@@ -164,7 +167,7 @@ export function LocationEvidenceMap({
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
         rotateEnabled={false}
-        style={styles.map}
+        style={height ? [styles.map, { height }] : styles.map}
       >
         {route.length >= 2 ? <Polyline coordinates={route} strokeColor={accentColor} strokeWidth={4} /> : null}
         {route.length < 2 && straightLineFallback.length >= 2 ? (

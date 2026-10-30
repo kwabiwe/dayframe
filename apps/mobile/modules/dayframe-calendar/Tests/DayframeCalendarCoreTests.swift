@@ -1885,6 +1885,17 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertFalse(gate.resolve(.run))
   }
 
+  func testDaySwipeTicksOnceAndThinsFastSwipes() {
+    var gate = DayframeCalendarDaySwipeTickGate()
+    XCTAssertTrue(gate.shouldTick(at: 10))
+    XCTAssertFalse(gate.shouldTick(at: 10.05))
+    XCTAssertFalse(gate.shouldTick(at: 10.119))
+    XCTAssertTrue(gate.shouldTick(at: 10.13))
+    XCTAssertTrue(gate.shouldTick(at: 11))
+    // A clock that went backwards never silences it.
+    XCTAssertTrue(gate.shouldTick(at: 5))
+  }
+
   func testScrollToNowRequestIsOptionalInTheModel() throws {
     // An older bundle's model has no such key.
     let olderData = try JSONEncoder().encode(DayframeCalendarPresentationRecord())

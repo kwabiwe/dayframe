@@ -877,6 +877,13 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
         target={{ kind: "place", place: home(), label: "Home" }} />);
       expect((await screen.findByTestId("evidence-map")).textContent).toBe("");
       expect(document.body.textContent).not.toMatch(/reading/);
+      // A trip says nothing of them either, on the trip or on its leg.
+      cleanup();
+      const fetched = evidence();
+      evidenceFetch.mockResolvedValue({ ok: true, json: async () => ({ ...fetched, segment: { ...fetched.segment, kind: "commute" } }) });
+      render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places} target={tripTarget()} />);
+      expect((await screen.findByTestId("evidence-map")).textContent).toBe("");
+      expect(document.body.textContent).not.toMatch(/reading/);
     });
 
     it("never selects Don't log as a filled pill: the Logs as chips are the shared activity chips", () => {

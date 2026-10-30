@@ -77,6 +77,8 @@ export function BottomSheetShell({
   fixedHeader,
   testID,
   commitRef,
+  discardRef,
+  secondaryAction,
   actionTone,
   children,
 }: {
@@ -103,6 +105,10 @@ export function BottomSheetShell({
    * close it as the action does: `onApply` runs, then the sheet leaves with its usual exit.
    */
   commitRef?: { current: (() => void) | null };
+  /** Set to the sheet's own discard (its usual exit, no change), for a close control inside it. */
+  discardRef?: { current: (() => void) | null };
+  /** A quiet action beside the primary one (the place sheet's "Not now"): it does its own work; the sheet stays until told. */
+  secondaryAction?: { disabled?: boolean; label: string; onPress: () => void; testID: string };
   /** The action's fill: coral for a filter's primary "Show", neutral for a Done (the date sheet's). Defaults by layout. */
   /** "quiet" (owner item O, 28 Oct 2026): a secondary-looking Done while nothing has changed. */
   actionTone?: "accent" | "neutral" | "quiet";
@@ -193,6 +199,59 @@ export function BottomSheetShell({
       if (commitRef.current === requestCommit) commitRef.current = null;
     };
   });
+  useEffect(() => {
+    if (!discardRef) return;
+    discardRef.current = requestDiscard;
+    return () => {
+      if (discardRef.current === requestDiscard) discardRef.current = null;
+    };
+  });
+
+  const primaryAction = (
+    <Pressable
+      testID={`${testID}-action`}
+      accessibilityRole="button"
+      accessibilityLabel={action}
+      accessibilityState={{ disabled: disabled || closing }}
+      disabled={disabled || closing}
+      onPress={requestCommit}
+      style={[
+        s.apply,
+        calendarLayout ? s.dateAction : s.filterAction,
+        compactCalendarLayout ? s.compactDateAction : null,
+        {
+          // The filter's "Show N activities" is the sheet's primary action (coral); a
+          // date sheet's Done is neutral (UIA-026). Both are full width.
+          backgroundColor:
+            disabled || closing || actionTone === "quiet"
+              ? theme.surfaceMuted
+              : neutralAction
+                ? theme.textPrimary
+                : theme.accent,
+        },
+        secondaryAction ? s.footerPrimary : null,
+      ]}
+    >
+      <Text
+        maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+        style={[
+          s.actionText,
+          {
+            color:
+              disabled || closing
+                ? theme.textSecondary
+                : actionTone === "quiet"
+                  ? theme.textPrimary
+                  : neutralAction
+                  ? theme.background
+                  : theme.onAccent,
+          },
+        ]}
+      >
+        {action}
+      </Text>
+    </Pressable>
+  );
 
   const overlay = (
     <View style={s.modal}>
@@ -273,48 +332,22 @@ export function BottomSheetShell({
               {children}
             </ScrollView>
           )}
-          <Pressable
-            testID={`${testID}-action`}
-            accessibilityRole="button"
-            accessibilityLabel={action}
-            accessibilityState={{ disabled: disabled || closing }}
-            disabled={disabled || closing}
-            onPress={requestCommit}
-            style={[
-              s.apply,
-              calendarLayout ? s.dateAction : s.filterAction,
-              compactCalendarLayout ? s.compactDateAction : null,
-              {
-                // The filter's "Show N activities" is the sheet's primary action (coral); a
-                // date sheet's Done is neutral (UIA-026). Both are full width.
-                backgroundColor:
-                  disabled || closing || actionTone === "quiet"
-                    ? theme.surfaceMuted
-                    : neutralAction
-                      ? theme.textPrimary
-                      : theme.accent,
-              },
-            ]}
-          >
-            <Text
-              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-              style={[
-                s.actionText,
-                {
-                  color:
-                    disabled || closing
-                      ? theme.textSecondary
-                      : actionTone === "quiet"
-                        ? theme.textPrimary
-                        : neutralAction
-                        ? theme.background
-                        : theme.onAccent,
-                },
-              ]}
-            >
-              {action}
-            </Text>
-          </Pressable>
+          {secondaryAction ? (
+            <View style={s.footerRow}>
+              <Pressable
+                testID={secondaryAction.testID}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(secondaryAction.disabled) || closing }}
+                disabled={Boolean(secondaryAction.disabled) || closing}
+                hitSlop={4}
+                onPress={secondaryAction.onPress}
+                style={({ pressed }) => [s.secondary, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.actionText, { color: theme.textSecondary }]}>{secondaryAction.label}</Text>
+              </Pressable>
+              {primaryAction}
+            </View>
+          ) : primaryAction}
         </View>
       </SwipeDismissSheet>
     </View>
@@ -385,4 +418,8 @@ const s = StyleSheet.create({
   dateAction: { marginTop: 16, marginHorizontal: 10 },
   filterAction: { alignSelf: "stretch", width: "100%", maxWidth: "100%" },
   compactDateAction: { marginTop: 6 },
+  // A quiet action to the left of the primary one, which keeps the rest of the row.
+  footerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  footerPrimary: { flex: 1, width: undefined, alignSelf: "auto" },
+  secondary: { minHeight: 48, minWidth: 88, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
 });

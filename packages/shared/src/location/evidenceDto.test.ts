@@ -20,8 +20,9 @@ describe("Location Review arrival presentation contract", () => {
 });
 
 describe("the place and trip sheets' map line (owner feedback, 29 Oct 2026)", () => {
-  const evidence = (evidenceCount: number, evidenceExpired = false) => ({ segment: { evidenceCount }, evidenceExpired }) as never;
-  it("says at most how many readings, never the silences, and nothing for a saved place", () => {
+  const evidence = (evidenceCount: number, evidenceExpired = false, kind = "stay") => ({ segment: { kind, evidenceCount }, evidenceExpired }) as never;
+  it("says at most how many readings, never the silences, and nothing for a saved place or a trip", () => {
+    expect(evidenceSheetCaption(evidence(14, false, "commute"), { knownPlace: false })).toBeNull();
     expect(evidenceSheetCaption(evidence(14), { knownPlace: false })).toBe("Based on 14 readings");
     expect(evidenceSheetCaption(evidence(1), { knownPlace: false })).toBe("Based on 1 reading");
     expect(evidenceSheetCaption(evidence(14), { knownPlace: true })).toBeNull();

@@ -30,10 +30,16 @@ vi.mock("react-native", async () => {
 });
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" }, runOnJS: (fn: unknown) => fn }));
 // The List's day swipe (a horizontal pan on the List).
+const swipe = vi.hoisted(() => ({ onEnd: null as null | ((event: { translationX: number; velocityX: number }, success: boolean) => void), tick: vi.fn() }));
+vi.mock("../../lib/daySwipeHaptic", () => ({ playDaySwipeTick: swipe.tick }));
 vi.mock("react-native-gesture-handler", () => {
   function Pan() {
     const pan: Record<string, unknown> = {};
-    for (const method of ["enabled", "activeOffsetX", "failOffsetY", "onEnd"]) pan[method] = () => pan;
+    for (const method of ["enabled", "activeOffsetX", "failOffsetY"]) pan[method] = () => pan;
+    pan.onEnd = (handler: unknown) => {
+      swipe.onEnd = handler as typeof swipe.onEnd;
+      return pan;
+    };
     return pan;
   }
   return { Gesture: { Pan }, GestureDetector: ({ children }: { children: unknown }) => children };
@@ -973,6 +979,33 @@ describe("CalendarListView (location v4 step 9)", () => {
       mount({ ...base, scrollToFirstCheck: 0 });
       expect(scrollTo).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("the List's day swipe haptic", () => {
+  it("ticks once for each swipe that changes the day, and never for one too short", () => {
+    swipe.tick.mockClear();
+    const onSwipeDay = vi.fn();
+    render({ onSwipeDay });
+    swipe.onEnd?.({ translationX: -30, velocityX: 100 }, true);
+    expect(swipe.tick).not.toHaveBeenCalled();
+    expect(onSwipeDay).not.toHaveBeenCalled();
+    // Cancelled, however far it went: no day change and no haptic (Codex r1 on #641).
+    swipe.onEnd?.({ translationX: -200, velocityX: 900 }, false);
+    expect(swipe.tick).not.toHaveBeenCalled();
+    expect(onSwipeDay).not.toHaveBeenCalled();
+    swipe.onEnd?.({ translationX: -80, velocityX: 100 }, true);
+    expect(swipe.tick).toHaveBeenCalledTimes(1);
+    expect(onSwipeDay).toHaveBeenCalledWith(1);
+  });
+
+  it("does not tick on the day chip or a change of day from outside", () => {
+    swipe.tick.mockClear();
+    const { tree } = render({ checkTotal: 2, onNextCheck: vi.fn() });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-checks-chip" }).props.onPress(); });
+    act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24) + 86_400_000} dayStartMs={at(0) + 86_400_000} entries={[]} loggedLabel="0h"
+      nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={null} />); });
+    expect(swipe.tick).not.toHaveBeenCalled();
   });
 });
 

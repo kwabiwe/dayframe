@@ -487,7 +487,9 @@ export function useLocationCorrections({
       // The sheet hands over a Nearby pick's Apple Place ID (PRD D23), but a saved place and a timeline correction
       // have no field for it yet (that needs a server change), so it is not sent: only the "?"'s Yes to a guess
       // (`record_poi_once`) adds to the venue history today.
-      onSavePlace={shown.kind === "place" && shown.place.matchKind === "unknown" && !shown.place.blockIds.length && shownCentre
+      // Any place not saved yet, as the web's: an "ambiguous" visit near several saved places had no Nearby list, so it
+      // never got its guess either.
+      onSavePlace={shown.kind === "place" && !shown.place.placeId && !shown.place.blockIds.length && shownCentre
         ? (name, rest, beforeEnqueue) => savePlace(open.id, open.ownerKey, shown.place, name, rest, beforeEnqueue) : undefined}
       places={places}
       presentationId={open.id}

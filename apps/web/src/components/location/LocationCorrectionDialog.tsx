@@ -43,7 +43,7 @@ const NearbyPlaces = dynamic(() => import("@/components/location/NearbyPlaces").
  * the person leaves alone stays as Dayframe made it.
  *
  * One layout for every dialog, as the iPhone's sheets (owner feedback, 29 Oct 2026; brand guide "Place and trip
- * sheet"): the title and times; the "?" (one Yes); the map (the visit's area or the trip's route, at most "Based on
+ * sheet"): the title and times; the "?" (one Yes); the map (the visit's area or the trip's route, for an unknown place at most "Based on
  * N readings"); "Where were you?" (places: saved places nearest first; Apple's nearby places are the iPhone's);
  * "Logs as" (compact activity chips; none picked is "don't log"); the times; then the corrections.
  */

@@ -147,14 +147,14 @@ export function evidencePlainSummary(
 
 /**
  * The map's one line on the place and trip sheets (owner feedback, 29 Oct 2026): never the silences or stops,
- * which are in the iPhone's Settings › Location details (`evidencePlainSummary`). A saved or named place says nothing, and an
- * unknown place or a trip at most "Based on 14 readings"; no readings, or readings already deleted, say nothing.
+ * which are in the iPhone's Settings › Location details (`evidencePlainSummary`). A saved or named place and a trip say nothing, and an
+ * unknown place at most "Based on 14 readings"; no readings, or readings already deleted, say nothing.
  */
 export function evidenceSheetCaption(
   evidence: Pick<LocationReviewEvidenceDto, "segment" | "evidenceExpired">,
   options: { knownPlace: boolean }
 ): string | null {
-  if (options.knownPlace || evidence.evidenceExpired) return null;
+  if (evidence.segment.kind !== "stay" || options.knownPlace || evidence.evidenceExpired) return null;
   const count = evidence.segment.evidenceCount;
   if (!Number.isFinite(count) || count <= 0) return null;
   return `Based on ${count} reading${count === 1 ? "" : "s"}`;
