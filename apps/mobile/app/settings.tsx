@@ -3513,7 +3513,7 @@ function HealthTypeSheet({
 /** Settings › Location › How suggestions work (UIA-022). */
 const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
   { glyph: "inbox", lead: "Suggestions are asked in Calendar.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
-  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain is asked in Calendar." },
+  { glyph: "check", lead: "Saved places and trips log on their own.", text: "A clear stay at a saved place with Log automatically on, or a clear trip between two known places while Log trips automatically is on, is logged straight away; anything less certain is asked in Calendar." },
   { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
   { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
 ];
