@@ -4,7 +4,7 @@ import { createPrivateKey, sign, type KeyObject } from "node:crypto";
  * Apple MapKit JS tokens for the web map (UI review, owner 29 Oct 2026): a short-lived ES256 JWT signed on the
  * server with the MapKit JS key from Vercel (`MAPKIT_JS_TEAM_ID`, `MAPKIT_JS_KEY_ID`, `MAPKIT_JS_PRIVATE_KEY`),
  * locked to the page's own origin. The key never leaves the server. Without all three variables the web keeps its
- * current map.
+ * current map. Hosted variables are read when a deployment is built: change them, then redeploy.
  */
 export const MAPKIT_TOKEN_TTL_SECONDS = 30 * 60;
 const APPLE_ID = /^[A-Z0-9]{10}$/;
