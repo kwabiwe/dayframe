@@ -334,9 +334,11 @@ export function LocationCorrectionDialog({
   const [seenPlaceVersion, setSeenPlaceVersion] = useState(placeVersion);
   if (placeVersion !== seenPlaceVersion && !busy && target.kind === "place") {
     setSeenPlaceVersion(placeVersion);
-    setPicked(original);
-    setStart(timeValue(target.place.startedAt));
-    setEnd(target.place.stoppedAt ? timeValue(target.place.stoppedAt) : "");
+    // Only fields the person hasn't edited follow the new data: a save that stopped part-way keeps the rest of the
+    // draft for the retry (Codex r2 on #636).
+    if (picked === saved.picked) setPicked(original);
+    if (start === timeValue(saved.startedAt)) setStart(timeValue(target.place.startedAt));
+    if (end === (saved.stoppedAt ? timeValue(saved.stoppedAt) : "")) setEnd(target.place.stoppedAt ? timeValue(target.place.stoppedAt) : "");
     setSaved((current) => ({ ...current, picked: original, startedAt: target.place.startedAt, stoppedAt: target.place.stoppedAt }));
   }
   // The open leg as the newest data has it: a refresh that changed its mode moves the baseline to that mode, and
@@ -681,7 +683,9 @@ export function LocationCorrectionDialog({
       {yesQuestion && !changed
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
         // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
-        : <Button disabled={busy} onClick={() => void (newPlaceName.trim() && canSaveNew ? saveThisPlace() : apply())} variant="primary">Save</Button>}
+        // A creation whose reply was lost (from a tap, a search or the field) is looked up first (Codex r2 on #636).
+        : <Button disabled={busy} onClick={() => void (canSaveNew && (newPlaceName.trim() || pendingCreation.current)
+          ? saveThisPlace(newPlaceName.trim() ? undefined : pendingCreation.current!.name) : apply())} variant="primary">Save</Button>}
     </>
   );
   return (

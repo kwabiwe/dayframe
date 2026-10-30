@@ -15634,8 +15634,16 @@ button.timeline-location-hit:focus-visible {
 /* Touch screens: the date box's ‹ › keep 44 px targets (the box is 44 px tall there). */
 @media (any-pointer: coarse) {
   :root .df-cal-datebox .ui-icon-button {
+    position: relative;
     width: 44px;
     min-width: 44px;
+  }
+
+  /* The box's 1 px border leaves the arrow 42 px tall: its hit area reaches the full 44. */
+  :root .df-cal-datebox .ui-icon-button::after {
+    position: absolute;
+    inset: -1px 0;
+    content: "";
   }
 }
 
