@@ -585,6 +585,26 @@ describe("Review real SQLite transactions", () => {
     await store.cacheReviewPresentation({ owner, response: terminalPresentation(input.bootstrap, ids, syntheticId(95)) });
     expect(count("review_mutation_outbox")).toBe(0);
   });
+  it("a venue outing's retry hands over with no block for its Stay, never without its trips' (Codex r1 on #642)", async () => {
+    const input = outingInput();
+    const mutation = { ...input.mutation, action: "confirm_outing" as const, venue: { name: "Synthetic Cafe", applePlaceId: "ISYNTHETICVENUE1" } };
+    await store.enqueueReviewMutation({ ...input, mutation });
+    const ids = input.affectedItems.map(x => x.id);
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "confirm_outing", status: "accepted",
+      reviewItemIds: ids, alreadyResolved: true, equivalent: true }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    const owner = { workspaceId: input.bootstrap.workspace.id, userId: input.bootstrap.user.id, backendId: "staging-fixture" };
+    const blockForTripsOnly = terminalPresentation(input.bootstrap, ids, syntheticId(95));
+    const withoutStay = { ...blockForTripsOnly, snapshotToken: "venue-stay-covered",
+      links: blockForTripsOnly.links.map((link) => link.reviewItemId === ids[0] ? { ...link, entryIds: [] } : link) };
+    // A trip's block is still missing: it waits.
+    await store.cacheReviewPresentation({ owner, response: { ...withoutStay, snapshotToken: "venue-trip-missing",
+      links: withoutStay.links.map((link) => link.reviewItemId === ids[1] ? { ...link, entryIds: [] } : link) } });
+    expect(count("review_mutation_outbox")).toBe(1);
+    await store.cacheReviewPresentation({ owner, response: withoutStay });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
   it("selects one complete acknowledged structural action for a bounded handover lookup", async () => {
     const input = mergeInput();
     await store.enqueueReviewMutation(input);

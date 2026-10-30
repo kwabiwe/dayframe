@@ -45,7 +45,7 @@ describeWithDatabase("confirm_outing with a venue on disposable PostgreSQL", () 
   });
 
   /** An unknown stay from +10 to +40 with a trip either side, three open cards on one outing key, a day apart per call. */
-  async function outing(ownBlock: [number, number] | null = null) {
+  async function outing(ownBlock: [number, number] | null = null, stayReviewId: string | null = null) {
     const n = ++outings;
     const base = (n - 1) * 24 * 60;
     const key = `outing-${n}`;
@@ -64,20 +64,20 @@ describeWithDatabase("confirm_outing with a venue on disposable PostgreSQL", () 
          from_stay_segment_id, to_stay_segment_id, confidence, metadata)
        values ($1, $2, 'device-1', $3, 'location-v2.0', 'finalised', $4, $5, $6, $7, 'medium', '{}'::jsonb) returning id`,
       [workspaceId, userId, `${key}-${name}`, at(base + start), at(base + stop), from, to])).rows[0].id;
-    const ask = async (name: string, segmentId: string, role: string, eventType: string, start: number, stop: number) => {
+    const ask = async (name: string, segmentId: string, role: string, eventType: string, start: number, stop: number, id: string | null = null) => {
       const eventId = (await db().query<{ id: string }>(
         `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
          values ($1, $2, $3, 'location_learning', $4, $5, 'medium', $6::jsonb, 'needs_review') returning id`,
         [workspaceId, userId, `location-segment:${key}-${name}`, eventType, at(base + start),
           JSON.stringify({ clientSegmentId: `${key}-${name}`, outingKey: key, outingRole: role })])).rows[0].id;
       const reviewId = (await db().query<{ id: string }>(
-        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status, confidence, suggested_started_at,
+        `insert into review_items (id, workspace_id, user_id, event_id, location_segment_id, type, title, status, confidence, suggested_started_at,
            suggested_stopped_at, suggested_category_id)
-         values ($1, $2, $3, $4, $5, 'Outing', 'open', 'medium', $6, $7, $8) returning id`,
-        [workspaceId, userId, eventId, segmentId, eventType, at(base + start), at(base + stop), eventType === "commute_detected" ? categoryId : null])).rows[0].id;
+         values (coalesce($9::uuid, gen_random_uuid()), $1, $2, $3, $4, $5, 'Outing', 'open', 'medium', $6, $7, $8) returning id`,
+        [workspaceId, userId, eventId, segmentId, eventType, at(base + start), at(base + stop), eventType === "commute_detected" ? categoryId : null, id])).rows[0].id;
       return { eventId, reviewId };
     };
-    const stay = await ask("stay", stayRow, "stay", "unknown_stay", 10, 40);
+    const stay = await ask("stay", stayRow, "stay", "unknown_stay", 10, 40, stayReviewId);
     const tripIn = await ask("in", await trip("in", 0, 10, homeRow, stayRow), "in", "commute_detected", 0, 10);
     const tripOut = await ask("out", await trip("out", 40, 55, stayRow, homeRow), "out", "commute_detected", 40, 55);
     if (ownBlock) {
@@ -146,6 +146,18 @@ describeWithDatabase("confirm_outing with a venue on disposable PostgreSQL", () 
     expect(covered.entryIds).toHaveLength(2);
     expect(await blocks(full.stay.eventId)).toEqual([]);
     expect(await statuses([full.stay.reviewId, ...full.members])).toEqual(["accepted", "accepted", "accepted"]);
+  });
+
+  it("the stay's free time doesn't depend on which card's id sorts first (Codex r1 on #642)", async () => {
+    // The stay's times stretched over both trips, its card sorting last and then first of the three.
+    for (const stayId of ["ffffffff-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"]) {
+      const o = await outing(null, stayId);
+      const edit = { categoryId, startedAt: at(o.base + 5), stoppedAt: at(o.base + 45) };
+      await resolve(o.stay.reviewId, { action: "confirm_outing", memberReviewItemIds: o.members, venue, edit });
+      const rows = await db().query<{ minutes: number }>(
+        `select extract(epoch from stopped_at - started_at)::int / 60 as minutes from time_entries where created_from_event_id = $1`, [o.stay.eventId]);
+      expect(rows.rows.map((row) => row.minutes)).toEqual([40]);
+    }
   });
 
   it("only a stay's card takes a venue, and only confirm_outing", async () => {

@@ -291,7 +291,10 @@ async function resolveOuting(
   }
   await lockLocationSegments(client, items, session);
   const entryIds: string[] = [];
-  for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
+  const inOrder = [...items].sort((a, b) => a.id.localeCompare(b.id));
+  // A venue's free time is read first, before the trips' own blocks, so the same answer always logs the same time
+  // (Codex r1 on #642).
+  for (const item of venue ? [anchor, ...inOrder.filter((other) => other.id !== anchor.id)] : inOrder) {
     const result = await performAction(client, item, memberAction(item), session) as { entryId?: unknown; entryIds?: unknown };
     if (confirm) {
       // A venue with an activity logs only the Stay's free time: any number of blocks, none when fully covered.
