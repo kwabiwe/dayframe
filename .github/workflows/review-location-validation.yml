@@ -263,6 +263,11 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/time-entry-details-conflict.postgres.integration.test.ts
+      - name: Outing with a venue ("Visited {name}?" on an unknown stay and its trips)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_OUTING_VENUE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/location-outing-venue.postgres.test.ts
       # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
         if: always()

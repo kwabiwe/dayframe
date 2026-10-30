@@ -3,7 +3,7 @@ import {
   ReviewEntryEditSchema, IgnoreLocationReviewSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
   SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema,
-  OutingLocationReviewSchema
+  ConfirmOutingLocationReviewSchema, IgnoreOutingLocationReviewSchema
 } from "./location/schemas";
 
 export const ReviewMutationEditSchema = ReviewEntryEditSchema.extend({
@@ -40,7 +40,7 @@ export const DurableLocationReviewMutationSchema = z.discriminatedUnion("action"
   durableConfirmMutationSchema, IgnoreLocationReviewSchema, completeEditMutationSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
   SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema,
-  OutingLocationReviewSchema
+  ConfirmOutingLocationReviewSchema, IgnoreOutingLocationReviewSchema
 ]);
 export const ReviewMutationSchema = z.discriminatedUnion("action", [
   acceptMutationSchema, ignoreMutationSchema, ...DurableLocationReviewMutationSchema.options
@@ -97,8 +97,11 @@ export function validReviewAcknowledgement(body: unknown, envelope: ReviewMutati
     if (!Array.isArray(ids) || ids.length !== members.length || !members.every((id) => ids.includes(id))) return false;
     if (envelope.mutation.action === "ignore_outing") return value.status === "ignored";
     if (value.alreadyResolved === true && value.equivalent === true) return value.status === "accepted";
-    return value.status === "accepted" && Array.isArray(value.entryIds) && value.entryIds.length === members.length &&
-      value.entryIds.every((id) => typeof id === "string" && id.length > 0);
+    // With a venue and an activity the Stay logs only the time the person's own blocks leave free: none, one or more
+    // blocks of its own beside each Move's one.
+    const enoughEntries = Array.isArray(value.entryIds) && (envelope.mutation.venue
+      ? value.entryIds.length >= members.length - 1 : value.entryIds.length === members.length);
+    return value.status === "accepted" && enoughEntries && (value.entryIds as unknown[]).every((id) => typeof id === "string" && id.length > 0);
   }
   if (["merge", "merge_and_confirm"].includes(envelope.mutation.action)) {
     return value.status === "accepted" && typeof value.mergedSegmentId === "string" && value.mergedSegmentId.length > 0 &&

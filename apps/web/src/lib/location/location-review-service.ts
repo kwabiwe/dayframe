@@ -249,7 +249,9 @@ export async function resolveLocationReviewActionWithClient(
  * of it in one transaction. Every member is locked in id order (as merge does), must still carry the
  * Stay card's outing key, and must still be open; otherwise nothing changes (a resolution conflict), unless
  * every member was already decided the same way, which acknowledges as already resolved. "Log as" on
- * the grouped card (`edit`) applies to the Stay card only; each Move is logged as proposed.
+ * the grouped card (`edit`) applies to the Stay card only; each Move is logged as proposed. A `venue`
+ * ("Visited {name}?") records the Stay as `record_poi_once` does, so its one-time name, Apple Place ID,
+ * free-time blocks with an activity, and retry and conflict proofs are that action's own.
  */
 async function resolveOuting(
   client: pg.PoolClient, reviewItemId: string,
@@ -265,7 +267,12 @@ async function resolveOuting(
   const anchor = items.find((item) => item.id === reviewItemId);
   if (!anchor) throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   const confirm = action.action === "confirm_outing";
+  const venue = action.action === "confirm_outing" ? action.venue : undefined;
+  if (venue && anchor.segmentKind !== "stay") {
+    throw new ReviewResolutionError("invalid_action", "Only a visit can use a one-time place.", { status: 422 });
+  }
   const memberAction = (item: LockedReview): LocationReviewAction => !confirm ? { action: "ignore_once_location" }
+    : item.id === anchor.id && venue ? { action: "record_poi_once", ...venue, ...(action.edit ? { edit: action.edit } : {}) }
     : item.id === anchor.id && action.edit ? { action: "edit_and_confirm", edit: action.edit } : { action: "confirm" };
   const closed = items.filter((item) => item.status !== "open");
   if (closed.length === items.length) {
@@ -284,9 +291,17 @@ async function resolveOuting(
   }
   await lockLocationSegments(client, items, session);
   const entryIds: string[] = [];
-  for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
-    const result = await performAction(client, item, memberAction(item), session) as { entryId?: unknown };
+  const inOrder = [...items].sort((a, b) => a.id.localeCompare(b.id));
+  // A venue's free time is read first, before the trips' own blocks, so the same answer always logs the same time
+  // (Codex r1 on #642).
+  for (const item of venue ? [anchor, ...inOrder.filter((other) => other.id !== anchor.id)] : inOrder) {
+    const result = await performAction(client, item, memberAction(item), session) as { entryId?: unknown; entryIds?: unknown };
     if (confirm) {
+      // A venue with an activity logs only the Stay's free time: any number of blocks, none when fully covered.
+      if (item.id === anchor.id && venue && Array.isArray(result?.entryIds)) {
+        entryIds.push(...result.entryIds as string[]);
+        continue;
+      }
       if (typeof result?.entryId !== "string") {
         throw new ReviewResolutionError("resolution_conflict", "Part of this outing could not be logged.", { status: 409 });
       }

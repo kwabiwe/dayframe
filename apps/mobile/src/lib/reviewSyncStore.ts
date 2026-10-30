@@ -1925,7 +1925,10 @@ async function materialiseAcknowledgedReviewHandover(
       // receipt. It must first follow the server's explicit source-to-entry
       // link; ordinary merge/split structural receipts already identify their
       // canonical outcome (or have no time-entry outcome at all).
-      if (requiresLinkedResult && !sourceEntryIds.length) {
+      // A venue's Stay (the outing's own card) rightly has none when your blocks cover it (Codex r1 on #642).
+      const mayLogNothing = envelope.mutation.action === "confirm_outing" && Boolean(envelope.mutation.venue) &&
+        effect.review_item_id === row.review_item_id;
+      if (requiresLinkedResult && !sourceEntryIds.length && !mayLogNothing) {
         missingAcceptedProof = true;
       }
     }
