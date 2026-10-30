@@ -1121,8 +1121,8 @@ export function CalendarReview({
   // A week's selection is the week's, however many of its days fit: a resize or a moved window keeps an open editor
   // and its unsaved edits (Codex r1 on #639).
   const firstVisibleDay = visibleDays[0];
-  const selectionDaysKey = visibleDays.length === 1 ? formatCalendarDateKey(firstVisibleDay)
-    : formatCalendarDateKey(addDays(firstVisibleDay, -((firstVisibleDay.getDay() + 6) % 7)));
+  const selectionDaysKey = visibleDays.length === 1 ? `day:${formatCalendarDateKey(firstVisibleDay)}`
+    : `week:${formatCalendarDateKey(addDays(firstVisibleDay, -((firstVisibleDay.getDay() + 6) % 7)))}`;
   const selectionScopeKey = `${calendarHoursMode}:${selectionDaysKey}`;
   const visibleSelectedTarget = selectedTarget?.scopeKey === selectionScopeKey ? selectedTarget : null;
   const selectedEntry = visibleSelectedTarget?.kind === "entry"
