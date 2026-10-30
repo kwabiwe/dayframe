@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info, Search, X } from "lucide-react";
 import { useId, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useKeyboardFocusRing } from "./useKeyboardFocusRing";
 import {
   placeDisplayName,
   placeLastVisitLabel,
@@ -58,6 +59,7 @@ export function PlacesManager({
   const [status, setStatus] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const searchId = useId();
+  const searchFocusRing = useKeyboardFocusRing();
   const searchRef = useRef<HTMLInputElement>(null);
   const visitsById = useMemo(() => placeVisitsById(visits), [visits]);
   const layout = useMemo(() => placeListLayout(places, visitsById, search), [places, visitsById, search]);
@@ -181,7 +183,7 @@ export function PlacesManager({
       {layout.searchable ? (
         <div className="places-search" role="search">
           <label className="sr-only" htmlFor={searchId}>Search places</label>
-          <div className="ui-compound-control place-search-control">
+          <div className="ui-compound-control place-search-control" data-focus-ring={searchFocusRing.focusRing} {...searchFocusRing.handlers}>
             <Search aria-hidden="true" size={18} />
             <input
               autoComplete="off"

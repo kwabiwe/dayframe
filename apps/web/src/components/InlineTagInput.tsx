@@ -64,6 +64,7 @@ export function InlineTagInput({
   onSelectedTagNamesChange,
   placeholder,
   portal = false,
+  tagButtonFirst = false,
   selectedTagNames,
   tags,
   value
@@ -100,6 +101,8 @@ export function InlineTagInput({
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
   portal?: boolean;
+  /** The Tags button before the field instead of after it (the timer bar, UI review round 2: activity, tags, description). */
+  tagButtonFirst?: boolean;
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -567,9 +570,30 @@ export function InlineTagInput({
     return portal && typeof document !== "undefined" ? createPortal(panel, document.body) : panel;
   }
 
+  const tagButton = (
+    <button
+      aria-controls={tagPickerListId}
+      aria-expanded={effectivePickerOpen}
+      aria-haspopup="listbox"
+      aria-label="Add or filter tags"
+      className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
+      disabled={disabled}
+      onClick={() => {
+        // Focus ends on the button (WebKit leaves a clicked button unfocused).
+        if (effectivePickerOpen) closePicker(true);
+        else openPicker();
+      }}
+      ref={pickerTriggerRef}
+      type="button"
+    >
+      <TagIcon size={15} />
+    </button>
+  );
+
   return (
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
       <div className="ui-compound-control inline-tag-input-anchor" ref={anchorRef}>
+        {tagButtonFirst ? tagButton : null}
         <input
           aria-activedescendant={activityOpen && activityMatches.length
             ? `${name}-activity-option-${activeActivityIndex}`
@@ -660,23 +684,7 @@ export function InlineTagInput({
             </span>
           ))}
         </span>
-        <button
-          aria-controls={tagPickerListId}
-          aria-expanded={effectivePickerOpen}
-          aria-haspopup="listbox"
-          aria-label="Add or filter tags"
-          className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
-          disabled={disabled}
-          onClick={() => {
-            // Focus ends on the button (WebKit leaves a clicked button unfocused).
-            if (effectivePickerOpen) closePicker(true);
-            else openPicker();
-          }}
-          ref={pickerTriggerRef}
-          type="button"
-        >
-          <TagIcon size={15} />
-        </button>
+        {tagButtonFirst ? null : tagButton}
         {maybePortal(<FloatingList
           activeId={actions.length ? `${name}-tag-option-${Math.min(highlightedIndex, actions.length - 1)}` : undefined}
           anchorRef={anchorRef}

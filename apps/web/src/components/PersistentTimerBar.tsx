@@ -725,6 +725,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
             placeholder={active ? "Add a description" : narrowCommand ? COMMAND_PLACEHOLDER_NARROW : COMMAND_PLACEHOLDER}
             selectedTagNames={timerDraft.tagNames}
+            tagButtonFirst={uiNext}
             tags={data.tags}
             value={timerDraft.description}
           />

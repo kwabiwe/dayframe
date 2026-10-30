@@ -34,6 +34,7 @@ import {
   FloatingListSearch,
   restoreFocusIfDropped
 } from "@/components/FloatingList";
+import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention } from "@/lib/command-parse";
 
@@ -132,6 +133,7 @@ export function CategoryPicker({
   const searchable = variant === "more" || blockPanel;
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchFocusRing = useKeyboardFocusRing();
   const selectedCategory = categories.find((category) => category.id === selectedId) ?? null;
   const trimmedQuery = query.trim();
   const listedCategories = useMemo(() => {
@@ -1021,6 +1023,8 @@ export function CategoryPicker({
               aria-label="Search activities"
               autoComplete="off"
               className="ui-control category-picker-search"
+              data-focus-ring={searchFocusRing.focusRing}
+              {...searchFocusRing.handlers}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setActiveIndex(0);

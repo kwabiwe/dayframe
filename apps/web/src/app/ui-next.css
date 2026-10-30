@@ -115,6 +115,54 @@
   opacity: 0.6;
 }
 
+/* Activity, then Tags, then the description (owner feedback on round 2): the Tags button leads the field. */
+:root[data-ui="next"] .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
+  padding: 0 6px;
+}
+
+/* The bar's floating lists are compact and sit under their own trigger, never across the whole bar: Tags under the
+   Tags button, Suggestions and the typed # and @ lists under the description's start. */
+:root[data-ui="next"] .df-cmd-field {
+  --df-cmd-list-width: min(340px, calc(100vw - 24px));
+}
+
+:root[data-ui="next"] .df-cmd-field .inline-tag-picker,
+:root[data-ui="next"] .df-cmd-field .inline-tag-suggestions,
+:root[data-ui="next"] .df-cmd-field .inline-activity-suggestions,
+:root[data-ui="next"] .df-cmd-field .swiss-task-suggestions {
+  right: auto;
+  width: var(--df-cmd-list-width);
+  max-width: var(--df-cmd-list-width);
+}
+
+:root[data-ui="next"] .df-cmd-field .inline-tag-suggestions,
+:root[data-ui="next"] .df-cmd-field .inline-activity-suggestions,
+:root[data-ui="next"] .df-cmd-field .swiss-task-suggestions {
+  left: var(--web-control-height);
+}
+
+/* Phones: the field is too narrow to anchor 340 px inside the viewport, so the lists hang from the bar itself, as
+   wide as the bar (never wider than the screen less 24 px). */
+@media (max-width: 640px) {
+  :root[data-ui="next"] .df-cmd {
+    position: relative;
+  }
+
+  :root[data-ui="next"] .df-cmd-field,
+  :root[data-ui="next"] .df-cmd-field .inline-tag-input-anchor {
+    position: static;
+  }
+
+  :root[data-ui="next"] .df-cmd-field .inline-tag-picker,
+  :root[data-ui="next"] .df-cmd-field .inline-tag-suggestions,
+  :root[data-ui="next"] .df-cmd-field .inline-activity-suggestions,
+  :root[data-ui="next"] .df-cmd-field .swiss-task-suggestions {
+    left: 0;
+    right: 0;
+    width: auto;
+  }
+}
+
 /* Play and Stop are the same round button, the bar's control size, so neither the clock nor the button moves on Start
    or Stop; Start's words ("Start", "Space") are its tip and accessible name. */
 :root[data-ui="next"] .df-cmd-go {
@@ -443,4 +491,32 @@
 
 :root[data-ui="next"][data-theme="dark"] {
   --calendar-dense-tint: 42%;
+}
+
+/* ---------- Fields (owner feedback on round 2): fill-led, no outline ---------- */
+/* Search and description fields are an inset fill with no border at rest or after a click or tap; the neutral grey
+   ring shows only for keyboard (and script or assistive-technology) focus, which `useKeyboardFocusRing` marks as
+   data-focus-ring="keyboard" (browsers match :focus-visible on text inputs for pointer focus too). An invalid field
+   keeps its danger underline. */
+:root[data-ui="next"] :is(.df-flist-search, .place-search-control, .category-picker-search, .swiss-timer-description-control .inline-tag-input-anchor),
+:root[data-ui="next"] :is(.df-flist-search, .place-search-control, .category-picker-search, .swiss-timer-description-control .inline-tag-input-anchor):is(:focus, :focus-within),
+:root[data-ui="next"] .swiss-timer-description-control .inline-tag-picker-search:focus-within {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+:root[data-ui="next"] :is(.df-flist-search, .place-search-control, .category-picker-search)[data-focus-ring="keyboard"]:is(:focus, :focus-within),
+:root[data-ui="next"] .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root[data-ui="next"] :is(.df-flist-search, .place-search-control, .swiss-timer-description-control .inline-tag-input-anchor):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root[data-ui="next"] :is(.df-flist-search, .place-search-control, .swiss-timer-description-control .inline-tag-input-anchor)[data-focus-ring="keyboard"]:focus-within:has(input[aria-invalid="true"]),
+:root[data-ui="next"] .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }

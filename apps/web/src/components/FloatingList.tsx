@@ -2,6 +2,7 @@
 
 import { DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH, resolveActivityIcon } from "@dayframe/shared";
 import { Check, Plus, Search, X } from "lucide-react";
+import { useKeyboardFocusRing } from "./useKeyboardFocusRing";
 import {
   useEffect,
   useLayoutEffect,
@@ -261,8 +262,10 @@ export function FloatingListSearch({
   onKeyDown: KeyboardEventHandler<HTMLInputElement>;
   value: string;
 }) {
+  // The neutral ring shows for keyboard focus only, never after a click or tap (UI review round 2).
+  const focusRing = useKeyboardFocusRing();
   return (
-    <div className={`ui-compound-control df-flist-search ${className}`.trim()}>
+    <div className={`ui-compound-control df-flist-search ${className}`.trim()} data-focus-ring={focusRing.focusRing} {...focusRing.handlers}>
       <Search aria-hidden="true" size={15} />
       <input
         aria-activedescendant={expanded ? activeDescendant : undefined}
