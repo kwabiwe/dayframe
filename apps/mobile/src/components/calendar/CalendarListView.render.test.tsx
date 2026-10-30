@@ -30,7 +30,7 @@ vi.mock("react-native", async () => {
 });
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" }, runOnJS: (fn: unknown) => fn }));
 // The List's day swipe (a horizontal pan on the List).
-const swipe = vi.hoisted(() => ({ onEnd: null as null | ((event: { translationX: number; velocityX: number }) => void), tick: vi.fn() }));
+const swipe = vi.hoisted(() => ({ onEnd: null as null | ((event: { translationX: number; velocityX: number }, success: boolean) => void), tick: vi.fn() }));
 vi.mock("../../lib/daySwipeHaptic", () => ({ playDaySwipeTick: swipe.tick }));
 vi.mock("react-native-gesture-handler", () => {
   function Pan() {
@@ -987,10 +987,14 @@ describe("the List's day swipe haptic", () => {
     swipe.tick.mockClear();
     const onSwipeDay = vi.fn();
     render({ onSwipeDay });
-    swipe.onEnd?.({ translationX: -30, velocityX: 100 });
+    swipe.onEnd?.({ translationX: -30, velocityX: 100 }, true);
     expect(swipe.tick).not.toHaveBeenCalled();
     expect(onSwipeDay).not.toHaveBeenCalled();
-    swipe.onEnd?.({ translationX: -80, velocityX: 100 });
+    // Cancelled, however far it went: no day change and no haptic (Codex r1 on #641).
+    swipe.onEnd?.({ translationX: -200, velocityX: 900 }, false);
+    expect(swipe.tick).not.toHaveBeenCalled();
+    expect(onSwipeDay).not.toHaveBeenCalled();
+    swipe.onEnd?.({ translationX: -80, velocityX: 100 }, true);
     expect(swipe.tick).toHaveBeenCalledTimes(1);
     expect(onSwipeDay).toHaveBeenCalledWith(1);
   });

@@ -219,7 +219,7 @@ function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | n
       route: trip ? { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) } : null,
       straightLineFallback: null, acceptedSamples: samples, rejectedSamples: [], anchors: [],
       gaps: trip ? [{ startedAt: iso(9, 20), stoppedAt: iso(9, 41), durationSeconds: 1_260, fromPoint: null, toPoint: null }] : [],
-      nearbySavedPlaces: trip ? [] : [qaSaved("p-school", "Exampleton Primary", 120), qaSaved("p-office", "Work", 640), qaSaved("p-home", "Home", 900)]
+      nearbySavedPlaces: trip ? [] : [qaSaved("p-school", "Exampleton Primary", 120), qaSaved("p-office", "Work", 340), qaSaved("p-home", "Home", 480)]
     },
     stops: [], suggestedSplitPoints: [], evidenceExpiresAt: null, evidenceExpired: false, rawEvidenceAvailable: true, textualSummary: ""
   } as TimelineItemEvidenceDto;

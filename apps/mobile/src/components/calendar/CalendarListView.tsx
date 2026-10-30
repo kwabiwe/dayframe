@@ -475,9 +475,10 @@ export function CalendarListView({
     .enabled(Boolean(onSwipeDay))
     .activeOffsetX([-24, 24])
     .failOffsetY([-12, 12])
-    .onEnd((event) => {
+    .onEnd((event, success) => {
       "worklet";
-      if (onSwipeDay && (Math.abs(event.translationX) > 64 || Math.abs(event.velocityX) > 700)) runOnJS(swipedDay)(event.translationX < 0 ? 1 : -1);
+      // A cancelled pan (`success` false) changes nothing, however far it went (Codex r1 on #641).
+      if (success && onSwipeDay && (Math.abs(event.translationX) > 64 || Math.abs(event.velocityX) > 700)) runOnJS(swipedDay)(event.translationX < 0 ? 1 : -1);
     }), [onSwipeDay, swipedDay]);
   const toggleLegs = (id: string) => setOpenLegs((current) => {
     const next = new Set(current);

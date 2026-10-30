@@ -87,6 +87,14 @@ export function SheetNearbySearch({ centre, disabled = false, evidence = null, o
     setSearchController(controller);
     return () => controller.dispose();
   }, [searchProvider]);
+  // Text typed before the search could start (the map still loading) is searched as soon as it can be (Codex r1 on #641).
+  useEffect(() => {
+    if (searchController && query.trim() && latitude !== null && longitude !== null) {
+      searchController.updateQuery(query, { latitude, longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+    }
+    // Only a new controller: each keystroke asks for itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchController]);
   // The ranking's own pick, not the visible rows (Codex r1 on #620).
   const guessed = nearby?.status === "results" || nearby?.status === "no-results" ? nearby.guess ?? null : null;
   const onGuessRef = useRef(onGuess);

@@ -609,10 +609,11 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onQueue).not.toHaveBeenCalled();
   });
 
-  it("lists at most two saved places within about 1 km, nearest first, with no Show all saved places", () => {
+  it("lists at most two saved places, nearest first, from the server's list (within 500 m today), with no Show all saved places", () => {
+    // `FAR` is beyond the server's 500 m, so its evidence has no row for it.
     const CLOSE = "6f000000-0000-4000-8000-000000000004";
     const tree = sheetWith({
-      evidence: { map: { acceptedSamples: [], centre: { type: "Point", coordinates: [20, 10] }, nearbySavedPlaces: [NEAR, SAVED, CLOSE, FAR].map((id, index) => ({ id, distanceMeters: [140, 900, 600, 1_400][index] })) }, segment: { kind: "stay" } } as never,
+      evidence: { map: { acceptedSamples: [], centre: { type: "Point", coordinates: [20, 10] }, nearbySavedPlaces: [NEAR, SAVED, CLOSE].map((id, index) => ({ id, distanceMeters: [140, 480, 300][index] })) }, segment: { kind: "stay" } } as never,
       places: [{ id: FAR, name: "Far Gym", role: null }, { id: SAVED, name: "Exampleton Library", role: null }, { id: CLOSE, name: "Close Bar", role: null }, { id: NEAR, name: "Near Café", role: null }]
     });
     expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props).toMatchObject({ visitOnly: true, height: 160 });
@@ -710,8 +711,9 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(JSON.stringify(unknown.toJSON())).not.toMatch(/No readings|readings \d/);
     const home = sheetWith({ evidence: stay(14), target: { kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" } as TimelinePlace, label: "Home" } });
     expect(home.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBeNull();
-    const tripSheet = sheetWith({ evidence: stay(9), target: { kind: "trip", trip, legIndex: null } });
-    expect(tripSheet.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBe("Based on 9 readings");
+    const commute = { ...(stay(9) as object), segment: { kind: "commute", evidenceCount: 9 } } as never;
+    const tripMap = sheetWith({ evidence: commute, target: { kind: "trip", trip, legIndex: null } });
+    expect(tripMap.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBeNull();
   });
 
   it("uses the compact activity chips under Logs as, none selected and no filled Don't log by default", () => {

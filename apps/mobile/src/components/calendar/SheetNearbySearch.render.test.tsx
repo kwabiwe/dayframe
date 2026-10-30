@@ -126,6 +126,24 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     mocks.searchAvailable = false;
   });
 
+  it("searches text typed before the map arrived as soon as it can (Codex r1 on #641)", async () => {
+    mocks.searchAvailable = true;
+    mocks.updateQuery.mockClear();
+    mocks.search.mockImplementation(nearbyAnswer);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<SheetNearbySearch centre={null} onPick={vi.fn()} theme={theme} />); });
+    type(tree, "Pret");
+    expect(mocks.updateQuery).not.toHaveBeenCalled();
+    await act(async () => { tree.update(<SheetNearbySearch centre={centre} evidence={evidence(25)} onPick={vi.fn()} theme={theme} />); });
+    await settle();
+    expect(mocks.updateQuery).toHaveBeenCalledTimes(1);
+    expect(mocks.updateQuery).toHaveBeenCalledWith("Pret");
+    act(() => { mocks.emit?.({ requestId: "r", query: "Pret", status: "results", message: null, suggestions: [{ id: "1", title: "Pret 1", subtitle: "1 High Street" }] }); });
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-search-spinner")).toHaveLength(0);
+    expect(ids(tree, "location-correction-nearby-")).toEqual(["1"]);
+    mocks.searchAvailable = false;
+  });
+
   it("never spins for text too short to search", async () => {
     mocks.searchAvailable = true;
     mocks.search.mockImplementation(nearbyAnswer);
