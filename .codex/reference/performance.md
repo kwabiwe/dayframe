@@ -22,6 +22,7 @@ Measured on the owner's iPhone 17 with production data, unless a row says otherw
 | Long-run footprint | ≤ 500 MB after about 3 hours of normal use | 422–431 MB after about 2.5–3 hours |
 | Looping motion (the live block's ring, rolling digits, anything that repeats) | no per-frame view-tree commits: React Native's native driver or Core Animation, never a Reanimated loop | Reanimated per-frame commits were 54–88 % of main-thread time before #392 |
 | Location energy (location v4 §10, B9) | all of Dayframe's location work under 2 % of battery a day on average, and under 20 minutes a day at best accuracy | from MetricKit's daily counts in Sync help › Location energy (7-day average) once TestFlight 129 has reported a week; checked against Settings › Battery over the same 7 days |
+| Web `/api/timer-state` polling, per tab | 10 s while visible and focused (about 360 an hour), 60 s while visible but not focused (about 60 an hour), none while hidden; one immediate poll on focus, on a return to visibility and after the user's own timer action, never beside one in flight; errors back off 20 → 40 → 80 → 120 s and reset on success; one poll chain per tab | 3 s while visible, about 1,200 an hour per tab, the largest share of staging traffic (before 30 Oct 2026) |
 | Per-sample and per-pass storage queries | index lookups only: no full table scans, no unbounded journal reads | retention went from about 37 ms to about 0.7 ms per sample (#398, Mac: one indexed delete and two indexed counts) |
 
 A budget is breached when a measurement made by the method below exceeds it. A PR that knowingly exceeds a budget needs an owner decision recorded in the tracker.
@@ -67,6 +68,7 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 
 | Accuracy bursts (card K) stay within the location energy budget: at most 6 bursts and 18 minutes a day at best accuracy, one at a time, a 5-minute cooldown, 3 minutes each, only on the trial's on days, a Visit never taking the day's last one, only for a Visit reported within 10 minutes; stopping capture ends one; the next reading or a timer after 3 minutes restores normal capture, and 5 minutes past them updates stop outright | `accuracyBurst.test.ts`, `geofence.test.ts`, `runtime.test.ts` (card K) |
 | No synchronous locationd call on main: Location status answers from cached delegate state, `locationServicesEnabled()` runs on a background queue, and a CoreLocation callback appends one journal line off main without waiting for the store | `nativeMainThreadBlocking.contract.test.ts`, `validate-ios-location-signals.sh` |
+| Web timer-state polling: about 60 polls in 10 focused minutes, about 10 unfocused, none hidden; immediate polls on focus, visibility and after an action (after its own reload, deduped); the 20/40/80/120 s backoff and its reset; one chain across rerenders and StrictMode, none after unmount, an account change dropping the answer in flight | `timerStatePolling.runtime.dom.test.tsx`, `calendarDataOwner.runtime.dom.test.tsx` (WEB-UI-4) |
 A new hot path adds its guard here in the PR that creates it.
 
 ## Release gate
