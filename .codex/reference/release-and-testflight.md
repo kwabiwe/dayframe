@@ -8,6 +8,7 @@ Use this before saying a mobile/API fix is present or absent in production.
 - Stable staging: `https://dayframe-staging.vercel.app`, manually assigned to the one PR Preview selected for web/iPhone testing.
 - Production: `https://dayframe-web.vercel.app` using production Supabase.
 - Mobile `preview`: staging API only. Mobile `production`/TestFlight: production API only.
+- Server feature flags can differ by lane. `DAYFRAME_TIMER_TRIP_CHECKS=on` (a timer that ran into a trip asks on its block, location v4 design §7) is set for the staging (Vercel Preview) environment only; production leaves it off until the owner turns it on. Check the lane's flags before calling a staging result a production result.
 
 The staging alias does not move automatically. Before merging an implementation PR, confirm its Preview is Ready, apply migrations to staging, promote that deployment to the stable alias, and complete the relevant hands-on checks. Production credentials and data are not a PR test lane.
 
@@ -38,16 +39,16 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (124)` (2026-10-21)
+- Last repository-recorded verified build: `0.1.0 (135)` (2026-10-29)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `ca17dca4-5873-43ae-a424-150a67448cd2`
-- Archived commit: `6f45a03`
-- Performance gate reading (baseline for the next build): staging build of `6f45a03`, Today in front with a block running on the iPhone 17 over USB with Auto-Lock off (checked from screenshots): gate 1 6.9 % and −2.88 MiB per minute, gate 2 6.7 % and +0.63 MiB per minute (21 Oct). The five-minute warm-up's sampler timed out without a figure, but the app had run for more than five minutes before gate 1. Build 123: 6.4–6.8 %, at most +1.02 MiB per minute.
+- Delivery/build ID: `aa984119-2ebd-4b1e-b89b-0333456b0d47`
+- Archived commit: `1958a5d4`, built in a detached worktree pinned to that SHA
+- Performance gate reading (baseline for the next build): staging build of `1958a5d4` on a fresh launch, Today in front with a block running on the iPhone 17, after warm-up windows: gate 1 6.6 % and +0.58 MiB per minute, gate 2 6.2 % and +1.17 MiB per minute (29 Oct). Build 134 (`d872f184`, delivery `6091cf1a-206c-48a6-ba85-3fe6c4bb78a6`), on a clean relaunch: 6.8 % and −0.17, 6.7 % and +1.07 MiB per minute.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 124 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 135 is recorded as `VALID`, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`; its signed app was checked for Apple Distribution signing, production push and the production App Group before upload. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
@@ -55,14 +56,14 @@ Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel
 
 For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, the repository/PR lane means:
 
-1. Sync local `main` with `origin/main`.
+1. Fetch `origin`. Never check out, pull or fast-forward branches in the shared main checkout: other sessions build and release from it.
 2. Check repo status is clean.
 3. Check memory, tracker, GitHub PRs/issues, and latest TestFlight state.
 4. Confirm PR scope from `docs/feature-fix-tracker.md`.
-5. Create a focused branch using the active Codex/client branch-prefix convention.
+5. Create a focused branch from `origin/main` in its own git worktree, using the active Codex/client branch-prefix convention.
 6. Implement the change narrowly.
 7. Add or update regression tests for the changed behavior.
-8. Update `docs/feature-fix-tracker.md` in the PR.
+8. Update `docs/feature-fix-tracker.md` in the PR. For a change to iPhone behaviour, add its device checks to the next-TestFlight staging checklist: one local list (outside Git) for the next build, not a per-build numbered one. The build that ships keeps that list as its record, and a new next list starts.
 9. Run validation:
    - `npm run test`
    - `npm run typecheck`
@@ -72,25 +73,26 @@ For any Dayframe implementation PR that changes shipped app, API, database, mobi
    - `git diff --check`
 10. Commit, push, and open the PR with summary and validation notes.
 11. Wait for GitHub/Vercel checks; fix failures and rerun validation if needed.
-12. Merge to `main` and sync local `main`.
+12. Merge to `main` with `gh pr merge` run from a folder outside any git checkout, then fetch `origin`. Run inside the shared checkout, `gh pr merge` fast-forwarded the shared `main` during a TestFlight archive.
 13. Update the tracker after merge if the merged PR number/status/build evidence changed.
 
 If mobile/native/runtime configuration changed or TestFlight is an explicit success criterion, continue with the release lane:
 
-1. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
-2. Run `npm run testflight:preflight`.
-3. Temporarily increment the iOS build number for release.
-4. Archive with full Xcode from merged `main`.
-5. Export and upload the `.ipa` to App Store Connect.
-6. Wait for Apple processing to become `VALID`.
-7. Set export compliance/encryption answer.
-8. Add/update TestFlight notes.
-9. Assign or verify the internal testing group.
-10. Verify TestFlight state is `IN_BETA_TESTING`.
-11. Restore the repo iOS build number back to its default if it was changed only for upload.
-12. Tell KB the exact build number, delivery UUID, verification state, and what changed.
+1. Create a detached git worktree pinned to the release SHA (`git worktree add --detach <path> <sha>`) and build the staging app and the release archive there, never in the shared main checkout: the shared checkout moved mid-archive once (TestFlight 134).
+2. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Take it on a fresh launch of that build (force-quit, then launch), after the warm-up window: on 29 Oct 2026 a TestFlight 134 process that had been used for a while read +4.43 MiB a minute, a false fail, and a clean relaunch passed. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
+3. Run `npm run testflight:preflight`.
+4. Temporarily increment the iOS build number for release.
+5. Archive with full Xcode from the pinned worktree.
+6. Export and upload the `.ipa` to App Store Connect.
+7. Wait for Apple processing to become `VALID`.
+8. Set export compliance/encryption answer.
+9. Add/update TestFlight notes.
+10. Assign or verify the internal testing group.
+11. Verify TestFlight state is `IN_BETA_TESTING`.
+12. Restore the repo iOS build number back to its default if it was changed only for upload.
+13. Tell KB the exact build number, delivery UUID, verification state, and what changed.
 
-Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged, and local `main` synced.
+Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged (with `gh` run outside any checkout), and `origin` fetched.
 
 ## TestFlight Build Identity
 
@@ -156,7 +158,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 The current working pattern is:
 
 1. Set the temporary iOS build number, for example `0.1.0 (13)`.
-2. Archive from merged `main` with `xcodebuild archive`.
+2. Archive from the detached worktree pinned to the merged release SHA with `xcodebuild archive`.
 3. Export the archive with the App Store Connect export options and the Dayframe App Store provisioning profile.
 4. Upload the exported `.ipa` with the App Store Connect API key path under `.codex-dayframe-qa/testflight/appstoreconnect/`.
 5. Save archive/export/upload logs under `.codex-dayframe-qa/testflight/`.

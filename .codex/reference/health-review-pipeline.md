@@ -24,7 +24,7 @@ HealthKit is an input signal, not a separate user-facing product model. Sleep st
 5. Event processing in `apps/web/src/lib/event-service.ts` creates entries or `review_items`.
 6. Review queries in `apps/web/src/lib/queries.ts` return open review items only.
 7. Mobile Calendar › List (`apps/mobile/src/components/calendar/CalendarListView.tsx`, answers through `useCalendarCheckAnswers.ts` and the Review outbox) asks an Apple Health "?" under its row and sends Confirm/Dismiss; there is no Review screen since location v4 step 15.
-8. Reprocess endpoint `apps/web/src/app/api/review/reprocess-health/route.ts` retries Health review decisions after preferences or code changes.
+8. Reprocess endpoint `apps/web/src/app/api/review/reprocess-health/route.ts` retries Health review decisions after preferences or code changes. On iPhone it runs, forced, when Calendar › List comes to the front (`apps/mobile/src/lib/calendarHealthReprocess.ts`, which replaced the deck's run on open): at most once per account every 15 minutes (an attempt counts, except one interrupted by leaving the front, which is forgotten so the next return may run it at once; one cut short by an account change still counts), inside a 20-second deadline, foreground only (leaving the front aborts it before its next batch), whether or not this iPhone captures Health. A Health mapping change also reprocesses for the account that made it.
 
 Do not patch one step without checking the adjacent step on either side.
 
@@ -101,7 +101,7 @@ Sleep:
 - User mapping defaults can override category and description for supported sleep/workout imports and for Health Review reprocess.
 - Implausible, too short, too long, malformed or unsafe logical-session Sleep collisions stay in Review. Ordinary activity overlap is not a blocker.
 
-Health walks win over location (PRD D19, design §9; `apps/web/src/lib/location/health-coverage.ts`): a location Move whose travel mode matches an imported walking, running or cycling workout (`health_workouts`, whatever became of its own card or block; its kind read hint by hint from the stored type, the payload's type, label and activity type) is not offered when the workout covers at least half of it or it lies inside the workout give or take five minutes; a Move without a mode only in the second case. Coverage is read per batch of Moves (no shared cap). Emission retires the open card of a covered candidate by the Move's current window and mode. An events request that imports a workout retires the open Move cards of any age that the workout's stored window covers; after every `v2_review` replay commits, the open Move cards of the last 30 days that some workout covers by time are swept from the cards themselves, so a card is retired even once its evidence has aged out. Both run page by page, each page its own short transaction (`withSyncTransaction`, within the request's deadline, three seconds at most) taken only while the location owner lock is free, so a slow page loses only itself and never the replay's work. Retirement is replay's own (`ignored_scope = 'superseded'`); while the Move's evidence lasts, removing the workout brings it back. Health data is never written by location; the workout keeps its own block or card. Not yet: showing the Move's route on the workout (design §9 bullet 2); Moves logged automatically (PR 11) will be covered when that lands.
+Health walks win over location (PRD D19, design §9; `apps/web/src/lib/location/health-coverage.ts`): a location Move whose travel mode matches an imported walking, running or cycling workout (`health_workouts`, whatever became of its own card or block; its kind read hint by hint from the stored type, the payload's type, label and activity type) is not offered when the workout covers at least half of it or it lies inside the workout give or take five minutes; a Move without a mode only in the second case. Coverage is read per batch of Moves (no shared cap). Emission retires the open card of a covered candidate by the Move's current window and mode. An events request that imports a workout retires the open Move cards of any age that the workout's stored window covers; after every `v2_review` replay commits, the open Move cards of the last 30 days that some workout covers by time are swept from the cards themselves, so a card is retired even once its evidence has aged out. Both run page by page, each page its own short transaction (`withSyncTransaction`, within the request's deadline, three seconds at most) taken only while the location owner lock is free, so a slow page loses only itself and never the replay's work. Retirement is replay's own (`ignored_scope = 'superseded'`); while the Move's evidence lasts, removing the workout brings it back. Health data is never written by location; the workout keeps its own block or card. A covered Move never logs itself (D19 Moves), and a workout that arrives after a Move logged itself removes the Move's unedited automatic block and retires its event as replay's own (`retireCoveredAutoMoves`, `autoLogSuperseded`); edited or deleted blocks stay decisions. Not yet: showing the Move's route on the workout (design §9 bullet 2).
 
 Strength training, swimming and other/unknown remain disabled by default. An explicitly enabled supported type, including swimming, may auto-log with a complete valid window, normal confidence and existing duration thresholds. Disabled preferences retain their existing ignore/review behaviour.
 
@@ -119,7 +119,7 @@ Expected Confirm behaviour:
 - create or reuse a completed time entry
 - mark review item accepted
 - mark linked activity event confirmed where appropriate
-- remove item from visible Review
+- clear its "?" from Calendar › List
 - return structured JSON on expected errors
 
 Expected Edit-and-confirm behaviour (a renamed or re-filed Health moment, web or iPhone "Log as"):
@@ -130,7 +130,7 @@ Expected Edit-and-confirm behaviour (a renamed or re-filed Health moment, web or
 Expected Dismiss behaviour:
 
 - mark review item ignored
-- remove item from visible Review
+- clear its "?" from Calendar › List
 - create no time entry
 - return structured JSON on expected errors
 
@@ -180,7 +180,7 @@ For one failed walk and one broken sleep session, collect:
 
 - TestFlight version/build and API base URL.
 - Health debug export.
-- Review card screenshot.
+- Calendar › List "?" screenshot.
 - Vercel logs for related `/api/events`, `/api/review`, and `/api/review/reprocess-health` requests.
 - Database rows for linked `activity_events`, `review_items`, and `time_entries`.
 - Import preferences for walking and sleep.
@@ -188,7 +188,7 @@ For one failed walk and one broken sleep session, collect:
 
 ## Recovery and provenance guardrails
 
-Interactive reprocess has a six-second request budget, at most 25 candidate IDs, a returned cursor, and one transaction per complete bounded logical unit. Pass the cursor to reach later candidates; an end-of-scan result is distinct from an empty Review inbox. Never split a legacy Sleep group merely to meet the page limit. Category maintenance runs in a separate bounded transaction. Counters describe committed effects, and unavailable remaining counts stay unknown.
+Interactive reprocess has a six-second request budget, at most 25 candidate IDs, a returned cursor, and one transaction per complete bounded logical unit. Pass the cursor to reach later candidates; an end-of-scan result is distinct from having no Health "?" left to answer. Never split a legacy Sleep group merely to meet the page limit. Category maintenance runs in a separate bounded transaction. Counters describe committed effects, and unavailable remaining counts stay unknown.
 
 New logical Sleep resolutions record `activity_events.resolved_time_entry_id` while preserving the existing entry and user metadata. Apply the additive resolution-link migration before the new server; do not infer or backfill historical provenance. SQL cancellation is not evidence of a Review-row lock, and an empty later lock snapshot cannot identify a historical blocker. Code tests, queue counts and hidden cards do not close a reported missing-record incident; trace exact source/event/receipt/entry identities through server and mobile visibility.
 
