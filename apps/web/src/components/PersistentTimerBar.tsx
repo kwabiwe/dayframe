@@ -672,6 +672,8 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
             setSuggestionsOpen(false);
           }}
           open={categoryMenuOpen}
+          // Proposed: the same 360 px as the bar's Tags and Suggestions lists, under the activity block.
+          panelWidth={uiNext ? 360 : undefined}
           portal
           scope={completionScope}
           selectedId={timerDraft.categoryId}

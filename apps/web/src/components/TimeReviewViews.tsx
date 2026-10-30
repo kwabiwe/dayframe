@@ -1893,8 +1893,6 @@ export function CalendarReview({
           )}
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
-            {/* Proposed (round 2): the now line runs on faintly through the gutter to the pill, as in Apple Calendar. */}
-            {uiNext && nowTop !== null ? <span aria-hidden="true" className="calendar-now-line is-faint" style={{ top: nowTop }} /> : null}
             {nowTop !== null ? (
               <span
                 aria-hidden="true"

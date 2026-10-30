@@ -123,7 +123,7 @@
 /* The bar's floating lists are compact and sit under their own trigger, never across the whole bar: Tags under the
    Tags button, Suggestions and the typed # and @ lists under the description's start. */
 :root[data-ui="next"] .df-cmd-field {
-  --df-cmd-list-width: min(340px, calc(100vw - 24px));
+  --df-cmd-list-width: min(360px, calc(100vw - 24px));
 }
 
 :root[data-ui="next"] .df-cmd-field .inline-tag-picker,
@@ -379,22 +379,17 @@
   margin-top: 12px;
 }
 
-/* ---------- 5: the now line (round 2): strong across today, faint across the other days and the gutter ---------- */
+/* ---------- 5: the now line (round 2, owner 30 Oct 2026) ---------- */
+/* The live coral token, one thickness on every day: full across today, faint across the other days. It starts at the
+   time pill and never runs on into the gutter. */
+:root[data-ui="next"] {
+  --calendar-now: var(--accent);
+  --calendar-now-ink: #fff;
+}
+
 :root[data-ui="next"] .calendar-now-line.is-faint {
   z-index: 2;
-  height: 1px;
-  margin-top: 0;
   opacity: 0.45;
-}
-
-:root[data-ui="next"] .calendar-time-axis .calendar-now-line.is-faint {
-  right: 0;
-  left: 0;
-}
-
-/* The pill sits over the gutter's faint line. */
-:root[data-ui="next"] .calendar-time-axis .calendar-now-pill {
-  z-index: 3;
 }
 
 /* ---------- 6: grid blocks (round 2) ---------- */
