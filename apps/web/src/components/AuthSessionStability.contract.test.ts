@@ -70,7 +70,7 @@ describe("web auth session-stability contracts", () => {
     );
     expect(runtimeSource).toContain('clientFetch("/api/timer-state"');
     expect(runtimeSource).toContain("timerStateChanged(timerStateRef.current, next)");
-    expect(runtimeSource).toContain("timerStatePollDelay(consecutiveFailures)");
+    expect(runtimeSource).toContain("webTimerStatePollDelay({ focused: document.hasFocus(), consecutiveFailures })");
     expect(runtimeSource).toContain('window.addEventListener("focus"');
     expect(runtimeSource).toContain('document.addEventListener("visibilitychange"');
     expect(runtimeSource).not.toMatch(/setInterval\([^)]*1000/s);
