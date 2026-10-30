@@ -598,7 +598,10 @@ export function TimeReviewViews({
   const goPeriod = (direction: "previous" | "next") => {
     if (isDateLoading) return;
     if (narrowWeek) {
-      void navigate({ date: toTimelineDateKey(addDays(narrowWeek.days[0], (direction === "previous" ? -1 : 1) * weekColumns)) });
+      // Three days step by three. Five days step a week: Monday to Friday is the window, so a five-day step would land
+      // on a weekend and clamp back (Codex r1 on #639).
+      const from = weekColumns === 5 ? ranges.day.start : narrowWeek.days[0];
+      void navigate({ date: toTimelineDateKey(addDays(from, (direction === "previous" ? -1 : 1) * (weekColumns === 5 ? 7 : 3))) });
       return;
     }
     const shifted = shiftTimelineState({ ...state, date: headerDayKey, scope: navScope }, direction);
@@ -648,7 +651,7 @@ export function TimeReviewViews({
           <section aria-busy={isDateLoading} aria-label="Calendar period and view controls" className="timeline-range-toolbar df-cal-toolbar is-next">
             <div className="df-cal-nav">
               <div className="df-cal-datebox" role="group" aria-label="Calendar period">
-                <IconButton disabled={isDateLoading} label={`Previous ${narrowWeek ? `${weekColumns} days` : navScope}`} onClick={() => goPeriod("previous")}>
+                <IconButton disabled={isDateLoading} label={`Previous ${narrowWeek && weekColumns === 3 ? "3 days" : navScope}`} onClick={() => goPeriod("previous")}>
                   <ChevronLeft size={16} />
                 </IconButton>
                 {/* One fixed width for every view and date: the longest labels sit invisibly in the same cell. */}
@@ -667,7 +670,7 @@ export function TimeReviewViews({
                     value={headerDayKey}
                   />
                 </span>
-                <IconButton disabled={isDateLoading} label={`Next ${narrowWeek ? `${weekColumns} days` : navScope}`} onClick={() => goPeriod("next")}>
+                <IconButton disabled={isDateLoading} label={`Next ${narrowWeek && weekColumns === 3 ? "3 days" : navScope}`} onClick={() => goPeriod("next")}>
                   <ChevronRight size={16} />
                 </IconButton>
               </div>
@@ -1115,8 +1118,12 @@ export function CalendarReview({
       };
     });
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, clock, rowHeight, zoom.intervalMinutes]);
-  const visibleDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
-  const selectionScopeKey = `${calendarHoursMode}:${visibleDaysKey}`;
+  // A week's selection is the week's, however many of its days fit: a resize or a moved window keeps an open editor
+  // and its unsaved edits (Codex r1 on #639).
+  const firstVisibleDay = visibleDays[0];
+  const selectionDaysKey = visibleDays.length === 1 ? formatCalendarDateKey(firstVisibleDay)
+    : formatCalendarDateKey(addDays(firstVisibleDay, -((firstVisibleDay.getDay() + 6) % 7)));
+  const selectionScopeKey = `${calendarHoursMode}:${selectionDaysKey}`;
   const visibleSelectedTarget = selectedTarget?.scopeKey === selectionScopeKey ? selectedTarget : null;
   const selectedEntry = visibleSelectedTarget?.kind === "entry"
     ? entries.find((entry) => entry.id === visibleSelectedTarget.entryId) ?? null

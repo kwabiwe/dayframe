@@ -62,6 +62,29 @@ describe("NearbyPlaces", () => {
     expect(screen.getByText("Looking…")).not.toBeNull();
   });
 
+  it("holds its rows while a dialog-owned search looks, says so through onSearching, and stops when it goes (owner, 30 Oct 2026)", async () => {
+    const fake = fakeMapKit([{ name: "Near Café", id: "b", coordinate: { latitude: 51.5002, longitude: -0.1 } }],
+      [{ name: "Example Library", coordinate: { latitude: 51.51, longitude: -0.1 } }]);
+    (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;
+    const onSearching = vi.fn();
+    const view = (query: string) => <NearbyPlaces centre={centre} disabled={false} onPick={vi.fn()} onSearching={onSearching} onUnavailable={vi.fn()} query={query} />;
+    const { rerender, unmount } = render(view(""));
+    await screen.findByRole("list", { name: "Places nearby" });
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    rerender(view("library"));
+    // No "Looking…": the rows stay until the answer.
+    expect(screen.getByText("Near Café")).not.toBeNull();
+    expect(screen.queryByText("Looking…")).toBeNull();
+    expect(onSearching).toHaveBeenLastCalledWith(true);
+    await screen.findByText("Example Library");
+    expect(onSearching).toHaveBeenLastCalledWith(false);
+    rerender(view("library hall"));
+    expect(screen.getByText("Example Library")).not.toBeNull();
+    expect(onSearching).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onSearching).toHaveBeenLastCalledWith(false);
+  });
+
   it("drops out when MapKit fails for the page", async () => {
     const fake = fakeMapKit([]);
     (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;

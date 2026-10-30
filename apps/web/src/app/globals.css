@@ -15833,6 +15833,13 @@ button.timeline-location-hit:focus-visible {
     visibility: hidden;
   }
 
+  /* Each day's hit area reaches 44 px however narrow its cell (Codex r1 on #639). */
+  :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day::after {
+    position: absolute;
+    inset: 0 calc((100% - 44px) / 2);
+    content: "";
+  }
+
   :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day {
     height: 48px;
     margin-inline: 1px;

@@ -123,6 +123,8 @@ export function NearbyPlaces({
   useEffect(() => {
     latest.current.onSearching?.(searching);
   }, [searching]);
+  // Gone mid-search (MapKit failed for the page): the host's spinner stops with it (Codex r1 on #639).
+  useEffect(() => () => latest.current.onSearching?.(false), []);
   // Inside the dialog (it owns the search) the rows stay until the next answer arrives, so nothing jumps (owner,
   // 30 Oct 2026): a tap on one still names that place. On its own, a newer query shows "Looking…" (Codex r3 on #633).
   const held = searched?.state ?? nearby;
