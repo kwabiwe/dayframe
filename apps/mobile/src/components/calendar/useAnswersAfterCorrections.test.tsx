@@ -48,7 +48,8 @@ vi.mock("../../lib/timelineCorrectionOutbox", () => ({
 }));
 const review = vi.hoisted(() => ({ enqueueReviewMutation: vi.fn(async (_input: Record<string, unknown>) => undefined), synchroniseReviewMutations: vi.fn(async () => undefined) }));
 vi.mock("../../lib/reviewSyncStore", () => review);
-vi.mock("../../lib/reviewAnswerClaims", () => ({ reviewAnswersDecided: async () => new Set() }));
+const claims = vi.hoisted(() => ({ decided: new Set<string>() }));
+vi.mock("../../lib/reviewAnswerClaims", () => ({ reviewAnswersDecided: async (_data: unknown, ids: readonly string[]) => new Set(ids.filter((id) => claims.decided.has(id))) }));
 
 import * as answers from "../../lib/reviewAnswersAfterCorrections";
 import { useAnswersAfterCorrections } from "./useAnswersAfterCorrections";
@@ -204,6 +205,30 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     expect(review.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ clientMutationId: "m-venue", mutation: { action: "confirm_outing",
       memberReviewItemIds: ["ri-in"], edit: { categoryId }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } } });
     expect(outbox.enqueue).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  it("delivers a stay's answer after an earlier answer for its trip reached the outbox, the trip left out of its record (Codex r2 on #643)", async () => {
+    storage.clear();
+    review.enqueueReviewMutation.mockClear();
+    outbox.pending = [];
+    const outingData = { ...data, reviewItems: [item, { ...item, id: "ri-in", eventType: "commute_detected", rawPayload: { clientSegmentId: "seg-ri-in" } }] } as unknown as MobileBootstrap;
+    // The trip's own earlier answer is in the outbox now.
+    claims.decided = new Set(["ri-in"]);
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-stay", reviewItemId: "ri-1", logged: false, waitsFor: [C1] });
+    const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
+    storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify(stored.map((record) => ({ ...record, acknowledged: [C1] }))));
+    await answers.commitAnswerAfterCorrections(OWNER, "m-stay");
+    function OutingProbe() {
+      useAnswersAfterCorrections({ data: outingData, owner: OWNER });
+      return null;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<OutingProbe />); });
+    await flush();
+    claims.decided = new Set();
+    expect(review.enqueueReviewMutation).toHaveBeenCalledOnce();
+    expect(review.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ clientMutationId: "m-stay" });
     act(() => { tree.unmount(); });
   });
 

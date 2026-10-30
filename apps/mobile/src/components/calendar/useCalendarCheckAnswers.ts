@@ -38,8 +38,14 @@ const accountOf = (data: MobileBootstrap | null | undefined): MobileAccountOwner
 /** What VoiceOver says an answer did: a block that ran into a trip is ended or kept; anything else logged or skipped. */
 const answerVerb = (item: MobileReviewItem, logged: boolean) => timerTripClashQuestion(item)
   ? logged ? "Ended" : "Kept" : logged ? "Logged" : "Skipped";
-/** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
-type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
+/**
+ * An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). `excluded`:
+ * "?" another waiting answer hid when it was tapped, which the List doesn't fold in. Kept with the set, because this
+ * answer's own record hides its own "?" once it is registered (Codex r2 on #643).
+ */
+type AnswerSet = { proposal: string; members: ReadonlyMap<string, string>; excluded: ReadonlySet<string> };
+/** What waiting answers hide now (`useAnswersAfterCorrections`). */
+export type WaitingAnswersHidden = { ids: ReadonlySet<string>; segments: ReadonlySet<string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
 type Saving = { owner: string | null; ids: ReadonlySet<string>; awaiting: ReadonlySet<string> };
 /** Copies brought back (Undo, a failed or refused save) for suggestions the loaded data no longer lists. */
@@ -108,7 +114,7 @@ export function calendarCheckAnswerable(item: MobileReviewItem, syncStateIds: Re
  * restored). Backgrounding the app saves a held answer at once, as in Review; so does the Dashboard going
  * away. VoiceOver hears the answer with its Undo, Undo's return, and the outcome, as on the deck.
  */
-export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syncStateIds }: {
+export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syncStateIds, waitingHidden }: {
   /** The Calendar's bootstrap (its Review items included): what an answer is checked against and saved with. */
   data: MobileBootstrap | null;
   /** Suggestions already decided on this phone (the outbox's own record, read again on every Review sync). */
@@ -117,6 +123,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   ownerKey: string | null;
   /** Suggestions with a waiting or rejected change of their own, which never fold into an outing. */
   syncStateIds: ReadonlySet<string>;
+  /** What waiting answers hide, read at a tap. A ref: those answers' owner is built from this hook's own result. */
+  waitingHidden?: { current: WaitingAnswersHidden };
 }) {
   const [held, setHeld] = useState<HeldAnswer | null>(null);
   const [saving, setSaving] = useState<Saving | null>(null);
@@ -417,7 +425,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // An answer after corrections is the "?" alone: its corrections reshape it, so an outing is not folded in.
     // A gated outing (`outing`) keeps its trips: its record waits for theirs too (Codex r10 on #610).
     const members = options.afterCorrections && !options.outing ? []
-      : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
+      : calendarCheckOutings(open.filter((candidate) => !options.expected?.excluded.has(candidate.id)), syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
     // An outing keeps a guessed venue only with its Apple Place ID (`confirm_outing`, #642), so Yes to one without is
@@ -468,16 +476,19 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
   // The answer set a tap is about: its proposal and, for an outing, each member's, as holdAnswer would fold them now.
-  const answerSetOf = (listed: MobileReviewItem): AnswerSet => {
+  const answerSetOf = (listed: MobileReviewItem, fixedExcluded?: ReadonlySet<string>): AnswerSet => {
+    const hidden = waitingHidden?.current;
+    const excluded = fixedExcluded ?? new Set((shownRef.current?.reviewItems ?? []).filter((candidate) => candidate.id !== listed.id && (hidden?.ids.has(candidate.id)
+      || (typeof candidate.rawPayload?.clientSegmentId === "string" && hidden?.segments.has(candidate.rawPayload.clientSegmentId)))).map((candidate) => candidate.id));
     const current = hold.current();
     const heldNow = current?.kind === "single"
       ? [current.itemId, ...((current as HeldAnswer).outing?.members.map((member) => member.itemId) ?? [])]
       : [];
     const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
-      && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id));
+      && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id) && !excluded.has(candidate.id));
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
-    return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])) };
+    return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])), excluded };
   };
   const canAnswer = (itemId: string) => {
     if (!ownerRef.current) return false;
@@ -510,7 +521,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       if (!options.expected) return true;
       if (reviewDeckProposalSignature(listed) !== options.expected.proposal) return false;
       if (!options.outing) return true;
-      const members = answerSetOf(listed).members;
+      const members = answerSetOf(listed, options.expected.excluded).members;
       return members.size === options.expected.members.size
         && [...members].every(([id, signature]) => options.expected!.members.get(id) === signature);
     },

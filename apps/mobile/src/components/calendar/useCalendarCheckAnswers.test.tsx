@@ -91,11 +91,12 @@ const outing = (stayStart: string | null = "2026-10-17T10:10:00.000Z") => [
 
 type Hook = ReturnType<typeof useCalendarCheckAnswers>;
 const NONE: ReadonlySet<string> = new Set();
+const waitingHiddenNow = { current: { ids: new Set<string>() as ReadonlySet<string>, segments: new Set<string>() as ReadonlySet<string> } };
 function mount(data: MobileBootstrap) {
   const result: { current: Hook } = { current: null as unknown as Hook };
   let props = { value: data, decided: NONE, owner: "owner-a" as string | null, states: NONE };
   function Harness({ value, decided, owner, states }: typeof props) {
-    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states });
+    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states, waitingHidden: waitingHiddenNow });
     return null;
   }
   let tree!: ReturnType<typeof create>;
@@ -317,6 +318,25 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
           expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
           await act(async () => { vi.advanceTimersByTime(10_000); });
           expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+        }
+      });
+
+      it("leaves out a trip another waiting answer hides, by id or segment, and still starts once its own record hides the stay (Codex r2 on #643)", async () => {
+        const withTripSegment = data();
+        withTripSegment.reviewItems = withTripSegment.reviewItems.map((item) => item.id === "there"
+          ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-there" } } : item);
+        for (const hidden of [{ ids: new Set(["there"]), segments: new Set<string>() }, { ids: new Set<string>(), segments: new Set(["segment-there"]) }]) {
+          waitingHiddenNow.current = hidden;
+          const { result } = mount(withTripSegment);
+          const answer = await held(result, true, true);
+          const call = gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown>; itemId: string };
+          expect(call.action).toMatchObject({ outingMemberIds: ["back"], venue });
+          // Its own record now hides the stay and its other trip: the set captured at the tap still stands.
+          waitingHiddenNow.current = { ids: new Set(["there", "stay", "back"]), segments: new Set(["segment-stay"]) };
+          act(() => { answer.start(); });
+          expect(result.current.held?.itemId).toBe("stay");
+          act(() => { result.current.undo(); });
+          waitingHiddenNow.current = { ids: new Set(), segments: new Set() };
         }
       });
 

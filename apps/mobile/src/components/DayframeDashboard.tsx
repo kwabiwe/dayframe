@@ -261,7 +261,7 @@ import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededE
 import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
 import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { settledCheckBase, useCalendarCheckAnswers, type WaitingAnswersHidden } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
 import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
@@ -2000,13 +2000,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
     [authState, data]);
   const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
+  const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
     // The backend, workspace and user. A build without a backend identity has none: its List offers no answers
     // (Codex r8 and r9 on #582).
     ownerKey: scopedOwnerKey ?? null,
-    syncStateIds: reviewSyncStateIds
+    syncStateIds: reviewSyncStateIds,
+    waitingHidden
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
@@ -2124,6 +2126,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
     onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
+  waitingHidden.current = { ids: answersAfterCorrections.waitingIds, segments: answersAfterCorrections.waitingSegments };
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
   // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
   // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
