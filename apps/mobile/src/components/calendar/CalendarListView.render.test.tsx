@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, create } from "react-test-renderer";
 import { reviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileReviewItem } from "../../lib/api";
@@ -436,6 +437,57 @@ describe("CalendarListView (location v4 step 9)", () => {
     });
     expect(onOpenPlace).toHaveBeenCalledOnce();
     expect(onOpenCheck).not.toHaveBeenCalled();
+  });
+
+  // The header's Today pill on today (Codex r2 on #640).
+  it("cancels a tap still waiting for its places and leaves an open question open", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkKinds: new Map([["c-sleep", "health"]]) as never,
+      checkTitles: new Map([["c-unknown", "Pret?"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace, openCheckRequest: { id: "c-sleep", request: 1 }
+    };
+    const shown = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={null} {...props} {...extra} />
+    );
+    const { tree } = render({ ...props, timeline: null });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1, timeline })); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  // Codex r2 on #640: dropping the previous day's request mustn't clear the one that came with the new day.
+  it("keeps a first-check request that arrives with a new day, and opens it when its rows arrive", () => {
+    const sleep = { id: "c-sleep", segmentId: null, startedAt: new Date(at(25)).toISOString(), stoppedAt: new Date(at(30)).toISOString() };
+    const controls = {} as { show: (next: { day: number; checks: typeof sleep[] }) => void; ask: (request: number) => void };
+    function Parent() {
+      const [shown, setShown] = useState<{ day: number; checks: typeof sleep[] }>({ day: 0, checks: [] });
+      const [request, setRequest] = useState(1);
+      controls.show = setShown;
+      controls.ask = setRequest;
+      return (
+        <CalendarListView checkKinds={new Map([["c-sleep", "health"]]) as never} checkQuestions={new Map([["c-sleep", question("Log your sleep?")]])}
+          checkTitles={new Map([["c-sleep", "Sleep"]])} checks={shown.checks} clockFormat="24h" dayEndMs={at(24) * 1 + shown.day * 86_400_000} dayStartMs={at(0) + shown.day * 86_400_000}
+          entries={[]} loggedLabel="0m" nowMs={at(18)} onAnswerCheck={vi.fn()} onOpenEntry={vi.fn()} onRefresh={vi.fn()}
+          onScrolledToFirstCheck={(used) => setRequest((current) => (current === used ? 0 : current))} reduceMotion={false} refreshing={false}
+          scrollToFirstCheck={request} theme={theme} timeline={null} />
+      );
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Parent />); });
+    act(() => { controls.show({ day: 1, checks: [] }); controls.ask(2); });
+    act(() => { controls.show({ day: 1, checks: [sleep] }); });
+    expect(questions(tree)).toHaveLength(1);
   });
 
   it("asks a place's or trip's \"?\" under its row when the day's places are read and lack its item, never Review (Codex r2 on #610)", () => {

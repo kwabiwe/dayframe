@@ -24,6 +24,26 @@ export function touchStartsInRegion(
     && touch.absoluteY <= region.pageY + region.height;
 }
 
+/**
+ * Whether a gesture is excluded after this touch-down: fingers landing together are checked in any order, and once a
+ * finger of the gesture has landed inside, it stays excluded until a new gesture starts (all its fingers are new).
+ */
+export function exclusionAfterTouchesDown(
+  previous: boolean,
+  event: {
+    allTouches: ReadonlyArray<unknown>;
+    changedTouches: ReadonlyArray<{ absoluteX: number; absoluteY: number }>;
+  },
+  region: { pageX: number; pageY: number; width: number; height: number } | null
+) {
+  "worklet";
+  if (previous && event.allTouches.length > event.changedTouches.length) return true;
+  for (const touch of event.changedTouches) {
+    if (touchStartsInRegion(touch, region)) return true;
+  }
+  return false;
+}
+
 export type SwipeRelease = {
   disabled?: boolean;
   sheetHeight: number;

@@ -58,6 +58,8 @@ describe("the Calendar Today pill", () => {
     expect(onToday).not.toContain("openCalendarToday");
     expect(onToday).not.toContain("setCalendarSelectionClear");
     expect(onToday).toContain("setCalendarLinkCancel((count) => count + 1);");
+    expect(onToday).toContain("setCalendarWaitingTapCancel((count) => count + 1);");
+    expect(dashboard).toContain("cancelWaitingTapRequest={calendarWaitingTapCancel}");
     expect(onToday).toContain("setCalendarCheckTarget(null);");
     expect(onToday).toContain("setCalendarCheckScroll(0);");
     expect(onToday).toContain('if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);');

@@ -46,8 +46,8 @@ import {
   shouldDismissSwipe,
   swipeSheetExitPlan,
   swipeSheetPresentationPlan,
-  SWIPE_DISMISS_MOTION,
-  touchStartsInRegion
+  exclusionAfterTouchesDown,
+  SWIPE_DISMISS_MOTION
 } from "@/lib/swipeDismissMotion";
 
 const REDUCE_MOTION_FADE_MS = 70;
@@ -490,7 +490,7 @@ function SwipeDismissSheet({
     // wheel, move the sheet or reach a dismiss. A later finger can't end a drag already under way.
     .onTouchesDown((event, stateManager) => {
       if (gestureState.value === "dragging") return;
-      const excluded = exclusionMounted.value && touchStartsInRegion(event.changedTouches[0], measure(exclusionRef));
+      const excluded = exclusionAfterTouchesDown(startedInExclusion.value, event, exclusionMounted.value ? measure(exclusionRef) : null);
       startedInExclusion.value = excluded;
       if (excluded) stateManager.fail();
     })
