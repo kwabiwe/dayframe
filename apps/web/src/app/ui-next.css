@@ -662,7 +662,10 @@
 }
 
 :root[data-ui="next"] .calendar-compact-editor-panel .calendar-compact-date-trigger {
+  width: var(--web-control-height);
+  min-width: var(--web-control-height);
   height: var(--web-control-height);
+  min-height: var(--web-control-height);
 }
 
 /* ---------- The place dialog (owner, 30 Oct 2026): the dialog is the question ---------- */
@@ -763,4 +766,20 @@
 
 :root[data-ui="next"] .location-correction.is-next .location-correction-save input {
   min-height: var(--web-control-height);
+}
+
+/* The block editor's description is a field like the others: the control height, 15 px. */
+:root[data-ui="next"] .calendar-compact-editor-panel .time-entry-quick-description-control .inline-tag-input-anchor {
+  min-height: var(--web-control-height);
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .time-entry-quick-description-control input {
+  min-height: calc(var(--web-control-height) - 2px);
+  font-size: 15px;
+}
+
+:root[data-ui="next"] .calendar-compact-editor-panel .time-entry-quick-description-control .inline-tag-picker-trigger {
+  width: var(--web-control-height);
+  height: calc(var(--web-control-height) - 2px);
+  flex-basis: var(--web-control-height);
 }

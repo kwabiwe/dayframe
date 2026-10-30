@@ -39,7 +39,8 @@ export function NearbyPlaces({
   onUnavailable,
   pickLabel = "Names this visit; you can then save it",
   query: controlledQuery,
-  rows = NEARBY_ROWS
+  rows = NEARBY_ROWS,
+  searchRows = 6
 }: {
   centre: { latitude: number; longitude: number };
   disabled: boolean;
@@ -50,6 +51,8 @@ export function NearbyPlaces({
   query?: string;
   /** How many nearby places show before a search (Proposed: 3). */
   rows?: number;
+  /** How many places a search shows (Proposed: 3). */
+  searchRows?: number;
   /** MapKit failed for the page: the dialog drops this list. */
   onUnavailable: () => void;
 }) {
@@ -100,7 +103,7 @@ export function NearbyPlaces({
         });
         search.search(text, (error, data) => {
           if (cancelled) return;
-          const rows = error ? [] : toRows(data?.places ?? [], { latitude, longitude }).slice(0, 6);
+          const rows = error ? [] : toRows(data?.places ?? [], { latitude, longitude }).slice(0, searchRows);
           setSearched({ query: text, state: { status: error ? "unavailable" : rows.length ? "results" : "empty", rows } });
         });
       }).catch(() => undefined);
@@ -109,7 +112,7 @@ export function NearbyPlaces({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, latitude, longitude]);
+  }, [query, latitude, longitude, searchRows]);
 
   const text = query.trim();
   const typed = text.length > 0;

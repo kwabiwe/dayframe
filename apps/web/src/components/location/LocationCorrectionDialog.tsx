@@ -715,6 +715,7 @@ export function LocationCorrectionDialog({
                 pickLabel="Saves it as a place and sets this visit to it"
                 query={query}
                 rows={3}
+                searchRows={3}
               />
             ) : null}
             {rows.length || (text && canSaveNew) ? (
