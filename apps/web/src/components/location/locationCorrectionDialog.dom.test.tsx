@@ -413,6 +413,42 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
   });
 
+  it("saves a typed name from the footer Save with the other edits, and a search's new place with them too (Codex r1 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    const { unmount } = render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("Start time", "08:45");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/places", "/api/timeline/corrections", "/api/timeline/corrections"]);
+    expect(sent()[1]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
+    expect(sent()[2]).toMatchObject({ kind: "times", itemId: "seg-cafe" });
+    unmount();
+
+    // The same through a search's "Save “…” as a place".
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-two" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    const closed = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={closed} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("End time", "09:50");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Bakery” as a place" }));
+    await waitFor(() => expect(closed).toHaveBeenCalledTimes(1));
+    expect(sent()[1]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-two", learnedPlaceId: null });
+    expect(sent()[2]).toMatchObject({ kind: "times", itemId: "seg-cafe" });
+  });
+
   it("lists at most two saved places within 1 km, nearest first, and finds the far ones by search", async () => {
     const shop = { id: "00000000-0000-4000-8000-000000000103", name: "Corner Shop", role: null };
     const park = { id: "00000000-0000-4000-8000-000000000104", name: "Exampleton Park", role: null };

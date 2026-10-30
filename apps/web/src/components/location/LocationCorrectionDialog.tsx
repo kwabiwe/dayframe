@@ -478,6 +478,12 @@ export function LocationCorrectionDialog({
       setError("Give the place a name.");
       return;
     }
+    // The other edits go with it (Codex r1 on #636): check them before anything is created.
+    const others = corrections();
+    if (typeof others === "string") {
+      setError(others);
+      return;
+    }
     setBusy(true);
     setError(null);
     let placeId = createdPlaceId;
@@ -519,17 +525,9 @@ export function LocationCorrectionDialog({
       }
       setCreatedPlaceId(placeId);
     }
-    const failure = await send({ kind: "place", subject: "place", itemId: target.place.id, placeId, learnedPlaceId: null })
-      .catch(() => "Couldn't save that. Check your connection and try again.");
-    if (!alive.current) return;
-    await corrected();
-    if (!alive.current) return;
+    // The visit set to the new place, then the dialog's other edits (times, Logs as), as one Save.
     setBusy(false);
-    if (failure) {
-      setError(failure);
-      return;
-    }
-    onClose();
+    await apply(`saved:${placeId}`);
   }
 
   /** "I wasn't here": the place leaves the day and the trips either side become one (step 12 part 4). */
@@ -682,7 +680,8 @@ export function LocationCorrectionDialog({
       {question ? <Button disabled={busy} onClick={() => void answer(false)} variant="ghost">{question.noLabel}</Button> : null}
       {yesQuestion && !changed
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
-        : <Button disabled={busy} onClick={() => void apply()} variant="primary">Save</Button>}
+        // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
+        : <Button disabled={busy} onClick={() => void (newPlaceName.trim() && canSaveNew ? saveThisPlace() : apply())} variant="primary">Save</Button>}
     </>
   );
   return (

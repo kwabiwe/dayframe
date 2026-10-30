@@ -321,9 +321,9 @@ export function CategoryPicker({
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
       // The "All activities" chip is narrow; its menu takes a comfortable width of its own.
       const width = Math.min(
-        panelWidth ?? (blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width,
+        panelWidth ?? (blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width),
         availableWidth
-      ));
+      );
       // The typed lists' 19rem plus the search field (22.5rem), so as many rows show; they scroll inside.
       const heightCap = listPanel ? 360 : 220;
       const left = Math.min(

@@ -603,8 +603,9 @@ export function TimeReviewViews({
   // The Proposed toolbar's total (round 2): the day's in Day, else the week's.
   const headDay = headModel.days.find((day) => day.selected);
   const toolbarTotal = !isList && state.scope === "day" && headDay
-    ? { value: headDay.total, label: `Day total ${headDay.total}, ${rangeLabel}` }
-    : { value: headModel.weekTotal, label: headModel.weekTotalLabel };
+    // The day's total opens the day's report; the week's, the week's (Codex r1 on #636).
+    ? { value: headDay.total, label: `Day total ${headDay.total}, ${rangeLabel}`, href: reportsHrefForCustomRange(headDay.key, headDay.key) }
+    : { value: headModel.weekTotal, label: headModel.weekTotalLabel, href: reportsHrefForCustomRange(weekReportFrom, weekReportTo) };
 
   return (
     <section className="timeline-workspace">
@@ -654,7 +655,7 @@ export function TimeReviewViews({
               </button>
             </div>
             <Link aria-label={`${toolbarTotal.label}. Open in Reports`} className="df-cal-weektotal df-tnum"
-              href={reportsHrefForCustomRange(weekReportFrom, weekReportTo)} title={toolbarTotal.label}>
+              href={toolbarTotal.href} title={toolbarTotal.label}>
               {toolbarTotal.value}
             </Link>
             <SegmentedControl
