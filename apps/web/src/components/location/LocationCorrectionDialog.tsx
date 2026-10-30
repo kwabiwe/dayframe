@@ -312,6 +312,7 @@ export function LocationCorrectionDialog({
   // of the dialog behind "More options".
   const [query, setQuery] = useState("");
   const [moreOptions, setMoreOptions] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -709,41 +710,47 @@ export function LocationCorrectionDialog({
             <DayframeIcon glyph="search" size={16} />
             <input aria-label="Search places" disabled={busy} onChange={(event) => setQuery(event.target.value)}
               placeholder="Search places" type="text" value={query} />
+            {searching ? <span aria-label="Searching" className="location-correction-search-spinner" role="status" /> : null}
           </label>
-          {!place.placeId && mapProvider === "mapkit" && centre ? (
-            <NearbyPlaces
-              centre={{ latitude: centre.coordinates[1], longitude: centre.coordinates[0] }}
-              disabled={busy}
-              onPick={(name) => void saveThisPlace(name)}
-              onUnavailable={() => setMapProvider("maplibre")}
-              pickLabel="Saves it as a place and sets this visit to it"
-              query={query}
-              rows={3}
-              searchRows={3}
-            />
-          ) : null}
-          {rows.length || (text && canSaveNew) ? (
-            <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
-              {rows.map((row) => (
-                <li key={row.key}>
-                  <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
-                    onClick={() => void apply(row.key)} type="button">
-                    <DayframeIcon glyph={row.glyph} size={18} />
-                    <span><b>{row.name}</b>{row.note ? <small>{row.note}</small> : null}</span>
-                    {picked === row.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
-                  </button>
-                </li>
-              ))}
-              {text && canSaveNew ? (
-                <li>
-                  <button className="location-correction-option is-save" disabled={busy} onClick={() => void saveThisPlace(text)} type="button">
-                    <DayframeIcon glyph="plus" size={18} />
-                    <span><b>Save “{text}” as a place</b></span>
-                  </button>
-                </li>
+          {/* A fixed area of five rows: it scrolls inside, stays blank below fewer, and "Save “X” as a place" has a
+              pinned slot at its foot, so the map, search, More options and footer never move (owner, 30 Oct 2026). */}
+          <div className="location-correction-results">
+            <div className="location-correction-results-list">
+              {!place.placeId && mapProvider === "mapkit" && centre ? (
+                <NearbyPlaces
+                  centre={{ latitude: centre.coordinates[1], longitude: centre.coordinates[0] }}
+                  disabled={busy}
+                  onPick={(name) => void saveThisPlace(name)}
+                  onSearching={setSearching}
+                  onUnavailable={() => setMapProvider("maplibre")}
+                  pickLabel="Saves it as a place and sets this visit to it"
+                  query={query}
+                  rows={3}
+                  searchRows={3}
+                />
               ) : null}
-            </ul>
-          ) : null}
+              {rows.length ? (
+                <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
+                  {rows.map((row) => (
+                    <li key={row.key}>
+                      <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
+                        onClick={() => void apply(row.key)} type="button">
+                        <DayframeIcon glyph={row.glyph} size={18} />
+                        <span><b>{row.name}</b>{row.note ? <small>{row.note}</small> : null}</span>
+                        {picked === row.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            {text && canSaveNew ? (
+              <button className="location-correction-option is-save" disabled={busy} onClick={() => void saveThisPlace(text)} type="button">
+                <DayframeIcon glyph="plus" size={18} />
+                <span><b>Save “{text}” as a place</b></span>
+              </button>
+            ) : null}
+          </div>
         </div>
         <button aria-controls={`location-correction-more-${place.id}`} aria-expanded={moreOptions} className="location-correction-disclosure"
           disabled={busy} onClick={() => setMoreOptions((value) => !value)} type="button">

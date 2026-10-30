@@ -36,6 +36,7 @@ export function NearbyPlaces({
   centre,
   disabled,
   onPick,
+  onSearching,
   onUnavailable,
   pickLabel = "Names this visit; you can then save it",
   query: controlledQuery,
@@ -45,6 +46,8 @@ export function NearbyPlaces({
   centre: { latitude: number; longitude: number };
   disabled: boolean;
   onPick: (name: string) => void;
+  /** Whether a typed search is waiting on Apple (the dialog's quiet spinner). */
+  onSearching?: (searching: boolean) => void;
   /** What a pick does, for assistive tech (Proposed: the pick answers the question). */
   pickLabel?: string;
   /** The dialog's own search text (Proposed, round 2): this list then draws no search field of its own. */
@@ -61,9 +64,9 @@ export function NearbyPlaces({
   const [searched, setSearched] = useState<{ query: string; state: State } | null>(null);
   const [ownQuery, setQuery] = useState("");
   const query = controlledQuery ?? ownQuery;
-  const latest = useRef({ onUnavailable });
+  const latest = useRef({ onSearching, onUnavailable });
   useEffect(() => {
-    latest.current = { onUnavailable };
+    latest.current = { onSearching, onUnavailable };
   });
   const { latitude, longitude } = centre;
 
@@ -116,10 +119,20 @@ export function NearbyPlaces({
 
   const text = query.trim();
   const typed = text.length > 0;
+  const searching = typed && searched?.query !== text;
+  useEffect(() => {
+    latest.current.onSearching?.(searching);
+  }, [searching]);
+  // Gone mid-search (MapKit failed for the page): the host's spinner stops with it (Codex r1 on #639).
+  useEffect(() => () => latest.current.onSearching?.(false), []);
+  // Inside the dialog (it owns the search) the rows stay until the next answer arrives, so nothing jumps (owner,
+  // 30 Oct 2026): a tap on one still names that place. On its own, a newer query shows "Looking…" (Codex r3 on #633).
+  const held = searched?.state ?? nearby;
   const shown: State = !typed ? nearby
-    : searched?.query === text ? searched.state
-      // A newer query shows "Looking…", never the last query's rows to pick from (Codex r3 on #633).
-      : { status: "loading", rows: [] };
+    : !searching ? searched!.state
+      : controlledQuery !== undefined ? { ...held, status: "loading" }
+        : { status: "loading", rows: [] };
+  const quiet = controlledQuery !== undefined && shown.status === "loading";
   return (
     <div className="location-correction-nearby" data-section="nearby">
       {controlledQuery === undefined ? (
@@ -141,7 +154,7 @@ export function NearbyPlaces({
             </li>
           ))}
         </ul>
-      ) : (
+      ) : quiet ? null : (
         <p aria-live="polite" className="location-correction-nearby-note" role="status">
           {shown.status === "loading" ? (typed ? "Looking…" : "Looking nearby…") : shown.status === "unavailable" ? "Nearby places aren’t available right now."
             : typed ? "No places match." : "No places nearby."}

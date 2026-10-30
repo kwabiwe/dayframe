@@ -12,8 +12,8 @@ const page = readFileSync(join(root, "app/timeline/page.tsx"), "utf8");
 
 describe("Calendar phone layout", () => {
   it("sizes the gutter and day columns from CSS, narrower on phones", () => {
-    expect(views).toContain("gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))`");
-    expect(styles).toMatch(/\.timeline-calendar-workspace \{\s*--calendar-axis-width: 104px;\s*--calendar-day-min-width: 130px;/);
+    expect(views).toContain("gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(0, 1fr))`");
+    expect(styles).toMatch(/\.timeline-view-stage,\s*\.df-cal-striprow \{\s*--calendar-axis-width: 104px;/);
     const phone = styles.slice(styles.lastIndexOf("/* Calendar phone layout"));
     expect(phone).toMatch(/@media \(max-width: 560px\)/);
     expect(phone).toMatch(/--calendar-axis-width: 60px;/);

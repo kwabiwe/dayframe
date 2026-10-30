@@ -27,7 +27,7 @@ describe("Calendar range and toolbar contract", () => {
 
   it("names the List's top day in the header, not only the URL's date (owner bug, 29 Oct 2026)", () => {
     expect(timeline).toContain("onVisibleDay: reportListTopDay");
-    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList })');
+    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey)');
     expect(timeline).toContain("selectedDay: headerRanges.day.start");
     expect(timeline).toContain("value={headerDayKey}");
     // Reported whether or not the places column shows, and after a positioning that fires no scroll event.
@@ -86,7 +86,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");
-    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList })');
+    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey)');
   });
 
   it("gives all views the same clipped period data", () => {
@@ -115,8 +115,8 @@ describe("Calendar range and toolbar contract", () => {
     expect(toolbar).toContain("{!isList ? null : (");
     expect(timeline).toContain('variant="row"');
     expect(timeline).not.toContain("CalendarViewMenu");
-    // Today is always there, disabled on today's day or week, always available in List.
-    expect(toolbar).toContain("disabled={isDateLoading || (!isList && showsToday)}");
+    // Today is always there, greyed whenever today is what's shown, in every view (owner, 30 Oct 2026).
+    expect(toolbar).toContain("disabled={isDateLoading || showsToday}");
     // Location days belong to the owner and the selected week (Codex r2 on #584).
     expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);");
     // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).

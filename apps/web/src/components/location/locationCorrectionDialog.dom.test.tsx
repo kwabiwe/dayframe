@@ -533,11 +533,13 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(screen.queryByRole("button", { name: "Show all saved places" })).toBeNull();
     expect(screen.queryByRole("radio")).toBeNull();
     fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "home" } });
-    expect(names("Saved places found")).toEqual(["Home", "Save “home” as a place"]);
+    expect(names("Saved places found")).toEqual(["Home"]);
+    // The pinned slot under the results, only while there's text.
+    expect(screen.getByRole("button", { name: "Save “home” as a place" }).parentElement?.className).toBe("location-correction-results");
     expect(screen.getByText("Saved place · 5.4 km away")).not.toBeNull();
     // At most three by search.
     fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "e" } });
-    expect(names("Saved places found")).toHaveLength(4);
+    expect(names("Saved places found")).toHaveLength(3);
   });
 
   it("gives a trip its own dialog: its legs, I didn't leave and This wasn't a trip", async () => {

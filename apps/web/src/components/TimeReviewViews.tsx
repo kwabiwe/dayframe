@@ -65,6 +65,8 @@ import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   formatCalendarRangeLabel,
+  weekColumnCount,
+  weekWindow,
   addCalendarDays,
   resetTimelineState,
   resolveTimelineRanges,
@@ -235,6 +237,24 @@ export function TimeReviewViews({
   );
   const calendarHoursMode: CalendarHoursMode = "fullDay";
   const preferenceRef = useRef<TimelinePreference | null>(initialPreference);
+  // How many of a week's days fit the grid (seven until measured, as on the server).
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [weekColumns, setWeekColumns] = useState<3 | 5 | 7>(7);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    const measure = () => {
+      const width = stage.getBoundingClientRect().width;
+      if (!width) return;
+      const axis = Number.parseFloat(getComputedStyle(stage).getPropertyValue("--calendar-axis-width")) || 104;
+      setWeekColumns(weekColumnCount(width, axis));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
   // Calendar starts unset so CalendarReview can open near now; later visits restore where it was left.
   const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition | null>>({
     calendar: null,
@@ -572,14 +592,25 @@ export function TimeReviewViews({
   const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
   // The toolbar's date box (UI review round 2): its words and arrows. List moves a week at a time, as its strip shows one.
   const navScope: TimelineScope = isList ? "week" : state.scope;
-  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList });
+  // A narrow Week shows five or three days, chosen by the grid's width, never a sideways scroll (owner, 30 Oct 2026).
+  const narrowWeek = !isList && state.scope === "week" && weekColumns < 7 ? weekWindow(ranges.weekDays, ranges.day.start, weekColumns) : null;
+  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey);
   const goPeriod = (direction: "previous" | "next") => {
     if (isDateLoading) return;
+    if (narrowWeek) {
+      // Three days step by three. Five days step a week: Monday to Friday is the window, so a five-day step would land
+      // on a weekend and clamp back (Codex r1 on #639).
+      const from = weekColumns === 5 ? ranges.day.start : narrowWeek.days[0];
+      void navigate({ date: toTimelineDateKey(addDays(from, (direction === "previous" ? -1 : 1) * (weekColumns === 5 ? 7 : 3))) });
+      return;
+    }
     const shifted = shiftTimelineState({ ...state, date: headerDayKey, scope: navScope }, direction);
     void navigate(isList ? { date: shifted.date } : shiftTimelineState(state, direction), isList ? { reposition: true } : undefined);
   };
-  const showsToday = todayKey === null
-    || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
+  // Greyed when today is what's shown: the top day in List, a visible day in a narrow Week, else the period.
+  const showsToday = todayKey === null || (isList ? headerDayKey === todayKey
+    : narrowWeek ? narrowWeek.days.some((day) => toTimelineDateKey(day) === todayKey)
+      : todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
   // link are that week's, from the List's loaded weeks.
   const headerWeekMoved = headerRanges.week.start.getTime() !== ranges.week.start.getTime();
@@ -620,7 +651,7 @@ export function TimeReviewViews({
           <section aria-busy={isDateLoading} aria-label="Calendar period and view controls" className="timeline-range-toolbar df-cal-toolbar is-next">
             <div className="df-cal-nav">
               <div className="df-cal-datebox" role="group" aria-label="Calendar period">
-                <IconButton disabled={isDateLoading} label={`Previous ${navScope}`} onClick={() => goPeriod("previous")}>
+                <IconButton disabled={isDateLoading} label={`Previous ${narrowWeek && weekColumns === 3 ? "3 days" : navScope}`} onClick={() => goPeriod("previous")}>
                   <ChevronLeft size={16} />
                 </IconButton>
                 {/* One fixed width for every view and date: the longest labels sit invisibly in the same cell. */}
@@ -639,13 +670,13 @@ export function TimeReviewViews({
                     value={headerDayKey}
                   />
                 </span>
-                <IconButton disabled={isDateLoading} label={`Next ${navScope}`} onClick={() => goPeriod("next")}>
+                <IconButton disabled={isDateLoading} label={`Next ${narrowWeek && weekColumns === 3 ? "3 days" : navScope}`} onClick={() => goPeriod("next")}>
                   <ChevronRight size={16} />
                 </IconButton>
               </div>
               <button
                 className="timeline-today-button"
-                disabled={isDateLoading || (!isList && showsToday)}
+                disabled={isDateLoading || showsToday}
                 onClick={() => {
                   if (todayKey) void navigate({ date: todayKey }, { reposition: true });
                 }}
@@ -699,7 +730,7 @@ export function TimeReviewViews({
         </p>
       ) : null}
 
-      <div className={`timeline-view-stage${isDateLoading ? " is-date-loading" : ""}`}>
+      <div className={`timeline-view-stage${isDateLoading ? " is-date-loading" : ""}`} ref={stageRef}>
         {state.view === "calendar" ? (
           <CalendarReview
             calendarHoursMode={calendarHoursMode}
@@ -717,13 +748,14 @@ export function TimeReviewViews({
             todayKeyHint={initialTodayKey}
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
-            visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+            visibleDays={state.scope === "day" ? [ranges.day.start] : narrowWeek ? narrowWeek.days : ranges.weekDays}
+            dayRowWindow={narrowWeek ? { start: narrowWeek.start, count: weekColumns } : null}
             dayRow={(
               <CalendarHead
                 disabled={isDateLoading}
                 model={headModel}
-                // Week highlights no day: choosing one there opens it in Day.
-                onSelectDay={(date) => void (state.scope === "week"
+                // A full Week highlights no day: choosing one there opens it in Day. A narrow Week moves its window.
+                onSelectDay={(date) => void (state.scope === "week" && !narrowWeek
                   ? navigate({ date, view: "calendar", scope: "day" }, { reposition: true })
                   : navigate({ date }, { reposition: true }))}
                 showSelected={state.scope === "day"}
@@ -848,7 +880,8 @@ export function CalendarReview({
   undoToastVisible = false,
   visibleDays,
   locations,
-  dayRow
+  dayRow,
+  dayRowWindow = null
 }: {
   /**
    * A block's "?" (a block that ran into a trip, location v4 design §7) answered from its editor: through the shared
@@ -873,6 +906,8 @@ export function CalendarReview({
   todayKeyHint?: string | null;
   /** The shared day row (`CalendarHead variant="row"`, UI review round 2), the grid's sticky first row. */
   dayRow?: ReactNode;
+  /** A narrow Week's days within the row (a soft pill spans them, and the grid gets its own column headings). */
+  dayRowWindow?: { start: number; count: number } | null;
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
@@ -1083,8 +1118,12 @@ export function CalendarReview({
       };
     });
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, clock, rowHeight, zoom.intervalMinutes]);
-  const visibleDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
-  const selectionScopeKey = `${calendarHoursMode}:${visibleDaysKey}`;
+  // A week's selection is the week's, however many of its days fit: a resize or a moved window keeps an open editor
+  // and its unsaved edits (Codex r1 on #639).
+  const firstVisibleDay = visibleDays[0];
+  const selectionDaysKey = visibleDays.length === 1 ? `day:${formatCalendarDateKey(firstVisibleDay)}`
+    : `week:${formatCalendarDateKey(addDays(firstVisibleDay, -((firstVisibleDay.getDay() + 6) % 7)))}`;
+  const selectionScopeKey = `${calendarHoursMode}:${selectionDaysKey}`;
   const visibleSelectedTarget = selectedTarget?.scopeKey === selectionScopeKey ? selectedTarget : null;
   const selectedEntry = visibleSelectedTarget?.kind === "entry"
     ? entries.find((entry) => entry.id === visibleSelectedTarget.entryId) ?? null
@@ -1702,16 +1741,25 @@ export function CalendarReview({
       >
         <div
           className="timeline-calendar-grid"
-          // The time gutter and the narrowest day column come from CSS (--calendar-axis-width,
-          // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
-          style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
+          // The time gutter comes from CSS (--calendar-axis-width), so phones get a narrow one; the day columns share
+          // the rest (a narrow Week shows fewer days, never a sideways scroll).
+          style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(0, 1fr))` }}
         >
           {/* One day row for Day and Week (UI review round 2), in seven columns after the zoom's cell, so each day sits
               over its Week column and at the same place in Day; switching views moves only the highlight. */}
           <div
             className="df-cal-dayrow"
-            style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(7, ${visibleDays.length === 1 ? "minmax(0, 1fr)" : "minmax(var(--calendar-day-min-width), 1fr)"})` }}
           >
+            {dayRowWindow ? (
+              <span
+                aria-hidden="true"
+                className="df-cal-daypill"
+                style={{
+                  left: `calc(var(--calendar-axis-width) + (100% - var(--calendar-axis-width)) * ${dayRowWindow.start} / 7)`,
+                  width: `calc((100% - var(--calendar-axis-width)) * ${dayRowWindow.count} / 7)`
+                }}
+              />
+            ) : null}
             <span className="calendar-corner-zoom df-cal-dayrow-zoom" role="group" aria-label="Calendar zoom">
               <button
                 type="button"
@@ -1732,6 +1780,16 @@ export function CalendarReview({
             </span>
             {dayRow}
           </div>
+          {dayRowWindow ? (
+            <>
+              <span aria-hidden="true" className="df-cal-colhead" />
+              {visibleDays.map((day) => (
+                <span className={`df-cal-colhead${isToday(day) ? " is-today" : ""}`} key={day.toISOString()}>
+                  {new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day)} {day.getDate()}
+                </span>
+              ))}
+            </>
+          ) : null}
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
             {nowTop !== null ? (
