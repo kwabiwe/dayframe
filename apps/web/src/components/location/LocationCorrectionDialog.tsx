@@ -566,7 +566,9 @@ export function LocationCorrectionDialog({
   ) : null;
 
   const pendingNow = corrections();
-  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim());
+  // A creation whose outcome isn't known counts as a change, so the footer recovers it instead of answering Yes
+  // (Codex r3 on #636; the failure that leaves it also re-renders, so the ref is current here).
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || Boolean(pendingCreation.current);
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>

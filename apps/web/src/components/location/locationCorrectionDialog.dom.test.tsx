@@ -494,8 +494,26 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const calls = clientFetch.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${url}`);
     expect(calls).toEqual(["POST /api/places", "GET /api/places", "POST /api/timeline/corrections"]);
+    // (With a question that has a Yes, the footer offers Save while the creation is unknown: Codex r3 on #636.)
     const last = JSON.parse((clientFetch.mock.calls.at(-1)![1] as RequestInit).body as string);
     expect(last).toMatchObject({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-bakery", learnedPlaceId: null });
+  });
+
+  it("offers Save, not the question's Yes, while a creation's outcome is unknown (Codex r3 on #636)", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset().mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const onAnswer = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      question={{ text: "Visited Boots?", yesLabel: "Yes", noLabel: "Not now", onAnswer }} target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    await screen.findByTestId("evidence-map");
+    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Bakery” as a place" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(onAnswer).not.toHaveBeenCalled();
   });
 
   it("lists at most two saved places within 1 km, nearest first, and finds the far ones by search", async () => {
