@@ -628,13 +628,49 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
 
   /** An edited sheet's answer, registered for `registeredFor` (`recordOwner`), started through the one completion path. */
   const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
-    recordOwner: MobileAccountOwner, generation: number, options: { outing?: boolean } = {}) =>
-    startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner, generation, options), []);
+    recordOwner: MobileAccountOwner, generation: number) =>
+    startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner, generation), []);
+  /**
+   * An answer after the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): kept on the phone before they are
+   * queued, and sent once the server has them. An outing's answer, Yes or Not now, keeps its trips: the record answers
+   * them with the stay, hides them while it waits and waits for theirs too, and the trips and proposals captured here
+   * are the ones its start checks, as an ordinary answer's are (Codex r1 on #643). A plain "?" is its own alone: its
+   * corrections reshape it. `generation`: the tap's account lifetime, from before its first await (Codex r17 on #610).
+   */
+  const answerAfterCorrections = async (input: { itemId: string; segmentId: string; logged: boolean; newIds: readonly string[]; generation: number;
+    venue: ReviewAnswerVenue | null; logAsCategoryId: string | null; owner: MobileAccountOwner; ownerKey: string }) => {
+    const { itemId, logged, generation, venue, owner, ownerKey } = input;
+    if (generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
+    // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps its
+    // question and nothing is queued (Codex r16 on #610).
+    if (!canAnswerRef.current(itemId)) throw new Error("This can't be answered here now.");
+    const data = shownRef.current;
+    const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
+    if (!listed) throw new Error("This can't be answered here now.");
+    const expected = answerSetOf(listed);
+    const memberIds = [...expected.members.keys()];
+    const memberItemIds = memberIds.flatMap((memberId) => {
+      const member = data?.reviewItems.find((candidate) => candidate.id === memberId);
+      return typeof member?.rawPayload?.clientSegmentId === "string" ? [member.rawPayload.clientSegmentId] : [];
+    });
+    const id = createReviewClientMutationId();
+    const record = await waitForItemCorrections(owner, { id, itemId: input.segmentId, newIds: input.newIds,
+      ...(memberItemIds.length ? { memberItemIds } : {}),
+      // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
+      action: { kind: "answer", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId } : {}),
+        ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } });
+    if (!record) throw new Error("Nothing to wait for.");
+    return {
+      // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
+      start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },
+      cancel: () => withdrawAnswerAfterCorrections(owner, id)
+    };
+  };
   /**
    * Whether a "?" can be answered here now (Codex r16 on #610): listed and open, a complete window, no waiting or
    * rejected change of its own, not already answered (held or saving) or being saved on the deck. An answer to one that
    * can't is refused at once, never accepted and dropped later.
    */
   const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
-  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
+  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
 }
