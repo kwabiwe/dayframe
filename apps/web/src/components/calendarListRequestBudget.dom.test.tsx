@@ -13,7 +13,7 @@ import type { ContinuousListProps } from "./EntriesTable";
 // however much history is loaded, and none from the running block's clock (performance.md). Synthetic data only.
 
 const navigation = vi.hoisted(() => ({ search: "" }));
-const listed = vi.hoisted(() => ({ continuous: null as ContinuousListProps | null, onChanged: null as null | (() => Promise<void>) }));
+const listed = vi.hoisted(() => ({ continuous: null as ContinuousListProps | null, onChanged: null as null | (() => Promise<void>), entries: [] as Array<{ id: string }> }));
 const runtime = vi.hoisted(() => {
   const values: Record<string, unknown> = { dateLoadError: null, isDateLoading: false, isTimerBusy: false, shellData: null };
   return new Proxy(values, {
@@ -41,9 +41,10 @@ vi.mock("@/components/AppShellRuntime", () => ({
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
 // The List itself (its Places column and "?" rows render from the props below and fetch nothing); the props are kept.
 vi.mock("@/components/EntriesTable", () => ({
-  EntriesTable: ({ continuous, onChanged }: { continuous?: ContinuousListProps; onChanged?: () => Promise<void> }) => {
+  EntriesTable: ({ continuous, entries, onChanged }: { continuous?: ContinuousListProps; entries?: Array<{ id: string }>; onChanged?: () => Promise<void> }) => {
     listed.continuous = continuous ?? null;
     listed.onChanged = onChanged ?? null;
+    listed.entries = entries ?? [];
     return null;
   }
 }));
@@ -402,5 +403,161 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     expect(view.result.current.get(far)?.timeZone).toBe("after");
     // At most the 15 days around the destination.
     expect(reads() - before).toBeLessThanOrEqual(15);
+  });
+});
+
+describe("Calendar › List freshness under the request budget (Codex r2 on #634)", () => {
+  const weekStart = (weeksBack: number) => {
+    const day = local(10, 26 - 7 * weeksBack);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+  };
+  const bootstrapCalls = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).length;
+
+  it("an edit never re-reads every outstanding historical read: 20 delayed reads, one edit, a fixed number more", async () => {
+    // Every bootstrap read waits until released.
+    const held: Array<() => void> = [];
+    let holding = false;
+    clientFetch.mockImplementation((url: string) => {
+      const answer = respond(url);
+      if (!holding) return Promise.resolve(answer);
+      return new Promise((resolve) => held.push(() => resolve(answer)));
+    });
+    const { useCalendarListWeeks } = await import("./useCalendarListWeeks");
+    type Props = { focusDate: string; staleKey: number; refreshToken: number };
+    const view = renderHook((props: Props) => useCalendarListWeeks({
+      anchorWeekStart: local(10, 26), currentWeekStart: local(10, 26), enabled: true, owner: "workspace:user", ...props
+    }), { initialProps: { focusDate: "2026-10-30", staleKey: 0, refreshToken: 0 } });
+    for (let week = 0; week < 24; week += 1) {
+      act(() => view.result.current.load("earlier"));
+      await flush();
+      await flush();
+    }
+    // A bootstrap refresh, then a slow scroll down through history: its window reads are all still out.
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
+    holding = true;
+    for (let step = 1; step <= 21; step += 3) {
+      view.rerender({ focusDate: weekStart(step), staleKey: 1, refreshToken: 0 });
+      await flush();
+    }
+    expect(held.length).toBeGreaterThanOrEqual(20);
+    // Back at the top, one edit, then every delayed read lands.
+    const before = bootstrapCalls();
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
+    await flush();
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 1 });
+    await flush();
+    holding = false;
+    while (held.length) await act(async () => { held.shift()!(); await vi.advanceTimersByTimeAsync(0); });
+    await flush();
+    // The top window (2 loaded weeks) at once and when visited: never one more read per outstanding flight (20 before).
+    expect(bootstrapCalls() - before).toBeLessThanOrEqual(4);
+  });
+
+  it("finds a block added elsewhere to a cached-empty week once the List has scrolled past it (TimeReviewViews)", { timeout: 30_000 }, async () => {
+    // Sparse history: blocks on 28 Oct (this week) and 16 Sep (6 weeks back); the 5 weeks between are empty.
+    const remote = new Map<string, TimeEntryRow[]>();
+    for (let back = 1; back <= 5; back += 1) remote.set(weekStart(back), []);
+    remote.set(weekStart(6), [entry("sep-16", local(9, 16, 9))]);
+    clientFetch.mockImplementation(async (url: string) => {
+      const path = url.split("?")[0];
+      const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
+      if (path === "/api/bootstrap") return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) ?? [] }) };
+      return respond(url);
+    });
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null} initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    const view = render(page(bootstrap()));
+    await flush();
+    for (let week = 1; week <= 6; week += 1) {
+      act(() => listed.continuous!.onLoad("earlier"));
+      await flush();
+      await flush();
+    }
+    expect(listed.entries.map((row) => row.id)).toContain("sep-16");
+    // A bootstrap refresh (every loaded week stale), and the block added to 7 Oct elsewhere (outside the bootstrap's 100).
+    view.rerender(page(bootstrap()));
+    await flush();
+    remote.set(weekStart(3), [entry("oct-7", local(10, 7, 9))]);
+    // The List's top day can only be 28 Oct or 16 Sep: the user scrolls between them.
+    let passes = 0;
+    while (!listed.entries.some((row) => row.id === "oct-7") && passes < 4) {
+      passes += 1;
+      const before = bootstrapCalls();
+      act(() => listed.continuous!.onVisibleDay!(local(9, 16).getTime()));
+      await flush();
+      await flush();
+      act(() => listed.continuous!.onVisibleDay!(local(10, 28).getTime()));
+      await flush();
+      await flush();
+      // Each pass down and up: at most the destination windows' weeks and 2 passed-over empty weeks each way.
+      expect(bootstrapCalls() - before).toBeLessThanOrEqual(2 * (3 + 2));
+    }
+    expect(listed.entries.map((row) => row.id)).toContain("oct-7");
+    expect(passes).toBeLessThanOrEqual(2);
+  });
+
+  it("shows a week whose refresh failed as out of date, keeps its old copy, and Try again reads it (TimeReviewViews)", { timeout: 30_000 }, async () => {
+    const failing = new Set<string>();
+    const remote = new Map<string, TimeEntryRow[]>();
+    clientFetch.mockImplementation(async (url: string) => {
+      const path = url.split("?")[0];
+      const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
+      if (path === "/api/bootstrap" && failing.has(date)) return { ok: false, status: 500, json: async () => ({}) };
+      if (path === "/api/bootstrap" && remote.has(date)) return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) }) };
+      return respond(url);
+    });
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null} initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    const view = render(page(bootstrap()));
+    await flush();
+    for (let week = 1; week <= 4; week += 1) {
+      act(() => listed.continuous!.onLoad("earlier"));
+      await flush();
+      await flush();
+    }
+    const far = weekStart(3);
+    view.rerender(page(bootstrap()));
+    await flush();
+    remote.set(far, []);
+    failing.add(far);
+    act(() => listed.continuous!.onVisibleDay!(local(10, 7).getTime()));
+    await flush();
+    await flush();
+    // The old copy stays, and the List is told the week couldn't be refreshed.
+    expect(listed.entries.map((row) => row.id)).toContain(`week-${far}`);
+    expect(listed.continuous!.staleWeeks?.map((week) => week.key)).toEqual([far]);
+    // Try again: read now, fresh, the line goes.
+    failing.delete(far);
+    act(() => listed.continuous!.onRetryWeek!(far));
+    await flush();
+    await flush();
+    expect(listed.entries.map((row) => row.id)).not.toContain(`week-${far}`);
+    expect(listed.continuous!.staleWeeks ?? []).toEqual([]);
+  });
+
+  it("exposes a place day whose refresh failed, keeps its copy, and reads it again on retry", async () => {
+    const failing = new Set<string>();
+    const markers = new Map<string, string>();
+    clientFetch.mockImplementation(async (url: string) => {
+      const date = decodeURIComponent(String(url).split("date=")[1]);
+      if (failing.has(date)) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, json: async () => ({ date, timeZone: markers.get(date) ?? "before", dayStart: `${date}T00:00:00.000Z`, dayEnd: `${date}T23:59:59.999Z`, gaps: [], items: [], openTrip: null }) };
+    });
+    const { useLocationTimelinesWithStatus } = await import("./location/LocationListRows");
+    const dates = ["2026-10-30", "2026-10-29", "2026-10-28"];
+    const view = renderHook(({ staleKey }) => useLocationTimelinesWithStatus(dates, ["2026-10-30"], 0, staleKey, "w:u", true, "2026-10-30"),
+      { initialProps: { staleKey: 0 } });
+    for (let pass = 0; pass < 4; pass += 1) await flush();
+    markers.set("2026-10-29", "after");
+    failing.add("2026-10-29");
+    view.rerender({ staleKey: 1 });
+    for (let pass = 0; pass < 4; pass += 1) await flush();
+    expect(view.result.current.days.get("2026-10-29")?.timeZone).toBe("before");
+    expect(view.result.current.failedDays).toEqual(["2026-10-29"]);
+    failing.delete("2026-10-29");
+    act(() => view.result.current.retry(["2026-10-29"]));
+    for (let pass = 0; pass < 4; pass += 1) await flush();
+    expect(view.result.current.days.get("2026-10-29")?.timeZone).toBe("after");
+    expect(view.result.current.failedDays).toEqual([]);
   });
 });

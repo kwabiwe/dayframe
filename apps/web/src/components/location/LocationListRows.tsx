@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DAYFRAME_APP_ICONS,
@@ -44,6 +44,9 @@ export function useLocationTimeline(date: string | null, refreshKey: unknown, ow
   return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
 
+/** Of the stale days without places the List's top day passes over, at most this many are read per move (nearest first). */
+export const LOCATION_GAP_DAYS_READ_ON_SCROLL = 2;
+
 /** Of the edited blocks' own days outside the window, at most this many are read again at once. */
 export const LOCATION_EDITED_DAYS_READ_ON_EDIT = 8;
 
@@ -68,8 +71,20 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * A's earlier days. Unmounting aborts every read and stops the queue. A failed read keeps the day's last
  * copy; a day without one shows blocks (and its checks) only, as before.
  */
-export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
-  owner: string, enabled = true, focusDate: string | null = null, affectedDates: readonly string[] = []): ReadonlyMap<string, LocationTimeline> {
+export function useLocationTimelines(...args: Parameters<typeof useLocationTimelinesWithStatus>): ReadonlyMap<string, LocationTimeline> {
+  return useLocationTimelinesWithStatus(...args).days;
+}
+
+/**
+ * The same, with the days whose newest read again failed (shown from their old copy, Codex r2 on #634) and a way to read
+ * days again now (Try again).
+ */
+export function useLocationTimelinesWithStatus(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
+  owner: string, enabled = true, focusDate: string | null = null, affectedDates: readonly string[] = []): {
+  days: ReadonlyMap<string, LocationTimeline>;
+  failedDays: readonly string[];
+  retry: (dates: readonly string[]) => void;
+} {
   // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
   const [scope, setScope] = useState({ owner, generation: 0 });
   let generation = scope.generation;
@@ -78,6 +93,7 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     setScope({ owner, generation });
   }
   const [loaded, setLoaded] = useState<{ generation: number; days: ReadonlyMap<string, LocationTimeline> }>({ generation: 0, days: new Map() });
+  const [failed, setFailed] = useState<{ generation: number; days: ReadonlySet<string> }>({ generation: 0, days: new Set() });
   const queueRef = useRef<TimelineQueue | null>(null);
   const datesKey = dates.join(",");
   const liveDatesKey = liveDates.join(",");
@@ -93,7 +109,13 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
           days.set(date, timeline);
           return { generation: forGeneration, days };
         });
-      });
+      }, (date, isFailed) => setFailed((current) => {
+        const days = new Set(current.generation === forGeneration ? current.days : []);
+        if (current.generation === forGeneration && days.has(date) === isFailed) return current;
+        if (isFailed) days.add(date);
+        else days.delete(date);
+        return { generation: forGeneration, days };
+      }));
     }
     return queueRef.current;
   };
@@ -139,25 +161,52 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     // The window and the edited days are read from this render; the effect runs only for a new edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, staleKey]);
-  // The stale days of the window the List's top day has come to (only the destination: days passed over on the way
-  // stay stale until visited), at most 2 × LIST_REFRESH_RADIUS_DAYS + 1. A day still being read is left to that read.
+  // The stale days of the window the List's top day has come to (at most 2 × LIST_REFRESH_RADIUS_DAYS + 1), and of the
+  // stale days with no places it passed over, at most LOCATION_GAP_DAYS_READ_ON_SCROLL nearest the destination (such a
+  // day may have no heading, so the top day can never be on it; Codex r2 on #634). A day still being read is left to it.
+  const previousFocusRef = useRef(focusDate);
+  const loadedRef = useRef(loaded);
+  useLayoutEffect(() => {
+    loadedRef.current = loaded;
+  });
   useEffect(() => {
+    const from = previousFocusRef.current;
+    previousFocusRef.current = focusDate;
     if (!enabled) return;
     const queue = queueRef.current;
     if (!queue || queue.generation !== generation || !queue.stale.size) return;
     const due = [...queue.stale.keys()].filter((date) => inListRefreshWindow(date, refreshWindow) && !queue.reading(date));
+    if (from && focusDate && from !== focusDate) {
+      const [low, high] = from < focusDate ? [from, focusDate] : [focusDate, from];
+      const days = loadedRef.current.generation === generation ? loadedRef.current.days : EMPTY_TIMELINES;
+      due.push(...[...queue.stale.keys()]
+        .filter((date) => date >= low && date <= high && !inListRefreshWindow(date, refreshWindow) && !queue.reading(date) &&
+          !(days.get(date)?.items.length))
+        .sort((left, right) => (left > right ? -1 : 1) * (focusDate < from ? -1 : 1))
+        .slice(0, LOCATION_GAP_DAYS_READ_ON_SCROLL));
+    }
     if (due.length) queue.want(due, true);
     // `windowKey` stands for the window.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, windowKey]);
+  const retry = useCallback((retryDates: readonly string[]) => {
+    const queue = queueRef.current;
+    if (enabled && queue) queue.want(retryDates.filter((date) => queue.asked.has(date)), true);
+  }, [enabled]);
   // Leaving: every read is aborted and the queue stops.
   useEffect(() => () => {
     queueRef.current?.dispose();
     queueRef.current = null;
   }, []);
 
-  return loaded.generation === generation ? loaded.days : EMPTY_TIMELINES;
+  return {
+    days: loaded.generation === generation ? loaded.days : EMPTY_TIMELINES,
+    failedDays: failed.generation === generation ? [...failed.days] : NO_FAILED_DAYS,
+    retry
+  };
 }
+
+const NO_FAILED_DAYS: readonly string[] = [];
 
 type TimelineQueue = {
   generation: number;
@@ -174,7 +223,8 @@ type TimelineQueue = {
   dispose: () => void;
 };
 
-function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void): TimelineQueue {
+function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void,
+  onFailed: (date: string, failed: boolean) => void = () => undefined): TimelineQueue {
   const due = new Set<string>();
   const inFlight = new Map<string, AbortController>();
   const againAfterFlight = new Set<string>();
@@ -196,8 +246,10 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
         .then((next) => {
           if (disposed) return;
           inFlight.delete(date);
+          if (!next || next.date !== date) onFailed(date, true);
           if (next && next.date === date) {
             onRead(date, next);
+            onFailed(date, false);
             // Fresh only when read after it was marked; a failed read leaves it stale, so the next visit reads it again.
             const marked = stale.get(date);
             if (marked !== undefined && marked <= startedAt) stale.delete(date);

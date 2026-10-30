@@ -13329,6 +13329,19 @@ dialog.ui-dialog.df-palette {
   }
 }
 
+/* A week whose refresh failed (request-storm fix, Codex r2 on #634): its own quiet line above the week's first day,
+   the List's edge copy and retry pill, rows unchanged. */
+.timeline-list-week-stale > td {
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: var(--type-meta);
+  font-weight: var(--fw-regular);
+}
+
+.timeline-list-week-stale .timeline-list-edge-retry {
+  margin-left: 8px;
+}
+
 .timeline-list-continued > td {
   padding: 4px 8px 8px;
   color: var(--text-secondary);

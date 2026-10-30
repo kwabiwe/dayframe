@@ -245,6 +245,12 @@ export type ContinuousListProps = {
    * the two always agree however the List got there (scrolling, a "?" link, the chip; owner bug, 29 Oct 2026).
    */
   onVisibleDay?: (dayStartMs: number | null) => void;
+  /**
+   * Weeks whose newest read again failed (Codex r2 on #634): their old copy shows, with a quiet line at the week's start
+   * saying it couldn't be refreshed, and Try again.
+   */
+  staleWeeks?: readonly { key: string; startMs: number; endMs: number }[];
+  onRetryWeek?: (key: string) => void;
 };
 
 /** How far ahead of either end the List starts loading the next week. */
@@ -1482,6 +1488,24 @@ export function EntriesTable({
     return formatDuration(editor?.draft.durationSeconds ?? fallbackSeconds);
   }
 
+  // A failed week's line, once, above the first day heading shown in it (newest first, so at the week's start).
+  const noticedStaleWeeks = new Set<string>();
+  const staleWeekNotice = (dayStartMs: number | undefined) => {
+    if (dayStartMs === undefined || !continuous?.staleWeeks?.length) return null;
+    const week = continuous.staleWeeks.find((each) => dayStartMs >= each.startMs && dayStartMs < each.endMs);
+    if (!week || noticedStaleWeeks.has(week.key)) return null;
+    noticedStaleWeeks.add(week.key);
+    const retry = continuous.onRetryWeek;
+    return (
+      <tr className="timeline-list-week-stale" data-stale-week={week.key} key={`stale-${week.key}`}>
+        <td colSpan={4}>
+          <span role="status">Couldn&apos;t refresh this week.</span>
+          {retry ? <button className="timeline-list-edge-retry" onClick={() => retry(week.key)} type="button">Try again</button> : null}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <section className="timeline-list-workspace">
       {actionError ? (
@@ -1581,8 +1605,9 @@ export function EntriesTable({
                     ? extraDays
                       .filter((day) => day.dayStartMs > (dayTotals.get(group.day)?.dayStartMs ?? 0) &&
                         (previousDate === null || day.dayStartMs < (dayTotals.get(previousDate)?.dayStartMs ?? Infinity)))
-                      .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
+                      .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} notice={staleWeekNotice(day.dayStartMs)} renderRow={renderLocationRow} />)
                     : null}
+                  {shouldShowDate ? staleWeekNotice(dayTotals.get(group.day)?.dayStartMs) : null}
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading"
                       data-day-start-ms={dayTotals.get(group.day)?.dayStartMs}>
@@ -1831,7 +1856,7 @@ export function EntriesTable({
             {groupByDay
               ? extraDays
                 .filter((day) => !grouped.length || day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
-                .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
+                .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} notice={staleWeekNotice(day.dayStartMs)} renderRow={renderLocationRow} />)
               : extraDays.flatMap((day) => day.rows).map((row) => renderLocationRow(row))}
           </tbody>
         </table>
@@ -2013,9 +2038,10 @@ type ExtraListDay = { label: string; dayStartMs: number; seconds: number; contin
  * A day without a group of its own: its heading (with its total when a block continues into it, and its
  * start for scrolling to it), a note when it only continues an earlier block, and its places and checks.
  */
-function ExtraDayRows({ day, renderRow }: { day: ExtraListDay; renderRow: (row: DayLocationRow) => ReactNode }) {
+function ExtraDayRows({ day, notice = null, renderRow }: { day: ExtraListDay; notice?: ReactNode; renderRow: (row: DayLocationRow) => ReactNode }) {
   return (
     <>
+      {notice}
       <tr className="timeline-list-day-heading" data-day-start-ms={day.dayStartMs}>
         <td colSpan={4}>
           <span>{day.label}</span>

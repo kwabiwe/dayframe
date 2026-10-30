@@ -66,6 +66,7 @@ import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   formatTimelinePeriodLabel,
+  addCalendarDays,
   resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
@@ -108,7 +109,7 @@ import {
 } from "@/lib/calendar-click-create";
 import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
-import { useLocationTimelines } from "@/components/location/LocationListRows";
+import { useLocationTimelines, useLocationTimelinesWithStatus } from "@/components/location/LocationListRows";
 import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
 import { calendarNavigationGeneration, subscribeToCalendarToday } from "@/lib/calendar-today-request";
 
@@ -470,8 +471,32 @@ export function TimeReviewViews({
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
-  const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
+  const listTimelineStatus = useLocationTimelinesWithStatus(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
     data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);
+  const listTimelines = listTimelineStatus.days;
+  // Weeks whose newest read again failed, for the week or any of its days' places (Codex r2 on #634): the List keeps
+  // their old copy and says so on a quiet line at the week's start, with Try again.
+  const failedListDays = listTimelineStatus.failedDays;
+  const retryListDays = listTimelineStatus.retry;
+  const staleListWeeks = (() => {
+    const weeks = new Map<string, { key: string; startMs: number; endMs: number; days: string[] }>();
+    const add = (dayKey: string, failedDay: boolean) => {
+      const start = resolveTimelineRanges({ ...state, date: dayKey }).week.start;
+      const key = toTimelineDateKey(start);
+      const week = weeks.get(key) ?? { key, startMs: start.getTime(), endMs: addCalendarDays(start, 7).getTime(), days: [] };
+      if (failedDay) week.days.push(dayKey);
+      weeks.set(key, week);
+    };
+    for (const key of listWeeks.failedWeeks) add(key, false);
+    for (const day of failedListDays) add(day, true);
+    return [...weeks.values()];
+  })();
+  const retryListWeek = (key: string) => {
+    const week = staleListWeeks.find((each) => each.key === key);
+    if (!week) return;
+    listWeeks.retryWeek(key);
+    if (week.days.length) retryListDays(week.days);
+  };
   // Location v4 steps 16–17: the Grid's days' places and trips, for trip leg strips and the Places lane.
   const gridDayKeys = isList ? NO_DAY_KEYS
     : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));
@@ -721,7 +746,9 @@ export function TimeReviewViews({
               onVisibleDay: reportListTopDay,
               onLoad: listWeeks.load,
               reachedEarliest: listWeeks.reachedEarliest,
-              reachedLatest: listWeeks.reachedLatest
+              reachedLatest: listWeeks.reachedLatest,
+              staleWeeks: staleListWeeks,
+              onRetryWeek: retryListWeek
             }}
             displayRange={listRange}
             onDeleteEntries={requestTimelineDelete}
