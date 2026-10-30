@@ -646,8 +646,9 @@ export function TimeReviewViews({
               value={isList ? "list" : state.scope}
             />
           </section>
-          {!isList && state.scope === "week" ? null : (
-            <div className={`df-cal-striprow${isList ? "" : " is-day"}`}>
+          {/* List keeps the 7-day picker as its own row; Day and Week draw the shared day row inside the grid. */}
+          {!isList ? null : (
+            <div className="df-cal-striprow">
               <CalendarHead
                 disabled={isDateLoading}
                 model={headModel}
@@ -768,6 +769,20 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+            dayRow={uiNext ? (
+              <CalendarHead
+                disabled={isDateLoading}
+                model={headModel}
+                // Week highlights no day: choosing one there opens it in Day.
+                onSelectDay={(date) => void (state.scope === "week"
+                  ? navigate({ date, view: "calendar", scope: "day" }, { reposition: true })
+                  : navigate({ date }, { reposition: true }))}
+                showSelected={state.scope === "day"}
+                showTotal={false}
+                variant="row"
+                weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+              />
+            ) : undefined}
             locations={{ timelines: gridTimelines, asking: gridCorrection.askingBySegment ?? NO_ASKING, onOpen: gridCorrection.open }}
           />
         ) : null}
@@ -881,7 +896,8 @@ export function CalendarReview({
   todayKeyHint = null,
   undoToastVisible = false,
   visibleDays,
-  locations
+  locations,
+  dayRow
 }: {
   /**
    * A block's "?" (a block that ran into a trip, location v4 design §7) answered from its editor: through the shared
@@ -904,6 +920,8 @@ export function CalendarReview({
   tags: BootstrapData["tags"];
   /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
   todayKeyHint?: string | null;
+  /** Proposed (UI review round 2): the shared day row (`CalendarHead variant="row"`) in place of the grid's own day headings. */
+  dayRow?: ReactNode;
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
@@ -1738,62 +1756,93 @@ export function CalendarReview({
           // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
           style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
         >
-          <div className="calendar-grid-corner">
-            <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
-              <button
-                type="button"
-                disabled={zoomIndex === 0}
-                aria-label="Zoom calendar out"
-                onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-              >
-                −
-              </button>
-              <button
-                type="button"
-                disabled={zoomIndex === zoomKeys.length - 1}
-                aria-label="Zoom calendar in"
-                onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-              >
-                +
-              </button>
-            </span>
-          </div>
-          {visibleDays.map((day) => {
-            const dayStart = startOfDay(day);
-            const total = analyzeTimeIntervals(
-              gridEntries.map((entry) => ({
-                id: entry.id,
-                startedAt: entry.startedAt,
-                stoppedAt: entry.stoppedAt
-              })),
-              {
-                range: { start: dayStart, end: addDays(dayStart, 1) },
-                now: capturedNow
-              }
-            );
-            const loggedLabel = formatDuration(total.loggedSeconds);
-            return (
-              <div
-                key={day.toISOString()}
-                className={[
-                  "calendar-day-heading",
-                  isToday(day) ? "is-today" : ""
-                ].join(" ")}
-              >
-                <div className="calendar-day-date" aria-label={formatDate(day)}>
-                  <small aria-hidden="true">{formatCalendarWeekday(day)}</small>
-                  <b aria-hidden="true">{day.getDate()}</b>
-                </div>
-                <div
-                  aria-hidden={localTimeReady ? undefined : true}
-                  aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
-                  className="calendar-day-total tabular"
+          {dayRow ? (
+            // Proposed (round 2): one day row for Day and Week, in seven columns after the zoom's cell, so each day sits
+            // over its Week column and at the same place in Day; switching views moves only the highlight.
+            <div
+              className="df-cal-dayrow"
+              style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(7, ${visibleDays.length === 1 ? "minmax(0, 1fr)" : "minmax(var(--calendar-day-min-width), 1fr)"})` }}
+            >
+              <span className="calendar-corner-zoom df-cal-dayrow-zoom" role="group" aria-label="Calendar zoom">
+                <button
+                  type="button"
+                  disabled={zoomIndex === 0}
+                  aria-label="Zoom calendar out"
+                  onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
                 >
-                  {total.loggedSeconds > 0 ? loggedLabel : "–"}
+                  −
+                </button>
+                <button
+                  type="button"
+                  disabled={zoomIndex === zoomKeys.length - 1}
+                  aria-label="Zoom calendar in"
+                  onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+                >
+                  +
+                </button>
+              </span>
+              {dayRow}
+            </div>
+          ) : (
+            <>
+            <div className="calendar-grid-corner">
+              <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
+                <button
+                  type="button"
+                  disabled={zoomIndex === 0}
+                  aria-label="Zoom calendar out"
+                  onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  disabled={zoomIndex === zoomKeys.length - 1}
+                  aria-label="Zoom calendar in"
+                  onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+                >
+                  +
+                </button>
+              </span>
+            </div>
+            {visibleDays.map((day) => {
+              const dayStart = startOfDay(day);
+              const total = analyzeTimeIntervals(
+                gridEntries.map((entry) => ({
+                  id: entry.id,
+                  startedAt: entry.startedAt,
+                  stoppedAt: entry.stoppedAt
+                })),
+                {
+                  range: { start: dayStart, end: addDays(dayStart, 1) },
+                  now: capturedNow
+                }
+              );
+              const loggedLabel = formatDuration(total.loggedSeconds);
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={[
+                    "calendar-day-heading",
+                    isToday(day) ? "is-today" : ""
+                  ].join(" ")}
+                >
+                  <div className="calendar-day-date" aria-label={formatDate(day)}>
+                    <small aria-hidden="true">{formatCalendarWeekday(day)}</small>
+                    <b aria-hidden="true">{day.getDate()}</b>
+                  </div>
+                  <div
+                    aria-hidden={localTimeReady ? undefined : true}
+                    aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
+                    className="calendar-day-total tabular"
+                  >
+                    {total.loggedSeconds > 0 ? loggedLabel : "–"}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+            </>
+          )}
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
             {/* Proposed (round 2): the now line runs on faintly through the gutter to the pill, as in Apple Calendar. */}

@@ -49,6 +49,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(model.days[6].bars).toEqual([{ key: "none", color: null, name: "No activity" }]);
     expect(model.days[0].accessibleName).toBe("Monday 5 October, nothing framed");
     expect(model.days[1].accessibleName).toBe("Tuesday 6 October, 7h 30m framed");
+    expect(model.days[0].tip).toBe("Mon 5");
+    expect(model.days[1].tip).toBe("Tue 6 · 7h 30m");
   });
 
   it("names a past week by its Monday instead of calling it this week", () => {
