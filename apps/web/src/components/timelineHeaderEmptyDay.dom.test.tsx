@@ -103,8 +103,7 @@ describe("Calendar › List header with nothing listed (Codex r3 on #625)", () =
     rerender(view(bootstrap(26, 26, [])));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(document.querySelectorAll("tr[data-day-start-ms]")).toHaveLength(0);
-    // The List names its top day by date (UI review round 2: "Today · 26 Oct" is Day's alone).
-    expect(label()).toContain("Mon 26 Oct");
+    expect(label()).toContain("Today · 26 Oct");
     expect(label()).not.toContain("14 Oct");
   });
 });

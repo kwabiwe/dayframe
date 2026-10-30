@@ -7167,9 +7167,13 @@ dialog.ui-dialog.df-range-custom {
    screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Every
    block keeps its title (location v4 C6); List is the phone path for detail (WUI-045). */
 .timeline-calendar-workspace {
-  --calendar-axis-width: 104px;
-  --calendar-day-min-width: 130px;
   position: relative;
+}
+
+/* Read by the day row in every view, and by the narrow Week's measure. */
+.timeline-view-stage,
+.df-cal-striprow {
+  --calendar-axis-width: 104px;
 }
 
 .calendar-phone-zoom {
@@ -14025,9 +14029,9 @@ dialog.ui-dialog.df-palette {
     overscroll-behavior: auto;
   }
 
-  .timeline-calendar-workspace {
+  .timeline-view-stage,
+  .df-cal-striprow {
     --calendar-axis-width: 60px;
-    --calendar-day-min-width: 118px;
   }
 
   /* "12:00 PM" fits the narrow gutter on one line. */
@@ -15590,40 +15594,22 @@ button.timeline-location-hit:focus-visible {
 
 /* The row beneath the toolbar: the 7-day picker in Day and List, the day columns in Week, at one height. */
 :root .df-cal-striprow {
-  display: flex;
+  position: relative;
+  display: grid;
   box-sizing: border-box;
   flex: none;
   height: var(--df-cal-row-height);
   min-height: var(--df-cal-row-height);
   align-items: center;
-  padding: 0 12px;
 }
 
-:root .df-cal-striprow .df-cal-week {
-  width: 100%;
-  justify-content: stretch;
-}
-
-:root .df-cal-striprow .df-cal-days {
-  width: 100%;
-}
-
-:root .df-cal-striprow .df-cal-day {
-  min-height: 0;
-  height: calc(var(--df-cal-row-height) - 6px);
-  grid-template-columns: auto auto;
-  grid-template-rows: auto auto;
-  align-content: center;
-  justify-content: center;
-  column-gap: 6px;
+/* List's leading cell: empty, as wide as Day's and Week's zoom cell, so the days never shift between views. */
+:root .df-cal-striprow::before {
+  content: "";
 }
 
 :root .df-cal-striprow .df-cal-day-total {
   display: none;
-}
-
-:root .df-cal-striprow .df-cal-day-bars {
-  grid-column: 1 / -1;
 }
 
 
@@ -15771,15 +15757,24 @@ button.timeline-location-hit:focus-visible {
   pointer-events: none;
 }
 
-:root .df-cal-dayrow .df-cal-week,
-:root .df-cal-dayrow .df-cal-days {
+:root .df-cal-dayrow,
+:root .df-cal-striprow {
+  grid-template-columns: var(--calendar-axis-width) repeat(7, minmax(0, 1fr));
+}
+
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-week,
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-days {
   display: contents;
 }
 
-:root .df-cal-dayrow .df-cal-day {
+/* Hover and the chosen day shade the day's wide cell, in every view (owner, 30 Oct 2026). */
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day {
+  position: relative;
+  z-index: 1;
   height: 44px;
   min-height: 44px;
-  justify-self: center;
+  margin-inline: 4px;
+  justify-self: stretch;
   grid-template-columns: auto auto;
   grid-template-rows: auto auto;
   align-content: center;
@@ -15824,7 +15819,7 @@ button.timeline-location-hit:focus-visible {
   background: var(--surface-muted);
 }
 
-:root .df-cal-dayrow .df-cal-day-bars {
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day-bars {
   grid-column: 1 / -1;
   justify-self: center;
 }
@@ -15838,22 +15833,56 @@ button.timeline-location-hit:focus-visible {
     visibility: hidden;
   }
 
-  :root .df-cal-dayrow .df-cal-day {
+  :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day {
+    height: 48px;
+    margin-inline: 1px;
     grid-template-columns: auto;
     grid-template-rows: auto auto auto;
     row-gap: 1px;
-    padding: 2px 4px;
+    padding: 2px 0;
   }
 
-  :root .df-cal-dayrow .df-cal-day b {
+  :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day b {
     width: 24px;
     height: 24px;
     font-size: 13px;
   }
+}
 
-  :root .df-cal-dayrow .df-cal-day {
-    height: 48px;
-  }
+/* The grid never scrolls sideways: its columns share the width, and a narrow Week shows fewer days. */
+:root .timeline-calendar-grid {
+  width: 100%;
+}
+
+/* A narrow Week (owner, 30 Oct 2026; Apple Calendar's multi-day view): the seven-day row stays whole, a soft pill spans
+   the days the grid shows, and the grid has its own small headings, aligned to its columns. */
+:root .df-cal-daypill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  pointer-events: none;
+}
+
+:root .df-cal-colhead {
+  position: sticky;
+  top: var(--df-cal-row-height);
+  z-index: 40;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  line-height: 28px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+:root .df-cal-colhead.is-today {
+  color: var(--accent-text);
 }
 
 /* ---------- The place dialog's fields: the shared time field and fill-led fields ---------- */
@@ -15928,9 +15957,59 @@ button.timeline-location-hit:focus-visible {
 }
 
 :root .location-correction.is-next .location-correction-option {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 44px;
+  min-height: 48px;
   padding: 6px 2px;
+}
+
+/* The dialog keeps one height: the map's frame and five result rows are fixed, so typing moves nothing; More options
+   may grow it, and on phones the dialog scrolls inside the viewport (owner, 30 Oct 2026). */
+:root .location-correction.is-next .location-correction-map {
+  box-sizing: border-box;
+  height: 189px;
+  flex: none;
+}
+
+:root .location-correction-results {
+  display: flex;
+  height: 240px;
+  flex-direction: column;
+}
+
+:root .location-correction-results-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+:root .location-correction-results > .location-correction-option {
+  flex: none;
+}
+
+/* A quiet spinner in the search field, never a row; held still under Reduce Motion. */
+:root .location-correction-search-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-secondary);
+  border-radius: 50%;
+  animation: df-search-spin 800ms linear infinite;
+}
+
+@keyframes df-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root .location-correction-search-spinner {
+    animation: none;
+  }
 }
 
 :root .location-correction.is-next li + li .location-correction-option::before,

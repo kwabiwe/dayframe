@@ -2,6 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   firstVisitTimelinePreference,
   formatCalendarRangeLabel,
+  weekColumnCount,
+  weekWindow,
   formatTimelinePeriodLabel,
   resetTimelineState,
   resolveTimelineRanges,
@@ -310,11 +312,40 @@ describe("the Calendar toolbar's date (UI review round 2, owner 30 Oct 2026)", (
     expect(formatCalendarRangeLabel("week", ranges("2026-10-30"), "2026-10-30")).toBe("26 Oct – 1 Nov");
     expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-30")).toBe("Today · 30 Oct");
     expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-31")).toBe("Fri 30 Oct");
-    expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-30", { nameToday: false })).toBe("Fri 30 Oct");
     expect(formatCalendarRangeLabel("day", ranges("2025-10-30"), "2026-10-30")).toBe("Thu 30 Oct 2025");
     // A week across New Year names both years.
     expect(formatCalendarRangeLabel("week", ranges("2026-12-31"), "2026-12-31")).toBe("28 Dec 2026 – 3 Jan 2027");
     expect(formatCalendarRangeLabel("week", ranges("2025-10-01"), "2026-10-30")).toBe("29 Sept – 5 Oct 2025");
     expect(formatCalendarRangeLabel("day", ranges("2025-09-30"), "2026-10-30")).toBe("Tue 30 Sept 2025");
+  });
+});
+
+describe("the narrow Week window (owner, 30 Oct 2026)", () => {
+  const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 9, 26 + index));
+  const names = (days: Date[]) => days.map((day) => day.getDate());
+
+  it("shows seven, then five, then three days as the grid narrows, never below the readable column", () => {
+    expect(weekColumnCount(1160, 104)).toBe(7);
+    expect(weekColumnCount(104 + 7 * 118, 104)).toBe(7);
+    expect(weekColumnCount(104 + 7 * 118 - 1, 104)).toBe(5);
+    expect(weekColumnCount(104 + 5 * 118, 104)).toBe(5);
+    expect(weekColumnCount(104 + 5 * 118 - 1, 104)).toBe(3);
+    expect(weekColumnCount(351, 60)).toBe(3);
+  });
+
+  it("keeps Monday to Friday at five days unless a weekend day is chosen", () => {
+    expect(names(weekWindow(week, week[2], 5).days)).toEqual([26, 27, 28, 29, 30]);
+    expect(names(weekWindow(week, week[5], 5).days)).toEqual([27, 28, 29, 30, 31]);
+    expect(weekWindow(week, week[6], 5).start).toBe(2);
+  });
+
+  it("starts three days at the chosen day, held inside the week", () => {
+    expect(names(weekWindow(week, week[3], 3).days)).toEqual([29, 30, 31]);
+    expect(weekWindow(week, week[6], 3).start).toBe(4);
+  });
+
+  it("shows the whole week at seven, and the first days for a date outside it", () => {
+    expect(weekWindow(week, week[3], 7).days).toHaveLength(7);
+    expect(weekWindow(week, new Date(2026, 10, 9), 3).start).toBe(0);
   });
 });

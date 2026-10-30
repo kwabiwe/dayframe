@@ -173,7 +173,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
         expect(listed.continuous!.focusRequest.startsWith("2026-10-18")).toBe(true);
         // The List lands there and says so: the header names today, in today's week.
         act(() => listed.continuous!.onVisibleDay!(local(18, 0).getTime()));
-        expect(container.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent).toContain("Sun 18 Oct");
+        expect(container.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent).toContain("Today · 18 Oct");
         expect(pressedDay(container)).toMatch(/18 Oct/);
       }
     } finally {
