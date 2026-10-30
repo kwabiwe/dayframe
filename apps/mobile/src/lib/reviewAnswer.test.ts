@@ -81,9 +81,23 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     // With a Logs as pick (Codex r1 on #620): recorded there once, as that activity.
     expect(reviewAnswerMutation(unnamed, true, { venue, logAsCategoryId: "cat-1" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
       applePlaceId: "I1234567890ABCDEF", edit: { categoryId: "cat-1" } });
-    // Not now leaves it, as ever; an outing keeps its own question and answer.
+    // Not now leaves it, as ever.
     expect(reviewAnswerMutation(unnamed, false, { venue })).toEqual({ action: "ignore_once_location" });
-    expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true }).question).toBe("Where were you?");
+  });
+
+  it("asks an outing's stay about its guess and keeps the venue on confirm_outing, only with an Apple Place ID (#642)", () => {
+    const venue = { name: "Exampleton Bakery", street: null, applePlaceId: "I1234567890ABCDEF" };
+    const noId = { ...venue, applePlaceId: null };
+    const unnamed = item({ eventType: "unknown_stay", title: "Unknown place", rawPayload: { algorithmVersion: "location-v2.0" }, suggestedPlaceId: null });
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true })).toMatchObject({ question: "Visited Exampleton Bakery?", logLabel: "Yes", skipLabel: "Not now" });
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue: noId, outing: true }).question).toBe("Where were you?");
+    const outing = { outingMemberIds: ["m1"] };
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"],
+      venue: { name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" } });
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue, logAsCategoryId: "cat-1" })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"],
+      edit: { categoryId: "cat-1" }, venue: { name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" } });
+    expect(reviewAnswerMutation(unnamed, false, { ...outing, venue })).toEqual({ action: "ignore_outing", memberReviewItemIds: ["m1"] });
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue: noId })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"] });
   });
 
   it("asks Apple Health in its own words", () => {

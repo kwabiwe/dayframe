@@ -2349,10 +2349,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
         // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
         guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
-        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule: never an outing's stay (it keeps
-        // no venue, Codex r2) nor a question already titled with a name (Codex r5 on #620).
-        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null,
-          calendarCheckBase.outings.has(check.id)),
+        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule (an outing's stay too, #642;
+        // never a question already titled with a name, Codex r5 on #620).
+        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null),
+        outing: calendarCheckBase.outings.has(check.id),
         onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
           logAsCategoryId ? { logAsCategoryId } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
@@ -2371,14 +2371,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps
           // its question and nothing is queued (Codex r16 on #610).
           if (!checkAnswers.canAnswer(check.id)) throw new Error("This can't be answered here now.");
+          // Yes to a guess on an outing answers its trips with it, as one `confirm_outing` (#642).
+          const outingMembers = yes && venue ? calendarCheckBase.outings.get(check.id)?.members ?? [] : [];
           const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
+            ...(outingMembers.length ? { memberItemIds: outingMembers.flatMap((member) =>
+              typeof member.rawPayload?.clientSegmentId === "string" ? [member.rawPayload.clientSegmentId] : []) } : {}),
             // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
-            action: { kind: "answer", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });
+            action: { kind: "answer", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}),
+              ...(outingMembers.length ? { outingMemberIds: outingMembers.map((member) => member.id) } : {}) } });
           if (!record) throw new Error("Nothing to wait for.");
           return {
             start: () => {
               // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
-              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);
+              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation, { outing: outingMembers.length > 0 });
             },
             cancel: () => withdrawAnswerAfterCorrections(registeredOwner, id)
           };

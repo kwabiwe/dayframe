@@ -231,8 +231,49 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
     });
 
-    it("refuses Yes to a guessed venue on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+    it("queues Yes to a guess on an outing's stay as confirm_outing with its venue; Not now and Undo carry none (#642)", async () => {
       const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
+        store.enqueueReviewMutation.mockClear();
+        const { result } = mount(items);
+        await act(async () => { result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1" }); });
+        expect(result.current.held?.itemId).toBe("stay");
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: ["there", "back"],
+          edit: { categoryId: "cat-1" }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } });
+        store.enqueueReviewMutation.mockClear();
+        const no = mount(items);
+        await act(async () => { no.result.current.answer("stay", false, venue); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: ["there", "back"] });
+        store.enqueueReviewMutation.mockClear();
+        const undone = mount(items);
+        await act(async () => { undone.result.current.answer("stay", true, venue); });
+        act(() => { undone.result.current.undo(); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      }
+    });
+
+    it("keeps the venue on an outing's waiting record, with its trips (#642)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = outing().map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      gate.waitForItemCorrections.mockClear();
+      const { result } = mount(withAccount(withSegment));
+      await act(async () => { result.current.answer("stay", true, venue); });
+      expect(gate.waitForItemCorrections.mock.calls[0][1]).toMatchObject({ action: { kind: "answer", reviewItemId: "stay", logged: true, venue, outingMemberIds: ["there", "back"] } });
+      gate.waitForItemCorrections.mockClear();
+      const no = mount(withAccount(withSegment));
+      await act(async () => { no.result.current.answer("stay", false, venue); });
+      expect((gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown> }).action).not.toHaveProperty("venue");
+    });
+
+    it("refuses Yes to a guess with no Apple Place ID on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: null };
       // Through the gate (the stay has its segment) and without it: refused, nothing held or saved.
       const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
         ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);

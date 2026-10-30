@@ -5,6 +5,7 @@ import { formatClockTime, placeQuestion, timerTripClashQuestion, timerTripClashW
 import type { MobileReviewItem } from "./api";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "./review";
 import { reviewDeckOutingMutation } from "./reviewDeckOutings";
+import { keepableVenue } from "./venueGuessEligibility";
 import type { ReviewLogAsEdit } from "./reviewLogAs";
 
 /**
@@ -36,7 +37,14 @@ export function reviewAnswerMutation(
     return { action: "accept", expectedProposalHash: hash };
   }
   const edit = logged ? options.edit ?? null : null;
-  if (options.outingMemberIds?.length) return reviewDeckOutingMutation(options.outingMemberIds, logged, edit);
+  if (options.outingMemberIds?.length) {
+    // Yes to "Visited {Apple place}?" on an outing: the stay is recorded there once, its trips logged with it (#642).
+    // Only with an Apple Place ID (`keepableVenue`); Not now never carries one.
+    const applePlaceId = logged ? options.venue?.applePlaceId : null;
+    const venue = options.venue && applePlaceId ? { name: options.venue.name, applePlaceId } : null;
+    return reviewDeckOutingMutation(options.outingMemberIds, logged,
+      edit ?? (venue && options.logAsCategoryId ? { categoryId: options.logAsCategoryId } : null), venue);
+  }
   // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
   // a one-time place, never a saved place or a rule (card B part 2).
   if (logged && options.venue && hasV2LocationEvidence(item)) {
@@ -121,7 +129,7 @@ function reviewAnswerWords(
   // Not now leaves it. With no guess, only Edit names it.
   // An unnamed visit with an Apple place the iPhone guessed nearby (card B part 2): "Visited {place}?", its
   // street and times under it; Yes records it there once.
-  if (!options.outing && options.venue && hasV2LocationEvidence(item)) {
+  if (keepableVenue(options.venue, Boolean(options.outing)) && options.venue && hasV2LocationEvidence(item)) {
     return { question: `Visited ${options.venue.name}?`, detail: [options.venue.street, window].filter(Boolean).join(" · ") || null,
       logLabel: "Yes", skipLabel: "Not now" };
   }

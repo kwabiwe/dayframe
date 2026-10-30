@@ -31,6 +31,7 @@ import { SheetNearbySearch, type SheetSavedRow } from "./SheetNearbySearch";
 import { ActivityChip, activityChipStyles } from "../ActivityChips";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { nearbyProposalKey } from "../../lib/nearbyProposal";
+import { keepableVenue } from "../../lib/venueGuessEligibility";
 import { COMPACT_PILL_HIT_SLOP, compactPillStyles } from "../compactPill";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import {
@@ -136,10 +137,12 @@ export function LocationCorrectionSheet({
     guess?: ReviewAnswerVenue | null;
     /**
      * Whether the sheet's own Nearby list may guess for this "?" (`venueGuessEligible`, Calendar's one rule; Codex r5 on
-     * #620): only an unnamed visit with its whole window, never an outing's stay (its `confirm_outing` keeps no venue,
-     * Codex r2) and never a question already titled with a name ("Visited Bread run?"), whose name is kept.
+     * #620): only an unnamed visit with its whole window, an outing's stay included, and never a question already
+     * titled with a name ("Visited Bread run?"), whose name is kept.
      */
     guessable?: boolean;
+    /** An outing's stay: a guess needs its Apple Place ID, or `confirm_outing` couldn't keep it (`keepableVenue`). */
+    outing?: boolean;
     /**
      * Answers now (held for Undo): the sheet has no changes of its own. Whether it was taken; refused, the sheet stays.
      * `venue`: Yes to a guess, recorded there once (`record_poi_once`); `logAsCategoryId`: the activity picked under
@@ -501,7 +504,7 @@ export function LocationCorrectionSheet({
     && Date.parse(evidence.segment.stoppedAt ?? "") === Date.parse(target.place.stoppedAt ?? "") ? nearbyGuess.venue : null;
   // The near guess the "?" asks about (PRD D23): only for a place whose "?" can be answered here, until Edit.
   const guess = question && target.kind === "place" && !guessSetAside && question.noLabel != null
-    ? question.guess ?? (question.guessable ? nearbyGuessNow : null) : null;
+    ? question.guess ?? (question.guessable ? keepableVenue(nearbyGuessNow, Boolean(question.outing)) : null) : null;
   // The question's own line: not when the guess asks instead, and not when it only says what the sheet already asks.
   const asks = question && !leg && !guess && !(guessSetAside && target.kind === "place") && question.text !== "Where were you?" ? question.text : null;
   const placeCanSave = target.kind === "place" && !target.place.placeId && Boolean(onSavePlace) && !stale;

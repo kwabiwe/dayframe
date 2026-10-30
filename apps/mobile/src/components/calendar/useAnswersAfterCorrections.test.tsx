@@ -181,6 +181,32 @@ describe("the Dashboard's release of answers after corrections (Codex r2 on #610
     act(() => { tree.unmount(); });
   });
 
+  it("releases a waiting outing answer with its venue and Logs as pick, offline replay unchanged (#642)", async () => {
+    storage.clear();
+    review.enqueueReviewMutation.mockClear();
+    outbox.pending = [];
+    const trip = (id: string) => ({ ...item, id, eventType: "commute_detected", rawPayload: { clientSegmentId: `seg-${id}` } });
+    const outingData = { ...data, reviewItems: [item, trip("ri-in")] } as unknown as MobileBootstrap;
+    const venue = { name: "Holland & Barrett", street: "12 High Street", applePlaceId: "IHB" };
+    const categoryId = "6f000000-0000-4000-8000-0000000000c1";
+    await answers.holdAnswerAfterCorrections(OWNER, { id: "m-venue", reviewItemId: "ri-1", logged: true, venue, log: { itemId: "seg-a", categoryId }, waitsFor: [C1] });
+    const stored = JSON.parse(storage.get("dayframe.reviewAnswersAfterCorrections.v1")!) as Array<Record<string, unknown>>;
+    storage.set("dayframe.reviewAnswersAfterCorrections.v1", JSON.stringify(stored.map((record) => ({ ...record, outingMemberIds: ["ri-in"], acknowledged: [C1] }))));
+    await answers.commitAnswerAfterCorrections(OWNER, "m-venue");
+    function OutingProbe() {
+      useAnswersAfterCorrections({ data: outingData, owner: OWNER });
+      return null;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<OutingProbe />); });
+    await flush();
+    expect(review.enqueueReviewMutation).toHaveBeenCalledOnce();
+    expect(review.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ clientMutationId: "m-venue", mutation: { action: "confirm_outing",
+      memberReviewItemIds: ["ri-in"], edit: { categoryId }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } } });
+    expect(outbox.enqueue).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
   it("a Logs as settled when its Dashboard went away during Undo goes out once its corrections are acknowledged, after a remount (Codex r13 on #610)", async () => {
     storage.clear();
     outbox.enqueue.mockClear();

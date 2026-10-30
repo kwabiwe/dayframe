@@ -60,14 +60,14 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     // Yes to a near guess carries its venue (PRD D23); otherwise the List's own guess, as before.
     expect(dashboard).toContain("onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
     // An answer after the sheet's changes keeps its guessed venue, and a Logs as pick with it (Codex r1 on #620).
-    expect(dashboard).toContain("action: { kind: \"answer\", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });");
+    expect(dashboard).toContain("action: { kind: \"answer\", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}),");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");
     expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     // Started through the store's one completion path (Codex r14 on #610).
-    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
+    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation, { outing: outingMembers.length > 0 });");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
     expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");

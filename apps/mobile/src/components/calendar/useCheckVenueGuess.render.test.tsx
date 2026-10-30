@@ -68,12 +68,16 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     mocks.appState.listeners.clear();
   });
 
-  it("asks only for an unnamed visit with its window, never a named place, a trip or an outing", () => {
-    expect(venueGuessEligible(stay, false)).toBe(true);
-    expect(venueGuessEligible({ ...stay, title: "Office" }, false)).toBe(false);
-    expect(venueGuessEligible({ ...stay, eventType: "commute_detected" }, false)).toBe(false);
-    expect(venueGuessEligible(stay, true)).toBe(false);
-    expect(venueGuessEligible({ ...stay, suggestedStoppedAt: null }, false)).toBe(false);
+  it("asks only for an unnamed visit with its window, an outing's stay too, never a named place, a trip or an outing's Move", () => {
+    expect(venueGuessEligible(stay)).toBe(true);
+    expect(venueGuessEligible({ ...stay, title: "Office" })).toBe(false);
+    expect(venueGuessEligible({ ...stay, eventType: "commute_detected" })).toBe(false);
+    const inOuting = (outingRole: string, title = "Unknown place") => ({ ...stay, title, rawPayload: { ...stay.rawPayload, outingKey: "outing:1", outingRole } });
+    expect(venueGuessEligible(inOuting("stay"))).toBe(true);
+    // A named outing stay keeps its name.
+    expect(venueGuessEligible(inOuting("stay", "Bread run"))).toBe(false);
+    for (const role of ["in", "out"]) expect(venueGuessEligible(inOuting(role))).toBe(false);
+    expect(venueGuessEligible({ ...stay, suggestedStoppedAt: null })).toBe(false);
     expect(streetOf("12 Example Street, Exampleton, EX1 2AB")).toBe("12 Example Street");
     expect(streetOf(null)).toBeNull();
   });
