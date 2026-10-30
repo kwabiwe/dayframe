@@ -5,9 +5,13 @@ import { cookies } from "next/headers";
 import { Suspense } from "react";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "./ui-next-weights.css";
+import "./ui-next.css";
 import { AppLoadingState } from "@/components/AppLoadingState";
 import { AppShell } from "@/components/AppShell";
 import { ClockFormatProvider } from "@/components/ClockFormat";
+import { UiNextToggle } from "@/components/UiNextToggle";
+import { UI_PREVIEW_INIT_SCRIPT, uiPreviewEnabled } from "@/lib/ui-preview";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 import { CLOCK_FORMAT_COOKIE, clockFormatFromCookieValue } from "@/lib/clock-format";
 
@@ -47,11 +51,15 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               "try{var t=localStorage.getItem('dayframe.theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}"
           }}
         />
+        {uiPreviewEnabled() ? (
+          <Script id="dayframe-ui-preview-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: UI_PREVIEW_INIT_SCRIPT }} />
+        ) : null}
         <ClockFormatProvider serverFormat={serverClockFormat}>
           <Suspense fallback={<AppLoadingState />}>
             {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
           </Suspense>
         </ClockFormatProvider>
+        {uiPreviewEnabled() ? <UiNextToggle /> : null}
       </body>
     </html>
   );
