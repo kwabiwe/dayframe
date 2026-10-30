@@ -20,7 +20,16 @@ const server = vi.hoisted(() => ({
   holdTimerState: false,
   held: [] as Array<() => void>,
   inFlight: 0,
-  maxInFlight: 0
+  maxInFlight: 0,
+  /** Start POSTs wait to be released, one at a time. */
+  holdPosts: false,
+  heldPosts: [] as Array<() => void>,
+  /** The next bootstrap waits to be released (it reads the server when released). */
+  holdNextBootstrap: false,
+  releaseBootstrap: null as (() => void) | null,
+  /** Bootstraps that arrive while set answer 500. */
+  failBootstraps: false,
+  started: 0
 }));
 
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams("date=2026-08-17") }));
@@ -42,9 +51,19 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         server.inFlight -= 1;
       }
     }
-    if (url.startsWith("/api/bootstrap")) return reply(200, bootstrap(server.activeEntry));
+    if (url.startsWith("/api/bootstrap")) {
+      if (server.failBootstraps) return reply(500, {});
+      if (server.holdNextBootstrap) {
+        server.holdNextBootstrap = false;
+        await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
+      }
+      return reply(200, bootstrap(server.activeEntry));
+    }
     if (method === "POST" && url === "/api/time-entries") {
-      server.activeEntry = entry({ id: `started-${Date.now()}`, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      if (server.holdPosts) await new Promise<void>((resolve) => server.heldPosts.push(resolve));
+      server.started += 1;
+      const at = new Date().toISOString();
+      server.activeEntry = entry({ id: `started-${server.started}`, startedAt: at, updatedAt: at });
       return reply(200, { timeEntryId: server.activeEntry.id });
     }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
@@ -80,6 +99,12 @@ beforeEach(() => {
   server.held = [];
   server.inFlight = 0;
   server.maxInFlight = 0;
+  server.holdPosts = false;
+  server.heldPosts = [];
+  server.holdNextBootstrap = false;
+  server.releaseBootstrap = null;
+  server.failBootstraps = false;
+  server.started = 0;
   probe.runtime = null;
 });
 
@@ -199,6 +224,49 @@ describe("web timer-state polling cadence", () => {
     });
     await advance(10);
     expect(polls().length - beforeStop).toBe(1);
+  });
+
+  it("queued actions confirm once, after the last one's own reload, and no poll supersedes that reload (Codex r1 on #637)", async () => {
+    await mount();
+    await advance(5_000); // mid-way to the next scheduled poll
+    server.holdPosts = true;
+    let first: Promise<unknown> = Promise.resolve();
+    let second: Promise<unknown> = Promise.resolve();
+    const actionsFrom = server.requests.length;
+    await act(async () => {
+      first = probe.runtime!.startTimer({ description: "A" });
+      second = probe.runtime!.startTimer({ description: "B" }); // a switch queued behind A
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    // A's POST lands; B's follows; B's reload is held.
+    await act(async () => { server.heldPosts.shift()?.(); await vi.advanceTimersByTimeAsync(10); });
+    server.holdNextBootstrap = true;
+    await act(async () => { server.heldPosts.shift()?.(); await vi.advanceTimersByTimeAsync(10); });
+    server.holdPosts = false;
+    await act(async () => { server.heldPosts.shift()?.(); await vi.advanceTimersByTimeAsync(10); });
+    expect(server.releaseBootstrap).not.toBeNull();
+    // Any other reload now fails: one started beside the action's would win and leave the block optimistic.
+    server.failBootstraps = true;
+    await advance(30_000); // scheduled polls fire meanwhile; their answers (a new block) are set aside
+    const during = server.requests.slice(actionsFrom).map(({ request }) => request);
+    expect(during.filter((request) => request.startsWith("GET /api/bootstrap"))).toHaveLength(1); // only the held reload
+    expect(during.filter((request) => request === "POST /api/time-entries")).toHaveLength(2);
+
+    const pollsBeforeRelease = polls().length;
+    server.failBootstraps = false;
+    await act(async () => { server.releaseBootstrap?.(); await vi.advanceTimersByTimeAsync(10); });
+    await act(async () => { await Promise.all([first, second]); });
+    await advance(10);
+    // The reload committed: the real block B shows, not an optimistic one.
+    expect(probe.runtime!.shellData?.activeEntry?.id).toBe("started-2");
+    expect(probe.runtime!.shellData?.activeEntry?.description).toBe("Writing");
+    // One confirming poll after it, which finds nothing new to load.
+    expect(polls().length - pollsBeforeRelease).toBe(1);
+    const reloads = bootstraps().length;
+    server.failBootstraps = true;
+    await advance(60_000);
+    expect(bootstraps()).toHaveLength(reloads);
+    expect(probe.runtime!.shellData?.activeEntry?.id).toBe("started-2");
   });
 
   it("an action's poll is deduped with one already in flight", async () => {
