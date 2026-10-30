@@ -1,5 +1,5 @@
 import { generateKeyPairSync, verify } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MAPKIT_TOKEN_TTL_SECONDS, mapKitConfig, signMapKitToken } from "@/lib/mapkit-token";
 
 const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -14,6 +14,19 @@ describe("MapKit JS tokens", () => {
     // A one-line .p8 with escaped newlines, as hosted environments store it.
     const oneLine = pem.replace(/\n/g, "\\n");
     expect(mapKitConfig({ MAPKIT_JS_TEAM_ID: "TEAM123456", MAPKIT_JS_KEY_ID: "KEY1234567", MAPKIT_JS_PRIVATE_KEY: oneLine })).not.toBeNull();
+  });
+
+  it("refuses IDs that aren't 10-character Apple identifiers, so nothing else reaches a token header", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const leaky = `KEY1234567\n${pem}`;
+    expect(mapKitConfig({ MAPKIT_JS_TEAM_ID: "TEAM123456", MAPKIT_JS_KEY_ID: leaky, MAPKIT_JS_PRIVATE_KEY: pem })).toBeNull();
+    expect(mapKitConfig({ MAPKIT_JS_TEAM_ID: "team 123", MAPKIT_JS_KEY_ID: "KEY1234567", MAPKIT_JS_PRIVATE_KEY: pem })).toBeNull();
+    expect(error.mock.calls.map(([message]) => String(message))).toEqual([
+      "MapKit JS is off: MAPKIT_JS_KEY_ID must be a 10-character Apple identifier.",
+      "MapKit JS is off: MAPKIT_JS_TEAM_ID must be a 10-character Apple identifier."
+    ]);
+    expect(JSON.stringify(error.mock.calls)).not.toContain("PRIVATE KEY");
+    error.mockRestore();
   });
 
   it("signs an ES256 token for one origin that expires in 30 minutes", () => {
