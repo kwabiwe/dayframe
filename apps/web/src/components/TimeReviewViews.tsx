@@ -122,6 +122,10 @@ const NOW_PILL_HALF_HEIGHT = 10;
 const CALENDAR_FUTURE_CREATE_NOTICE = "Blocks can't start in the future";
 const CALENDAR_CREATE_NOTICE_MS = 3_000;
 const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
+// The widest labels the Calendar's date box can show (`formatCalendarRangeLabel`): a week across two years, a week
+// with long months outside this year, and a day outside this year. The box takes the widest of them, so it never
+// resizes between views or dates.
+const CALENDAR_DATEBOX_SIZERS = ["28 Dec 2026 – 3 Jan 2027", "29 Sept – 5 Oct 2025", "Wed 30 Sept 2025"];
 
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
   { id: "day", label: "Day" },
@@ -592,15 +596,22 @@ export function TimeReviewViews({
                 <IconButton disabled={isDateLoading} label={`Previous ${navScope}`} onClick={() => goPeriod("previous")}>
                   <ChevronLeft size={16} />
                 </IconButton>
-                <DatePickerPopover
-                  disabled={isDateLoading}
-                  label={rangeLabel}
-                  onChange={(date) => void navigate({ date }, { reposition: true })}
-                  portal
-                  portalAlign="center"
-                  today={todayKey ?? state.date}
-                  value={headerDayKey}
-                />
+                {/* One fixed width for every view and date: the longest labels sit invisibly in the same cell. */}
+                <span className="df-cal-datebox-label">
+                  {CALENDAR_DATEBOX_SIZERS.map((sizer) => (
+                    <span aria-hidden="true" className="df-cal-datebox-sizer" key={sizer}>{sizer}</span>
+                  ))}
+                  <DatePickerPopover
+                    disabled={isDateLoading}
+                    label={rangeLabel}
+                    onChange={(date) => void navigate({ date }, { reposition: true })}
+                    panelClassName="df-cal-date-panel"
+                    portal
+                    portalAlign="center"
+                    today={todayKey ?? state.date}
+                    value={headerDayKey}
+                  />
+                </span>
                 <IconButton disabled={isDateLoading} label={`Next ${navScope}`} onClick={() => goPeriod("next")}>
                   <ChevronRight size={16} />
                 </IconButton>
@@ -636,7 +647,7 @@ export function TimeReviewViews({
             />
           </section>
           {!isList && state.scope === "week" ? null : (
-            <div className="df-cal-striprow">
+            <div className={`df-cal-striprow${isList ? "" : " is-day"}`}>
               <CalendarHead
                 disabled={isDateLoading}
                 model={headModel}

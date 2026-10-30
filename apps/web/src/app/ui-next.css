@@ -178,6 +178,40 @@
   min-width: 0;
 }
 
+/* A fixed width for every view and date: the widest possible labels sit hidden in the label's one grid cell, so the
+   box and its arrows never move or resize; the label is centred in tabular figures. */
+:root[data-ui="next"] .df-cal-datebox-label {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+}
+
+:root[data-ui="next"] .df-cal-datebox-label > * {
+  grid-area: 1 / 1;
+}
+
+:root[data-ui="next"] .df-cal-datebox-sizer {
+  height: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+:root[data-ui="next"] .df-cal-datebox-label .timeline-date-picker {
+  width: 100%;
+}
+
+:root[data-ui="next"] .df-cal-datebox-label .timeline-period-trigger {
+  width: 100%;
+  justify-content: center;
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+}
+
 :root[data-ui="next"] .df-cal-datebox .timeline-period-trigger {
   min-height: calc(var(--web-control-height) - 2px);
   border: 0;
@@ -194,6 +228,20 @@
 
 :root[data-ui="next"] .df-cal-toolbar.is-next .timeline-today-button:disabled {
   opacity: 0.45;
+}
+
+/* Today, beside the box and inside its date picker, is one control: the box's height, the same quiet pill. */
+:root[data-ui="next"] .df-cal-toolbar.is-next .timeline-today-button,
+:root[data-ui="next"] .df-cal-date-panel > .ui-button.is-compact {
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
+  border: 0;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
 }
 
 :root[data-ui="next"] .df-cal-toolbar.is-next .df-cal-weektotal {
@@ -254,6 +302,22 @@
   box-sizing: border-box;
   height: var(--df-cal-row-height);
   min-height: var(--df-cal-row-height);
+}
+
+/* Day: the same inset divider between the 7-day row and the grid as under Week's day columns. */
+:root[data-ui="next"] .df-cal-striprow.is-day {
+  position: relative;
+}
+
+:root[data-ui="next"] .df-cal-striprow.is-day::after {
+  --divider-inset: 12px;
+  position: absolute;
+  bottom: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 /* Phones: the same toolbar on two fixed lines (date and Today, then the total and the view control). */

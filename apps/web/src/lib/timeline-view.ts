@@ -182,7 +182,8 @@ export function formatCalendarRangeLabel(scope: TimelineScope, ranges: TimelineR
   const end = ranges.weekDays[6];
   const spansYears = start.getFullYear() !== end.getFullYear();
   const format = (date: Date, year: boolean) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}) }).format(date);
-  return `${format(start, spansYears || withYear(start))} – ${format(end, spansYears || withYear(end))}`;
+  // The year once, after the end, unless the week spans two years ("22 Sept – 28 Sept 2025").
+  return `${format(start, spansYears)} – ${format(end, spansYears || withYear(end))}`;
 }
 
 export function formatTimelinePeriodLabel(

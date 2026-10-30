@@ -312,5 +312,7 @@ describe("the Calendar toolbar's date (UI review round 2, owner 30 Oct 2026)", (
     expect(formatCalendarRangeLabel("day", ranges("2025-10-30"), "2026-10-30")).toBe("Thu 30 Oct 2025");
     // A week across New Year names both years.
     expect(formatCalendarRangeLabel("week", ranges("2026-12-31"), "2026-12-31")).toBe("28 Dec 2026 – 3 Jan 2027");
+    expect(formatCalendarRangeLabel("week", ranges("2025-10-01"), "2026-10-30")).toBe("29 Sept – 5 Oct 2025");
+    expect(formatCalendarRangeLabel("day", ranges("2025-09-30"), "2026-10-30")).toBe("Tue 30 Sept 2025");
   });
 });
