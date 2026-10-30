@@ -308,7 +308,9 @@ describe("the Calendar toolbar's date (UI review round 2, owner 30 Oct 2026)", (
   const ranges = (date: string) => resolveTimelineRanges({ date, scope: "week", view: "calendar" } as never);
   it("says a week as 26 Oct – 1 Nov and a day as Fri 30 Oct, the year only when it isn't this year", () => {
     expect(formatCalendarRangeLabel("week", ranges("2026-10-30"), "2026-10-30")).toBe("26 Oct – 1 Nov");
-    expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-30")).toBe("Fri 30 Oct");
+    expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-30")).toBe("Today · 30 Oct");
+    expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-31")).toBe("Fri 30 Oct");
+    expect(formatCalendarRangeLabel("day", ranges("2026-10-30"), "2026-10-30", { nameToday: false })).toBe("Fri 30 Oct");
     expect(formatCalendarRangeLabel("day", ranges("2025-10-30"), "2026-10-30")).toBe("Thu 30 Oct 2025");
     // A week across New Year names both years.
     expect(formatCalendarRangeLabel("week", ranges("2026-12-31"), "2026-12-31")).toBe("28 Dec 2026 – 3 Jan 2027");

@@ -125,7 +125,7 @@ const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
 // The widest labels the Calendar's date box can show (`formatCalendarRangeLabel`): a week across two years, a week
 // with long months outside this year, and a day outside this year. The box takes the widest of them, so it never
 // resizes between views or dates.
-const CALENDAR_DATEBOX_SIZERS = ["28 Dec 2026 – 3 Jan 2027", "29 Sept – 5 Oct 2025", "Wed 30 Sept 2025"];
+const CALENDAR_DATEBOX_SIZERS = ["28 Dec 2026 – 3 Jan 2027", "29 Sept – 5 Oct 2025", "Wed 30 Sept 2025", "Today · 30 Sept"];
 
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
   { id: "day", label: "Day" },
@@ -545,7 +545,7 @@ export function TimeReviewViews({
   const uiNext = useUiNext();
   // Proposed toolbar (round 2): the date box's words and arrows. List moves a week at a time, as its strip shows one.
   const navScope: TimelineScope = isList ? "week" : state.scope;
-  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey);
+  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList });
   const goPeriod = (direction: "previous" | "next") => {
     if (isDateLoading) return;
     const shifted = shiftTimelineState({ ...state, date: headerDayKey, scope: navScope }, direction);
