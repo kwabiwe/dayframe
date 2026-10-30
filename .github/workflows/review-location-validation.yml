@@ -248,6 +248,21 @@ jobs:
         env:
           DAYFRAME_REPORT_LOCATION_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/report-location.postgres.test.ts
+      - name: Task suggestions from recent history
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_HISTORY_FLAGS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/queries-task-suggestions.postgres.test.ts
+      - name: Review presentation paging, lookup and snapshots
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_REVIEW_PRESENTATION_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/review-presentation-service.postgres.test.ts
+      - name: Running-block details precondition (409)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_RUN_DB_INTEGRATION: "1"
+        run: npm run test -w @dayframe/web -- src/lib/time-entry-details-conflict.postgres.integration.test.ts
       # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
         if: always()

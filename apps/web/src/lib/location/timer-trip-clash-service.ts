@@ -21,8 +21,9 @@ import { PERSON_SET_END_SQL, TIMER_STARTED_SQL } from "../time-entry-provenance"
  */
 
 /**
- * Off until the List and Grid show the "?" on the block and the Review deck is gone (v4 step 15): the deck
- * and older iPhone builds would offer it as an ordinary card (Codex r1 on #611).
+ * The check runs only where `DAYFRAME_TIMER_TRIP_CHECKS=on`: on for staging (Vercel Preview) since 29 Oct 2026,
+ * off in production until the owner decides. The "?" now asks on its block in the List and Grid (#618) and the
+ * Review deck is gone (#613, #615); iPhone builds before those would still offer it as an ordinary card.
  */
 export function timerTripChecksEnabled() {
   return process.env.DAYFRAME_TIMER_TRIP_CHECKS === "on";
