@@ -292,6 +292,8 @@ export function LocationCorrectionDialog({
   // The creation sent whose outcome isn't known (its reply was lost): its own name and spot, kept until a lookup
   // that worked finds the place or confirms it isn't there (Codex r8 on #609).
   const pendingCreation = useRef<{ name: string; latitude: number; longitude: number } | null>(null);
+  // Its name, for rendering (the footer's label and recovery read state, never the ref, during render).
+  const [pendingCreationName, setPendingCreationName] = useState<string | null>(null);
   const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
   const newPlaceNameRef = useRef<HTMLInputElement | null>(null);
@@ -504,6 +506,7 @@ export function LocationCorrectionDialog({
         return;
       }
       pendingCreation.current = null;
+      setPendingCreationName(null);
       if (lookup) {
         placeId = lookup;
         setCreatedPlaceId(placeId);
@@ -512,6 +515,7 @@ export function LocationCorrectionDialog({
     if (!placeId) {
       const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
       pendingCreation.current = { name, latitude, longitude };
+      setPendingCreationName(name);
       const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
       const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
@@ -519,7 +523,10 @@ export function LocationCorrectionDialog({
       placeId = created?.place?.id ?? null;
       // Only a definitive refusal (4xx) is a known "nothing saved"; a 5xx or gateway error, an unreadable body or a lost
       // reply may have committed, so its outcome stays unknown and the next try looks first (Codex r9 on #609).
-      if (placeId || (response && response.status >= 400 && response.status < 500)) pendingCreation.current = null;
+      if (placeId || (response && response.status >= 400 && response.status < 500)) {
+        pendingCreation.current = null;
+        setPendingCreationName(null);
+      }
       if (!placeId) {
         setBusy(false);
         setError("The place wasn't saved. Saving a place needs a connection.");
@@ -567,8 +574,8 @@ export function LocationCorrectionDialog({
 
   const pendingNow = corrections();
   // A creation whose outcome isn't known counts as a change, so the footer recovers it instead of answering Yes
-  // (Codex r3 on #636; the failure that leaves it also re-renders, so the ref is current here).
-  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || Boolean(pendingCreation.current);
+  // (Codex r3 on #636).
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || pendingCreationName !== null;
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>
@@ -686,8 +693,8 @@ export function LocationCorrectionDialog({
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
         // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
         // A creation whose reply was lost (from a tap, a search or the field) is looked up first (Codex r2 on #636).
-        : <Button disabled={busy} onClick={() => void (canSaveNew && (newPlaceName.trim() || pendingCreation.current)
-          ? saveThisPlace(newPlaceName.trim() ? undefined : pendingCreation.current!.name) : apply())} variant="primary">Save</Button>}
+        : <Button disabled={busy} onClick={() => void (canSaveNew && (newPlaceName.trim() || pendingCreationName !== null)
+          ? saveThisPlace(newPlaceName.trim() ? undefined : pendingCreationName ?? undefined) : apply())} variant="primary">Save</Button>}
     </>
   );
   return (
