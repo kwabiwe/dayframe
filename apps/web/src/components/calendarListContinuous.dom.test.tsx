@@ -711,3 +711,30 @@ describe("SegmentedControl unavailable options", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe("Calendar › List week that couldn't be refreshed (Codex r2 on #634)", () => {
+  afterEach(cleanup);
+
+  it("says so on its own quiet line above the week's first day, once, with Try again; other weeks and rows are unchanged", () => {
+    const onRetryWeek = vi.fn();
+    // 21–23 Oct are in the week of 19 Oct (failed); 14 Oct is in the week before (fine).
+    const weekStart = new Date(2026, 9, 19);
+    render(
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay
+        entries={[entry("friday", new Date(2026, 9, 23, 9)), entry("wednesday", new Date(2026, 9, 21, 9)), entry("before", new Date(2026, 9, 14, 9))]}
+        continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 23).getTime(), focusRequest: "2026-10-23", loading: null, onLoad: vi.fn(),
+          reachedEarliest: false, reachedLatest: true, onRetryWeek,
+          staleWeeks: [{ key: "2026-10-19", startMs: weekStart.getTime(), endMs: new Date(2026, 9, 26).getTime() }] }}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    const notices = document.querySelectorAll("tr.timeline-list-week-stale");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].textContent).toContain("Couldn't refresh this week.");
+    // Its own row, right above the week's newest day heading (23 Oct), not inside a block row.
+    expect((notices[0].nextElementSibling as HTMLElement).dataset.dayStartMs).toBe(String(new Date(2026, 9, 23).getTime()));
+    expect(screen.getByText("Block friday")).toBeTruthy();
+    expect(screen.getByText("Block before")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetryWeek).toHaveBeenCalledWith("2026-10-19");
+  });
+});

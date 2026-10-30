@@ -22,7 +22,7 @@ import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
-import { EntriesTable } from "@/components/EntriesTable";
+import { EntriesTable, type ListChange } from "@/components/EntriesTable";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -66,6 +66,7 @@ import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   formatTimelinePeriodLabel,
+  addCalendarDays,
   resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
@@ -108,7 +109,7 @@ import {
 } from "@/lib/calendar-click-create";
 import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
-import { useLocationTimelines } from "@/components/location/LocationListRows";
+import { useLocationTimelines, useLocationTimelinesWithStatus } from "@/components/location/LocationListRows";
 import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
 import { calendarNavigationGeneration, subscribeToCalendarToday } from "@/lib/calendar-today-request";
 
@@ -254,12 +255,24 @@ export function TimeReviewViews({
   const refreshData = useCallback(async () => {
     await refresh();
   }, [refresh]);
-  // An edit or delete in the List also reads its loaded weeks (and their places) again.
-  const [listRefreshToken, setListRefreshToken] = useState(0);
-  const refreshList = useCallback(async () => {
-    setListRefreshToken((token) => token + 1);
+  // An edit or delete in the List also reads its loaded weeks (and their places) again: those near the List's top day
+  // and the changed blocks' own days at once (their days before the change, from the blocks shown, and after it).
+  const [listRefresh, setListRefresh] = useState<{ token: number; affected: readonly string[] }>({ token: 0, affected: [] });
+  const listRefreshToken = listRefresh.token;
+  const shownEntriesRef = useRef<readonly TimeEntryRow[]>([]);
+  const refreshList = useCallback(async (change?: ListChange) => {
+    const entryIds = change?.entryIds ?? [];
+    const times = change?.times ?? [];
+    const before = shownEntriesRef.current.filter((entry) => entryIds.includes(entry.id))
+      .flatMap((entry) => [entry.startedAt, entry.stoppedAt]);
+    const affected = [...new Set([...before, ...times].flatMap((time) => {
+      const at = time ? new Date(time) : null;
+      return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
+    }))];
+    setListRefresh((current) => ({ token: current.token + 1, affected }));
     await refresh();
   }, [refresh]);
+  const refreshDeleted = useCallback((entryIds: readonly string[]) => refreshList({ entryIds }), [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
@@ -422,14 +435,6 @@ export function TimeReviewViews({
   // Calendar › List shows continuous days (owner, 24 Oct 2026): the selected week from the shell's data,
   // and whole weeks before and after it, loaded as the List scrolls. The period controls don't apply.
   const listTodayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
-  const listWeeks = useCalendarListWeeks({
-    anchorWeekStart: ranges.week.start,
-    currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
-    enabled: isList && hydrated,
-    owner: listOwner,
-    refreshToken: listRefreshToken
-  });
-  const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   // The day at the top of Calendar › List, as the List reports it for the current date request (until it has, the
   // URL's date stands in, so an earlier visit's day never shows).
   const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
@@ -446,11 +451,52 @@ export function TimeReviewViews({
   const listTopDayMs = isList && listTop?.request === listTopRequest ? listTop.dayStartMs : null;
   // Leaving List forgets it: a List opened again positions itself afresh and reports again (adjusted while rendering).
   if (!isList && listTop !== null) setListTop(null);
+  // An edit re-reads only the weeks and days near the List's top day; the rest are read again as the List nears them.
+  const listFocusDate = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  const listWeeks = useCalendarListWeeks({
+    anchorWeekStart: ranges.week.start,
+    currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
+    enabled: isList && hydrated,
+    affectedDates: listRefresh.affected,
+    focusDate: listFocusDate,
+    owner: listOwner,
+    refreshToken: listRefreshToken,
+    staleKey: data
+  });
+  // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.
+  useLayoutEffect(() => {
+    shownEntriesRef.current = [...data.weekEntries, ...data.entries, ...listWeeks.entries];
+  });
+  const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
-  const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
-    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);
+  const listTimelineStatus = useLocationTimelinesWithStatus(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
+    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);
+  const listTimelines = listTimelineStatus.days;
+  // Weeks whose newest read again failed, for the week or any of its days' places (Codex r2 on #634): the List keeps
+  // their old copy and says so on a quiet line at the week's start, with Try again.
+  const failedListDays = listTimelineStatus.failedDays;
+  const retryListDays = listTimelineStatus.retry;
+  const staleListWeeks = (() => {
+    const weeks = new Map<string, { key: string; startMs: number; endMs: number; days: string[] }>();
+    const add = (dayKey: string, failedDay: boolean) => {
+      const start = resolveTimelineRanges({ ...state, date: dayKey }).week.start;
+      const key = toTimelineDateKey(start);
+      const week = weeks.get(key) ?? { key, startMs: start.getTime(), endMs: addCalendarDays(start, 7).getTime(), days: [] };
+      if (failedDay) week.days.push(dayKey);
+      weeks.set(key, week);
+    };
+    for (const key of listWeeks.failedWeeks) add(key, false);
+    for (const day of failedListDays) add(day, true);
+    return [...weeks.values()];
+  })();
+  const retryListWeek = (key: string) => {
+    const week = staleListWeeks.find((each) => each.key === key);
+    if (!week) return;
+    listWeeks.retryWeek(key);
+    if (week.days.length) retryListDays(week.days);
+  };
   // Location v4 steps 16–17: the Grid's days' places and trips, for trip leg strips and the Places lane.
   const gridDayKeys = isList ? NO_DAY_KEYS
     : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));
@@ -494,7 +540,7 @@ export function TimeReviewViews({
     failedDelete,
     dismissDeleteError,
     undoPendingDelete
-  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshList });
+  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshDeleted });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
   // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
   const [deletedMoveEventId, setDeletedMoveEventId] = useState<string | null>(null);
@@ -700,7 +746,9 @@ export function TimeReviewViews({
               onVisibleDay: reportListTopDay,
               onLoad: listWeeks.load,
               reachedEarliest: listWeeks.reachedEarliest,
-              reachedLatest: listWeeks.reachedLatest
+              reachedLatest: listWeeks.reachedLatest,
+              staleWeeks: staleListWeeks,
+              onRetryWeek: retryListWeek
             }}
             displayRange={listRange}
             onDeleteEntries={requestTimelineDelete}
