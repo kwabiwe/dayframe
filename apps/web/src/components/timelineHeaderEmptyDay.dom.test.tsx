@@ -77,7 +77,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const label = () => document.querySelector(".timeline-range-navigation")?.textContent ?? "";
+const label = () => document.querySelector(".df-cal-datebox .timeline-period-trigger")?.textContent ?? "";
 
 describe("Calendar › List header with nothing listed (Codex r3 on #625)", () => {
   it("names the requested day, not the earlier one, when the List moves from the 14th to an empty today", async () => {
@@ -93,7 +93,7 @@ describe("Calendar › List header with nothing listed (Codex r3 on #625)", () =
     const { rerender } = render(view(bootstrap(14, 12, fourteenth)));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(document.querySelectorAll("tr[data-day-start-ms]")).toHaveLength(1);
-    expect(label()).toContain("Wed, 14 Oct 2026");
+    expect(label()).toContain("Wed 14 Oct");
 
     // Calendar on today, the 26th: a new week with nothing in it.
     navigation.search = "date=2026-10-26&scope=day&view=list";
@@ -103,7 +103,8 @@ describe("Calendar › List header with nothing listed (Codex r3 on #625)", () =
     rerender(view(bootstrap(26, 26, [])));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(document.querySelectorAll("tr[data-day-start-ms]")).toHaveLength(0);
-    expect(label()).toContain("Today");
+    // The List names its top day by date (UI review round 2: "Today · 26 Oct" is Day's alone).
+    expect(label()).toContain("Mon 26 Oct");
     expect(label()).not.toContain("14 Oct");
   });
 });

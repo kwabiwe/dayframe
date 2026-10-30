@@ -63,6 +63,20 @@ function Grid({ owner = "w1:u1", items = [suggestion("q1", {})], timelines = [ti
   );
 }
 
+/**
+ * A place dialog's own answer buttons (UI review round 2): no question card; the question is a plain line (except
+ * "Where were you?"), Not now is the footer's quiet button and Yes its primary.
+ */
+const answer = (name: "Yes" | "Not now", question?: string) => {
+  if (question) expect(document.querySelector("p.location-correction-ask")?.textContent).toBe(question);
+  return within(screen.getByRole("dialog")).getByRole("button", { name });
+};
+/** Logs as waits behind "More options"; with no edits but Logs as, the primary is Save. */
+const logAsErrands = () => {
+  fireEvent.click(screen.getByRole("button", { name: "More options" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
+};
+
 const posted = () => clientFetch.mock.calls.map(([url, init]) => ({ url, mutation: JSON.parse((init as RequestInit).body as string).mutation }));
 
 describe("the Grid's place dialogs (Codex r1 on #609)", () => {
@@ -92,12 +106,12 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
   it("answers an outing's \"?\" for the outing: Not now and Yes decide its trips with it", async () => {
     const view = render(<Grid items={outing()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Where were you?" })).getByRole("button", { name: "Not now" }));
+    fireEvent.click(answer("Not now"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(posted()).toEqual([{ url: `/api/review/${STAY}`, mutation: { action: "ignore_outing", memberReviewItemIds: [WALK] } }]);
     view.rerender(<Grid items={[{ ...outing()[0], title: "Boots" }, outing()[1]]} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Visited Boots?" })).getByRole("button", { name: "Yes" }));
+    fireEvent.click(answer("Yes", "Visited Boots?"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(posted()[1]).toEqual({ url: `/api/review/${STAY}`, mutation: { action: "confirm_outing", memberReviewItemIds: [WALK] } });
   });
@@ -109,7 +123,7 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     const refresh = vi.fn(async () => undefined);
     render(<Grid refresh={refresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    const yes = () => within(screen.getByRole("group", { name: "Visited Boots?" })).getByRole("button", { name: "Yes" });
+    const yes = () => answer("Yes", "Visited Boots?");
     fireEvent.click(yes());
     expect((await screen.findByRole("alert")).textContent).toBe("Couldn't log that visit.");
     fireEvent.click(yes());
@@ -131,8 +145,8 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
       : new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     render(<Grid refresh={refresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    logAsErrands();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
     expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: "cat-errands",
@@ -160,8 +174,8 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     expect(screen.getByTestId("asking").textContent).toBe(STAY);
     expect(screen.getByTestId("open").textContent).toBe(`${STAY},${WALK}`);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    logAsErrands();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
     // The data still lists both open; the receipt settled both, so nothing asks, and the day was read once.
@@ -178,8 +192,8 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     }));
     const view = render(<Grid refresh={refresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    logAsErrands();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     // A refresh no longer lists the cafe: its dialog closes while the POST is out.
     view.rerender(<Grid refresh={refresh} timelines={[timeline([])]} />);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -191,7 +205,9 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     render(<Grid items={[suggestion("q-old", { suggestedStartedAt: new Date(2026, 9, 20, 9).toISOString(), suggestedStoppedAt: new Date(2026, 9, 20, 10).toISOString() })]} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Visited Boots?" })).toBeNull();
+    expect(document.querySelector(".location-correction-ask")).toBeNull();
+    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Not now" })).toBeNull();
   });
   it("keeps an outing's question when the server says part of it was decided elsewhere, and says so (Codex r2 on #609)", async () => {
     clientFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
@@ -199,24 +215,26 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     const refresh = vi.fn(async () => undefined);
     render(<Grid items={outing()} refresh={refresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Where were you?" })).getByRole("button", { name: "Not now" }));
+    fireEvent.click(answer("Not now"));
     expect((await screen.findByRole("alert")).textContent).toContain("decided elsewhere");
-    expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    // Still asking: its Not now is still there.
+    expect(answer("Not now")).toBeTruthy();
     expect(refresh).toHaveBeenCalledTimes(1);
     // A stay decided elsewhere has nothing left to ask: the dialog closes.
     clientFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
       canonicalReviewStatuses: { [STAY]: "ignored", [WALK]: "accepted" } }), { status: 409 }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Where were you?" })).getByRole("button", { name: "Not now" }));
+    fireEvent.click(answer("Not now"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("follows the refreshed copy of its place: new times, a new map read (Codex r2 on #609)", () => {
     const view = render(<Grid />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("10:30");
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("10:30");
     view.rerender(<Grid timelines={[timeline([{ ...cafe, startedAt: at(10, 40) }])]} />);
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("10:40");
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("10:40");
     expect(evidenceFetch.mock.calls.at(-1)?.[0]).toBe(`/api/timeline/items/seg-cafe/evidence?kind=place&startedAt=${encodeURIComponent(at(10, 40))}`);
   });
 
@@ -239,12 +257,12 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     const first = screen.getByRole("button", { name: "q1" });
     first.focus();
     fireEvent.click(first);
-    fireEvent.click(within(screen.getByRole("group", { name: "Visited Boots?" })).getByRole("button", { name: "Yes" }));
+    fireEvent.click(answer("Yes", "Visited Boots?"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "q2" })));
     screen.getByRole("button", { name: "q2" }).focus();
     fireEvent.click(screen.getByRole("button", { name: "q2" }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Visited Boots?" })).getByRole("button", { name: "Not now" }));
+    fireEvent.click(answer("Not now", "Visited Boots?"));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("scroller")));
   });
   it("moves focus on when a saved Logs as removes the opener (Codex r3 on #609)", async () => {
@@ -268,8 +286,8 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     const first = screen.getByRole("button", { name: "q1" });
     first.focus();
     fireEvent.click(first);
-    fireEvent.click(screen.getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    logAsErrands();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "q2" })));
   });

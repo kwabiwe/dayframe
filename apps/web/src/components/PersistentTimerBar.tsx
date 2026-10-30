@@ -6,7 +6,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
+import { previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
 import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -39,7 +39,6 @@ import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-to
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
-import { useUiNext } from "@/components/UiNextToggle";
 
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
@@ -105,7 +104,6 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
-  const uiNext = useUiNext();
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -672,8 +670,8 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
             setSuggestionsOpen(false);
           }}
           open={categoryMenuOpen}
-          // Proposed: the same 360 px as the bar's Tags and Suggestions lists, under the activity block.
-          panelWidth={uiNext ? 360 : undefined}
+          // The same 360 px as the bar's Tags and Suggestions lists, under the activity block.
+          panelWidth={360}
           portal
           scope={completionScope}
           selectedId={timerDraft.categoryId}
@@ -727,7 +725,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
             placeholder={active ? "Add a description" : narrowCommand ? COMMAND_PLACEHOLDER_NARROW : COMMAND_PLACEHOLDER}
             selectedTagNames={timerDraft.tagNames}
-            tagButtonFirst={uiNext}
+            tagButtonFirst
             tags={data.tags}
             value={timerDraft.description}
           />
@@ -763,13 +761,12 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
               }}
               ref={startEditorTriggerRef}
             >
-              {/* Proposed (round 2): "since 07:36" sits in a fixed slot left of the digits, on their baseline. */}
-              {uiNext ? <small className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small> : null}
+              {/* "since 07:36" sits in a fixed slot left of the digits, on their baseline (UI review round 2). */}
+              <small className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small>
               <Odometer value={formatClockDuration(durationSeconds)} />
-              {uiNext ? null : <small>Started {formatTime(active.startedAt, clock)}</small>}
             </button>
-          ) : uiNext ? (
-            // Proposed (round 2, owner 30 Oct 2026): one line in every state. "From 07:51" is a small text button in the
+          ) : (
+            // UI review round 2 (owner 30 Oct 2026): one line in every state. "From 07:51" is a small text button in the
             // same fixed slot "since" uses, then the idle clock in the same face, so nothing moves on Start or Stop.
             <div className="df-cmd-idle">
               <span className="df-cmd-slot">
@@ -788,26 +785,6 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
               <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
                 {formatClockDuration(0)}
               </span>
-            </div>
-          ) : (
-            <div className="df-cmd-idle">
-              <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
-                {formatClockDuration(0)}
-              </span>
-              {previousEnd ? (
-                <button
-                  aria-label={`Start from ${formatTime(previousEnd.startedAt, clock)}, after ${previousEnd.previousName}`}
-                  className="df-cmd-from"
-                  disabled={isTimerBusy}
-                  onClick={() => void startFromPreviousEnd(previousEnd)}
-                  type="button"
-                >
-                  {/* The same compact pill as the iPhone sheet (owner, 15 Oct 2026): the previous
-                      block's name is in the label only. */}
-                  <DayframeIcon glyph={DAYFRAME_APP_ICONS.startFromPreviousEnd} size={12} />
-                  <span>From <span className="tabular">{formatTime(previousEnd.startedAt, clock)}</span></span>
-                </button>
-              ) : null}
             </div>
           )}
 
@@ -940,7 +917,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
           aria-busy={(Boolean(active) && isStopPending) || undefined}
           aria-label={active ? (isStopPending ? "Stopping…" : "Stop recording") : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           // Proposed (round 2): Play and Stop are one round button, so it never moves; Start's words move to its tip.
-          title={active && isStopPending ? "Stopping…" : uiNext && !active ? `${goLabel}${parsedCommand?.durationSeconds ? "" : " (Space)"}` : undefined}
+          title={active && isStopPending ? "Stopping…" : !active ? `${goLabel}${parsedCommand?.durationSeconds ? "" : " (Space)"}` : undefined}
           onClick={(event) => {
             if (active) {
               void stopTimer();

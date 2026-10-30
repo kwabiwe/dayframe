@@ -138,6 +138,22 @@ const sleepRow = () => screen.queryByRole("button", { name: /^Sleep, .+\. Needs 
 const askingRow = (title: string) => screen.queryByRole("button", { name: new RegExp(`^${title}, .+\\. Needs a look$`) });
 const chip = (count: number) => screen.getByRole("button", { name: `${count} to check, oldest first` });
 const dialog = () => screen.queryByRole("dialog");
+/**
+ * A place dialog's question (UI review round 2): a plain line at the top, no card; its Yes is the footer's primary and
+ * Not now the quiet button beside it. Throws until the open dialog asks `text`, so it works inside `waitFor`.
+ */
+const placeAsk = (text: string) => {
+  const line = dialog()?.querySelector("p.location-correction-ask");
+  if (line?.textContent !== text) throw new Error(`The place dialog doesn't ask "${text}"`);
+  return line;
+};
+/** A place dialog's ✕: closes with no change (no Cancel/Done on a place). */
+const closePlace = () => fireEvent.click(within(dialog()!).getByRole("button", { name: /^Close / }));
+/** Logs as waits behind "More options". */
+const pickErrands = () => {
+  fireEvent.click(within(dialog()!).getByRole("button", { name: "More options" }));
+  fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
+};
 
 describe("things to check in Calendar › List (location v4 step 14)", () => {
   beforeEach(() => {
@@ -177,14 +193,14 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     // Owner item A: the row opens the place's dialog with its "?" asked at the top, Yes and Not now.
     fireEvent.click(officeRow()!);
     const opened = dialog()!;
-    const asked = within(opened).getByRole("group", { name: "Visited Office?" });
+    const asked = placeAsk("Visited Office?");
     expect(asked.parentElement?.firstElementChild).toBe(asked);
     // The dialog says its times; the question doesn't repeat them or "not in a block".
     expect(opened.textContent).toMatch(/\d\d:00–\d\d:00/);
     expect(asked.textContent).not.toContain("not in a block");
     // A row that opens a dialog never shows the inline question card too (owner final change 1).
     expect(document.querySelector(".timeline-check-question")).toBeNull();
-    fireEvent.click(within(asked).getByRole("button", { name: "Yes" }));
+    fireEvent.click(within(opened).getByRole("button", { name: "Yes" }));
     expect(dialog()).toBeNull();
     expect(screen.getByText("Logged Office")).toBeTruthy();
     expect(clientFetch).not.toHaveBeenCalled();
@@ -328,8 +344,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     // Then the Office (09:00): its dialog, with the question at the top.
     fireEvent.click(chip(3));
     expect(screen.queryByRole("group", { name: /^Sleep, / })).toBeNull();
-    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    expect(placeAsk("Visited Office?")).toBeTruthy();
+    closePlace();
     // Then the trip (10:00), in its own dialog.
     fireEvent.click(chip(3));
     expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy();
@@ -373,9 +389,9 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(office.getAttribute("aria-label")).not.toContain("Needs a look");
     expect(office.querySelector(".timeline-location-dot")).toBeNull();
     fireEvent.click(office);
-    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
-    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
+    expect(within(dialog()!).getByRole("textbox", { name: "Search places" })).toBeTruthy();
+    closePlace();
     fireEvent.click(chip(1));
     expect(router.push).toHaveBeenCalledWith(`/timeline?view=list&scope=day&date=2026-08-12&check=${recent.id}`);
   });
@@ -390,12 +406,13 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(chip(1)).toBeTruthy();
     expect(askingRow("Walk")).toBeNull();
     fireEvent.click(askingRow("Unknown place")!);
-    // Card B: the outing's trips are decided with it, silently.
-    expect(within(dialog()!).getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    // Card B: the outing's trips are decided with it, silently. "Where were you?" is the dialog itself: no line, and Not now.
+    expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
+    expect(within(dialog()!).getByRole("button", { name: "Not now" })).toBeTruthy();
     expect(screen.queryByText(/With its trips/)).toBeNull();
     // With no guess there is nothing to say Yes to: the dialog's choices name it.
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
-    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("textbox", { name: "Search places" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
@@ -575,7 +592,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     search.params = "check=first";
     try {
       render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[0]]} />);
-      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      await waitFor(() => expect(placeAsk("Visited Office?")).toBeTruthy());
     } finally {
       search.params = "";
     }
@@ -592,7 +609,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
         eventType: "health_workout_import_suggestion", suggestedStartedAt: yesterdayStart, suggestedStoppedAt: yesterdayStop });
       // Yesterday's "?" is the oldest still asking; today's (the 11th, the List's day) is Office.
       render(<EntriesTable {...baseProps()} reviewItems={[yesterday, reviewItems[0]]} />);
-      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      await waitFor(() => expect(placeAsk("Visited Office?")).toBeTruthy());
       expect(router.push).not.toHaveBeenCalled();
       expect(router.replace).not.toHaveBeenCalled();
     } finally {
@@ -642,8 +659,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const onChanged = vi.fn(async () => undefined);
     const { rerender } = render(<EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={reviewItems} />);
     fireEvent.click(officeRow()!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
     expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands",
@@ -672,8 +689,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const view = render(list({ items }));
     expect(badge()).toBe(2);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     // One log_place, never confirm_outing, and one read of the day.
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
@@ -704,13 +721,13 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const onChanged = vi.fn(async () => undefined);
     const view = render(<Shell items={[stay, walk]}><EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[stay, walk]} /></Shell>);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(within(dialog()!).getByText(/Check your connection/)).toBeTruthy());
     // Nothing saved: the "?" are still asked and the day isn't read.
     expect(onChanged).not.toHaveBeenCalled();
     expect(badge()).toBe(1);
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     const ids = clientFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string).clientCorrectionId);
     expect(ids).toHaveLength(2);
@@ -733,8 +750,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const list = () => <EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={[stay, walk]} />;
     const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>{list()}</Shell>);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     // The List is left while the POST is out; the shell's decisions owner stays.
     view.rerender(<Shell items={[stay, walk]} refresh={shellRefresh}>{null}</Shell>);
@@ -758,8 +775,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const view = render(<Shell items={[stay, walk]} refresh={refreshA}>
       <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     // B signs in while the POST is out, then A again: a new lifetime of A.
     view.rerender(<Shell items={[]} owner="w2:u2" refresh={refreshB}>{null}</Shell>);
     view.rerender(<Shell items={[stay, walk]} refresh={refreshA}>{null}</Shell>);
@@ -780,8 +797,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const view = render(<Shell items={[stay, walk]} refresh={shellRefresh}>
       <EntriesTable {...baseProps()} categories={[errands]} reviewItems={[stay, walk]} /></Shell>);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     view.rerender(<Shell items={[]} owner="w2:u2" refresh={shellRefresh}>{null}</Shell>);
     await act(async () => { save.answer(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -809,10 +826,10 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       expect(dialog()).toBeNull();
       // The places arrive: the question moves into the place's dialog.
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={reviewItems} />);
-      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
+      await waitFor(() => expect(placeAsk("Visited Office?")).toBeTruthy());
       expect(document.querySelector(".timeline-check-question")).toBeNull();
       // Once: closed, it stays closed.
-      fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+      closePlace();
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[...reviewItems]} />);
       await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
       expect(dialog()).toBeNull();
@@ -830,19 +847,19 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(document.querySelectorAll(`tr[data-suggestion-id="${PLACE}"]`)).toHaveLength(1);
     // It keeps its place: the row opens the place's dialog with its map and choices, never the inline question.
     fireEvent.click(officeRow()!);
-    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
-    expect(within(dialog()!).getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    expect(placeAsk("Visited Office?")).toBeTruthy();
+    expect(within(dialog()!).getByRole("textbox", { name: "Search places" })).toBeTruthy();
     expect(document.querySelector(".timeline-check-question")).toBeNull();
   });
   it("stops asking in an open dialog once its \"?\" expires at midnight (Codex r2 on #609)", () => {
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
     fireEvent.click(officeRow()!);
-    expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy();
+    expect(placeAsk("Visited Office?")).toBeTruthy();
     // Midnight on 18 Aug: the 11th's "?" no longer ask. The dialog stays, as the place's correction, asking nothing.
     clock.todayStartMs = localDayStart(new Date(Date.UTC(2026, 7, 18, 12)).toISOString());
     rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
     expect(dialog()).toBeTruthy();
-    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
+    expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
     expect(within(dialog()!).queryByRole("button", { name: "Not now" })).toBeNull();
   });
 
@@ -985,8 +1002,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const office = officeRow()!;
     office.focus();
     fireEvent.click(office);
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(officeRow()).toBeNull();
     // Sleep is the next "?" down the List from the Office row.
@@ -1016,9 +1033,9 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
     expect(screen.getByTestId("grid-asks").textContent).toBe("quiet");
     fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
-    expect(within(dialog()!).queryByRole("group", { name: "Visited Office?" })).toBeNull();
+    expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
     expect(within(dialog()!).queryByRole("button", { name: "Yes" })).toBeNull();
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+    closePlace();
     // Back in the List, Undo brings it back, in the List, the badge and the Grid; nothing was sent.
     view.rerender(<Shell items={reviewItems}>{list}</Shell>);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -1084,8 +1101,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     // On the Grid, while the List holds its Not now, the office is logged as Errands.
     view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
     fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
-    fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+    pickErrands();
+    await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     // Back in the List: Undo brings nothing back, the badge stays, and the held Not now was never sent.
     view.rerender(<Shell items={reviewItems}>{list}</Shell>);
@@ -1128,8 +1145,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
         : Promise.resolve(new Response(JSON.stringify(acknowledge(url, init)), { status: 200 })));
       const view = render(<Shell items={reviewItems}><GridProbe /></Shell>);
       fireEvent.click(screen.getByRole("button", { name: "Open the office" }));
-      fireEvent.click(within(dialog()!).getByRole("radio", { name: "Errands" }));
-      await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Done" })); });
+      pickErrands();
+      await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
       return { view, land: () => land() };
     }
 
@@ -1223,8 +1240,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       // A deliberate visit to another "?" (B, the Office), then another chip press (to the trip).
       search.params = `view=list&check=${PLACE}`;
       rerender(<EntriesTable {...baseProps()} checksDays={[ninth, today]} reviewItems={[...items]} />);
-      await waitFor(() => expect(within(dialog()!).getByRole("group", { name: "Visited Office?" })).toBeTruthy());
-      fireEvent.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(placeAsk("Visited Office?")).toBeTruthy());
+      closePlace();
       await frames();
       fireEvent.click(chip(4));
       expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy();

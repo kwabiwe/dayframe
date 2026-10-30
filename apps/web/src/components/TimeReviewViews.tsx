@@ -12,7 +12,6 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { useGridCorrection } from "@/components/location/useGridCorrection";
 import { blockQuestionWords, useEndedBlocks, useProjectedReviewItems, useSharedCheckDecisions } from "@/components/location/ListChecks";
-import { useUiNext } from "@/components/UiNextToggle";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -34,7 +33,6 @@ import type { BootstrapData, CategoryRow, PlaceRow, ReviewItemRow, TimeEntryRow 
 import { pendingReviewSpans } from "@/lib/today-view";
 import {
   dateTimeLocalInputToIso,
-  formatDate,
   formatDuration,
   formatTime
 } from "@/lib/format";
@@ -67,7 +65,6 @@ import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   formatCalendarRangeLabel,
-  formatTimelinePeriodLabel,
   addCalendarDays,
   resetTimelineState,
   resolveTimelineRanges,
@@ -127,15 +124,6 @@ const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
 // with long months outside this year, and a day outside this year. The box takes the widest of them, so it never
 // resizes between views or dates.
 const CALENDAR_DATEBOX_SIZERS = ["28 Dec 2026 – 3 Jan 2027", "29 Sept – 5 Oct 2025", "Wed 30 Sept 2025", "Today · 30 Sept"];
-
-const scopeItems: Array<{ id: TimelineScope; label: string }> = [
-  { id: "day", label: "Day" },
-  { id: "week", label: "Week" }
-];
-const viewItems: Array<{ id: TimelineView; label: string }> = [
-  { id: "calendar", label: "Calendar" },
-  { id: "list", label: "List" }
-];
 
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
   fullDay: { label: "24h", startHour: 0, endHour: 24 }
@@ -433,11 +421,6 @@ export function TimeReviewViews({
     });
   }
 
-  function updateScope(scope: TimelineScope) {
-    if (isDateLoading) return;
-    navigate({ scope });
-  }
-
   // Calendar › List shows continuous days (owner, 24 Oct 2026): the selected week from the shell's data,
   // and whole weeks before and after it, loaded as the List scrolls. The period controls don't apply.
   const listTodayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
@@ -587,9 +570,7 @@ export function TimeReviewViews({
   // scrolling can leave the List on another day, and the two must agree (owner bug, 29 Oct 2026).
   const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
   const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
-  const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
-  const uiNext = useUiNext();
-  // Proposed toolbar (round 2): the date box's words and arrows. List moves a week at a time, as its strip shows one.
+  // The toolbar's date box (UI review round 2): its words and arrows. List moves a week at a time, as its strip shows one.
   const navScope: TimelineScope = isList ? "week" : state.scope;
   const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey, { nameToday: !isList });
   const goPeriod = (direction: "previous" | "next") => {
@@ -631,9 +612,8 @@ export function TimeReviewViews({
           week totals, Day | Week and Calendar | List — wrapping only where the screen is too narrow.
           The month stays the page's heading for assistive tech; the period label shows the date. */}
       <h1 className="sr-only">{headModel.month}</h1>
-      {uiNext ? (
-        <>
-          {/* Proposed (UI review round 2, owner 30 Oct 2026): one toolbar, identical and one height in every view —
+      <>
+          {/* UI review round 2 (owner 30 Oct 2026): one toolbar, identical and one height in every view —
               one date box with ‹ › inside it and Today on the left, the period's total in the middle, one Day · Week · List
               control on the right. The 7-day strip is the row beneath it (in Week, the day columns are that row). */}
           <section aria-busy={isDateLoading} aria-label="Calendar period and view controls" className="timeline-range-toolbar df-cal-toolbar is-next">
@@ -704,87 +684,7 @@ export function TimeReviewViews({
               />
             </div>
           )}
-        </>
-      ) : (
-      <section
-        className="timeline-range-toolbar df-cal-toolbar"
-        aria-busy={isDateLoading}
-        aria-label="Calendar period and view controls"
-      >
-        {/* In List the period arrows and Day | Week don't apply (continuous days), so they leave the row (UI review
-            W8, owner 29 Oct 2026; they were shown greyed); the date stays, naming the List's top day. */}
-        <div aria-disabled={isList || undefined} className="timeline-range-navigation" data-unused-in-list={isList || undefined}>
-          {isList ? null : (
-            <IconButton
-              disabled={isDateLoading}
-              label={`Previous ${state.scope}`}
-              onClick={() => void navigate(shiftTimelineState(state, "previous"))}
-            >
-              <ChevronLeft size={18} />
-            </IconButton>
-          )}
-          <DatePickerPopover
-            disabled={isDateLoading}
-            label={periodLabel}
-            unavailable={isList ? "Not used in List" : undefined}
-            onChange={(date) => void navigate({ date }, { reposition: true })}
-            portal
-            portalAlign="center"
-            today={todayKey ?? state.date}
-            value={headerDayKey}
-          />
-          {isList ? null : (
-            <IconButton
-              disabled={isDateLoading}
-              label={`Next ${state.scope}`}
-              onClick={() => void navigate(shiftTimelineState(state, "next"))}
-            >
-              <ChevronRight size={18} />
-            </IconButton>
-          )}
-          {/* List has its own way back to today (it scrolls there), so only the grid shows this one. */}
-          {showsToday || isList ? null : (
-            <button
-              className="timeline-today-button"
-              disabled={isDateLoading}
-              onClick={() => {
-                if (todayKey) void navigate({ date: todayKey });
-              }}
-              type="button"
-            >
-              Today
-            </button>
-          )}
-        </div>
-
-        <CalendarHead
-          disabled={isDateLoading}
-          model={headModel}
-          onSelectDay={(date) => void navigate({ date }, { reposition: true })}
-          showDays={!(state.view === "calendar" && state.scope === "week")}
-          weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
-        />
-
-        <div className="timeline-range-controls">
-          {isList ? null : (
-            <SegmentedControl
-              ariaLabel="Calendar scope"
-              onChange={updateScope}
-              options={scopeItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
-              value={state.scope}
-            />
-          )}
-          {/* Card C item 5 (owner, 25 Oct 2026): a visible Calendar | List switch like Day | Week; the
-              round view-icon menu is the iPhone's only. */}
-          <SegmentedControl
-            ariaLabel="Calendar view"
-            onChange={updateView}
-            options={viewItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
-            value={state.view}
-          />
-        </div>
-      </section>
-      )}
+      </>
       {dateLoadError || isDateLoading ? (
         <p
           aria-atomic="true"
@@ -815,7 +715,7 @@ export function TimeReviewViews({
             // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
             undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
-            dayRow={uiNext ? (
+            dayRow={(
               <CalendarHead
                 disabled={isDateLoading}
                 model={headModel}
@@ -828,7 +728,7 @@ export function TimeReviewViews({
                 variant="row"
                 weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
               />
-            ) : undefined}
+            )}
             locations={{ timelines: gridTimelines, asking: gridCorrection.askingBySegment ?? NO_ASKING, onOpen: gridCorrection.open }}
           />
         ) : null}
@@ -968,7 +868,7 @@ export function CalendarReview({
   tags: BootstrapData["tags"];
   /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
   todayKeyHint?: string | null;
-  /** Proposed (UI review round 2): the shared day row (`CalendarHead variant="row"`) in place of the grid's own day headings. */
+  /** The shared day row (`CalendarHead variant="row"`, UI review round 2), the grid's sticky first row. */
   dayRow?: ReactNode;
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
@@ -1744,7 +1644,6 @@ export function CalendarReview({
     if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
 
-  const uiNext = useUiNext();
   // Today's now line, on the minute (the line, the pill and the hidden hour label share it).
   const nowTop = localTimeReady && visibleDays.some(isToday)
     ? Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight)
@@ -1804,93 +1703,32 @@ export function CalendarReview({
           // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
           style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
         >
-          {dayRow ? (
-            // Proposed (round 2): one day row for Day and Week, in seven columns after the zoom's cell, so each day sits
-            // over its Week column and at the same place in Day; switching views moves only the highlight.
-            <div
-              className="df-cal-dayrow"
-              style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(7, ${visibleDays.length === 1 ? "minmax(0, 1fr)" : "minmax(var(--calendar-day-min-width), 1fr)"})` }}
-            >
-              <span className="calendar-corner-zoom df-cal-dayrow-zoom" role="group" aria-label="Calendar zoom">
-                <button
-                  type="button"
-                  disabled={zoomIndex === 0}
-                  aria-label="Zoom calendar out"
-                  onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-                >
-                  −
-                </button>
-                <button
-                  type="button"
-                  disabled={zoomIndex === zoomKeys.length - 1}
-                  aria-label="Zoom calendar in"
-                  onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-                >
-                  +
-                </button>
-              </span>
-              {dayRow}
-            </div>
-          ) : (
-            <>
-            <div className="calendar-grid-corner">
-              <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
-                <button
-                  type="button"
-                  disabled={zoomIndex === 0}
-                  aria-label="Zoom calendar out"
-                  onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-                >
-                  −
-                </button>
-                <button
-                  type="button"
-                  disabled={zoomIndex === zoomKeys.length - 1}
-                  aria-label="Zoom calendar in"
-                  onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-                >
-                  +
-                </button>
-              </span>
-            </div>
-            {visibleDays.map((day) => {
-              const dayStart = startOfDay(day);
-              const total = analyzeTimeIntervals(
-                gridEntries.map((entry) => ({
-                  id: entry.id,
-                  startedAt: entry.startedAt,
-                  stoppedAt: entry.stoppedAt
-                })),
-                {
-                  range: { start: dayStart, end: addDays(dayStart, 1) },
-                  now: capturedNow
-                }
-              );
-              const loggedLabel = formatDuration(total.loggedSeconds);
-              return (
-                <div
-                  key={day.toISOString()}
-                  className={[
-                    "calendar-day-heading",
-                    isToday(day) ? "is-today" : ""
-                  ].join(" ")}
-                >
-                  <div className="calendar-day-date" aria-label={formatDate(day)}>
-                    <small aria-hidden="true">{formatCalendarWeekday(day)}</small>
-                    <b aria-hidden="true">{day.getDate()}</b>
-                  </div>
-                  <div
-                    aria-hidden={localTimeReady ? undefined : true}
-                    aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
-                    className="calendar-day-total tabular"
-                  >
-                    {total.loggedSeconds > 0 ? loggedLabel : "–"}
-                  </div>
-                </div>
-              );
-            })}
-            </>
-          )}
+          {/* One day row for Day and Week (UI review round 2), in seven columns after the zoom's cell, so each day sits
+              over its Week column and at the same place in Day; switching views moves only the highlight. */}
+          <div
+            className="df-cal-dayrow"
+            style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(7, ${visibleDays.length === 1 ? "minmax(0, 1fr)" : "minmax(var(--calendar-day-min-width), 1fr)"})` }}
+          >
+            <span className="calendar-corner-zoom df-cal-dayrow-zoom" role="group" aria-label="Calendar zoom">
+              <button
+                type="button"
+                disabled={zoomIndex === 0}
+                aria-label="Zoom calendar out"
+                onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                disabled={zoomIndex === zoomKeys.length - 1}
+                aria-label="Zoom calendar in"
+                onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+              >
+                +
+              </button>
+            </span>
+            {dayRow}
+          </div>
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
             {nowTop !== null ? (
@@ -1983,8 +1821,8 @@ export function CalendarReview({
                   className="calendar-now-line"
                   style={{ top: nowTop ?? 0 }}
                 />
-              ) : uiNext && nowTop !== null ? (
-                // Proposed (round 2): strong across today, faint across the week's other days.
+              ) : nowTop !== null ? (
+                // Strong across today, faint across the week's other days (UI review round 2).
                 <span aria-hidden="true" className="calendar-now-line is-faint" style={{ top: nowTop }} />
               ) : null}
               {dayBrackets.map((bracket) => {
@@ -2775,10 +2613,6 @@ function calendarDurationSeconds(
   capturedNow: Date
 ) {
   return calendarEntrySliceDetails(entry, draft, day, capturedNow).durationSeconds;
-}
-
-function formatCalendarWeekday(day: Date) {
-  return new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day);
 }
 
 function dayBodyPointHitsSemanticBlock(dayBody: HTMLElement, clientX: number, clientY: number) {

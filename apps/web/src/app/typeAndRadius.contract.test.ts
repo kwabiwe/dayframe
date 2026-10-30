@@ -125,7 +125,8 @@ describe("type and radius tokens (WUI-036, WUI-037)", () => {
       .filter(({ prop }) => prop === "font-weight")
       .filter(({ value, siblings }) => {
         if (/^var\(--fw-(regular|medium|strong)\)$/.test(value) || value === "inherit") return false;
-        return !(value === "700" && siblings.some((d) => d.prop === "font-family" && /^var\(--font-display/.test(d.value)));
+        // The display face: its 700 cut, and its 600 SemiBold cut for the timer bar's clock (UI review round 2).
+        return !((value === "700" || value === "600") && siblings.some((d) => d.prop === "font-family" && /^var\(--font-display/.test(d.value)));
       })
       .map(({ selector, value }) => `${selector}: ${value}`);
     expect(strays).toEqual([]);

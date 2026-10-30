@@ -62,13 +62,15 @@
   --surface-muted: #eef1f6;
   /* Calendar v3 (owner, 24 Oct 2026): translucent tints, text in a darker shade of the block's hue, and
      the now line in the danger red with AA text on its pill. */
-  --calendar-dense-tint: 18%;
+  /* Activities read apart (UI review round 2): a stronger tint of each activity's own colour. */
+  --calendar-dense-tint: 26%;
   --calendar-dense-review-tint: 10%;
   --calendar-ink: 52%;
   --calendar-ink-strong: 40%;
   --calendar-ink-mix: #000000;
-  --calendar-now: var(--danger-text);
-  --calendar-now-ink: #ffffff;
+  /* The live coral (UI review round 2, owner 30 Oct 2026; the danger red before). */
+  --calendar-now: var(--accent);
+  --calendar-now-ink: var(--on-accent);
   --border: #dde2ea;
   --border-strong: #bcc5d2;
   --control-border: #7d8797;
@@ -172,13 +174,13 @@
     --surface-strong: var(--surface-raised);
     --surface-inset: #101622;
     --surface-muted: #202838;
-    --calendar-dense-tint: 28%;
+    --calendar-dense-tint: 42%;
     --calendar-dense-review-tint: 14%;
     --calendar-ink: 62%;
     --calendar-ink-strong: 40%;
     --calendar-ink-mix: #ffffff;
-    --calendar-now: var(--danger);
-    --calendar-now-ink: var(--background);
+    --calendar-now: var(--accent);
+    --calendar-now-ink: var(--on-accent);
     --border: #2a3345;
     --border-strong: #3b465b;
     --control-border: #64718a;
@@ -279,13 +281,13 @@
   --surface-strong: var(--surface-raised);
   --surface-inset: #101622;
   --surface-muted: #202838;
-  --calendar-dense-tint: 28%;
+  --calendar-dense-tint: 42%;
   --calendar-dense-review-tint: 14%;
   --calendar-ink: 62%;
   --calendar-ink-strong: 40%;
   --calendar-ink-mix: #ffffff;
-  --calendar-now: var(--danger);
-  --calendar-now-ink: var(--background);
+  --calendar-now: var(--accent);
+  --calendar-now-ink: var(--on-accent);
   --border: #2a3345;
   --border-strong: #3b465b;
   --control-border: #64718a;
@@ -809,10 +811,7 @@ textarea.ui-control {
 
 /* A control that doesn't apply here (Calendar › List's period controls): shown, greyed and inert, but
    still focusable so its reason ("Not used in List") is read and shown as its tooltip. */
-.ui-segmented-control button[aria-disabled="true"],
-.timeline-range-navigation[aria-disabled="true"] .ui-icon-button,
-.timeline-range-navigation[aria-disabled="true"] button[aria-disabled="true"],
-.timeline-range-navigation[aria-disabled="true"] button:disabled {
+.ui-segmented-control button[aria-disabled="true"] {
   color: var(--muted);
   cursor: not-allowed;
   opacity: 0.55;
@@ -823,7 +822,6 @@ textarea.ui-control {
   box-shadow: none;
 }
 
-.timeline-range-navigation[aria-disabled="true"] .ui-icon-button:hover,
 .ui-segmented-control button[aria-disabled="true"]:hover {
   background: transparent;
 }
@@ -4395,13 +4393,7 @@ dialog.ui-dialog.df-range-custom {
   padding: var(--web-gap-lg);
 }
 
-.timeline-range-navigation {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: var(--web-icon-button-size) minmax(160px, 1fr) var(--web-icon-button-size);
-  align-items: center;
-  gap: var(--web-gap-sm);
-}
+
 
 .timeline-date-picker {
   position: relative;
@@ -5609,33 +5601,13 @@ dialog.ui-dialog.df-range-custom {
   min-width: 100%;
 }
 
-.calendar-grid-corner,
-.calendar-day-heading {
-  position: sticky;
-  top: 0;
-  display: grid;
-  min-height: 62px;
-  align-content: center;
-  border-bottom: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  padding: 10px 12px;
-  background: var(--surface-inset);
-}
 
-.calendar-grid-corner {
-  left: 0;
-  z-index: 4;
-  color: var(--muted);
-  font-size: 12px;
-}
 
-.calendar-day-heading {
-  z-index: 3;
-}
 
-.calendar-day-heading.is-today {
-  background: var(--surface-muted);
-}
+
+
+
+
 
 .calendar-time-axis {
   position: sticky;
@@ -5769,9 +5741,7 @@ dialog.ui-dialog.df-range-custom {
     padding: 14px;
   }
 
-  .timeline-range-navigation {
-    grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size);
-  }
+
 
   .timeline-period-trigger strong {
     white-space: nowrap;
@@ -7153,10 +7123,7 @@ dialog.ui-dialog.df-range-custom {
   pointer-events: none;
 }
 
-.swiss-timeline-surface .timeline-range-navigation {
-  width: max-content;
-  grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size);
-}
+
 
 .swiss-timeline-surface .timeline-date-picker {
   min-width: 120px;
@@ -7188,30 +7155,13 @@ dialog.ui-dialog.df-range-custom {
   background: transparent;
 }
 
-.calendar-grid-corner,
-.calendar-day-heading {
-  z-index: 40;
-  min-height: 52px;
-  background: var(--surface-inset);
-}
 
-.calendar-grid-corner {
-  z-index: 42;
-  align-content: center;
-  padding: 4px 8px;
-}
 
-.calendar-day-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-block: 4px;
-}
 
-.calendar-day-date,
-.calendar-day-total {
-  white-space: nowrap;
-}
+
+
+
+
 
 /* Calendar phone layout (owner-approved 17 Oct 2026): a 104 px gutter and 130 px day columns on wider
    screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Every
@@ -7302,10 +7252,7 @@ dialog.ui-dialog.df-range-custom {
   align-items: center;
 }
 
-/* List has no arrows: its greyed date takes the navigation's one column (Codex r3 on #632). */
-.timeline-range-navigation[data-unused-in-list] {
-  grid-template-columns: minmax(120px, auto);
-}
+
 
 /* The Week grid shows only the week's total: it follows the date range instead of floating mid-row (E). */
 .df-cal-week:not(:has(.df-cal-days)) {
@@ -7681,10 +7628,7 @@ dialog.ui-dialog.df-range-custom {
     padding: 10px 12px;
   }
 
-  .swiss-timeline-surface .timeline-range-navigation {
-    width: 100%;
-    grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size);
-  }
+
 
   .swiss-timeline-surface .timeline-range-controls {
     grid-column: auto;
@@ -8225,47 +8169,13 @@ button.df-cmd-clock:hover {
   min-width: 0;
 }
 
-.df-cmd-from {
-  position: relative;
-  display: inline-flex;
-  max-width: 260px;
-  min-width: 0;
-  align-items: center;
-  gap: 0.28em;
-  /* Tucked under the clock's padding so the bar keeps its 64 px height with or without it. */
-  margin: -5px 8px 0;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 8px;
-  background: var(--surface-inset);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: var(--fw-medium);
-  line-height: 15px;
-  white-space: nowrap;
-}
 
-/* The chip stays 15 px tall so the bar keeps 64 px; its target is 44 px (14.5 px above and below). */
-.df-cmd-from::after {
-  position: absolute;
-  inset: -14.5px 0;
-  content: "";
-}
 
-.df-cmd-from:hover:not(:disabled) {
-  background: var(--surface-muted);
-  color: var(--text-primary);
-}
 
-.df-cmd-from:disabled {
-  opacity: 0.6;
-}
 
-/* "← From 15:20" (owner, 15 Oct 2026): the registry's back arrow, then the time; the previous
-   block's name is in the accessible label only, as on the iPhone. */
-.df-cmd-from svg {
-  flex: none;
-}
+
+
+
 
 .df-odometer {
   display: inline-flex;
@@ -8538,17 +8448,9 @@ button.df-cmd-clock:hover {
     flex: none;
   }
 
-  .df-cmd-from {
-    min-height: 44px;
-    margin: 0;
-    padding: 0 12px;
-    font-size: 13px;
-  }
 
-  /* Already 44 px here; an extended target would reach the description and the quick starts. */
-  .df-cmd-from::after {
-    inset: 0;
-  }
+
+
 
   .df-cmd-go-label,
   .df-cmd-go kbd {
@@ -8625,27 +8527,11 @@ button.df-cmd-clock:hover {
     min-width: 0;
   }
 
-  .df-cmd-wrap .df-cmd-from {
-    min-width: 0;
-    max-width: 100%;
-    min-height: var(--web-control-height);
-    overflow: hidden;
-  }
 
-  .df-cmd-from > span {
-    display: flex;
-    min-width: 0;
-    font-size: 0;
-  }
 
-  /* The ellipsis belongs to the visible 13 px time (Codex r3 on #629). */
-  .df-cmd-from > span > .tabular {
-    min-width: 0;
-    overflow: hidden;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+
+
+
 
   .df-cmd-wrap:has(.inline-tag-description-input:focus) .df-cmd-idle {
     display: none;
@@ -10010,21 +9896,8 @@ dialog.ui-dialog.df-palette {
  * weekday / date / total day headings, a coral now line, hatched Review suggestions in a
  * right-hand lane and neutral view switches. Geometry, drag-to-create and resize are unchanged.
  */
-.swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
-  grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size) auto;
-}
 
-@media (max-width: 760px) {
-  .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
-    width: 100%;
-    grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size) auto;
-  }
 
-  /* With Today beside it the period label may shrink (it ellipsises) instead of overflowing Next. */
-  .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) .timeline-date-picker {
-    min-width: 0;
-  }
-}
 
 .timeline-today-button {
   min-height: var(--web-icon-button-size, 38px);
@@ -10046,36 +9919,15 @@ dialog.ui-dialog.df-palette {
   opacity: 0.6;
 }
 
-.calendar-day-heading .calendar-day-date {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
 
-.calendar-day-heading .calendar-day-date small {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: var(--fw-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
 
-.calendar-day-heading .calendar-day-date b {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
 
-.calendar-day-heading.is-today .calendar-day-date b {
-  color: var(--accent);
-}
 
-.calendar-day-heading .calendar-day-total {
-  margin-left: auto;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
+
+
+
+
+
 
 .calendar-time-block.is-running::after {
   position: absolute;
@@ -12397,9 +12249,7 @@ dialog.ui-dialog.df-palette {
   padding: 8px 14px;
 }
 
-.df-cal-toolbar .timeline-range-navigation {
-  flex: none;
-}
+
 
 .df-cal-toolbar .timeline-range-controls {
   flex: none;
@@ -12518,7 +12368,6 @@ dialog.ui-dialog.df-palette {
     padding: 8px 12px;
   }
 
-  .df-cal-toolbar .timeline-range-navigation,
   .df-cal-toolbar .timeline-range-controls,
   .df-cal-week {
     flex: 1 1 100%;
@@ -14189,13 +14038,9 @@ dialog.ui-dialog.df-palette {
     white-space: nowrap;
   }
 
-  .calendar-grid-corner .calendar-corner-zoom {
-    display: none;
-  }
 
-  .calendar-grid-corner {
-    padding: 4px;
-  }
+
+
 
   .calendar-time-axis .tabular {
     padding-inline: 6px;
@@ -14819,22 +14664,6 @@ button.timeline-location-hit:focus-visible {
   color: var(--text-primary);
 }
 
-/* The radio itself is visually hidden: the whole row shows the choice, and keeps the radio's keyboard. */
-.location-correction-radio {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
-
-.location-correction-option:has(.location-correction-radio:focus-visible) {
-  /* The shared neutral focus ring, inside the row. */
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
 .location-correction-hint {
   margin: 0;
   line-height: 1.45;
@@ -15171,18 +15000,6 @@ button.timeline-location-hit:focus-visible {
   outline-offset: 2px;
 }
 
-/* The hint, and "Don't log" as quiet text once an activity is picked; one line either way, so nothing moves. */
-.location-correction-log-foot {
-  display: flex;
-  min-height: 0;
-  align-items: center;
-  gap: 12px;
-}
-
-.location-correction-log-foot:not(:has(*)) {
-  display: none;
-}
-
 /* MapLibre's zoom buttons follow the theme in the dialog (UI review W12). */
 :root[data-theme="dark"] .location-correction-map .maplibregl-ctrl-group {
   background: var(--surface-raised, var(--surface));
@@ -15202,9 +15019,7 @@ button.timeline-location-hit:focus-visible {
   }
 }
 
-.location-correction-log-foot .location-correction-hint {
-  flex: 1;
-}
+
 
 .location-correction-save {
   display: flex;
@@ -15443,7 +15258,10 @@ button.timeline-location-hit:focus-visible {
   .location-correction-option + .location-correction-option::before,
   .location-correction-leg + .location-correction-leg::before,
   .settings-group .df-set-trips::before,
-  .location-correction-nearby li + li .location-correction-option::before {
+  .location-correction-nearby li + li .location-correction-option::before,
+  :root .df-cal-dayrow::after,
+  :root .location-correction.is-next li + li .location-correction-option::before,
+  :root .location-correction.is-next .location-correction-nearby + .location-correction-options li:first-child .location-correction-option::before {
     height: 0;
     border-top: 1px solid CanvasText;
     background: none;
@@ -15478,6 +15296,681 @@ button.timeline-location-hit:focus-visible {
   }
 }
 
+
+/* ====================================================================================================================
+   UI review round 2 (owner approval 30 Oct 2026; shipped without the staging preview switch): the timer bar, the
+   Calendar toolbar and day row, the shell's chip gap, the now line, grid block titles, fill-led search fields and the
+   place dialog. The `:root` prefix keeps these rules ahead of the earlier ones they refine.
+   ==================================================================================================================== */
+
+/* ---------- 1 and 2: the timer bar (round 2) ---------- */
+:root .df-cmd {
+  --df-cmd-slot: 88px;
+}
+
+:root .df-cmd-wrap[data-clock="12h"] .df-cmd {
+  --df-cmd-slot: 104px;
+}
+
+/* The timer is Bricolage again, the face of the dates and totals, at its SemiBold cut with tabular figures, idle and
+   running alike, so the digits never jitter and Start never swaps the face. */
+:root .df-cmd-clock,
+:root .df-cmd-clock.is-idle {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+/* One line in every state: a fixed slot ("since 07:36" running, the "From 07:51" text button idle), then the digits,
+   on one baseline. The slot keeps its width when empty, so the clock and Play/Stop never move. */
+:root button.df-cmd-clock,
+:root .df-cmd-idle {
+  display: grid;
+  grid-template-columns: var(--df-cmd-slot) auto;
+  grid-auto-flow: column;
+  align-items: baseline;
+  justify-items: start;
+  column-gap: 8px;
+}
+
+:root .df-cmd-slot {
+  display: block;
+  width: var(--df-cmd-slot);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root .df-cmd-from-text {
+  position: relative;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+:root .df-cmd-from-text::after {
+  position: absolute;
+  inset: -14px -6px;
+  content: "";
+}
+
+:root .df-cmd-from-text:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:root .df-cmd-from-text:disabled {
+  opacity: 0.6;
+}
+
+/* Activity, then Tags, then the description (owner feedback on round 2): the Tags button leads the field. */
+:root .df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
+  padding: 0 6px;
+}
+
+/* The bar's floating lists are compact and sit under their own trigger, never across the whole bar: Tags under the
+   Tags button, Suggestions and the typed # and @ lists under the description's start. */
+:root .df-cmd-field {
+  --df-cmd-list-width: min(360px, calc(100vw - 24px));
+}
+
+:root .df-cmd-field .inline-tag-picker,
+:root .df-cmd-field .inline-tag-suggestions,
+:root .df-cmd-field .inline-activity-suggestions,
+:root .df-cmd-field .swiss-task-suggestions {
+  right: auto;
+  width: var(--df-cmd-list-width);
+  max-width: var(--df-cmd-list-width);
+}
+
+:root .df-cmd-field .inline-tag-suggestions,
+:root .df-cmd-field .inline-activity-suggestions,
+:root .df-cmd-field .swiss-task-suggestions {
+  left: var(--web-control-height);
+}
+
+/* Phones: the field is too narrow to anchor 340 px inside the viewport, so the lists hang from the bar itself, as
+   wide as the bar (never wider than the screen less 24 px). */
+@media (max-width: 640px) {
+  :root .df-cmd {
+    position: relative;
+  }
+
+  :root .df-cmd-field,
+  :root .df-cmd-field .inline-tag-input-anchor {
+    position: static;
+  }
+
+  :root .df-cmd-field .inline-tag-picker,
+  :root .df-cmd-field .inline-tag-suggestions,
+  :root .df-cmd-field .inline-activity-suggestions,
+  :root .df-cmd-field .swiss-task-suggestions {
+    left: 0;
+    right: 0;
+    width: auto;
+  }
+}
+
+/* Play and Stop are the same round button, the bar's control size, so neither the clock nor the button moves on Start
+   or Stop; Start's words ("Start", "Space") are its tip and accessible name. */
+:root .df-cmd-go {
+  width: var(--web-control-height);
+  justify-content: center;
+  padding: 0;
+}
+
+:root .df-cmd-go .df-cmd-go-label,
+:root .df-cmd-go kbd {
+  display: none;
+}
+
+/* Phones and narrow windows (860 px and under): the bar's one row keeps the description's room, so the running clock
+   shows alone (no "since" slot) and the idle bar keeps only "From 07:51" (the idle clock already hides there). */
+@media (max-width: 860px) {
+  :root button.df-cmd-clock {
+    display: flex;
+    align-items: center;
+  }
+
+  :root button.df-cmd-clock .df-cmd-slot {
+    display: none;
+  }
+
+  :root .df-cmd-idle {
+    display: flex;
+    align-items: center;
+  }
+
+  :root .df-cmd-idle .df-cmd-slot {
+    width: auto;
+    min-width: 0;
+  }
+}
+
+/* ---------- 3: the Calendar toolbar and the strip row (round 2) ---------- */
+:root {
+  --df-cal-toolbar-height: 56px;
+  --df-cal-row-height: 52px;
+}
+
+:root .swiss-timeline-surface .df-cal-toolbar.is-next {
+  display: grid;
+  box-sizing: border-box;
+  flex: none;
+  height: var(--df-cal-toolbar-height);
+  min-height: var(--df-cal-toolbar-height);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+:root .df-cal-toolbar.is-next .df-cal-nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
+
+/* One box: ‹ the date › (Toggl style). */
+:root .df-cal-datebox {
+  display: inline-flex;
+  height: var(--web-control-height);
+  min-width: 0;
+  align-items: center;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+}
+
+:root .df-cal-datebox .ui-icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: calc(var(--web-control-height) - 2px);
+  min-height: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+:root .df-cal-datebox .timeline-date-picker {
+  min-width: 0;
+}
+
+/* A fixed width for every view and date: the widest possible labels sit hidden in the label's one grid cell, so the
+   box and its arrows never move or resize; the label is centred in tabular figures. */
+:root .df-cal-datebox-label {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+}
+
+:root .df-cal-datebox-label > * {
+  grid-area: 1 / 1;
+}
+
+:root .df-cal-datebox-sizer {
+  height: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+:root .df-cal-datebox-label .timeline-date-picker {
+  width: 100%;
+}
+
+:root .df-cal-datebox-label .timeline-period-trigger {
+  width: 100%;
+  justify-content: center;
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+}
+
+:root .df-cal-datebox .timeline-period-trigger {
+  min-height: calc(var(--web-control-height) - 2px);
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: transparent;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+:root .df-cal-datebox .timeline-period-trigger svg {
+  display: none;
+}
+
+:root .df-cal-toolbar.is-next .timeline-today-button:disabled {
+  opacity: 0.45;
+}
+
+/* Today, beside the box and inside its date picker, is one control: the box's height, the same quiet pill. */
+:root .df-cal-toolbar.is-next .timeline-today-button,
+:root .df-cal-date-panel > .ui-button.is-compact {
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
+  border: 0;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+
+:root .df-cal-toolbar.is-next .df-cal-weektotal {
+  justify-self: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+
+:root .df-cal-toolbar.is-next .ui-segmented-control {
+  justify-self: end;
+}
+
+/* The row beneath the toolbar: the 7-day picker in Day and List, the day columns in Week, at one height. */
+:root .df-cal-striprow {
+  display: flex;
+  box-sizing: border-box;
+  flex: none;
+  height: var(--df-cal-row-height);
+  min-height: var(--df-cal-row-height);
+  align-items: center;
+  padding: 0 12px;
+}
+
+:root .df-cal-striprow .df-cal-week {
+  width: 100%;
+  justify-content: stretch;
+}
+
+:root .df-cal-striprow .df-cal-days {
+  width: 100%;
+}
+
+:root .df-cal-striprow .df-cal-day {
+  min-height: 0;
+  height: calc(var(--df-cal-row-height) - 6px);
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: center;
+  column-gap: 6px;
+}
+
+:root .df-cal-striprow .df-cal-day small {
+  align-self: center;
+}
+
+:root .df-cal-striprow .df-cal-day-total {
+  display: none;
+}
+
+:root .df-cal-striprow .df-cal-day-bars {
+  grid-column: 1 / -1;
+}
+
+
+
+/* Phones: the same toolbar on two fixed lines (date and Today, then the total and the view control). */
+@media (max-width: 640px) {
+  :root {
+    --df-cal-toolbar-height: 96px;
+  }
+
+  :root .swiss-timeline-surface .df-cal-toolbar.is-next {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 1fr 1fr;
+    row-gap: 4px;
+  }
+
+  :root .df-cal-toolbar.is-next .df-cal-nav {
+    grid-column: 1 / -1;
+  }
+
+  :root .df-cal-toolbar.is-next .df-cal-weektotal {
+    justify-self: start;
+  }
+}
+
+/* ---------- 4: one gap under the quick-start chips on every page (round 2) ---------- */
+/* The other pages put 28 px between the chips and their first surface; Calendar's panel sat 16 px under them. */
+:root .swiss-timeline-surface > .swiss-timeline-main {
+  margin-top: 12px;
+}
+
+/* ---------- 5: the now line (round 2, owner 30 Oct 2026) ---------- */
+/* The live coral token, one thickness on every day: full across today, faint across the other days. It starts at the
+   time pill and never runs on into the gutter. */
+:root .calendar-now-line.is-faint {
+  z-index: 2;
+  opacity: 0.45;
+}
+
+/* ---------- 6: grid blocks (round 2) ---------- */
+/* One title size per zoom level for every block, never shrunk to fit; the title truncates with an ellipsis and the
+   time line shows only where there's room (has-detail-room, unchanged). */
+:root .timeline-calendar-workspace {
+  --df-cal-title-size: 12px;
+  --df-cal-title-line: 15px;
+}
+
+:root .timeline-calendar-workspace[data-zoom="half"] {
+  --df-cal-title-size: 13px;
+  --df-cal-title-line: 16px;
+}
+
+:root .timeline-calendar-workspace[data-zoom="quarter"] {
+  --df-cal-title-size: 14px;
+  --df-cal-title-line: 17px;
+}
+
+:root .timeline-calendar-workspace .calendar-entry-title,
+:root .timeline-calendar-workspace .calendar-time-block.is-dense-compact .calendar-entry-title,
+:root .timeline-calendar-workspace .calendar-review-block.is-dense-compact .calendar-entry-title {
+  font-size: var(--df-cal-title-size);
+  line-height: var(--df-cal-title-line);
+}
+
+/* ---------- Fields (owner feedback on round 2): fill-led, no outline ---------- */
+/* Search and description fields are an inset fill with no border at rest or after a click or tap; the neutral grey
+   ring shows only for keyboard (and script or assistive-technology) focus, which `useKeyboardFocusRing` marks as
+   data-focus-ring="keyboard" (browsers match :focus-visible on text inputs for pointer focus too). An invalid field
+   keeps its danger underline. */
+:root :is(.df-flist-search, .place-search-control, .category-picker-search, .swiss-timer-description-control .inline-tag-input-anchor),
+:root :is(.df-flist-search, .place-search-control, .category-picker-search, .swiss-timer-description-control .inline-tag-input-anchor):is(:focus, :focus-within),
+:root .swiss-timer-description-control .inline-tag-picker-search:focus-within {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+:root :is(.df-flist-search, .place-search-control, .category-picker-search)[data-focus-ring="keyboard"]:is(:focus, :focus-within),
+:root .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root :is(.df-flist-search, .place-search-control, .swiss-timer-description-control .inline-tag-input-anchor):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root :is(.df-flist-search, .place-search-control, .swiss-timer-description-control .inline-tag-input-anchor)[data-focus-ring="keyboard"]:focus-within:has(input[aria-invalid="true"]),
+:root .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* ---------- The day row (round 2, owner 30 Oct 2026): one row for Day and Week ---------- */
+/* It is the grid's sticky first row, spanning every column with seven day columns after the zoom's cell, so each day
+   sits over its Week column and at the same place in Day. Each day: its letter in light grey, its date in darker
+   semibold, its activities' dots under them; today is a filled coral circle (coral only ever means today here, with
+   the now line), the day chosen in Day a soft grey pill. No dividers between days; each day's total is its tip. */
+:root .df-cal-dayrow {
+  position: sticky;
+  top: 0;
+  z-index: 41;
+  display: grid;
+  box-sizing: border-box;
+  height: var(--df-cal-row-height);
+  grid-column: 1 / -1;
+  align-items: center;
+  background: var(--surface-inset);
+}
+
+:root .df-cal-dayrow::after {
+  --divider-inset: 12px;
+  position: absolute;
+  bottom: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
+}
+
+:root .df-cal-dayrow .df-cal-week,
+:root .df-cal-dayrow .df-cal-days {
+  display: contents;
+}
+
+:root .df-cal-dayrow .df-cal-day {
+  height: 44px;
+  min-height: 44px;
+  justify-self: center;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: center;
+  column-gap: 6px;
+  row-gap: 3px;
+  border-radius: 12px;
+  padding: 2px 10px;
+}
+
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day small {
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+}
+
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day b,
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day[aria-pressed="true"] b {
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: var(--fw-strong);
+}
+
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day.is-today b,
+:root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day.is-today[aria-pressed="true"] b {
+  background: var(--accent);
+  /* Dark navy on the coral (5.5:1 Daylight, 6:1 Midnight); white was under 3.3:1. */
+  color: var(--on-accent);
+}
+
+:root .df-cal-dayrow .df-cal-day.is-selected:not(.is-today),
+:root .df-cal-striprow .df-cal-day[aria-pressed="true"]:not(.is-today) {
+  background: var(--surface-muted);
+}
+
+:root .df-cal-dayrow .df-cal-day-bars {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
+/* Phones: the gutter is too narrow for the zoom (it floats over the grid instead) and a Day column too narrow for the
+   letter beside the date, so the letter sits over the date in both views. */
+@media (max-width: 560px) {
+  /* The cell stays (the days keep their columns); only its buttons go. */
+  :root .df-cal-dayrow-zoom {
+    overflow: hidden;
+    visibility: hidden;
+  }
+
+  :root .df-cal-dayrow .df-cal-day {
+    grid-template-columns: auto;
+    grid-template-rows: auto auto auto;
+    row-gap: 1px;
+    padding: 2px 4px;
+  }
+
+  :root .df-cal-dayrow .df-cal-day b {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
+
+  :root .df-cal-dayrow .df-cal-day {
+    height: 48px;
+  }
+}
+
+/* ---------- The place dialog's fields: the shared time field and fill-led fields ---------- */
+/* The one time field (`TimeField`): fill-led, no border, the control height. The dialog's fields have no border at
+   rest or after a click; the neutral ring shows only for keyboard focus (`data-kb-focus`, set page-wide by
+   useKeyboardFocusMarks); an invalid field keeps its danger underline. */
+:root .df-time-field {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--web-control-height);
+  border: 0;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+}
+
+:root :is(.location-correction .ui-control, .location-correction-save input, .df-time-field),
+:root :is(.location-correction .ui-control, .location-correction-save input, .df-time-field):focus {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+:root :is(.location-correction .ui-control, .location-correction-save input, .df-time-field)[data-kb-focus] {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root :is(.location-correction .ui-control, .df-time-field)[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root :is(.location-correction .ui-control, .df-time-field)[aria-invalid="true"][data-kb-focus] {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* ---------- The place dialog (owner, 30 Oct 2026): the dialog is the question ---------- */
+:root dialog.ui-dialog.ui-dialog--compact:has(.location-correction.is-next) {
+  width: min(400px, calc(100vw - 24px));
+}
+
+:root .location-correction.is-next {
+  gap: 10px;
+}
+
+:root .location-correction-ask {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--type-body);
+  font-weight: var(--fw-medium);
+}
+
+:root .location-correction.is-next .location-correction-search {
+  margin: 0;
+}
+
+:root .location-correction.is-next :is(.location-correction-options, .location-correction-nearby) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root .location-correction.is-next .location-correction-option {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 2px;
+}
+
+:root .location-correction.is-next li + li .location-correction-option::before,
+:root .location-correction.is-next .location-correction-nearby + .location-correction-options li:first-child .location-correction-option::before {
+  --divider-inset: 2px;
+  --divider-inset-start: 36px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  content: "";
+  pointer-events: none;
+}
+
+:root .location-correction.is-next .location-correction-option:hover:not(:disabled) b {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:root .location-correction.is-next .location-correction-option:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+:root .location-correction.is-next .location-correction-option.is-save b {
+  font-weight: var(--fw-medium);
+}
+
+:root .location-correction-nearby-note {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+:root .location-correction-disclosure {
+  display: flex;
+  height: var(--web-control-height);
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 2px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+:root .location-correction-disclosure:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+:root .location-correction-disclosure:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+:root .location-correction-more-options {
+  display: grid;
+  gap: 12px;
+}
+
+:root .location-correction.is-next .location-correction-save input {
+  min-height: var(--web-control-height);
+}
+
+/* Touch screens: segments and text fields at 44 px, last in the cascade (WUI-019, WUI-046). */
 @media (any-pointer: coarse) {
   .df-seg a,
   .ui-segmented-control button,
