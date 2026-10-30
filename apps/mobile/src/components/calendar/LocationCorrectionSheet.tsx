@@ -330,8 +330,9 @@ export function LocationCorrectionSheet({
     }
     if (problem) return false;
     // A name typed under More options is saved with the rest, as the web's Save (Codex r1 on #636).
-    if (!pickedNow.current && onSavePlace && placeName.trim()) {
-      savePlace();
+    if (!pickedNow.current && onSavePlace && (attempted || placeName.trim())) {
+      if (attempted) savePlace(attempted.name, attempted.applePlaceId);
+      else savePlace();
       return false;
     }
     const corrections = target.kind === "place"
@@ -362,6 +363,7 @@ export function LocationCorrectionSheet({
       setSaveError("Those times don't work yet. Fix them, then save.");
       return;
     }
+    setAttempted(null);
     setChoice(next);
     pickedNow.current = next;
     commitRef.current?.();
@@ -372,6 +374,9 @@ export function LocationCorrectionSheet({
   const [confirming, setConfirming] = useState<Join | null>(null);
   // The name typed under More options.
   const [placeName, setPlaceName] = useState("");
+  // A place tapped (Apple's, or "Save “X” as a place") until it saves: its name and Place ID stay in the draft, so
+  // the footer's Save tries it again after a failure (Codex r2 on #641).
+  const [attempted, setAttempted] = useState<{ name: string; applePlaceId: string | null } | null>(null);
   // The near guess from the sheet's own nearby list (PRD D23), and whether Edit set the guess aside.
   // Kept with the visit it was ranked for (`nearbyProposalKey`; Codex r1 on #620).
   const [nearbyGuess, setNearbyGuess] = useState<{ venue: ReviewAnswerVenue | null; proposal: string } | null>(null);
@@ -398,6 +403,7 @@ export function LocationCorrectionSheet({
     const categoryId = logCategoryId;
     const logAfter = logAs?.onLogAfter && categoryId ? logAs.onLogAfter : null;
     const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
+    if (chosenName !== undefined) setAttempted({ name, applePlaceId });
     setSaving(true);
     setSaveError(null);
     onSavePlace(name, rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined,
@@ -408,7 +414,9 @@ export function LocationCorrectionSheet({
       setCloseKept(true);
     }, () => {
       setSaving(false);
-      setSaveError("That place couldn't be saved. Saving a place needs a connection; try again.");
+      setSaveError(chosenName !== undefined
+        ? `“${name}” wasn't saved. Saving a place needs a connection; Save tries again.`
+        : "That place couldn't be saved. Saving a place needs a connection; try again.");
     });
   }
   /**
@@ -422,6 +430,8 @@ export function LocationCorrectionSheet({
    */
   function answerFromSheet(yes: boolean, venue: ReviewAnswerVenue | null = null) {
     if (!question || frozen() || stale) return;
+    // An answer leaves a tapped place that didn't save behind.
+    setAttempted(null);
     // Yes to a guessed venue keeps the venue on every path (Codex r1 on #620): with Logs as picked, the venue is
     // recorded once as that activity (one `record_poi_once` answer, after the sheet's corrections), never `log_place`.
     if (yes && logCategoryId && logAs && !venue) {
@@ -531,7 +541,7 @@ export function LocationCorrectionSheet({
   const hasMore = !leg && (target.kind === "place"
     ? !stale && (Boolean(logAs) || (correctable(item) && Boolean(item.stoppedAt)) || placeCanSave || (placeIsNamed && correctable(item)) || Boolean(target.notHere))
     : correctable(item));
-  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || Boolean(placeName.trim()) || (!problem && (target.kind === "place"
+  const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || Boolean(placeName.trim()) || Boolean(attempted) || (!problem && (target.kind === "place"
     ? placeCorrections(target.place, { choice, times }, places).length > 0
     : tripCorrections(target.trip, { times }).length > 0));
   // The footer: a question with a Yes shows its Yes until something changes (the web's rule). A guess has its Yes in its card.
@@ -701,7 +711,7 @@ export function LocationCorrectionSheet({
               <View style={styles.corrections} testID="location-correction-corrections">
                 {placeCanSave ? (
                   <View style={styles.saveRow} testID="location-correction-save-form">
-                    <TextInput accessibilityLabel="Name for this place" onChangeText={(text) => { if (!frozen()) setPlaceName(text); }} onSubmitEditing={() => savePlace()}
+                    <TextInput accessibilityLabel="Name for this place" onChangeText={(text) => { if (frozen()) return; setAttempted(null); setPlaceName(text); }} onSubmitEditing={() => savePlace()}
                       placeholder="Save this place as…" placeholderTextColor={theme.textSecondary} returnKeyType="done"
                       style={[styles.nameInput, { backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
                       testID="location-correction-place-name" value={placeName} />

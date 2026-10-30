@@ -653,6 +653,42 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tripTree.root.findAll((node) => node.props.testID === "location-correction-times").length).toBeGreaterThan(0);
   });
 
+  it("keeps a tapped place that failed to save: the sheet stays open and the footer's Save tries it again (Codex r2 on #641)", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    for (const [trigger, placeId] of [["apple", "IPRET"], ["typed", null]] as const) {
+      const onSavePlace = vi.fn<(...args: unknown[]) => Promise<void>>().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+      const onDismissed = vi.fn();
+      const answer = vi.fn();
+      // A question with a Yes: the footer must become Save, never Yes, while the place waits.
+      const tree = sheetWith({ onDismissed, onSavePlace: onSavePlace as never, question: { text: "Getting there?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer: answer } });
+      const nearby = tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
+      act(() => { if (trigger === "apple") nearby.props.onPick("Pret", "IPRET"); else nearby.props.onSaveTyped("Pret"); });
+      await settle();
+      expect(onDismissed).not.toHaveBeenCalled();
+      expect(tree.root.findAll((node) => node.props.testID === "location-correction-error").length).toBeGreaterThan(0);
+      expect(action(tree).props.accessibilityLabel).toBe("Save");
+      tap(tree, "location-correction-sheet-action");
+      await settle();
+      expect(onSavePlace).toHaveBeenCalledTimes(2);
+      expect(onSavePlace.mock.calls[1]).toEqual(["Pret", [], undefined, placeId]);
+      expect(answer).not.toHaveBeenCalled();
+      expect(onDismissed).toHaveBeenCalledWith(1);
+    }
+  });
+
+  it("drops a failed tap when another place is chosen instead", async () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const onSavePlace = vi.fn(async () => { throw new Error("offline"); });
+    const onQueue = vi.fn(async () => undefined);
+    const tree = sheetWith({ onQueue, onSavePlace });
+    act(() => { tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onPick("Pret", "IPRET"); });
+    await settle();
+    tap(tree, `location-correction-place-${SAVED}`);
+    await settle();
+    expect(onSavePlace).toHaveBeenCalledTimes(1);
+    expect(onQueue).toHaveBeenCalledOnce();
+  });
+
   it("taps an Apple place or a typed name straight into Save this place, and Save keeps a name typed under More options", async () => {
     const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     const onSavePlace = vi.fn(async () => undefined);
