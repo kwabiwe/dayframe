@@ -422,14 +422,6 @@ export function TimeReviewViews({
   // Calendar › List shows continuous days (owner, 24 Oct 2026): the selected week from the shell's data,
   // and whole weeks before and after it, loaded as the List scrolls. The period controls don't apply.
   const listTodayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
-  const listWeeks = useCalendarListWeeks({
-    anchorWeekStart: ranges.week.start,
-    currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
-    enabled: isList && hydrated,
-    owner: listOwner,
-    refreshToken: listRefreshToken
-  });
-  const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   // The day at the top of Calendar › List, as the List reports it for the current date request (until it has, the
   // URL's date stands in, so an earlier visit's day never shows).
   const [listTop, setListTop] = useState<{ request: string; dayStartMs: number } | null>(null);
@@ -446,11 +438,22 @@ export function TimeReviewViews({
   const listTopDayMs = isList && listTop?.request === listTopRequest ? listTop.dayStartMs : null;
   // Leaving List forgets it: a List opened again positions itself afresh and reports again (adjusted while rendering).
   if (!isList && listTop !== null) setListTop(null);
+  // An edit re-reads only the weeks and days near the List's top day; the rest are read again as the List nears them.
+  const listFocusDate = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  const listWeeks = useCalendarListWeeks({
+    anchorWeekStart: ranges.week.start,
+    currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
+    enabled: isList && hydrated,
+    focusDate: listFocusDate,
+    owner: listOwner,
+    refreshToken: listRefreshToken
+  });
+  const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
-    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);
+    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate);
   // Location v4 steps 16–17: the Grid's days' places and trips, for trip leg strips and the Places lane.
   const gridDayKeys = isList ? NO_DAY_KEYS
     : (state.scope === "day" ? [ranges.day.start] : ranges.weekDays).map((day) => toTimelineDateKey(day));

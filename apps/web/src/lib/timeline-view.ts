@@ -221,6 +221,46 @@ export function addCalendarDays(date: Date, days: number) {
   return copy;
 }
 
+/**
+ * Calendar › List refreshes (performance.md, request-storm fix 30 Oct 2026): an edit re-reads at once only the loaded
+ * days within this many days of the List's top day (and the weeks that overlap them). Every other loaded day is marked
+ * stale and read again only when the List scrolls it into this window, so an edit costs a fixed number of requests
+ * however much history the List has loaded.
+ */
+export const LIST_REFRESH_RADIUS_DAYS = 7;
+
+/** The date keys (inclusive) an edit re-reads at once around the List's top day, or null for every loaded day. */
+export function listRefreshWindow(focusKey: string | null | undefined) {
+  const focus = parseTimelineDateKey(focusKey);
+  if (!focus) return null;
+  return {
+    from: toTimelineDateKey(addCalendarDays(focus, -LIST_REFRESH_RADIUS_DAYS)),
+    to: toTimelineDateKey(addCalendarDays(focus, LIST_REFRESH_RADIUS_DAYS))
+  };
+}
+
+/**
+ * The span the List's top day has swept from one window to the next: a fast scroll (or days with no rows of their own)
+ * can move the top day by more than a window, and the days passed over count as seen.
+ */
+export function sweptListRefreshWindow(previous: { from: string; to: string } | null, next: { from: string; to: string } | null) {
+  if (!previous || !next) return next;
+  return { from: previous.from < next.from ? previous.from : next.from, to: previous.to > next.to ? previous.to : next.to };
+}
+
+/** Whether a day key falls in the refresh window (every day does without one). */
+export function inListRefreshWindow(dateKey: string, window: { from: string; to: string } | null) {
+  return !window || (dateKey >= window.from && dateKey <= window.to);
+}
+
+/** Whether a week (by its start key) overlaps the refresh window (every week does without one). */
+export function weekInListRefreshWindow(weekStartKey: string, window: { from: string; to: string } | null) {
+  if (!window) return true;
+  const start = parseTimelineDateKey(weekStartKey);
+  if (!start) return false;
+  return weekStartKey <= window.to && toTimelineDateKey(addCalendarDays(start, 6)) >= window.from;
+}
+
 function normalizeTimelineState(state: TimelineState): TimelineState {
   const date = parseTimelineDateKey(state.date);
   const view = isTimelineView(state.view) ? state.view : "calendar";

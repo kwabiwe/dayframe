@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { addCalendarDays, parseTimelineDateKey, toTimelineDateKey } from "@/lib/timeline-view";
+import { addCalendarDays, listRefreshWindow, parseTimelineDateKey, sweptListRefreshWindow, toTimelineDateKey, weekInListRefreshWindow } from "@/lib/timeline-view";
 
 /** Empty weeks in a row that end the List's way back. */
 export const LIST_EMPTY_WEEKS_BEFORE_END = 8;
@@ -54,11 +54,16 @@ function trailingEmptyWeeks(earlier: readonly WeekPage[]) {
  * new one (a generation), which drops the stored weeks and every read still in flight, so even an
  * A → B → A round trip never brings back A's earlier weeks or answers. Each week's reads are numbered:
  * only its newest read commits, and a read that started before an edit (`refreshToken`) is read again.
+ *
+ * An edit re-reads at once only the loaded weeks that overlap LIST_REFRESH_RADIUS_DAYS around the List's top day
+ * (`focusDate`, the anchor until the List reports one); every other loaded week is marked stale and read again when the
+ * List scrolls near it (request-storm fix, 30 Oct 2026: an edit used to re-read every loaded week).
  */
 export function useCalendarListWeeks({
   anchorWeekStart,
   currentWeekStart,
   enabled,
+  focusDate = null,
   owner,
   refreshToken
 }: {
@@ -66,6 +71,8 @@ export function useCalendarListWeeks({
   /** The viewer's current week, or null before hydration (no later weeks then). */
   currentWeekStart: Date | null;
   enabled: boolean;
+  /** The day at the top of the List (a date key), or null for the anchor week. */
+  focusDate?: string | null;
   owner: string;
   refreshToken: number;
 }): CalendarListWeeks {
@@ -183,16 +190,51 @@ export function useCalendarListWeeks({
   useLayoutEffect(() => {
     storedRef.current = stored;
   }, [stored]);
+  // Only the weeks near the List's top day are read at once; the others are stale until the List scrolls near them.
+  const refreshWindow = listRefreshWindow(focusDate ?? anchorKey);
+  const windowKey = refreshWindow ? `${refreshWindow.from}..${refreshWindow.to}` : "";
+  const staleRef = useRef<{ generation: number; weeks: Set<string> }>({ generation, weeks: new Set() });
+  const staleWeeks = (forGeneration: number) => {
+    if (staleRef.current.generation !== forGeneration) staleRef.current = { generation: forGeneration, weeks: new Set() };
+    return staleRef.current.weeks;
+  };
   const lastRefreshRef = useRef(refreshToken);
   useEffect(() => {
     if (lastRefreshRef.current === refreshToken) return;
     lastRefreshRef.current = refreshToken;
     const current = storedRef.current;
     if (!enabled || !current || current.generation !== generation) return;
+    const stale = staleWeeks(generation);
+    // The empty weeks that end the way back are read too (at most LIST_EMPTY_WEEKS_BEFORE_END), so a block moved into
+    // one opens the way back again even when the List can't scroll down to it.
+    const endRun = new Set(current.earlier.slice(current.earlier.length - current.emptyEarlierRun).map((week) => week.startKey));
     for (const week of [...current.earlier, ...current.later]) {
+      if (!endRun.has(week.startKey) && !weekInListRefreshWindow(week.startKey, refreshWindow)) {
+        stale.add(week.startKey);
+        continue;
+      }
+      stale.delete(week.startKey);
       void readWeek(week.startKey, generation, replaceWeek(generation, week.startKey)).catch(() => undefined);
     }
+    // The window is read from this render; the effect runs only for a new edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, readWeek, refreshToken, replaceWeek]);
+  // A stale week the List scrolls near (or past) is read again, once.
+  const sweptFromRef = useRef(refreshWindow);
+  useEffect(() => {
+    const swept = sweptListRefreshWindow(sweptFromRef.current, refreshWindow);
+    sweptFromRef.current = refreshWindow;
+    if (!enabled) return;
+    const stale = staleWeeks(generation);
+    if (!stale.size) return;
+    for (const startKey of [...stale]) {
+      if (!weekInListRefreshWindow(startKey, swept)) continue;
+      stale.delete(startKey);
+      void readWeek(startKey, generation, replaceWeek(generation, startKey)).catch(() => undefined);
+    }
+    // `windowKey` stands for the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, generation, readWeek, replaceWeek, windowKey]);
 
   const entries = enabled && (state.earlier.length || state.later.length)
     ? [...state.earlier, ...state.later].flatMap((week) => week.entries)
