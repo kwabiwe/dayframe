@@ -338,6 +338,43 @@ describe("web timer-state polling cadence", () => {
     expect(shownId()).toBe("phone-1");
   });
 
+  it("past the 30 s cap a failed poll reload never discards the action's held reload, and later polls retry (Codex r3 on #637)", async () => {
+    await mount();
+    server.holdNextBootstrap = true; // Start's own reload, held 41 s
+    await act(async () => {
+      void probe.runtime!.startTimer({ description: "Writing" });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(server.releaseBootstrap).not.toBeNull();
+    server.failBootstraps = true; // every competing reload answers 500
+    const reloadsBefore = bootstraps().length;
+    await advance(41_000);
+    expect(bootstraps().length).toBeGreaterThan(reloadsBefore); // polls past the cap did try to reload
+    server.failBootstraps = false;
+    await act(async () => { server.releaseBootstrap?.(); await vi.advanceTimersByTimeAsync(10); });
+    expect(shownId()).toBe("started-1"); // the action's successful reload still committed
+    await advance(60_000);
+    expect(shownId()).toBe("started-1");
+  });
+
+  it("a failed poll reload keeps the old fingerprint, so the next poll retries until it loads", async () => {
+    await mount();
+    server.failBootstraps = true;
+    phoneStart();
+    await advance(10_000); // a poll sees the change; its reload fails
+    expect(shownId()).toBeNull();
+    const failed = bootstraps().length;
+    await advance(10_000); // the next poll retries the reload
+    expect(bootstraps().length).toBeGreaterThan(failed);
+    expect(shownId()).toBeNull();
+    server.failBootstraps = false;
+    await advance(10_000);
+    expect(shownId()).toBe("phone-1");
+    const loaded = bootstraps().length;
+    await advance(30_000); // reconciled: unchanged polls load nothing more
+    expect(bootstraps()).toHaveLength(loaded);
+  });
+
   it("an action's poll is deduped with one already in flight", async () => {
     await mount();
     server.holdTimerState = true;

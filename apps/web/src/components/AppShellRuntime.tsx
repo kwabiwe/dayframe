@@ -399,6 +399,37 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [commitData]);
 
+  /**
+   * The poll's reload, after a changed fingerprint. Unlike `refresh` it supersedes nothing until it has
+   * succeeded: a failed one never discards a reload still in flight (an action's), and an answer
+   * overtaken by a newer load, a period change, a workspace change or a mutation is dropped. True only
+   * when it committed, so the poll keeps its old fingerprint otherwise and the next poll retries
+   * (Codex r3 on #637).
+   */
+  const reconcileFromPoll = useCallback(async (): Promise<boolean> => {
+    if (mutationGateRef.current.isActive()) return false;
+    const baseline = refreshRequestRef.current;
+    const date = selectedDateRef.current;
+    const generation = workspaceGenerationRef.current;
+    try {
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
+      if (!response.ok) return false;
+      const payload = (await response.json()) as BootstrapData;
+      if (
+        baseline !== refreshRequestRef.current ||
+        date !== selectedDateRef.current ||
+        generation !== workspaceGenerationRef.current ||
+        mutationGateRef.current.isActive()
+      ) return false;
+      // Succeeded: now it supersedes the loads still in flight (they started before it).
+      refreshRequestRef.current += 1;
+      commitData(payload, "canonical");
+      return true;
+    } catch {
+      return false;
+    }
+  }, [commitData]);
+
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
     const cached = cachedDateData(date);
     if (cached) {
@@ -536,9 +567,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         // An action of the user's is still settling: its own reload has the newest state, and the
         // poll that follows it confirms. The answer is set aside so it never supersedes that reload.
         if (hasCurrentTimerAction()) return;
-        const changed = timerStateChanged(timerStateRef.current, next);
-        timerStateRef.current = next;
-        if (changed) await refresh();
+        // A changed fingerprint is kept only once its reload has committed (which records the
+        // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
+        if (!timerStateChanged(timerStateRef.current, next)) timerStateRef.current = next;
+        else await reconcileFromPoll();
       } catch {
         if (!stale()) consecutiveFailures += 1;
       } finally {
@@ -574,7 +606,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [hasCurrentTimerAction, refresh]);
+  }, [hasCurrentTimerAction, reconcileFromPoll]);
 
   // The user's own timer actions (start, switch, stop, delete, split, join, an edit of the running
   // block) in progress, each until its own reload has settled. While one is current, a poll's answer
