@@ -1,0 +1,513 @@
+/*
+ * UI review round 2 (owner approval 30 Oct 2026), staging and local only: every rule here is scoped to
+ * :root[data-ui="next"], which only the staging Current | Proposed switch sets. Production renders as before.
+ * On approval the Proposed rules move into globals.css and this file goes.
+ */
+
+/* ---------- The preview switch itself (always visible where it renders: staging and local) ---------- */
+.ui-preview-toggle {
+  position: fixed;
+  z-index: 2147483000;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  gap: 2px;
+  border-radius: 999px;
+  padding: 3px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow-soft), inset 0 0 0 1px var(--border);
+  font-size: 12px;
+}
+.ui-preview-toggle button {
+  min-width: 44px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ui-preview-toggle button[aria-pressed="true"] {
+  background: var(--text-primary);
+  color: var(--background);
+}
+@media (max-width: 860px) {
+  .ui-preview-toggle {
+    right: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+    transform: translateX(50%);
+  }
+}
+
+/* ---------- Second pass ---------- */
+:root[data-ui="next"] .df-cmd .inline-tag-input-anchor {
+  min-height: 36px;
+}
+:root[data-ui="next"] .df-cmd .inline-tag-description-input,
+:root[data-ui="next"] .df-cmd .inline-tag-picker-trigger {
+  min-height: 36px;
+  height: 36px;
+}
+:root[data-ui="next"] .df-cmd .inline-tag-description-input {
+  font-size: 14px;
+}
+:root[data-ui="next"] .df-erow-block {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  border-radius: calc(28px * 0.3);
+}
+:root[data-ui="next"] .df-erow-block svg[data-glyph] {
+  width: 16px;
+  height: 16px;
+}
+:root[data-ui="next"] .dayframe-brand-wordmark {
+  width: 124px;
+}
+:root[data-ui="next"] .df-wb-label b {
+  font-size: 12px;
+}
+
+/* Calendar › List: one quiet time range ("15:29–16:54", "17:44–now") and one duration; denser rows. */
+:root[data-ui="next"] .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  padding-block: 6px;
+  vertical-align: middle;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time.is-running,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time[data-clock="12h"],
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
+  grid-template-columns: max-content 12px max-content;
+  grid-auto-rows: 28px;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--text-secondary);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-separator {
+  display: inline-flex;
+  width: 12px;
+  height: 28px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-control,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-input {
+  height: 28px;
+  min-height: 28px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > :last-child {
+  color: var(--text-secondary);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-running {
+  height: 28px;
+  min-height: 28px;
+  font-size: 0;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-running::after {
+  content: "now";
+  font-size: 14px;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-list-time-content,
+:root[data-ui="next"] .timeline-list-table .timeline-list-duration-content {
+  min-height: 32px;
+}
+:root[data-ui="next"] .timeline-list-day-heading > td {
+  font-size: 13px;
+  font-weight: var(--fw-strong);
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > :last-child .timeline-inline-time-input,
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time > .timeline-inline-time-control:last-child .timeline-inline-time-input {
+  text-align: left;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-inline-time-separator {
+  justify-content: center;
+}
+:root[data-ui="next"] .timeline-list-table .timeline-task-cell {
+  min-height: 32px;
+  align-items: center;
+}
+/* Dialog: fewer words (helper sentences go; the choices speak for themselves) and dark map controls. */
+:root[data-ui="next"] .location-correction .location-correction-hint,
+:root[data-ui="next"] .location-correction .location-correction-option:has(input[value="unknown"]) small {
+  display: none;
+}
+:root[data-ui="next"][data-theme="dark"] .location-correction-map .maplibregl-ctrl-group,
+:root[data-ui="next"]:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group {
+  background: var(--surface-raised, var(--surface));
+}
+@media (prefers-color-scheme: light) {
+  :root[data-ui="next"]:not([data-theme="dark"]) .location-correction-map .maplibregl-ctrl-group {
+    background: #fff;
+  }
+}
+:root[data-ui="next"]:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: light) {
+  :root[data-ui="next"]:not([data-theme="dark"]) .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+    filter: none;
+  }
+}
+
+@media (max-width: 860px) {
+  :root[data-ui="next"] .df-erow-main {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  :root[data-ui="next"] .df-report-row .df-erow-main {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    min-height: 48px;
+  }
+  :root[data-ui="next"] .df-erow-block {
+    width: 28px;
+  }
+  :root[data-ui="next"] .df-today {
+    padding: 12px 16px 24px;
+  }
+}
+:root[data-ui="next"] .location-correction-log-foot {
+  min-height: 0;
+}
+:root[data-ui="next"] .location-correction-log-foot:not(:has(button)) {
+  display: none;
+}
+
+/* ---------- 1 and 2: the timer bar (round 2) ---------- */
+:root[data-ui="next"] .df-cmd {
+  --df-cmd-slot: 88px;
+}
+
+:root[data-ui="next"] .df-cmd-wrap[data-clock="12h"] .df-cmd {
+  --df-cmd-slot: 104px;
+}
+
+/* The timer is Bricolage again, the face of the dates and totals, at its SemiBold cut with tabular figures, idle and
+   running alike, so the digits never jitter and Start never swaps the face. */
+:root[data-ui="next"] .df-cmd-clock,
+:root[data-ui="next"] .df-cmd-clock.is-idle {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+/* One line in every state: a fixed slot ("since 07:36" running, the "From 07:51" text button idle), then the digits,
+   on one baseline. The slot keeps its width when empty, so the clock and Play/Stop never move. */
+:root[data-ui="next"] button.df-cmd-clock,
+:root[data-ui="next"] .df-cmd-idle {
+  display: grid;
+  grid-template-columns: var(--df-cmd-slot) auto;
+  grid-auto-flow: column;
+  align-items: baseline;
+  justify-items: start;
+  column-gap: 8px;
+}
+
+:root[data-ui="next"] .df-cmd-slot {
+  display: block;
+  width: var(--df-cmd-slot);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui="next"] .df-cmd-from-text {
+  position: relative;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+:root[data-ui="next"] .df-cmd-from-text::after {
+  position: absolute;
+  inset: -14px -6px;
+  content: "";
+}
+
+:root[data-ui="next"] .df-cmd-from-text:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:root[data-ui="next"] .df-cmd-from-text:disabled {
+  opacity: 0.6;
+}
+
+/* Play and Stop are the same round button, the bar's control size, so neither the clock nor the button moves on Start
+   or Stop; Start's words ("Start", "Space") are its tip and accessible name. */
+:root[data-ui="next"] .df-cmd-go {
+  width: var(--web-control-height);
+  justify-content: center;
+  padding: 0;
+}
+
+:root[data-ui="next"] .df-cmd-go .df-cmd-go-label,
+:root[data-ui="next"] .df-cmd-go kbd {
+  display: none;
+}
+
+/* ---------- 3: the Calendar toolbar and the strip row (round 2) ---------- */
+:root[data-ui="next"] {
+  --df-cal-toolbar-height: 56px;
+  --df-cal-row-height: 52px;
+}
+
+:root[data-ui="next"] .swiss-timeline-surface .df-cal-toolbar.is-next {
+  display: grid;
+  box-sizing: border-box;
+  flex: none;
+  height: var(--df-cal-toolbar-height);
+  min-height: var(--df-cal-toolbar-height);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+:root[data-ui="next"] .df-cal-toolbar.is-next .df-cal-nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
+
+/* One box: ‹ the date › (Toggl style). */
+:root[data-ui="next"] .df-cal-datebox {
+  display: inline-flex;
+  height: var(--web-control-height);
+  min-width: 0;
+  align-items: center;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+}
+
+:root[data-ui="next"] .df-cal-datebox .ui-icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: calc(var(--web-control-height) - 2px);
+  min-height: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+:root[data-ui="next"] .df-cal-datebox .timeline-date-picker {
+  min-width: 0;
+}
+
+:root[data-ui="next"] .df-cal-datebox .timeline-period-trigger {
+  min-height: calc(var(--web-control-height) - 2px);
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: transparent;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+:root[data-ui="next"] .df-cal-datebox .timeline-period-trigger svg {
+  display: none;
+}
+
+:root[data-ui="next"] .df-cal-toolbar.is-next .timeline-today-button:disabled {
+  opacity: 0.45;
+}
+
+:root[data-ui="next"] .df-cal-toolbar.is-next .df-cal-weektotal {
+  justify-self: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+}
+
+:root[data-ui="next"] .df-cal-toolbar.is-next .ui-segmented-control {
+  justify-self: end;
+}
+
+/* The row beneath the toolbar: the 7-day picker in Day and List, the day columns in Week, at one height. */
+:root[data-ui="next"] .df-cal-striprow {
+  display: flex;
+  box-sizing: border-box;
+  flex: none;
+  height: var(--df-cal-row-height);
+  min-height: var(--df-cal-row-height);
+  align-items: center;
+  padding: 0 12px;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-week {
+  width: 100%;
+  justify-content: stretch;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-days {
+  width: 100%;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-day {
+  min-height: 0;
+  height: calc(var(--df-cal-row-height) - 6px);
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: center;
+  column-gap: 6px;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-day small {
+  align-self: center;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-day-total {
+  display: none;
+}
+
+:root[data-ui="next"] .df-cal-striprow .df-cal-day-bars {
+  grid-column: 1 / -1;
+}
+
+:root[data-ui="next"] .calendar-grid-corner,
+:root[data-ui="next"] .calendar-day-heading {
+  box-sizing: border-box;
+  height: var(--df-cal-row-height);
+  min-height: var(--df-cal-row-height);
+}
+
+/* Phones: the same toolbar on two fixed lines (date and Today, then the total and the view control). */
+@media (max-width: 640px) {
+  :root[data-ui="next"] {
+    --df-cal-toolbar-height: 96px;
+  }
+
+  :root[data-ui="next"] .swiss-timeline-surface .df-cal-toolbar.is-next {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 1fr 1fr;
+    row-gap: 4px;
+  }
+
+  :root[data-ui="next"] .df-cal-toolbar.is-next .df-cal-nav {
+    grid-column: 1 / -1;
+  }
+
+  :root[data-ui="next"] .df-cal-toolbar.is-next .df-cal-weektotal {
+    justify-self: start;
+  }
+}
+
+/* Day: the 7-day picker above is the grid's top row, so the grid's own one-day heading row goes and the zoom floats
+   over the grid's lower right corner, as on phones. Week keeps its day columns as that row. */
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] .calendar-grid-corner,
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] .calendar-day-heading {
+  display: none;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] {
+  position: relative;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] .calendar-phone-zoom {
+  position: absolute;
+  z-index: 45;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, 44px);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] .calendar-phone-zoom button {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 17px;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-one-day] .calendar-phone-zoom button:disabled {
+  color: var(--muted);
+  opacity: 0.42;
+}
+
+/* ---------- 4: one gap under the quick-start chips on every page (round 2) ---------- */
+/* The other pages put 28 px between the chips and their first surface; Calendar's panel sat 16 px under them. */
+:root[data-ui="next"] .swiss-timeline-surface > .swiss-timeline-main {
+  margin-top: 12px;
+}
+
+/* ---------- 5: the now line (round 2): strong across today, faint across the other days and the gutter ---------- */
+:root[data-ui="next"] .calendar-now-line.is-faint {
+  z-index: 2;
+  height: 1px;
+  margin-top: 0;
+  opacity: 0.45;
+}
+
+:root[data-ui="next"] .calendar-time-axis .calendar-now-line.is-faint {
+  right: 0;
+  left: 0;
+}
+
+/* The pill sits over the gutter's faint line. */
+:root[data-ui="next"] .calendar-time-axis .calendar-now-pill {
+  z-index: 3;
+}
+
+/* ---------- 6: grid blocks (round 2) ---------- */
+/* One title size per zoom level for every block, never shrunk to fit; the title truncates with an ellipsis and the
+   time line shows only where there's room (has-detail-room, unchanged). */
+:root[data-ui="next"] .timeline-calendar-workspace {
+  --df-cal-title-size: 12px;
+  --df-cal-title-line: 15px;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-zoom="half"] {
+  --df-cal-title-size: 13px;
+  --df-cal-title-line: 16px;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace[data-zoom="quarter"] {
+  --df-cal-title-size: 14px;
+  --df-cal-title-line: 17px;
+}
+
+:root[data-ui="next"] .timeline-calendar-workspace .calendar-entry-title,
+:root[data-ui="next"] .timeline-calendar-workspace .calendar-time-block.is-dense-compact .calendar-entry-title,
+:root[data-ui="next"] .timeline-calendar-workspace .calendar-review-block.is-dense-compact .calendar-entry-title {
+  font-size: var(--df-cal-title-size);
+  line-height: var(--df-cal-title-line);
+}
+
+/* Activities read apart: a stronger tint of each activity's own colour (the same brand palette and leading bar),
+   instead of a light wash that made every block a similar muted mauve. */
+:root[data-ui="next"] {
+  --calendar-dense-tint: 26%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-ui="next"]:not([data-theme="light"]) {
+    --calendar-dense-tint: 42%;
+  }
+}
+
+:root[data-ui="next"][data-theme="dark"] {
+  --calendar-dense-tint: 42%;
+}

@@ -169,8 +169,8 @@ describe("Calendar range and toolbar contract", () => {
   it("keeps Timeline viewport-scoped and stacks the toolbar without page overflow at phone widths", () => {
     expect(shell).toContain('const isTimeline = pathname === "/timeline"');
     expect(shell).toContain('swiss-app-shell${isTimeline ? " is-timeline" : ""}');
-    expect(shell).toContain('className="swiss-timeline-surface"');
-    expect(shell).toContain('className="swiss-timeline-main"');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-main" : undefined}');
     expect(styles).toContain(".swiss-app-shell.is-timeline");
     expect(styles).toContain(".timeline-view-stage");
     expect(styles).toContain(".calendar-grid-scroller");
@@ -194,7 +194,7 @@ describe("Calendar range and toolbar contract", () => {
 
   it("uses one outer Timeline surface and direct per-view scrollers without duplicate titles", () => {
     expect(shell).toContain('<PersistentTimerBar onToday={pathname === "/"} workspaceMode={isTimeline} />');
-    expect(shell).toContain('className="swiss-timeline-surface"');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}');
     expect(timeline).not.toContain('className="timeline-view-title-row"');
     expect(entries).not.toContain('className="timeline-view-title-row"');
     expect(timeline).toContain('className="calendar-corner-zoom"');

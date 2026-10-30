@@ -5,16 +5,21 @@ import { cookies } from "next/headers";
 import { Suspense } from "react";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "./ui-next.css";
 import { AppLoadingState } from "@/components/AppLoadingState";
 import { AppShell } from "@/components/AppShell";
 import { ClockFormatProvider } from "@/components/ClockFormat";
+import { UiNextToggle } from "@/components/UiNextToggle";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 import { CLOCK_FORMAT_COOKIE, clockFormatFromCookieValue } from "@/lib/clock-format";
+import { UI_PREVIEW_INIT_SCRIPT, uiPreviewEnabled } from "@/lib/ui-preview";
 
 // Bricolage Grotesque (SIL OFL, `fonts/BricolageGrotesque-OFL.txt`) is bundled and self-hosted:
 // it is the Blocks display face for titles, the timer and large totals only.
 const displayFont = localFont({
   src: [
+    // SemiBold for the timer's digits (UI review round 2, owner 30 Oct 2026); same upstream release as Bold.
+    { path: "./fonts/BricolageGrotesque-SemiBold.ttf", weight: "600", style: "normal" },
     { path: "./fonts/BricolageGrotesque-Bold.ttf", weight: "700", style: "normal" },
     { path: "./fonts/BricolageGrotesque-ExtraBold.ttf", weight: "800", style: "normal" }
   ],
@@ -47,11 +52,15 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               "try{var t=localStorage.getItem('dayframe.theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}"
           }}
         />
+        {uiPreviewEnabled() ? (
+          <Script id="dayframe-ui-preview-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: UI_PREVIEW_INIT_SCRIPT }} />
+        ) : null}
         <ClockFormatProvider serverFormat={serverClockFormat}>
           <Suspense fallback={<AppLoadingState />}>
             {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
           </Suspense>
         </ClockFormatProvider>
+        {uiPreviewEnabled() ? <UiNextToggle /> : null}
       </body>
     </html>
   );

@@ -39,6 +39,7 @@ import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-to
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
+import { useUiNext } from "@/components/UiNextToggle";
 
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
@@ -104,6 +105,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
+  const uiNext = useUiNext();
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -641,6 +643,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
         // Phones show quick start on Today only (UI review decision C).
         onToday ? "is-today" : ""
       ].filter(Boolean).join(" ")}
+      data-clock={clock}
       data-testid="persistent-timer"
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
@@ -757,9 +760,32 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
               }}
               ref={startEditorTriggerRef}
             >
+              {/* Proposed (round 2): "since 07:36" sits in a fixed slot left of the digits, on their baseline. */}
+              {uiNext ? <small className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small> : null}
               <Odometer value={formatClockDuration(durationSeconds)} />
-              <small>Started {formatTime(active.startedAt, clock)}</small>
+              {uiNext ? null : <small>Started {formatTime(active.startedAt, clock)}</small>}
             </button>
+          ) : uiNext ? (
+            // Proposed (round 2, owner 30 Oct 2026): one line in every state. "From 07:51" is a small text button in the
+            // same fixed slot "since" uses, then the idle clock in the same face, so nothing moves on Start or Stop.
+            <div className="df-cmd-idle">
+              <span className="df-cmd-slot">
+                {previousEnd ? (
+                  <button
+                    aria-label={`Start from ${formatTime(previousEnd.startedAt, clock)}, after ${previousEnd.previousName}`}
+                    className="df-cmd-from-text"
+                    disabled={isTimerBusy}
+                    onClick={() => void startFromPreviousEnd(previousEnd)}
+                    type="button"
+                  >
+                    From <span className="tabular">{formatTime(previousEnd.startedAt, clock)}</span>
+                  </button>
+                ) : null}
+              </span>
+              <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
+                {formatClockDuration(0)}
+              </span>
+            </div>
           ) : (
             <div className="df-cmd-idle">
               <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
@@ -910,7 +936,8 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
           type="button"
           aria-busy={(Boolean(active) && isStopPending) || undefined}
           aria-label={active ? (isStopPending ? "Stopping…" : "Stop recording") : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
-          title={active && isStopPending ? "Stopping…" : undefined}
+          // Proposed (round 2): Play and Stop are one round button, so it never moves; Start's words move to its tip.
+          title={active && isStopPending ? "Stopping…" : uiNext && !active ? `${goLabel}${parsedCommand?.durationSeconds ? "" : " (Space)"}` : undefined}
           onClick={(event) => {
             if (active) {
               void stopTimer();

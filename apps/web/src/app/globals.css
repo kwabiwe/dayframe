@@ -7027,6 +7027,11 @@ dialog.ui-dialog.df-range-custom {
   background: var(--background);
 }
 
+/* Off Calendar the shell's one surface wrapper takes no part in layout (UI review round 2). */
+.swiss-page-surface {
+  display: contents;
+}
+
 .swiss-timeline-surface {
   display: flex;
   min-width: 0;

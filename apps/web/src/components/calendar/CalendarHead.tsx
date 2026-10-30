@@ -15,6 +15,7 @@ export function CalendarHead({
   model,
   onSelectDay,
   showDays = true,
+  showTotal = true,
   weekReportHref
 }: {
   disabled: boolean;
@@ -22,6 +23,8 @@ export function CalendarHead({
   onSelectDay: (dateKey: string) => void;
   /** False in the Week grid, whose day columns already show each date and total (UI review E). */
   showDays?: boolean;
+  /** False where the toolbar shows the total itself (UI review round 2): the strip is then its own row. */
+  showTotal?: boolean;
   weekReportHref: string;
 }) {
   const daysRef = useRef<HTMLDivElement | null>(null);
@@ -66,10 +69,12 @@ export function CalendarHead({
           </button>
         ))}
       </div> : null}
-      <Link aria-label={`${model.weekTotalLabel}. Open in Reports`} className="df-cal-weektotal df-tnum" href={weekReportHref}
-        title={model.weekTotalLabel}>
-        {model.weekTotal}
-      </Link>
+      {showTotal ? (
+        <Link aria-label={`${model.weekTotalLabel}. Open in Reports`} className="df-cal-weektotal df-tnum" href={weekReportHref}
+          title={model.weekTotalLabel}>
+          {model.weekTotal}
+        </Link>
+      ) : null}
     </div>
   );
 }

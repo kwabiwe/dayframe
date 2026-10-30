@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { tripsByBlockId, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
 import { useGridCorrection } from "@/components/location/useGridCorrection";
 import { blockQuestionWords, useEndedBlocks, useProjectedReviewItems, useSharedCheckDecisions } from "@/components/location/ListChecks";
+import { useUiNext } from "@/components/UiNextToggle";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -65,6 +66,7 @@ import {
 import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
+  formatCalendarRangeLabel,
   formatTimelinePeriodLabel,
   resetTimelineState,
   resolveTimelineRanges,
@@ -536,6 +538,15 @@ export function TimeReviewViews({
   const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
   const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
   const periodLabel = formatTimelinePeriodLabel(isList ? "day" : state.scope, headerRanges, todayKey);
+  const uiNext = useUiNext();
+  // Proposed toolbar (round 2): the date box's words and arrows. List moves a week at a time, as its strip shows one.
+  const navScope: TimelineScope = isList ? "week" : state.scope;
+  const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, headerRanges, todayKey);
+  const goPeriod = (direction: "previous" | "next") => {
+    if (isDateLoading) return;
+    const shifted = shiftTimelineState({ ...state, date: headerDayKey, scope: navScope }, direction);
+    void navigate(isList ? { date: shifted.date } : shiftTimelineState(state, direction), isList ? { reposition: true } : undefined);
+  };
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
@@ -558,6 +569,11 @@ export function TimeReviewViews({
     weekDays: headerRanges.weekDays,
     weekLoggedSeconds: headWeekSeconds
   });
+  // The Proposed toolbar's total (round 2): the day's in Day, else the week's.
+  const headDay = headModel.days.find((day) => day.selected);
+  const toolbarTotal = !isList && state.scope === "day" && headDay
+    ? { value: headDay.total, label: `Day total ${headDay.total}, ${rangeLabel}` }
+    : { value: headModel.weekTotal, label: headModel.weekTotalLabel };
 
   return (
     <section className="timeline-workspace">
@@ -565,6 +581,73 @@ export function TimeReviewViews({
           week totals, Day | Week and Calendar | List — wrapping only where the screen is too narrow.
           The month stays the page's heading for assistive tech; the period label shows the date. */}
       <h1 className="sr-only">{headModel.month}</h1>
+      {uiNext ? (
+        <>
+          {/* Proposed (UI review round 2, owner 30 Oct 2026): one toolbar, identical and one height in every view —
+              one date box with ‹ › inside it and Today on the left, the period's total in the middle, one Day · Week · List
+              control on the right. The 7-day strip is the row beneath it (in Week, the day columns are that row). */}
+          <section aria-busy={isDateLoading} aria-label="Calendar period and view controls" className="timeline-range-toolbar df-cal-toolbar is-next">
+            <div className="df-cal-nav">
+              <div className="df-cal-datebox" role="group" aria-label="Calendar period">
+                <IconButton disabled={isDateLoading} label={`Previous ${navScope}`} onClick={() => goPeriod("previous")}>
+                  <ChevronLeft size={16} />
+                </IconButton>
+                <DatePickerPopover
+                  disabled={isDateLoading}
+                  label={rangeLabel}
+                  onChange={(date) => void navigate({ date }, { reposition: true })}
+                  portal
+                  portalAlign="center"
+                  today={todayKey ?? state.date}
+                  value={headerDayKey}
+                />
+                <IconButton disabled={isDateLoading} label={`Next ${navScope}`} onClick={() => goPeriod("next")}>
+                  <ChevronRight size={16} />
+                </IconButton>
+              </div>
+              <button
+                className="timeline-today-button"
+                disabled={isDateLoading || (!isList && showsToday)}
+                onClick={() => {
+                  if (todayKey) void navigate({ date: todayKey }, { reposition: true });
+                }}
+                type="button"
+              >
+                Today
+              </button>
+            </div>
+            <Link aria-label={`${toolbarTotal.label}. Open in Reports`} className="df-cal-weektotal df-tnum"
+              href={reportsHrefForCustomRange(weekReportFrom, weekReportTo)} title={toolbarTotal.label}>
+              {toolbarTotal.value}
+            </Link>
+            <SegmentedControl
+              ariaLabel="Calendar view"
+              onChange={(next) => {
+                if (next === "list") updateView("list");
+                else if (isDateLoading) return;
+                else navigate({ view: "calendar", scope: next as TimelineScope });
+              }}
+              options={[
+                { value: "day", label: "Day", disabled: isDateLoading },
+                { value: "week", label: "Week", disabled: isDateLoading },
+                { value: "list", label: "List", disabled: isDateLoading }
+              ]}
+              value={isList ? "list" : state.scope}
+            />
+          </section>
+          {!isList && state.scope === "week" ? null : (
+            <div className="df-cal-striprow">
+              <CalendarHead
+                disabled={isDateLoading}
+                model={headModel}
+                onSelectDay={(date) => void navigate({ date }, { reposition: true })}
+                showTotal={false}
+                weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+              />
+            </div>
+          )}
+        </>
+      ) : (
       <section
         className="timeline-range-toolbar df-cal-toolbar"
         aria-busy={isDateLoading}
@@ -643,6 +726,7 @@ export function TimeReviewViews({
           />
         </div>
       </section>
+      )}
       {dateLoadError || isDateLoading ? (
         <p
           aria-atomic="true"
@@ -1583,6 +1667,7 @@ export function CalendarReview({
     if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
 
+  const uiNext = useUiNext();
   // Today's now line, on the minute (the line, the pill and the hidden hour label share it).
   const nowTop = localTimeReady && visibleDays.some(isToday)
     ? Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight)
@@ -1607,7 +1692,7 @@ export function CalendarReview({
   }, [axisMarks, clock, nowTop]);
 
   return (
-    <section className="timeline-calendar-workspace">
+    <section className="timeline-calendar-workspace" data-one-day={visibleDays.length === 1 || undefined} data-zoom={zoomLevel}>
       {/* Phones: the narrow time gutter has no room for the corner's zoom, so it floats over the
           grid's lower right corner instead (CSS shows one or the other). */}
       <span className="calendar-phone-zoom" role="group" aria-label="Calendar zoom">
@@ -1700,6 +1785,8 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
+            {/* Proposed (round 2): the now line runs on faintly through the gutter to the pill, as in Apple Calendar. */}
+            {uiNext && nowTop !== null ? <span aria-hidden="true" className="calendar-now-line is-faint" style={{ top: nowTop }} /> : null}
             {nowTop !== null ? (
               <span
                 aria-hidden="true"
@@ -1790,6 +1877,9 @@ export function CalendarReview({
                   className="calendar-now-line"
                   style={{ top: nowTop ?? 0 }}
                 />
+              ) : uiNext && nowTop !== null ? (
+                // Proposed (round 2): strong across today, faint across the week's other days.
+                <span aria-hidden="true" className="calendar-now-line is-faint" style={{ top: nowTop }} />
               ) : null}
               {dayBrackets.map((bracket) => {
                 // From the first part's drawn top to the last part's drawn bottom (the blocks' own
