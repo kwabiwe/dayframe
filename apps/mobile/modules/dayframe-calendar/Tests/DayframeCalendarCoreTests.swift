@@ -1831,20 +1831,58 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: .nan, calendar: calendar), 0)
   }
 
-  func testScrollToNowActsOnlyOnTodayWithNoFingerOnTheTimeline() {
-    let can = { (selected: String, today: String, viewport: Double, finger: Bool) in
-      DayframeCalendarScrollToNowMath.canScroll(
+  func testScrollToNowDecisionDropsOffTodayOrUnderAFingerAndWaitsForAViewport() {
+    let decide = { (selected: String, today: String, viewport: Double?, finger: Bool) in
+      DayframeCalendarScrollToNowMath.decision(
         selectedDayKey: selected,
         todayKey: today,
         viewportHeight: viewport,
         fingerOnTimeline: finger
       )
     }
-    XCTAssertTrue(can("2026-10-30", "2026-10-30", 600, false))
-    XCTAssertFalse(can("2026-10-29", "2026-10-30", 600, false))
-    XCTAssertFalse(can("2026-10-30", "2026-10-30", 600, true))
-    XCTAssertFalse(can("2026-10-30", "2026-10-30", 0, false))
-    XCTAssertFalse(can("", "", 600, false))
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 600, false), .run)
+    XCTAssertEqual(decide("2026-10-29", "2026-10-30", 600, false), .drop)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 600, true), .drop)
+    XCTAssertEqual(decide("", "", 600, false), .drop)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 0, false), .wait)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", nil, false), .wait)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", .nan, false), .wait)
+  }
+
+  func testScrollToNowGateNeverReplaysTheBaseline() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 7)
+    gate.receive(7)
+    XCTAssertFalse(gate.isWaiting)
+    XCTAssertFalse(gate.resolve(.run))
+  }
+
+  func testScrollToNowGateHoldsARequestUntilTheFirstValidLayoutThenRunsItOnce() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 0)
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.wait))
+    XCTAssertTrue(gate.isWaiting)
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.wait))
+    XCTAssertTrue(gate.resolve(.run))
+    XCTAssertFalse(gate.resolve(.run))
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.run))
+  }
+
+  func testScrollToNowGateCollapsesRepeatsAndDropsCancelledRequests() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 0)
+    gate.receive(1)
+    gate.receive(2)
+    XCTAssertTrue(gate.resolve(.run))
+    XCTAssertFalse(gate.resolve(.run))
+
+    gate.receive(3)
+    XCTAssertFalse(gate.resolve(.drop))
+    XCTAssertFalse(gate.resolve(.run))
+
+    gate.receive(4)
+    gate.cancel()
+    XCTAssertFalse(gate.resolve(.run))
   }
 
   func testScrollToNowRequestIsOptionalInTheModel() throws {

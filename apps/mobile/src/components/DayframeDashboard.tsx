@@ -3080,11 +3080,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarSelectionClear((count) => count + 1);
     selectCalendarDay(formatDateKey(new Date()));
   }, [selectCalendarDay]);
-  // The header's Today pill: the Calendar tab's path every time, so every waiting request is cancelled and the
-  // Grid/List choice stays; already on today it then scrolls to now, in whichever layout is showing.
+  // The header's Today pill: from another day the Calendar tab's path, keeping the Grid/List choice. Already on today
+  // it only scrolls to now in the layout showing: waiting link and "?" requests are cancelled so none can move the view
+  // afterwards, and the selection clear is skipped, so an open Apple Health question stays open.
   const pressCalendarToday = useCallback(() => {
     const action = calendarTodayPressAction({ layout: calendarLayout, selectedDayKey, todayKey: formatDateKey(new Date()) });
-    openCalendarToday();
+    if (action === "go-to-today") {
+      openCalendarToday();
+      return;
+    }
+    setCalendarLinkCancel((count) => count + 1);
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
     if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);
     if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);
   }, [calendarLayout, openCalendarToday, selectedDayKey]);

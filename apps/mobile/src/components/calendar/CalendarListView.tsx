@@ -268,27 +268,42 @@ export function CalendarListView({
   // row's current one, never a remembered one (Codex r3 on #573).
   const rowViews = useRef(new Map<string, View>());
   const content = useRef<View>(null);
-  // "first" (Today's request) or the key of the row to show.
-  const pendingScroll = useRef<string | null>(null);
+  // One waiting scroll: "first" (Today's request) or the key of the row to show, and the day it was made on. Each
+  // request is a new object, so a measurement still out for a replaced one can never act for its successor.
+  const pendingScroll = useRef<{ target: string; dayStartMs: number } | null>(null);
+  const shownDayStartMs = useRef(dayStartMs);
+  shownDayStartMs.current = dayStartMs;
+  const dropPendingScroll = () => {
+    const dropped = pendingScroll.current;
+    pendingScroll.current = null;
+    // A "first" request is over, so a List shown again later has nothing to replay.
+    if (dropped?.target === "first") onScrolledToFirstCheck?.();
+  };
   const firstCheckKey = checkKeys[0];
   const tryScroll = () => {
     const pending = pendingScroll.current;
-    const target = pending === "first" ? firstCheckKey : pending;
+    const target = pending?.target === "first" ? firstCheckKey : pending?.target;
     if (!pending || !target) return;
     // After the frame commits, so a row that just moved is measured where it is now.
     requestAnimationFrame(() => {
       const row = rowViews.current.get(target);
-      if (pendingScroll.current !== pending || !row || !content.current) return;
+      if (pendingScroll.current !== pending || pending.dayStartMs !== shownDayStartMs.current || !row || !content.current) return;
       row.measureLayout(content.current, (_x, y) => {
-        if (pendingScroll.current !== pending) return;
+        if (pendingScroll.current !== pending || pending.dayStartMs !== shownDayStartMs.current) return;
         pendingScroll.current = null;
         scroller.current?.scrollTo({ y: Math.max(0, y - 24), animated: !reduceMotion });
-        if (pending === "first") onScrolledToFirstCheck?.();
+        if (pending.target === "first") onScrolledToFirstCheck?.();
       }, () => undefined);
     });
   };
+  // Another day ends what was waiting on the last one. This runs first, so a request arriving with the day survives.
   useEffect(() => {
-    if (scrollToFirstCheck) pendingScroll.current = "first";
+    if (pendingScroll.current && pendingScroll.current.dayStartMs !== dayStartMs) dropPendingScroll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayStartMs]);
+  useEffect(() => {
+    if (scrollToFirstCheck) pendingScroll.current = { target: "first", dayStartMs };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToFirstCheck]);
   // The Today pill on today: the same one scroll owner and row measurement as a "?" (a drag stops it; a repeat
   // retargets; at once with Reduce Motion). A day with no rows has nothing to reach, so it goes to the top.
@@ -297,7 +312,7 @@ export function CalendarListView({
     if (!scrollToNowRequest || scrollToNowRequest === handledNowRequest.current) return;
     handledNowRequest.current = scrollToNowRequest;
     const key = nowRowKey(items.filter((item) => rowViews.current.has(item.key)), nowMs);
-    pendingScroll.current = key;
+    pendingScroll.current = key ? { target: key, dayStartMs } : null;
     if (key) tryScroll();
     else scroller.current?.scrollTo({ y: 0, animated: !reduceMotion });
     // Once per request, with the rows and time of the render it arrived in.
@@ -348,7 +363,7 @@ export function CalendarListView({
     if (!handledCheckRequest || !request || request.request !== handledCheckRequest) return;
     const row = checkRows.find((each) => each.id === request.id);
     if (!row) return;
-    pendingScroll.current = row.key;
+    pendingScroll.current = { target: row.key, dayStartMs };
     tryScroll();
     openCheckRow(row, false);
     // Once per handled request.
@@ -449,6 +464,7 @@ export function CalendarListView({
   return (
     <ScrollView
       contentContainerStyle={styles.content}
+      onScrollBeginDrag={dropPendingScroll}
       ref={scroller}
       refreshControl={<RefreshControl colors={[theme.accent]} onRefresh={onRefresh} refreshing={refreshing} tintColor={theme.accent} />}
       style={{ backgroundColor: theme.background }}
@@ -467,7 +483,7 @@ export function CalendarListView({
           <Pressable accessibilityHint="Opens the next one, oldest first" accessibilityLabel={`${checkTotal} to check in the last 7 days`}
             accessibilityRole="button" hitSlop={6} onPress={() => {
               // A Today request still waiting to land is done: this tap moves on from it (Codex r12 on #582).
-              if (pendingScroll.current === "first") onScrolledToFirstCheck?.();
+              if (pendingScroll.current?.target === "first") onScrolledToFirstCheck?.();
               onNextCheck(shownOpenCheckId ?? lastOpenedCheckId.current);
             }}
             style={({ pressed }) => [styles.checksChip, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]} testID="calendar-list-checks-chip">

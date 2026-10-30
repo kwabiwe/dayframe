@@ -72,8 +72,8 @@ export type SwipeDismissSheetHandle = {
 /**
  * The one exclusion from the sheet's drag: the view drawn with `ref` (a time wheel's panel) keeps every swipe that
  * starts inside it, so the wheel turns and the sheet stays. The pan measures it live on the UI thread when a finger
- * lands; if the finger is inside, it never enters its dragging state, the only state that can move or dismiss the
- * sheet. `mounted` says the ref is attached (a sheet has one wheel at most). See `useSheetGestureExclusion`.
+ * lands; if the finger is inside, it fails before it can activate, so the touch stays with the wheel and the pan
+ * never enters its dragging state, the only state that can move or dismiss the sheet. `mounted` says the ref is attached (a sheet has one wheel at most). See `useSheetGestureExclusion`.
  */
 type SheetGestureExclusion = {
   mounted: SharedValue<boolean>;
@@ -486,9 +486,13 @@ function SwipeDismissSheet({
       -SWIPE_DISMISS_MOTION.horizontalFailureOffset,
       SWIPE_DISMISS_MOTION.horizontalFailureOffset
     ])
-    // A finger landing in a time wheel: this pan never starts a drag, so it can't move or dismiss the sheet.
-    .onBegin((event) => {
-      startedInExclusion.value = exclusionMounted.value && touchStartsInRegion(event, measure(exclusionRef));
+    // A finger landing in a time wheel fails this pan before it can activate, so it can't take the touch from the
+    // wheel, move the sheet or reach a dismiss. A later finger can't end a drag already under way.
+    .onTouchesDown((event, stateManager) => {
+      if (gestureState.value === "dragging") return;
+      const excluded = exclusionMounted.value && touchStartsInRegion(event.changedTouches[0], measure(exclusionRef));
+      startedInExclusion.value = excluded;
+      if (excluded) stateManager.fail();
     })
     // Only claim the interaction after the pan crosses activeOffsetY. Using
     // onBegin here would dismiss the keyboard for ordinary taps on fields,

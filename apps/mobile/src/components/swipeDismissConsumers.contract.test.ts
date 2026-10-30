@@ -27,11 +27,11 @@ describe("shared swipe-dismiss ownership integration", () => {
   });
 
   it("keeps a swipe that starts in a time wheel away from the sheet, in the shared layer, for every sheet", () => {
-    // The finger's landing place decides, and such a pan never enters "dragging", the only state that can move or
-    // dismiss the sheet.
-    expect(sheetSource).toContain("startedInExclusion.value = exclusionMounted.value && touchStartsInRegion(event, measure(exclusionRef));");
+    // The pan fails before it can activate, so it can't take the touch from the wheel (Codex r1 on #640), and
+    // `dragging`, the only state that can move or dismiss the sheet, is never reached.
+    expect(sheetSource).toMatch(/\.onTouchesDown\(\(event, stateManager\) => \{\s*if \(gestureState\.value === "dragging"\) return;\s*const excluded = exclusionMounted\.value && touchStartsInRegion\(event\.changedTouches\[0\], measure\(exclusionRef\)\);\s*startedInExclusion\.value = excluded;\s*if \(excluded\) stateManager\.fail\(\);/);
     expect(sheetSource).toContain("if (dismissCommitted.value || startedInExclusion.value) return;");
-    expect(sheetSource.indexOf(".onBegin(")).toBeLessThan(sheetSource.indexOf(".onStart("));
+    expect(sheetSource.indexOf(".onTouchesDown(")).toBeLessThan(sheetSource.indexOf(".onStart("));
     expect(sheetSource).toMatch(/\.onUpdate\(\(event\) => \{\s*if \(gestureState\.value !== "dragging"/);
     expect(sheetSource).toMatch(/\.onEnd\(\(event\) => \{\s*if \(gestureState\.value !== "dragging"/);
     // The one provider is the sheet itself, around its children; the one consumer is the shared panel.

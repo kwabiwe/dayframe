@@ -44,22 +44,35 @@ describe("the Calendar Today pill", () => {
     expect(dashboard).toContain("onPressToday={pressCalendarToday}");
   });
 
-  it("uses the Calendar tab's path, so waiting requests stay cancelled and the layout stays", () => {
+  it("uses the Calendar tab's path from another day, keeping the layout", () => {
     const press = between(dashboard, "const pressCalendarToday = useCallback(() => {", "}, [");
-    expect(press).toContain("openCalendarToday();");
+    expect(press).toMatch(/if \(action === "go-to-today"\) \{\s*openCalendarToday\(\);\s*return;\s*\}/);
     expect(press).not.toContain("changeCalendarLayout");
-    expect(press).toContain('if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);');
-    expect(press).toContain('if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);');
     expect(dashboard).toContain("scrollToNowRequest={calendarListScrollToNow}");
     expect(dashboard).toContain("scrollToNowRequest: calendarScrollToNow");
   });
 
+  it("only scrolls on today: waiting requests are cancelled, the selection clear is not run", () => {
+    const press = between(dashboard, "const pressCalendarToday = useCallback(() => {", "}, [");
+    const onToday = press.slice(press.indexOf("return;"));
+    expect(onToday).not.toContain("openCalendarToday");
+    expect(onToday).not.toContain("setCalendarSelectionClear");
+    expect(onToday).toContain("setCalendarLinkCancel((count) => count + 1);");
+    expect(onToday).toContain("setCalendarCheckTarget(null);");
+    expect(onToday).toContain("setCalendarCheckScroll(0);");
+    expect(onToday).toContain('if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);');
+    expect(onToday).toContain('if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);');
+  });
+
   it("leaves the Grid's scroll to Swift: one request, one owner, never replayed, jumping under Reduce Motion", () => {
-    expect(coordinator).toContain("handledScrollToNowRequest = model.presentation.scrollToNowRequest");
+    expect(coordinator).toContain("DayframeCalendarScrollToNowGate(baseline: model.presentation.scrollToNowRequest)");
     expect(coordinator).toContain("animated: !presentation.reduceMotion");
     expect(coordinator).toContain("fingerOnTimeline: scrollView.isTracking || pinchStart != nil || creationDragState.session != nil");
-    // Used up before the scroll-view guard, so a request can't fire when a scroll view attaches later.
+    // Received before the scroll-view guard and only run with a viewport, so a request made during layout isn't lost.
     const sync = between(coordinator, "func synchronize() {", "@objc private func handleRefresh()");
-    expect(sync.indexOf("handledScrollToNowRequest = scrollToNowRequest")).toBeLessThan(sync.indexOf("guard let scrollView"));
+    expect(sync.indexOf("scrollToNowGate.receive(")).toBeLessThan(sync.indexOf("guard let scrollView"));
+    // It watches the layout only while one waits, and leaving the screen ends it.
+    expect(coordinator).toContain("scrollView.observe(\\.bounds)");
+    expect(between(coordinator, "func detach() {", "guard let scrollView")).toContain("scrollToNowGate.cancel()");
   });
 });

@@ -684,14 +684,14 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Owner: from another day, the existing day change (the Grid's own day transition, or the List's rows in place). On today, one scroll owner per layout: `UIScrollView` in the Swift coordinator on the Grid, the List's `ScrollView` on the List. JS only sends a new request number. The pill itself has no motion.
 - Entrance/update/exit: the pill is always there, in one place, in Grid and List, and doesn't change; only its VoiceOver hint does. The timeline or list scrolls with the platform's animated scroll to now (Grid: a third down the viewport, kept inside the timeline; List: the last row to have started, 24 points below the top, or the top of an empty day).
 - Surrounding layout: none moves; the header row keeps its height.
-- Interruption: a finger stops the scroll where it is, because the platform's scroll gives way to a drag; a pinch does the same; a request while a finger is on the timeline (or a create drag) is ignored. A rapid repeat retargets the same place. A request is used once and never replayed: a timeline or List that appears later starts from the current number.
-- Async outcome: none. It only moves the view; every press also cancels waiting link and "?" requests, as the Calendar tab does.
+- Interruption: a finger stops the scroll where it is, because the platform's scroll gives way to a drag; a pinch does the same; a request while a finger is on the timeline (or a create drag) is dropped. A rapid repeat retargets the same place. A Grid request with no viewport yet waits for the timeline's first real one, and leaving today or the screen drops it. On the List, a row measurement still out is dropped by a day change or the start of a drag, and can never act for a newer request. A request is used once and never replayed: a timeline or List that appears later starts from the current number.
+- Async outcome: none. On today it only moves the view: waiting link and "?" requests are cancelled, and anything open stays open (an Apple Health question under its row).
 - Accessibility: Reduce Motion jumps without animation. VoiceOver focus stays on the pill; its hint says which of the two it will do. The pill's text follows Dynamic Type up to the header's cap.
 
 ## Time wheel swipes in sheets (owner, 30 Oct 2026)
 
 - Trigger: a vertical swipe that starts in a `TimeWheelPanel` inside a `SwipeDismissSheet`.
-- Owner: the native wheel keeps its columns. The sheet's pan decides on touch-down (`onBegin`, on the UI thread) and stays out of `dragging`, so one gesture owner still moves the sheet and nothing hands off mid-swipe.
+- Owner: the native wheel keeps its columns. The sheet's pan decides on touch-down (`onTouchesDown`, on the UI thread) and fails before it can activate, so it never competes with the wheel, and nothing hands off mid-swipe.
 - Entrance/update/exit: the sheet doesn't move, rubber-band or dismiss, and no discard prompt appears. A swipe that starts outside the panel drags as before.
-- Interruption: the decision is made once per pan. A second finger added during a drag can't stop it, and one outside the panel can't start one while the first is in the wheel.
+- Interruption: a second finger added during a drag can't stop it, and one outside the panel can't start one while the first is in the wheel (the pan has failed until every finger lifts).
 - Async outcome and accessibility: none; the wheel is hidden from VoiceOver as before, and Reduce Motion is unchanged.

@@ -781,15 +781,59 @@ public enum DayframeCalendarScrollToNowMath {
     )
   }
 
-  /// A request acts only on today, with a viewport to move, and never over a finger that owns the
-  /// timeline (a drag, a pinch or a create drag). A finger arriving later stops the scroll itself.
-  public static func canScroll(
+  /// What a waiting request does now. Off today, or with a finger owning the timeline (a drag, a pinch or a
+  /// create drag), it is dropped; with no viewport yet it waits; otherwise it runs. A finger arriving after it
+  /// runs stops the scroll itself.
+  public static func decision(
     selectedDayKey: String,
     todayKey: String,
-    viewportHeight: Double,
+    viewportHeight: Double?,
     fingerOnTimeline: Bool
-  ) -> Bool {
-    !selectedDayKey.isEmpty && selectedDayKey == todayKey && viewportHeight > 0 && !fingerOnTimeline
+  ) -> DayframeCalendarScrollToNowDecision {
+    guard !selectedDayKey.isEmpty, selectedDayKey == todayKey, !fingerOnTimeline else { return .drop }
+    guard let viewportHeight, viewportHeight.isFinite, viewportHeight > 0 else { return .wait }
+    return .run
+  }
+}
+
+public enum DayframeCalendarScrollToNowDecision: Equatable {
+  case drop
+  case run
+  case wait
+}
+
+/// Which scroll-to-now request is outstanding. Starts from the number already in the model, so a request made
+/// before this timeline existed never replays; a newer one waits here until it can run, and runs once.
+public struct DayframeCalendarScrollToNowGate: Equatable {
+  public private(set) var handledRequest: Int
+  public private(set) var isWaiting = false
+
+  public init(baseline: Int) {
+    handledRequest = baseline
+  }
+
+  public mutating func receive(_ request: Int) {
+    guard request != handledRequest else { return }
+    handledRequest = request
+    isWaiting = true
+  }
+
+  public mutating func resolve(_ decision: DayframeCalendarScrollToNowDecision) -> Bool {
+    guard isWaiting else { return false }
+    switch decision {
+    case .run:
+      isWaiting = false
+      return true
+    case .drop:
+      isWaiting = false
+      return false
+    case .wait:
+      return false
+    }
+  }
+
+  public mutating func cancel() {
+    isWaiting = false
   }
 }
 
