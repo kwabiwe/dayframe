@@ -753,6 +753,90 @@ public struct DayframeCalendarPinchStart: Equatable {
   }
 }
 
+/// The header's Today pill, tapped on today: where the Grid's one scroll owner goes, and when it goes.
+/// JS sends a new request number; only the scroll coordinator moves the timeline.
+public enum DayframeCalendarScrollToNowMath {
+  /// Now sits a third of the way down the viewport, so the coming hours are the larger part of the view.
+  public static let viewportAnchor = 1.0 / 3.0
+
+  public static func minuteOfDay(milliseconds: Double, calendar: Calendar = .current) -> Double {
+    guard milliseconds.isFinite else { return 0 }
+    let components = calendar.dateComponents(
+      [.hour, .minute, .second],
+      from: Date(timeIntervalSince1970: milliseconds / 1000)
+    )
+    return Double(components.hour ?? 0) * 60
+      + Double(components.minute ?? 0)
+      + Double(components.second ?? 0) / 60
+  }
+
+  public static func contentOffset(minuteOfDay: Double, hourHeight: Double, viewportHeight: Double) -> Double {
+    let minute = min(24 * 60, max(0, minuteOfDay.isFinite ? minuteOfDay : 0))
+    let viewport = max(0, viewportHeight.isFinite ? viewportHeight : 0)
+    let nowY = minute / 60 * DayframeCalendarZoomMath.clampHourHeight(hourHeight)
+    return DayframeCalendarZoomMath.clampContentOffset(
+      nowY - viewport * viewportAnchor,
+      hourHeight: hourHeight,
+      viewportHeight: viewport
+    )
+  }
+
+  /// What a waiting request does now. Off today, or with a finger owning the timeline (a drag, a pinch or a
+  /// create drag), it is dropped; with no viewport yet it waits; otherwise it runs. A finger arriving after it
+  /// runs stops the scroll itself.
+  public static func decision(
+    selectedDayKey: String,
+    todayKey: String,
+    viewportHeight: Double?,
+    fingerOnTimeline: Bool
+  ) -> DayframeCalendarScrollToNowDecision {
+    guard !selectedDayKey.isEmpty, selectedDayKey == todayKey, !fingerOnTimeline else { return .drop }
+    guard let viewportHeight, viewportHeight.isFinite, viewportHeight > 0 else { return .wait }
+    return .run
+  }
+}
+
+public enum DayframeCalendarScrollToNowDecision: Equatable {
+  case drop
+  case run
+  case wait
+}
+
+/// Which scroll-to-now request is outstanding. Starts from the number already in the model, so a request made
+/// before this timeline existed never replays; a newer one waits here until it can run, and runs once.
+public struct DayframeCalendarScrollToNowGate: Equatable {
+  public private(set) var handledRequest: Int
+  public private(set) var isWaiting = false
+
+  public init(baseline: Int) {
+    handledRequest = baseline
+  }
+
+  public mutating func receive(_ request: Int) {
+    guard request != handledRequest else { return }
+    handledRequest = request
+    isWaiting = true
+  }
+
+  public mutating func resolve(_ decision: DayframeCalendarScrollToNowDecision) -> Bool {
+    guard isWaiting else { return false }
+    switch decision {
+    case .run:
+      isWaiting = false
+      return true
+    case .drop:
+      isWaiting = false
+      return false
+    case .wait:
+      return false
+    }
+  }
+
+  public mutating func cancel() {
+    isWaiting = false
+  }
+}
+
 public enum DayframeCalendarZoomMath {
   public static func clampHourHeight(_ value: Double) -> Double {
     min(

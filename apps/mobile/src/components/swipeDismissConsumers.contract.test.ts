@@ -26,6 +26,27 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(reportsSource).not.toMatch(/animationType=.*(?:fade|slide)/);
   });
 
+  it("keeps a swipe that starts in a time wheel away from the sheet, in the shared layer, for every sheet", () => {
+    // The pan fails before it can activate, so it can't take the touch from the wheel (Codex r1 on #640), and
+    // `dragging`, the only state that can move or dismiss the sheet, is never reached.
+    expect(sheetSource).toMatch(/\.onTouchesDown\(\(event, stateManager\) => \{\s*if \(gestureState\.value === "dragging"\) return;\s*const excluded = exclusionAfterTouchesDown\(startedInExclusion\.value, event, exclusionMounted\.value \? measure\(exclusionRef\) : null\);\s*startedInExclusion\.value = excluded;\s*if \(excluded\) stateManager\.fail\(\);/);
+    expect(sheetSource).toContain("if (dismissCommitted.value || startedInExclusion.value) return;");
+    expect(sheetSource.indexOf(".onTouchesDown(")).toBeLessThan(sheetSource.indexOf(".onStart("));
+    expect(sheetSource).toMatch(/\.onUpdate\(\(event\) => \{\s*if \(gestureState\.value !== "dragging"/);
+    expect(sheetSource).toMatch(/\.onEnd\(\(event\) => \{\s*if \(gestureState\.value !== "dragging"/);
+    // The one provider is the sheet itself, around its children; the one consumer is the shared panel.
+    expect(sheetSource).toContain("<SheetGestureExclusionContext.Provider value={gestureExclusion}>");
+    const panelSource = read("./TimeWheelPanel.tsx");
+    expect(panelSource).toContain("const sheetGestureExclusion = useSheetGestureExclusion();");
+    expect(panelSource).toContain("ref={sheetGestureExclusion}");
+    expect(panelSource).toContain("collapsable={false}");
+    // Both wheel hosts draw the shared panel inside the shared sheet.
+    expect(editSource).toContain("<TimeWheelPanel");
+    expect(editSource).toContain("<SwipeDismissSheet");
+    expect(read("./calendar/LocationCorrectionSheet.tsx")).toContain("<TimeWheelPanel");
+    expect(read("./calendar/LocationCorrectionSheet.tsx")).toContain("<BottomSheetShell");
+  });
+
   it("gives both Reports sheets one handle-only shared motion owner", () => {
     expect(reportSheetsSource).toContain("<BottomSheetShell");
     expect(reportSheetsSource).toContain("<DateSheet");

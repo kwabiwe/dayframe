@@ -83,6 +83,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private var zoomDisplayLink: CADisplayLink?
     private var buttonZoom: ButtonZoomAnimation?
     private var handledZoomToken: UInt64 = 0
+    private var scrollToNowGate: DayframeCalendarScrollToNowGate
+    private var scrollToNowLayoutObservation: NSKeyValueObservation?
     private var layout: DayframeCalendarTimelineLayout
     private var longPressCandidate: LongPressCandidate?
     private var creationDragState = DayframeCalendarCreationDragState()
@@ -107,6 +109,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       self.actions = actions
       self.layout = layout
       handledZoomToken = model.zoomRequest?.token ?? 0
+      // A request made before this timeline existed is not replayed when it appears.
+      scrollToNowGate = DayframeCalendarScrollToNowGate(baseline: model.presentation.scrollToNowRequest)
       super.init()
       displayLinkProxy.owner = self
       zoomDisplayLinkProxy.owner = self
@@ -182,6 +186,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     func detach() {
       stopButtonZoom()
+      scrollToNowGate.cancel()
+      scrollToNowLayoutObservation = nil
       guard let scrollView else {
         cancelCreationInteraction()
         return
@@ -197,7 +203,9 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     func synchronize() {
-      guard let model, let scrollView else { return }
+      guard let model else { return }
+      scrollToNowGate.receive(model.presentation.scrollToNowRequest)
+      guard let scrollView else { return }
       let nextSelectedDayKey = model.presentation.selectedDayKey
       if selectedDayKey.isEmpty {
         selectedDayKey = nextSelectedDayKey
@@ -253,6 +261,40 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: CGFloat(clamped)), animated: false)
         }
       }
+      resolveScrollToNow(model: model, scrollView: scrollView)
+    }
+
+    /// The Today pill on today. A request waits for this timeline's first real viewport, watching the scroll view's
+    /// bounds only while it waits. UIScrollView owns the animation, so a finger stops it where it is, a second
+    /// request retargets it, and Reduce Motion jumps.
+    private func resolveScrollToNow(model: DayframeCalendarViewModel, scrollView: UIScrollView) {
+      let presentation = model.presentation
+      let viewportHeight = Double(scrollView.bounds.height)
+      let run = scrollToNowGate.resolve(DayframeCalendarScrollToNowMath.decision(
+        selectedDayKey: presentation.selectedDayKey,
+        todayKey: presentation.todayKey,
+        viewportHeight: viewportHeight,
+        fingerOnTimeline: scrollView.isTracking || pinchStart != nil || creationDragState.session != nil
+      ))
+      if scrollToNowGate.isWaiting {
+        guard scrollToNowLayoutObservation == nil else { return }
+        scrollToNowLayoutObservation = scrollView.observe(\.bounds) { [weak self] _, _ in
+          DispatchQueue.main.async { self?.synchronize() }
+        }
+        return
+      }
+      scrollToNowLayoutObservation = nil
+      guard run else { return }
+      stopButtonZoom()
+      let offset = DayframeCalendarScrollToNowMath.contentOffset(
+        minuteOfDay: DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: presentation.nowMs),
+        hourHeight: Double(model.hourHeight),
+        viewportHeight: viewportHeight
+      )
+      scrollView.setContentOffset(
+        CGPoint(x: scrollView.contentOffset.x, y: CGFloat(offset)),
+        animated: !presentation.reduceMotion
+      )
     }
 
     @objc private func handleRefresh() {

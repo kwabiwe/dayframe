@@ -203,6 +203,7 @@ struct DayframeCalendarPresentation: Equatable {
   let reduceMotion: Bool
   let reduceTransparency: Bool
   let refreshing: Bool
+  let scrollToNowRequest: Int
   let selectedDayKey: String
   let selectedDayTitle: String
   let theme: DayframeCalendarTheme
@@ -233,6 +234,7 @@ struct DayframeCalendarPresentation: Equatable {
     reduceMotion = record.reduceMotion
     reduceTransparency = record.reduceTransparency
     refreshing = record.refreshing
+    scrollToNowRequest = record.scrollToNowRequest ?? 0
     selectedDayKey = record.selectedDayKey
     selectedDayTitle = record.selectedDayTitle
     theme = DayframeCalendarTheme(record.theme)
@@ -448,6 +450,8 @@ struct DayframeCalendarActions {
   let selectDay: (String) -> Void
   /// Grid · List in the header (location v4 step 9).
   let changeLayout: (String) -> Void
+  /// The header's Today pill. The app decides what it does: go to today, or scroll to now.
+  let pressToday: () -> Void
   /// In List: the height the header and week strip need, so the app sizes the view to them.
   let reportHeaderHeight: (Double) -> Void
 }

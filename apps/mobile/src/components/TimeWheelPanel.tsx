@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
+import { useSheetGestureExclusion } from "@/components/SwipeDismissSheet";
 import { DayframeTimeWheelView, type DayframeTimeWheelChange, type DayframeTimeWheelModel } from "../../modules/dayframe-time-wheel";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -45,12 +46,16 @@ export function TimeWheelPanel({
   theme: MobileTheme;
   wheelHeight: number;
 }) {
+  // A swipe that starts anywhere in the panel turns the wheel and never drags the sheet, on every sheet with one.
+  const sheetGestureExclusion = useSheetGestureExclusion();
   return (
     <Reanimated.View
+      collapsable={false}
       entering={localPresenceEntering(reduceMotion, "rise")}
       exiting={localPresenceExiting(reduceMotion)}
       onStartShouldSetResponder={() => true}
       onTouchStart={onTouchStart}
+      ref={sheetGestureExclusion}
       style={[panelStyles.panel, { backgroundColor: theme.surfaceMuted }, minHeight ? { minHeight } : null]}
       testID={testIDPrefix}
     >

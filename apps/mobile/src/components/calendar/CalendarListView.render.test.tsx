@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, create } from "react-test-renderer";
 import { reviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileReviewItem } from "../../lib/api";
@@ -438,6 +439,57 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onOpenCheck).not.toHaveBeenCalled();
   });
 
+  // The header's Today pill on today (Codex r2 on #640).
+  it("cancels a tap still waiting for its places and leaves an open question open", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkKinds: new Map([["c-sleep", "health"]]) as never,
+      checkTitles: new Map([["c-unknown", "Pret?"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace, openCheckRequest: { id: "c-sleep", request: 1 }
+    };
+    const shown = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={null} {...props} {...extra} />
+    );
+    const { tree } = render({ ...props, timeline: null });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1, timeline })); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  // Codex r2 on #640: dropping the previous day's request mustn't clear the one that came with the new day.
+  it("keeps a first-check request that arrives with a new day, and opens it when its rows arrive", () => {
+    const sleep = { id: "c-sleep", segmentId: null, startedAt: new Date(at(25)).toISOString(), stoppedAt: new Date(at(30)).toISOString() };
+    const controls = {} as { show: (next: { day: number; checks: typeof sleep[] }) => void; ask: (request: number) => void };
+    function Parent() {
+      const [shown, setShown] = useState<{ day: number; checks: typeof sleep[] }>({ day: 0, checks: [] });
+      const [request, setRequest] = useState(1);
+      controls.show = setShown;
+      controls.ask = setRequest;
+      return (
+        <CalendarListView checkKinds={new Map([["c-sleep", "health"]]) as never} checkQuestions={new Map([["c-sleep", question("Log your sleep?")]])}
+          checkTitles={new Map([["c-sleep", "Sleep"]])} checks={shown.checks} clockFormat="24h" dayEndMs={at(24) * 1 + shown.day * 86_400_000} dayStartMs={at(0) + shown.day * 86_400_000}
+          entries={[]} loggedLabel="0m" nowMs={at(18)} onAnswerCheck={vi.fn()} onOpenEntry={vi.fn()} onRefresh={vi.fn()}
+          onScrolledToFirstCheck={(used) => setRequest((current) => (current === used ? 0 : current))} reduceMotion={false} refreshing={false}
+          scrollToFirstCheck={request} theme={theme} timeline={null} />
+      );
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Parent />); });
+    act(() => { controls.show({ day: 1, checks: [] }); controls.ask(2); });
+    act(() => { controls.show({ day: 1, checks: [sleep] }); });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
   it("asks a place's or trip's \"?\" under its row when the day's places are read and lack its item, never Review (Codex r2 on #610)", () => {
     const onOpenCheck = vi.fn();
     const onOpenPlace = vi.fn();
@@ -774,6 +826,145 @@ describe("CalendarListView (location v4 step 9)", () => {
         onScrolledToFirstCheck={vi.fn()} scrollToFirstCheck={1} />); });
       expect(scrollTo).toHaveBeenCalledTimes(1);
       expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 126, animated: false });
+    });
+
+    // The header's Today pill on today (owner, 30 Oct 2026).
+    it("scrolls to the row for now, once per request, and never on mounting with an old request", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      const shown = (request: number, extra: Partial<Parameters<typeof CalendarListView>[0]> = {}) => (
+        <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h"
+          nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline}
+          scrollToNowRequest={request} {...extra} />
+      );
+      const tree = mount({ scrollToNowRequest: 4 });
+      expect(scrollTo).not.toHaveBeenCalled();
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 376, animated: true });
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      // A repeat goes again, and Reduce Motion jumps.
+      act(() => { tree.update(shown(6, { reduceMotion: true })); });
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(scrollTo.mock.calls[1][0]).toMatchObject({ y: 376, animated: false });
+    });
+
+    // Measurements that answer late (Codex r1 on #640). Each row's measureLayout waits here until the test answers it.
+    describe("with a late measurement", () => {
+      const answers: Array<(y: number) => void> = [];
+      const list = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+        <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h"
+          nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} {...extra} />
+      );
+      const mountLate = () => {
+        scrollTo.mockClear();
+        answers.length = 0;
+        let tree!: ReturnType<typeof create>;
+        act(() => {
+          tree = create(list({ scrollToNowRequest: 0 }), { createNodeMock: () => ({
+            measureLayout: (_relativeTo: unknown, done: (x: number, y: number) => void) => { answers.push((y) => done(0, y)); }
+          }) });
+        });
+        return tree;
+      };
+      const scroller = (tree: ReturnType<typeof create>) => tree.root.findByProps({ testID: "calendar-list" });
+
+      it("acts on the newest request only, even for the same row", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        const stale = answers.length;
+        act(() => { tree.update(list({ scrollToNowRequest: 2 })); });
+        expect(answers.length).toBeGreaterThan(stale);
+        // The first request's measurement answers now: it is not the newest, so nothing moves, and the newest stays.
+        answers[0](400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        answers[answers.length - 1](300);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 276 });
+      });
+
+      it("drops the scroll when the day changes before the measurement answers", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1, dayStartMs: at(24), dayEndMs: at(48) })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("drops the scroll when a drag starts before the measurement answers", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("uses up a request that arrives during a drag: no scroll, even once its measurement could answer", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        // It stays used up after the finger lifts, and the next request runs.
+        act(() => { scroller(tree).props.onScrollEndDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        act(() => { tree.update(list({ scrollToNowRequest: 2 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("acknowledges a first-check request that arrives during a drag, without scrolling", () => {
+        const onScrolled = vi.fn();
+        const tree = mountLate();
+        const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+        const shown = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ ...shown, scrollToFirstCheck: 3 })); });
+        expect(onScrolled).toHaveBeenCalledWith(3);
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("runs again once the scroll has settled after momentum", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { scroller(tree).props.onMomentumScrollEnd(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("keeps a request that arrives with the new day", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1, dayStartMs: at(24), dayEndMs: at(48) })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("reports a dropped \"first\" request as over, so nothing replays", () => {
+        const onScrolled = vi.fn();
+        const tree = mountLate();
+        const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+        const shown = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+        act(() => { tree.update(list({ ...shown, scrollToFirstCheck: 1 })); });
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        expect(onScrolled).toHaveBeenCalledTimes(1);
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+    });
+
+    it("goes to the top of a day with no rows", () => {
+      scrollTo.mockClear();
+      const empty = { ...timeline, items: [] } as LocationTimeline;
+      const tree = mount({ entries: [], timeline: empty, scrollToNowRequest: 0 });
+      act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="0m" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} scrollToNowRequest={1} theme={theme} timeline={empty} />); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 0 });
     });
 
     it("does not jump when shown again with the request cleared", () => {

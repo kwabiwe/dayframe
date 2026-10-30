@@ -50,6 +50,7 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
+import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
@@ -403,6 +404,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Calendar › Grid or List (location v4 step 9), remembered on this phone.
   const [calendarLayout, setCalendarLayout] = useState<"grid" | "list">("grid");
   const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
+  // The Today pill on today: Swift's scroll owner on the Grid, the List's own ScrollView on the List.
+  const [calendarScrollToNow, setCalendarScrollToNow] = useState(0);
+  const [calendarListScrollToNow, setCalendarListScrollToNow] = useState(0);
+  const [calendarWaitingTapCancel, setCalendarWaitingTapCancel] = useState(0);
   // A layout the person picked here wins over the stored one, however late that read lands (Codex r1 on #570).
   const calendarLayoutChosen = useRef(false);
   // The evening reminder's tap lands in an effect set up once: it reads the current opener.
@@ -2269,12 +2274,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Stable objects, so DayframeCalendarView re-serialises only when the model or refresh state changes.
   const nativeCalendarModel = useMemo(
-    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false }),
-    [calendarLayout, nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false, scrollToNowRequest: calendarScrollToNow }),
+    [calendarLayout, calendarScrollToNow, nativeCalendarBridge.model]
   );
   const nativeCalendarModelRefreshing = useMemo(
-    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true }),
-    [calendarLayout, nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true, scrollToNowRequest: calendarScrollToNow }),
+    [calendarLayout, calendarScrollToNow, nativeCalendarBridge.model]
   );
   useEffect(() => {
     let cancelled = false;
@@ -3076,6 +3081,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarSelectionClear((count) => count + 1);
     selectCalendarDay(formatDateKey(new Date()));
   }, [selectCalendarDay]);
+  // The header's Today pill: from another day the Calendar tab's path, keeping the Grid/List choice. Already on today
+  // it only scrolls to now in the layout showing: waiting link, "?" and tap requests are cancelled so none can move the view
+  // afterwards, and the selection clear is skipped, so an open Apple Health question stays open.
+  const pressCalendarToday = useCallback(() => {
+    const action = calendarTodayPressAction({ layout: calendarLayout, selectedDayKey, todayKey: formatDateKey(new Date()) });
+    if (action === "go-to-today") {
+      openCalendarToday();
+      return;
+    }
+    setCalendarLinkCancel((count) => count + 1);
+    setCalendarWaitingTapCancel((count) => count + 1);
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);
+    if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);
+  }, [calendarLayout, openCalendarToday, selectedDayKey]);
   // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge is a count only.
   // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
   const openTodayChecks = useCallback(() => {
@@ -4077,6 +4098,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               model={isFocused && refreshing ? gridModelRefreshing : gridModel}
               onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
               onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
+              onPressToday={pressCalendarToday}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
               onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
@@ -4148,8 +4170,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onOpenPlace={locationCorrections.openPlace}
                   onOpenTripLeg={locationCorrections.openTripLeg}
-                  onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
+                  // Only the request it reports: a newer one that arrived with it stays (Codex r2 on #640).
+                  onScrolledToFirstCheck={(request) => setCalendarCheckScroll((current) => (current === request ? 0 : current))}
+                  cancelWaitingTapRequest={calendarWaitingTapCancel}
                   scrollToFirstCheck={calendarCheckScroll}
+                  scrollToNowRequest={calendarListScrollToNow}
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
                   reduceMotion={reduceMotion}
                   refreshing={isFocused && refreshing}

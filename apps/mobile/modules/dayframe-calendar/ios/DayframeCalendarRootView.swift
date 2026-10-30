@@ -57,6 +57,13 @@ struct DayframeCalendarRootView: View {
         .minimumScaleFactor(0.7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.isHeader)
+      DayframeCalendarTodayPill(
+        isOnToday: presentation.selectedDayKey == presentation.todayKey,
+        theme: theme
+      ) {
+        playSelectionHaptic()
+        actions.pressToday()
+      }
       viewMenu(presentation: presentation, theme: theme)
     }
     .dynamicTypeSize(.xSmall ... .xxxLarge)
@@ -177,6 +184,35 @@ struct DayframeCalendarRootView: View {
       @unknown default: break
       }
     }
+  }
+}
+
+/// The compact pill (`compactPill.ts`; owner rule, 28 Oct 2026) in SwiftUI, because the header is: 32 points
+/// tall, 16 of side padding, 14-point bold, in a 44-point target. It has one job and one place, so it never
+/// moves or changes, in Day or List; the app decides what a tap does.
+private struct DayframeCalendarTodayPill: View {
+  let isOnToday: Bool
+  let theme: DayframeCalendarTheme
+  let action: () -> Void
+  @ScaledMetric(relativeTo: .subheadline) private var textSize: CGFloat = 14
+
+  var body: some View {
+    Button(action: action) {
+      Text("Today")
+        .font(.system(size: textSize, weight: .bold))
+        .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 16)
+        .frame(minHeight: 32)
+        .background(Capsule().fill(Color(dayframeCSS: theme.surface)))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Today")
+    .accessibilityHint(isOnToday ? "Scroll to now" : "Go to today")
+    .accessibilityIdentifier("calendar-today-pill")
   }
 }
 

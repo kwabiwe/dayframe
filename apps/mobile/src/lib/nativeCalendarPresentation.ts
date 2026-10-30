@@ -166,6 +166,8 @@ export type NativeCalendarPresentation = {
   reduceMotion: boolean;
   reduceTransparency: boolean;
   refreshing: boolean;
+  /** A new number scrolls the Grid to now, with Swift's own scroll owner (the Today pill on today). */
+  scrollToNowRequest?: number;
   selectedDayKey: string;
   selectedDayTitle: string;
   theme: NativeCalendarTheme;
