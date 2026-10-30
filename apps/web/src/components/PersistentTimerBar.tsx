@@ -619,7 +619,8 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
     const outcome = await updateActiveStartTime(startedAt);
     if (outcome.ok) {
       setStartEditorOpen(false);
-      window.requestAnimationFrame(() => startEditorTriggerRef.current?.focus());
+      // Focus goes back to the clock without a ring box until the keyboard is used (owner, 30 Oct 2026).
+      window.requestAnimationFrame(() => focusQuietly(startEditorTriggerRef.current));
     } else setStartEditError(outcome.error);
   }
 
@@ -889,7 +890,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                     disabled={isTimerBusy}
                     onClick={() => {
                       setStartEditorOpen(false);
-                      startEditorTriggerRef.current?.focus();
+                      focusQuietly(startEditorTriggerRef.current);
                     }}
                     type="button"
                   >

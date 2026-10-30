@@ -15331,7 +15331,8 @@ button.timeline-location-hit:focus-visible {
   display: grid;
   grid-template-columns: var(--df-cmd-slot) auto;
   grid-auto-flow: column;
-  align-items: baseline;
+  /* The label, the digits and Play/Stop share the bar's centre line (owner, 30 Oct 2026). */
+  align-items: center;
   justify-items: start;
   column-gap: 8px;
 }
@@ -15617,10 +15618,6 @@ button.timeline-location-hit:focus-visible {
   column-gap: 6px;
 }
 
-:root .df-cal-striprow .df-cal-day small {
-  align-self: center;
-}
-
 :root .df-cal-striprow .df-cal-day-total {
   display: none;
 }
@@ -15665,6 +15662,18 @@ button.timeline-location-hit:focus-visible {
 
   :root .df-cal-toolbar.is-next .df-cal-weektotal {
     justify-self: start;
+  }
+}
+
+/* A period that's loading keeps the shown one in place, dimmed, instead of adding a line (owner, 30 Oct 2026). */
+:root .timeline-view-stage.is-date-loading {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root .timeline-view-stage.is-date-loading {
+    transition: none;
   }
 }
 
@@ -15782,7 +15791,8 @@ button.timeline-location-hit:focus-visible {
 }
 
 :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day small {
-  align-self: center;
+  /* The letter and the date share one baseline (owner, 30 Oct 2026). */
+  align-self: baseline;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: var(--fw-medium);
@@ -15793,6 +15803,7 @@ button.timeline-location-hit:focus-visible {
 
 :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day b,
 :root :is(.df-cal-dayrow, .df-cal-striprow) .df-cal-day[aria-pressed="true"] b {
+  align-self: baseline;
   width: 26px;
   height: 26px;
   background: transparent;

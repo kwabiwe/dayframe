@@ -690,14 +690,16 @@ export function TimeReviewViews({
         <p
           aria-atomic="true"
           aria-live={dateLoadError ? "assertive" : "polite"}
-          className={`timeline-range-feedback${dateLoadError ? " is-error" : ""}`}
+          // Loading never adds a row (owner, 30 Oct 2026): it is announced only, and the shown period dims until the
+          // new one arrives; an error still shows.
+          className={dateLoadError ? "timeline-range-feedback is-error" : "sr-only"}
           role={dateLoadError ? "alert" : "status"}
         >
           {dateLoadError ?? "Loading period…"}
         </p>
       ) : null}
 
-      <div className="timeline-view-stage">
+      <div className={`timeline-view-stage${isDateLoading ? " is-date-loading" : ""}`}>
         {state.view === "calendar" ? (
           <CalendarReview
             calendarHoursMode={calendarHoursMode}
