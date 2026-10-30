@@ -1795,4 +1795,71 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
     XCTAssertLessThan(late.zIndex, DayframeCalendarDayLayout.momentZIndex)
   }
+
+  // The Today pill on today (scroll to now).
+
+  func testScrollToNowPutsNowAThirdDownTheViewport() {
+    // 15:00 at 72 points an hour is 1080; a third of a 600-point viewport is 200.
+    XCTAssertEqual(
+      DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 900, hourHeight: 72, viewportHeight: 600),
+      880,
+      accuracy: 0.001
+    )
+    // It follows the zoom.
+    XCTAssertEqual(
+      DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 900, hourHeight: 100, viewportHeight: 600),
+      1300,
+      accuracy: 0.001
+    )
+  }
+
+  func testScrollToNowStaysInsideTheTimeline() {
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 10, hourHeight: 72, viewportHeight: 600), 0)
+    let maximum = DayframeCalendarZoomMath.maximumContentOffset(hourHeight: 72, viewportHeight: 600)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 1439, hourHeight: 72, viewportHeight: 600), maximum)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: .nan, hourHeight: 72, viewportHeight: 600), 0)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: .infinity, hourHeight: 72, viewportHeight: 600), 0)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 720, hourHeight: 72, viewportHeight: 5_000), 0)
+  }
+
+  func testScrollToNowReadsTheMinuteInTheCalendarsZone() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/London"))
+    // 2026-10-22 16:05:30 UTC is 17:05:30 in London (BST).
+    let milliseconds = 1792685130000.0
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: milliseconds, calendar: calendar), 1025.5, accuracy: 0.001)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: .nan, calendar: calendar), 0)
+  }
+
+  func testScrollToNowActsOnlyOnTodayWithNoFingerOnTheTimeline() {
+    let can = { (selected: String, today: String, viewport: Double, finger: Bool) in
+      DayframeCalendarScrollToNowMath.canScroll(
+        selectedDayKey: selected,
+        todayKey: today,
+        viewportHeight: viewport,
+        fingerOnTimeline: finger
+      )
+    }
+    XCTAssertTrue(can("2026-10-30", "2026-10-30", 600, false))
+    XCTAssertFalse(can("2026-10-29", "2026-10-30", 600, false))
+    XCTAssertFalse(can("2026-10-30", "2026-10-30", 600, true))
+    XCTAssertFalse(can("2026-10-30", "2026-10-30", 0, false))
+    XCTAssertFalse(can("", "", 600, false))
+  }
+
+  func testScrollToNowRequestIsOptionalInTheModel() throws {
+    // An older bundle's model has no such key.
+    let olderData = try JSONEncoder().encode(DayframeCalendarPresentationRecord())
+    XCTAssertFalse(String(decoding: olderData, as: UTF8.self).contains("scrollToNowRequest"))
+    let older = try JSONDecoder().decode(DayframeCalendarPresentationRecord.self, from: olderData)
+    XCTAssertNil(older.scrollToNowRequest)
+
+    var next = DayframeCalendarPresentationRecord()
+    next.scrollToNowRequest = 3
+    let current = try JSONDecoder().decode(
+      DayframeCalendarPresentationRecord.self,
+      from: JSONEncoder().encode(next)
+    )
+    XCTAssertEqual(current.scrollToNowRequest, 3)
+  }
 }

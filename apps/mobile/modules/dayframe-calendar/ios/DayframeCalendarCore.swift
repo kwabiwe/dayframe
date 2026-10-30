@@ -753,6 +753,46 @@ public struct DayframeCalendarPinchStart: Equatable {
   }
 }
 
+/// The header's Today pill, tapped on today: where the Grid's one scroll owner goes, and when it goes.
+/// JS sends a new request number; only the scroll coordinator moves the timeline.
+public enum DayframeCalendarScrollToNowMath {
+  /// Now sits a third of the way down the viewport, so the coming hours are the larger part of the view.
+  public static let viewportAnchor = 1.0 / 3.0
+
+  public static func minuteOfDay(milliseconds: Double, calendar: Calendar = .current) -> Double {
+    guard milliseconds.isFinite else { return 0 }
+    let components = calendar.dateComponents(
+      [.hour, .minute, .second],
+      from: Date(timeIntervalSince1970: milliseconds / 1000)
+    )
+    return Double(components.hour ?? 0) * 60
+      + Double(components.minute ?? 0)
+      + Double(components.second ?? 0) / 60
+  }
+
+  public static func contentOffset(minuteOfDay: Double, hourHeight: Double, viewportHeight: Double) -> Double {
+    let minute = min(24 * 60, max(0, minuteOfDay.isFinite ? minuteOfDay : 0))
+    let viewport = max(0, viewportHeight.isFinite ? viewportHeight : 0)
+    let nowY = minute / 60 * DayframeCalendarZoomMath.clampHourHeight(hourHeight)
+    return DayframeCalendarZoomMath.clampContentOffset(
+      nowY - viewport * viewportAnchor,
+      hourHeight: hourHeight,
+      viewportHeight: viewport
+    )
+  }
+
+  /// A request acts only on today, with a viewport to move, and never over a finger that owns the
+  /// timeline (a drag, a pinch or a create drag). A finger arriving later stops the scroll itself.
+  public static func canScroll(
+    selectedDayKey: String,
+    todayKey: String,
+    viewportHeight: Double,
+    fingerOnTimeline: Bool
+  ) -> Bool {
+    !selectedDayKey.isEmpty && selectedDayKey == todayKey && viewportHeight > 0 && !fingerOnTimeline
+  }
+}
+
 public enum DayframeCalendarZoomMath {
   public static func clampHourHeight(_ value: Double) -> Double {
     min(

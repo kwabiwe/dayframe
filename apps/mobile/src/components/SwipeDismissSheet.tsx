@@ -1,6 +1,8 @@
 import {
+  createContext,
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -25,7 +27,11 @@ import {
 } from "react-native-gesture-handler";
 import Reanimated, {
   cancelAnimation,
+  measure,
   runOnJS,
+  type AnimatedRef,
+  type SharedValue,
+  useAnimatedRef,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -40,7 +46,8 @@ import {
   shouldDismissSwipe,
   swipeSheetExitPlan,
   swipeSheetPresentationPlan,
-  SWIPE_DISMISS_MOTION
+  SWIPE_DISMISS_MOTION,
+  touchStartsInRegion
 } from "@/lib/swipeDismissMotion";
 
 const REDUCE_MOTION_FADE_MS = 70;
@@ -61,6 +68,32 @@ const EXIT_SPRING = {
 export type SwipeDismissSheetHandle = {
   dismiss: () => void;
 };
+
+/**
+ * The one exclusion from the sheet's drag: the view drawn with `ref` (a time wheel's panel) keeps every swipe that
+ * starts inside it, so the wheel turns and the sheet stays. The pan measures it live on the UI thread when a finger
+ * lands; if the finger is inside, it never enters its dragging state, the only state that can move or dismiss the
+ * sheet. `mounted` says the ref is attached (a sheet has one wheel at most). See `useSheetGestureExclusion`.
+ */
+type SheetGestureExclusion = {
+  mounted: SharedValue<boolean>;
+  ref: AnimatedRef<View>;
+};
+
+const SheetGestureExclusionContext = createContext<SheetGestureExclusion | null>(null);
+
+/** Keeps swipes inside the returned ref's view away from the enclosing sheet's drag. Outside a sheet it does nothing. */
+export function useSheetGestureExclusion() {
+  const exclusion = useContext(SheetGestureExclusionContext);
+  useEffect(() => {
+    if (!exclusion) return;
+    exclusion.mounted.value = true;
+    return () => {
+      exclusion.mounted.value = false;
+    };
+  }, [exclusion]);
+  return exclusion?.ref;
+}
 
 type SwipeDismissSheetProps = {
   accessibilityLabel?: string;
@@ -127,6 +160,13 @@ function SwipeDismissSheet({
   const presence = useSharedValue(0);
   const gestureState = useSharedValue<"idle" | "dragging" | "settling" | "dismissing">("idle");
   const dismissCommitted = useSharedValue(false);
+  const exclusionRef = useAnimatedRef<View>();
+  const exclusionMounted = useSharedValue(false);
+  const startedInExclusion = useSharedValue(false);
+  const gestureExclusion = useMemo(
+    () => ({ mounted: exclusionMounted, ref: exclusionRef }),
+    [exclusionMounted, exclusionRef]
+  );
   const onDismissRef = useRef(onDismiss);
   const onDismissStartRef = useRef(onDismissStart);
   const onGestureSettledRef = useRef(onGestureSettled);
@@ -446,11 +486,15 @@ function SwipeDismissSheet({
       -SWIPE_DISMISS_MOTION.horizontalFailureOffset,
       SWIPE_DISMISS_MOTION.horizontalFailureOffset
     ])
+    // A finger landing in a time wheel: this pan never starts a drag, so it can't move or dismiss the sheet.
+    .onBegin((event) => {
+      startedInExclusion.value = exclusionMounted.value && touchStartsInRegion(event, measure(exclusionRef));
+    })
     // Only claim the interaction after the pan crosses activeOffsetY. Using
     // onBegin here would dismiss the keyboard for ordinary taps on fields,
     // Suggestions, and quick actions before those controls can respond.
     .onStart(() => {
-      if (dismissCommitted.value) return;
+      if (dismissCommitted.value || startedInExclusion.value) return;
       cancelAnimation(translationY);
       cancelAnimation(presence);
       gestureOriginY.value = translationY.value;
@@ -532,6 +576,9 @@ function SwipeDismissSheet({
     dismissGestureRef,
     dismissCommitted,
     commitDismiss,
+    exclusionMounted,
+    exclusionRef,
+    startedInExclusion,
     gestureOriginY,
     gestureTravelY,
     gestureState,
@@ -601,7 +648,9 @@ function SwipeDismissSheet({
       testID={testID}
     >
       {dismissHandle}
-      {children}
+      <SheetGestureExclusionContext.Provider value={gestureExclusion}>
+        {children}
+      </SheetGestureExclusionContext.Provider>
     </Reanimated.View>
   );
 

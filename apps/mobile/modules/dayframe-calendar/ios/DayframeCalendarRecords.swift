@@ -143,6 +143,9 @@ struct DayframeCalendarPresentationRecord: Codable {
   var reduceMotion = false
   var reduceTransparency = false
   var refreshing = false
+  /// A new number from the app scrolls the Grid to now (the Today pill on today). Absent from an
+  /// older bundle (never scrolls).
+  var scrollToNowRequest: Int?
   var selectedDayKey = ""
   var selectedDayTitle = "Calendar"
   var theme = DayframeCalendarThemeRecord()

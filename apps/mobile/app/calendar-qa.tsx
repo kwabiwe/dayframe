@@ -4,6 +4,7 @@ import { CalendarListView } from "@/components/calendar/CalendarListView";
 import { LocationCorrectionSheet, type LocationCorrectionTarget } from "@/components/calendar/LocationCorrectionSheet";
 import { useEffect, useMemo, useState } from "react";
 import { LogBox, ScrollView, View } from "react-native";
+import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
@@ -247,6 +248,10 @@ export default function CalendarQaRoute() {
   const dense = params.day === "dense";
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  // The week strip and the Today pill work here, as on the real Calendar, over the fixture's fixed "now".
+  const [selectedDay, setSelectedDay] = useState(dense ? DENSE_DAY : DAY);
+  const [scrollToNow, setScrollToNow] = useState(0);
+  const [listScrollToNow, setListScrollToNow] = useState(0);
   // Screenshots of the harness carry no development toasts; only while it is open (Codex r1 on #570).
   useEffect(() => {
     if (!__DEV__) return;
@@ -263,16 +268,22 @@ export default function CalendarQaRoute() {
     reduceMotion: false,
     reduceTransparency: false,
     refreshing: false,
-    selectedDayKey: dense ? DENSE_DAY : DAY,
+    selectedDayKey: selectedDay,
     theme,
     transitionDirection: 1
-  }).model, [clockFormat, dense, now, theme]);
+  }).model, [clockFormat, dense, now, selectedDay, theme]);
   // Steps 16–17: the Grid's Places lane and trip leg strip over the synthetic Thursday.
   const shown = useMemo(() => {
-    const base = { ...model, layout };
+    const base = { ...model, layout, scrollToNowRequest: scrollToNow };
     return !dense && layout === "grid"
       ? withPlacesAndLegs(base, timeline, QA_CHECKS, (ms) => new Date(ms).toTimeString().slice(0, 5)) : base;
-  }, [dense, layout, model]);
+  }, [dense, layout, model, scrollToNow]);
+  const pressToday = () => {
+    const action = calendarTodayPressAction({ layout, selectedDayKey: selectedDay, todayKey: model.todayKey });
+    if (action === "go-to-today") setSelectedDay(model.todayKey);
+    if (action === "scroll-grid-to-now") setScrollToNow((count) => count + 1);
+    if (action === "scroll-list-to-now") setListScrollToNow((count) => count + 1);
+  };
   // `?sheet=place|trip|leg` opens a correction sheet at once; a place or trip row (or `?check=unknown|trip`) opens
   // it too, its "?" asked at the top (owner, 28 Oct 2026).
   const [sheet, setSheet] = useState<{ name: string; asks: boolean } | null>(params.sheet ? { name: params.sheet, asks: params.asks === "1" } : null);
@@ -306,6 +317,8 @@ export default function CalendarQaRoute() {
           model={shown}
           onChangeLayout={(event) => setLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
           onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
+          onPressToday={pressToday}
+          onSelectDay={(event) => setSelectedDay(event.nativeEvent.dayKey)}
           style={layout === "list" && headerHeight ? { height: headerHeight } : { flex: 1 }}
         />
         {layout === "list" ? (
@@ -317,7 +330,7 @@ export default function CalendarQaRoute() {
               openCheckRequest={params.check && params.check !== "1" ? { id: `qa-check-${params.check}`, request: 1 } : null}
               checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
               onAnswerCheck={() => undefined} onOpenCheck={(id) => { if (id === "qa-check-trip") setSheet({ name: "trip", asks: true }); }}
-              onOpenPlace={(place) => { if (place.id === "qa-unknown") setSheet({ name: "place", asks: true }); }} scrollToFirstCheck={params.check === "1" ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+              onOpenPlace={(place) => { if (place.id === "qa-unknown") setSheet({ name: "place", asks: true }); }} scrollToFirstCheck={params.check === "1" ? 1 : undefined} scrollToNowRequest={listScrollToNow} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={dense ? null : timeline} />
           </View>

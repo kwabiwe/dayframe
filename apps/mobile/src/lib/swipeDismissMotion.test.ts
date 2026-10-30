@@ -8,7 +8,8 @@ import {
   projectedSwipeEndpoint,
   shouldDismissSwipe,
   swipeSheetExitPlan,
-  swipeSheetPresentationPlan
+  swipeSheetPresentationPlan,
+  touchStartsInRegion
 } from "./swipeDismissMotion";
 
 const BASE_RELEASE = {
@@ -344,5 +345,28 @@ describe("presentation lifecycle", () => {
     expect(coordinator.begin(42, "slide")).toBe("start");
     expect(coordinator.complete(41)).toBe("stale");
     expect(coordinator.complete(42)).toBe("accepted");
+  });
+});
+
+describe("touchStartsInRegion (a swipe that starts in a time wheel)", () => {
+  const wheel = { pageX: 16, pageY: 400, width: 361, height: 200 };
+  const touch = (absoluteX: number, absoluteY: number) => ({ absoluteX, absoluteY });
+
+  it("keeps a touch that lands inside the region, edges included", () => {
+    expect(touchStartsInRegion(touch(200, 500), wheel)).toBe(true);
+    expect(touchStartsInRegion(touch(16, 400), wheel)).toBe(true);
+    expect(touchStartsInRegion(touch(377, 600), wheel)).toBe(true);
+  });
+
+  it("leaves a touch outside it to the sheet", () => {
+    expect(touchStartsInRegion(touch(200, 399), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(200, 601), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(15, 500), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(378, 500), wheel)).toBe(false);
+  });
+
+  it("leaves the sheet draggable when there is nothing to measure", () => {
+    expect(touchStartsInRegion(undefined, wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(200, 500), null)).toBe(false);
   });
 });

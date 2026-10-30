@@ -34,6 +34,7 @@ import { mobileTextProps } from "../../lib/mobileTypography";
 import { ROW_BLOCK, rowBlockHeight } from "../../lib/todayBlockRows";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { nowRowKey } from "../../lib/calendarTodayPress";
 
 /**
  * Calendar › List on the iPhone (location v4 step 9, mock-up #ios-list, placement A): the day's blocks
@@ -88,6 +89,7 @@ export function CalendarListView({
   onOpenTripLeg,
   onScrolledToFirstCheck,
   scrollToFirstCheck,
+  scrollToNowRequest = 0,
   onRefresh,
   reduceMotion,
   refreshing,
@@ -165,6 +167,8 @@ export function CalendarListView({
   scrollToFirstCheck?: number;
   /** The request was used, so a List shown again later does not jump. */
   onScrolledToFirstCheck?: () => void;
+  /** A new number scrolls to the row for now (the header's Today pill on today). A List mounting later ignores it. */
+  scrollToNowRequest?: number;
   onRefresh: () => void;
   reduceMotion: boolean;
   refreshing: boolean;
@@ -286,6 +290,19 @@ export function CalendarListView({
   useEffect(() => {
     if (scrollToFirstCheck) pendingScroll.current = "first";
   }, [scrollToFirstCheck]);
+  // The Today pill on today: the same one scroll owner and row measurement as a "?" (a drag stops it; a repeat
+  // retargets; at once with Reduce Motion). A day with no rows has nothing to reach, so it goes to the top.
+  const handledNowRequest = useRef(scrollToNowRequest);
+  useEffect(() => {
+    if (!scrollToNowRequest || scrollToNowRequest === handledNowRequest.current) return;
+    handledNowRequest.current = scrollToNowRequest;
+    const key = nowRowKey(items.filter((item) => rowViews.current.has(item.key)), nowMs);
+    pendingScroll.current = key;
+    if (key) tryScroll();
+    else scroller.current?.scrollTo({ y: 0, animated: !reduceMotion });
+    // Once per request, with the rows and time of the render it arrived in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToNowRequest]);
   // A question belongs to the day it was opened on: another day closes it, even for a "?" both days show
   // (overnight sleep), before any request for the new day opens one (Codex r4 on #582).
   const [openDayStartMs, setOpenDayStartMs] = useState(dayStartMs);

@@ -776,6 +776,38 @@ describe("CalendarListView (location v4 step 9)", () => {
       expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 126, animated: false });
     });
 
+    // The header's Today pill on today (owner, 30 Oct 2026).
+    it("scrolls to the row for now, once per request, and never on mounting with an old request", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      const shown = (request: number, extra: Partial<Parameters<typeof CalendarListView>[0]> = {}) => (
+        <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h"
+          nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline}
+          scrollToNowRequest={request} {...extra} />
+      );
+      const tree = mount({ scrollToNowRequest: 4 });
+      expect(scrollTo).not.toHaveBeenCalled();
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 376, animated: true });
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      // A repeat goes again, and Reduce Motion jumps.
+      act(() => { tree.update(shown(6, { reduceMotion: true })); });
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(scrollTo.mock.calls[1][0]).toMatchObject({ y: 376, animated: false });
+    });
+
+    it("goes to the top of a day with no rows", () => {
+      scrollTo.mockClear();
+      const empty = { ...timeline, items: [] } as LocationTimeline;
+      const tree = mount({ entries: [], timeline: empty, scrollToNowRequest: 0 });
+      act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="0m" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} scrollToNowRequest={1} theme={theme} timeline={empty} />); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 0 });
+    });
+
     it("does not jump when shown again with the request cleared", () => {
       scrollTo.mockClear();
       positions.set("first", 400);

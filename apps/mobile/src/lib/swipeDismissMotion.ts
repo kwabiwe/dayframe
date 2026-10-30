@@ -8,6 +8,22 @@ export const SWIPE_DISMISS_MOTION = {
   maximumDistance: 128
 } as const;
 
+/**
+ * A swipe that starts inside this region belongs to what is drawn there (a time wheel), never to the sheet.
+ * Both are in window points, the rectangle as Reanimated's `measure` reports it.
+ */
+export function touchStartsInRegion(
+  touch: { absoluteX: number; absoluteY: number } | undefined,
+  region: { pageX: number; pageY: number; width: number; height: number } | null
+) {
+  "worklet";
+  if (!touch || !region) return false;
+  return touch.absoluteX >= region.pageX
+    && touch.absoluteX <= region.pageX + region.width
+    && touch.absoluteY >= region.pageY
+    && touch.absoluteY <= region.pageY + region.height;
+}
+
 export type SwipeRelease = {
   disabled?: boolean;
   sheetHeight: number;
