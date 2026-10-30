@@ -8,7 +8,7 @@ import {
   venueStayFromEvidence
 } from "../../lib/placeSearch";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
-import { venueGuessEligible } from "../../lib/venueGuessEligibility";
+import { keepableVenue, venueGuessEligible } from "../../lib/venueGuessEligibility";
 
 /**
  * Card B part 2 (owner feedback, 25 Oct 2026): the best guess for an unnamed visit's "?" when it opens in
@@ -73,7 +73,7 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
   const ownerKey = owner ? `${owner.workspaceId}:${owner.userId}` : null;
   guessesFor(ownerKey);
   const inFront = useAppForeground();
-  const eligible = venueGuessEligible(item, outing);
+  const eligible = venueGuessEligible(item);
   const proposal = item ? proposalOf(item) : "";
   const key = eligible && item && ownerKey ? `${ownerKey}:${item.id}:${proposal}` : null;
   const [found, setFound] = useState<{ key: string; venue: ReviewAnswerVenue | null } | null>(null);
@@ -156,8 +156,8 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
   }, [key]);
 
   if (!key) return { venue: null, searching: false, release };
-  if (guesses.has(key)) return { venue: guesses.get(key) ?? null, searching: false, release };
-  if (found?.key === key) return { venue: found.venue, searching: false, release };
+  if (guesses.has(key)) return { venue: keepableVenue(guesses.get(key), outing), searching: false, release };
+  if (found?.key === key) return { venue: keepableVenue(found.venue, outing), searching: false, release };
   return { venue: null, searching: searchable, release };
 }
 

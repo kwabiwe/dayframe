@@ -1,6 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
+import { currentMobileAccountEpoch } from "../../lib/mobileAccount";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -90,11 +91,12 @@ const outing = (stayStart: string | null = "2026-10-17T10:10:00.000Z") => [
 
 type Hook = ReturnType<typeof useCalendarCheckAnswers>;
 const NONE: ReadonlySet<string> = new Set();
+const waitingHiddenNow = { current: { ids: new Set<string>() as ReadonlySet<string>, segments: new Set<string>() as ReadonlySet<string> } };
 function mount(data: MobileBootstrap) {
   const result: { current: Hook } = { current: null as unknown as Hook };
   let props = { value: data, decided: NONE, owner: "owner-a" as string | null, states: NONE };
   function Harness({ value, decided, owner, states }: typeof props) {
-    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states });
+    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states, waitingHidden: waitingHiddenNow });
     return null;
   }
   let tree!: ReturnType<typeof create>;
@@ -231,8 +233,124 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
     });
 
-    it("refuses Yes to a guessed venue on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+    it("queues Yes to a guess on an outing's stay as confirm_outing with its venue; Not now and Undo carry none (#642)", async () => {
       const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
+        store.enqueueReviewMutation.mockClear();
+        const { result } = mount(items);
+        await act(async () => { result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1" }); });
+        expect(result.current.held?.itemId).toBe("stay");
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: ["there", "back"],
+          edit: { categoryId: "cat-1" }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } });
+        store.enqueueReviewMutation.mockClear();
+        const no = mount(items);
+        await act(async () => { no.result.current.answer("stay", false, venue); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: ["there", "back"] });
+        store.enqueueReviewMutation.mockClear();
+        const undone = mount(items);
+        await act(async () => { undone.result.current.answer("stay", true, venue); });
+        act(() => { undone.result.current.undo(); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      }
+    });
+
+    it("keeps the venue on an outing's waiting record, with its trips (#642)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = outing().map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      gate.waitForItemCorrections.mockClear();
+      const { result } = mount(withAccount(withSegment));
+      await act(async () => { result.current.answer("stay", true, venue); });
+      expect(gate.waitForItemCorrections.mock.calls[0][1]).toMatchObject({ action: { kind: "answer", reviewItemId: "stay", logged: true, venue, outingMemberIds: ["there", "back"] } });
+      gate.waitForItemCorrections.mockClear();
+      const no = mount(withAccount(withSegment));
+      await act(async () => { no.result.current.answer("stay", false, venue); });
+      expect((gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown> }).action).not.toHaveProperty("venue");
+    });
+
+    describe("an outing answered from the edited sheet (Codex r1 on #643)", () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const data = () => withAccount(outing().map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item));
+      const input = (logged: boolean, withVenue = false) => ({ itemId: "stay", segmentId: "segment-stay", logged, newIds: ["cid-1"], generation: currentMobileAccountEpoch(),
+        venue: withVenue ? venue : null, logAsCategoryId: null, owner: { userId: "u", workspaceId: "w" }, ownerKey: "owner-a" });
+      const held = async (result: { current: Hook }, logged: boolean, withVenue = false) => {
+        gate.waitForItemCorrections.mockClear();
+        gate.waitForItemCorrections.mockResolvedValueOnce({ id: "client-id" });
+        let waiting_!: Awaited<ReturnType<Hook["answerAfterCorrections"]>>;
+        await act(async () => { waiting_ = await result.current.answerAfterCorrections(input(logged, withVenue)); });
+        return waiting_;
+      };
+
+      it("keeps the trips with Not now, with no venue, and with Yes, with its venue", async () => {
+        const { result } = mount(data());
+        const no = await held(result, false);
+        const action = (gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown>; newIds: string[] }).action;
+        expect(action).toMatchObject({ kind: "answer", reviewItemId: "stay", logged: false, outingMemberIds: ["there", "back"] });
+        expect(action).not.toHaveProperty("venue");
+        act(() => { no.start(); });
+        expect(result.current.held?.itemId).toBe("stay");
+        expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
+        act(() => { result.current.undo(); });
+        const { result: other } = mount(data());
+        await held(other, true, true);
+        expect(gate.waitForItemCorrections.mock.calls[0][1]).toMatchObject({ action: { logged: true, venue, outingMemberIds: ["there", "back"] } });
+      });
+
+      it("drops the answer when a captured trip's proposal or the membership changes during registration", async () => {
+        const moved = (items: MobileBootstrap) => ({ ...items, reviewItems: items.reviewItems.map((item) => item.id === "there"
+          ? { ...item, suggestedStartedAt: "2026-10-17T09:30:00.000Z" } : item) });
+        const gone = (items: MobileBootstrap) => ({ ...items, reviewItems: items.reviewItems.filter((item) => item.id !== "back") });
+        for (const change of [moved, gone]) {
+          waiting.cancelAnswerAfterCorrections.mockClear();
+          store.enqueueReviewMutation.mockClear();
+          const { result, rerender } = mount(data());
+          const answer = await held(result, true, true);
+          rerender(change(data()));
+          act(() => { answer.start(); });
+          expect(result.current.held).toBeNull();
+          expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+          await act(async () => { vi.advanceTimersByTime(10_000); });
+          expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+        }
+      });
+
+      it("leaves out a trip another waiting answer hides, by id or segment, and still starts once its own record hides the stay (Codex r2 on #643)", async () => {
+        const withTripSegment = data();
+        withTripSegment.reviewItems = withTripSegment.reviewItems.map((item) => item.id === "there"
+          ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-there" } } : item);
+        for (const hidden of [{ ids: new Set(["there"]), segments: new Set<string>() }, { ids: new Set<string>(), segments: new Set(["segment-there"]) }]) {
+          waitingHiddenNow.current = hidden;
+          const { result } = mount(withTripSegment);
+          const answer = await held(result, true, true);
+          const call = gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown>; itemId: string };
+          expect(call.action).toMatchObject({ outingMemberIds: ["back"], venue });
+          // Its own record now hides the stay and its other trip: the set captured at the tap still stands.
+          waitingHiddenNow.current = { ids: new Set(["there", "stay", "back"]), segments: new Set(["segment-stay"]) };
+          act(() => { answer.start(); });
+          expect(result.current.held?.itemId).toBe("stay");
+          act(() => { result.current.undo(); });
+          waitingHiddenNow.current = { ids: new Set(), segments: new Set() };
+        }
+      });
+
+      it("leaves a plain place's answer alone, as its corrections reshape it", async () => {
+        const { result } = mount(withAccount([suggestion("a", { rawPayload: { clientSegmentId: "segment-a" } } as never)]));
+        gate.waitForItemCorrections.mockClear();
+        gate.waitForItemCorrections.mockResolvedValueOnce({ id: "client-id" });
+        await act(async () => { await result.current.answerAfterCorrections({ ...input(false), itemId: "a", segmentId: "segment-a" }); });
+        expect((gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown> }).action).not.toHaveProperty("outingMemberIds");
+      });
+    });
+
+    it("refuses Yes to a guess with no Apple Place ID on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: null };
       // Through the gate (the stay has its segment) and without it: refused, nothing held or saved.
       const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
         ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);

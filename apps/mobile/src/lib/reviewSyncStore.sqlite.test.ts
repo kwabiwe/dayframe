@@ -585,6 +585,22 @@ describe("Review real SQLite transactions", () => {
     await store.cacheReviewPresentation({ owner, response: terminalPresentation(input.bootstrap, ids, syntheticId(95)) });
     expect(count("review_mutation_outbox")).toBe(0);
   });
+  it("replays a venue outing unchanged after a lost reply, and a conflict stops it as any answer's does (#642)", async () => {
+    const input = outingInput();
+    const mutation = { ...input.mutation, action: "confirm_outing" as const, venue: { name: "Synthetic Cafe", applePlaceId: "ISYNTHETICVENUE1" } };
+    await store.enqueueReviewMutation({ ...input, mutation });
+    mocks.fetch.mockRejectedValueOnce(new TypeError("Network request failed"));
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).not.toBe("acknowledged");
+    const firstBody = mocks.fetch.mock.calls.at(-1)![1].body;
+    expect(JSON.stringify(JSON.parse(firstBody))).toContain("ISYNTHETICVENUE1");
+    db.prepare("update review_mutation_outbox set next_attempt_at = 0").run();
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ error: "This outing changed.", code: "resolution_conflict" }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch.mock.calls.at(-1)![1].body).toBe(firstBody);
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
+  });
+
   it("a venue outing's retry hands over with no block for its Stay, never without its trips' (Codex r1 on #642)", async () => {
     const input = outingInput();
     const mutation = { ...input.mutation, action: "confirm_outing" as const, venue: { name: "Synthetic Cafe", applePlaceId: "ISYNTHETICVENUE1" } };

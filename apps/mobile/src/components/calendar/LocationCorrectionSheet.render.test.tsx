@@ -820,7 +820,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(onLog).not.toHaveBeenCalled();
   });
 
-  it("applies the sheet's own Nearby guess only to an unnamed visit, never over a name or to an outing (Codex r2, r5 on #620)", async () => {
+  it("applies the sheet's own Nearby guess only to an unnamed visit, never over a name (Codex r5 on #620), and to an outing's stay only with its Place ID (#642)", async () => {
     const { nearbyProposalKey } = await import("../../lib/nearbyProposal");
     const evidence = { segment: { kind: "stay", startedAt: place.startedAt, stoppedAt: place.stoppedAt, evidenceCount: 3 }, evidenceExpired: false,
       map: { acceptedSamples: [], centre: { type: "Point", coordinates: [20, 10] }, nearbySavedPlaces: [], gaps: [] } } as never;
@@ -836,10 +836,14 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     nearbyGuesses(named);
     expect(questionText(named)).toContain("Visited Bread run?");
     expect(questionText(named)).not.toContain("Apple Bakery");
-    // An outing's stay (not guessable either): no guess.
-    const outing = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: false } });
+    // An outing's stay takes it with an Apple Place ID (#642), and shows no guess without one.
+    const outing = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: true, outing: true } });
     nearbyGuesses(outing);
-    expect(questionText(outing)).not.toContain("Visited");
+    expect(questionText(outing)).toContain("Visited Apple Bakery?");
+    const noId = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: true, outing: true } });
+    const list = noId.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
+    act(() => { list.props.onGuess({ ...venue, applePlaceId: null }, nearbyProposalKey(list.props.centre, evidence)); });
+    expect(questionText(noId)).not.toContain("Visited");
     // An unnamed visit takes it.
     const unnamed = sheetWith({ evidence, onSavePlace: vi.fn(async () => undefined), question: { ...ask, guessable: true } });
     nearbyGuesses(unnamed);

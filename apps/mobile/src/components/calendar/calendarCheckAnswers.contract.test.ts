@@ -55,19 +55,20 @@ describe("Calendar › List answers and Today's toasts (Codex r2 on #582)", () =
 describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #610)", () => {
   it("keeps a sheet answer with changes on the phone before its corrections, and hides it while it waits", () => {
     // Every sheet answer, with or without new changes, through the one shared registration (Codex r6 on #610).
-    expect(dashboard).toContain("const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,");
+    const answers = source("./useCalendarCheckAnswers.ts");
+    expect(answers).toContain("const record = await waitForItemCorrections(owner, { id, itemId: input.segmentId, newIds: input.newIds,");
     // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
     // Yes to a near guess carries its venue (PRD D23); otherwise the List's own guess, as before.
     expect(dashboard).toContain("onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
     // An answer after the sheet's changes keeps its guessed venue, and a Logs as pick with it (Codex r1 on #620).
-    expect(dashboard).toContain("action: { kind: \"answer\", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });");
+    expect(answers).toContain("action: { kind: \"answer\", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId } : {}),");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");
     expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     // Started through the store's one completion path (Codex r14 on #610).
-    expect(dashboard).toContain("checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);");
+    expect(answers).toContain("start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
     expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
@@ -97,7 +98,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };");
+    expect(hook).toContain("return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
     expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
     expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");

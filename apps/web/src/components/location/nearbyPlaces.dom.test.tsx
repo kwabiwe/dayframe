@@ -77,7 +77,8 @@ describe("NearbyPlaces", () => {
     expect(screen.queryByText("Looking…")).toBeNull();
     expect(onSearching).toHaveBeenLastCalledWith(true);
     await screen.findByText("Example Library");
-    expect(onSearching).toHaveBeenLastCalledWith(false);
+    // `onSearching` is a passive effect: it runs a task after the commit that draws the row, so wait for it.
+    await waitFor(() => expect(onSearching).toHaveBeenLastCalledWith(false));
     rerender(view("library hall"));
     expect(screen.getByText("Example Library")).not.toBeNull();
     expect(onSearching).toHaveBeenLastCalledWith(true);

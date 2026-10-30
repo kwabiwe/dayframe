@@ -38,8 +38,14 @@ const accountOf = (data: MobileBootstrap | null | undefined): MobileAccountOwner
 /** What VoiceOver says an answer did: a block that ran into a trip is ended or kept; anything else logged or skipped. */
 const answerVerb = (item: MobileReviewItem, logged: boolean) => timerTripClashQuestion(item)
   ? logged ? "Ended" : "Kept" : logged ? "Logged" : "Skipped";
-/** An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). */
-type AnswerSet = { proposal: string; members: ReadonlyMap<string, string> };
+/**
+ * An answer's set as tapped: its proposal, and an outing's members' proposals by id (Codex r9 on #610). `excluded`:
+ * "?" another waiting answer hid when it was tapped, which the List doesn't fold in. Kept with the set, because this
+ * answer's own record hides its own "?" once it is registered (Codex r2 on #643).
+ */
+type AnswerSet = { proposal: string; members: ReadonlyMap<string, string>; excluded: ReadonlySet<string> };
+/** What waiting answers hide now (`useAnswersAfterCorrections`). */
+export type WaitingAnswersHidden = { ids: ReadonlySet<string>; segments: ReadonlySet<string> };
 /** Answers saving or saved whose hand-over to the outbox's own record is pending, for one account. */
 type Saving = { owner: string | null; ids: ReadonlySet<string>; awaiting: ReadonlySet<string> };
 /** Copies brought back (Undo, a failed or refused save) for suggestions the loaded data no longer lists. */
@@ -108,7 +114,7 @@ export function calendarCheckAnswerable(item: MobileReviewItem, syncStateIds: Re
  * restored). Backgrounding the app saves a held answer at once, as in Review; so does the Dashboard going
  * away. VoiceOver hears the answer with its Undo, Undo's return, and the outcome, as on the deck.
  */
-export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syncStateIds }: {
+export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syncStateIds, waitingHidden }: {
   /** The Calendar's bootstrap (its Review items included): what an answer is checked against and saved with. */
   data: MobileBootstrap | null;
   /** Suggestions already decided on this phone (the outbox's own record, read again on every Review sync). */
@@ -117,6 +123,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   ownerKey: string | null;
   /** Suggestions with a waiting or rejected change of their own, which never fold into an outing. */
   syncStateIds: ReadonlySet<string>;
+  /** What waiting answers hide, read at a tap. A ref: those answers' owner is built from this hook's own result. */
+  waitingHidden?: { current: WaitingAnswersHidden };
 }) {
   const [held, setHeld] = useState<HeldAnswer | null>(null);
   const [saving, setSaving] = useState<Saving | null>(null);
@@ -417,12 +425,12 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // An answer after corrections is the "?" alone: its corrections reshape it, so an outing is not folded in.
     // A gated outing (`outing`) keeps its trips: its record waits for theirs too (Codex r10 on #610).
     const members = options.afterCorrections && !options.outing ? []
-      : calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
+      : calendarCheckOutings(open.filter((candidate) => !options.expected?.excluded.has(candidate.id)), syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return false;
-    // An outing has no way to keep a guessed venue (`confirm_outing` takes no name or Place ID), so Yes to a guess is
+    // An outing keeps a guessed venue only with its Apple Place ID (`confirm_outing`, #642), so Yes to one without is
     // refused for one rather than saved without it (Codex r2 on #620); neither the Calendar nor the sheet guesses one.
-    if (logged && venue && members.length) return false;
+    if (logged && venue && members.length && !venue.applePlaceId) return false;
     // The whole answer set as tapped (Codex r9 on #610): an outing's membership and every member's proposal. An
     // answer after corrections is the "?" alone, so only its own proposal counts there.
     if (options.expected && (!options.afterCorrections || options.outing) && (members.length !== options.expected.members.size
@@ -444,7 +452,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       seconds: 0,
       proposal: options.expected?.proposal ?? reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
-      ...(logged && venue && !members.length ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {}) } : {}),
+      ...(logged && venue ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {}) } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
       ...(options.recordOwner ? { recordOwner: options.recordOwner } : {}),
       ...(quiet ? { quiet: true } : {}),
@@ -468,16 +476,19 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hold]);
   // The answer set a tap is about: its proposal and, for an outing, each member's, as holdAnswer would fold them now.
-  const answerSetOf = (listed: MobileReviewItem): AnswerSet => {
+  const answerSetOf = (listed: MobileReviewItem, fixedExcluded?: ReadonlySet<string>): AnswerSet => {
+    const hidden = waitingHidden?.current;
+    const excluded = fixedExcluded ?? new Set((shownRef.current?.reviewItems ?? []).filter((candidate) => candidate.id !== listed.id && (hidden?.ids.has(candidate.id)
+      || (typeof candidate.rawPayload?.clientSegmentId === "string" && hidden?.segments.has(candidate.rawPayload.clientSegmentId)))).map((candidate) => candidate.id));
     const current = hold.current();
     const heldNow = current?.kind === "single"
       ? [current.itemId, ...((current as HeldAnswer).outing?.members.map((member) => member.itemId) ?? [])]
       : [];
     const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
-      && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id));
+      && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id) && !excluded.has(candidate.id));
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
-    return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])) };
+    return { proposal: reviewDeckProposalSignature(listed), members: new Map(members.map((member) => [member.id, reviewDeckProposalSignature(member)])), excluded };
   };
   const canAnswer = (itemId: string) => {
     if (!ownerRef.current) return false;
@@ -510,7 +521,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       if (!options.expected) return true;
       if (reviewDeckProposalSignature(listed) !== options.expected.proposal) return false;
       if (!options.outing) return true;
-      const members = answerSetOf(listed).members;
+      const members = answerSetOf(listed, options.expected.excluded).members;
       return members.size === options.expected.members.size
         && [...members].every(([id, signature]) => options.expected!.members.get(id) === signature);
     },
@@ -543,8 +554,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // refresh brings meanwhile (Codex r8 and r9 on #610).
     const expected = answerSetOf(listed);
     if (registering.current.has(itemId)) return false;
-    // Yes to a guessed venue on an outing: refused, never saved without its venue (Codex r2 on #620).
-    if (logged && venue && expected.members.size) return false;
+    // Yes to a guess with no Apple Place ID on an outing: refused, never saved without its venue (Codex r2 on #620).
+    if (logged && venue && expected.members.size && !venue.applePlaceId) return false;
     // Not answerable here now (no complete window, a waiting or rejected change of its own, already answered): refused
     // at once, never taken and dropped later (Codex r16 on #610).
     if (!canAnswer(itemId)) return false;
@@ -563,7 +574,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       ...(memberItemIds.length ? { memberItemIds } : {}),
       // A guessed venue (and a Logs as pick with it) stays with the answer, also while it waits (Codex r1 on #620).
       action: { kind: "answer", reviewItemId: itemId, logged, ...(memberIds.length ? { outingMemberIds: memberIds } : {}),
-        ...(venue && !memberIds.length ? { venue, ...logAs } : {}) } }).then((record) => {
+        ...(venue && (logged || !memberIds.length) ? { venue, ...logAs } : {}) } }).then((record) => {
       registering.current.delete(itemId);
       if (!record) {
         if (ownerRef.current === owner && generation === currentMobileAccountEpoch()) holdAnswer(itemId, logged, venue, { expected, ...logAs });
@@ -631,10 +642,46 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     recordOwner: MobileAccountOwner, generation: number) =>
     startWaitingAnswerRef.current(itemId, logged, recordId, registeredFor, recordOwner, generation), []);
   /**
+   * An answer after the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): kept on the phone before they are
+   * queued, and sent once the server has them. An outing's answer, Yes or Not now, keeps its trips: the record answers
+   * them with the stay, hides them while it waits and waits for theirs too, and the trips and proposals captured here
+   * are the ones its start checks, as an ordinary answer's are (Codex r1 on #643). A plain "?" is its own alone: its
+   * corrections reshape it. `generation`: the tap's account lifetime, from before its first await (Codex r17 on #610).
+   */
+  const answerAfterCorrections = async (input: { itemId: string; segmentId: string; logged: boolean; newIds: readonly string[]; generation: number;
+    venue: ReviewAnswerVenue | null; logAsCategoryId: string | null; owner: MobileAccountOwner; ownerKey: string }) => {
+    const { itemId, logged, generation, venue, owner, ownerKey } = input;
+    if (generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
+    // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps its
+    // question and nothing is queued (Codex r16 on #610).
+    if (!canAnswerRef.current(itemId)) throw new Error("This can't be answered here now.");
+    const data = shownRef.current;
+    const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
+    if (!listed) throw new Error("This can't be answered here now.");
+    const expected = answerSetOf(listed);
+    const memberIds = [...expected.members.keys()];
+    const memberItemIds = memberIds.flatMap((memberId) => {
+      const member = data?.reviewItems.find((candidate) => candidate.id === memberId);
+      return typeof member?.rawPayload?.clientSegmentId === "string" ? [member.rawPayload.clientSegmentId] : [];
+    });
+    const id = createReviewClientMutationId();
+    const record = await waitForItemCorrections(owner, { id, itemId: input.segmentId, newIds: input.newIds,
+      ...(memberItemIds.length ? { memberItemIds } : {}),
+      // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
+      action: { kind: "answer", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId } : {}),
+        ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } });
+    if (!record) throw new Error("Nothing to wait for.");
+    return {
+      // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
+      start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },
+      cancel: () => withdrawAnswerAfterCorrections(owner, id)
+    };
+  };
+  /**
    * Whether a "?" can be answered here now (Codex r16 on #610): listed and open, a complete window, no waiting or
    * rejected change of its own, not already answered (held or saving) or being saved on the deck. An answer to one that
    * can't is refused at once, never accepted and dropped later.
    */
   const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
-  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, startAfterCorrections, undo };
+  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
 }

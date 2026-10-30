@@ -112,8 +112,6 @@ import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
-import { withdrawAnswerAfterCorrections } from "@/lib/reviewAnswersAfterCorrections";
-import { waitForItemCorrections } from "@/lib/afterCorrections";
 import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
 import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
@@ -263,7 +261,7 @@ import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededE
 import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
 import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { settledCheckBase, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { settledCheckBase, useCalendarCheckAnswers, type WaitingAnswersHidden } from "@/components/calendar/useCalendarCheckAnswers";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
 import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
@@ -2002,13 +2000,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
     [authState, data]);
   const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
+  const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
     // The backend, workspace and user. A build without a backend identity has none: its List offers no answers
     // (Codex r8 and r9 on #582).
     ownerKey: scopedOwnerKey ?? null,
-    syncStateIds: reviewSyncStateIds
+    syncStateIds: reviewSyncStateIds,
+    waitingHidden
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
@@ -2126,6 +2126,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
     onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
+  waitingHidden.current = { ids: answersAfterCorrections.waitingIds, segments: answersAfterCorrections.waitingSegments };
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
   // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
   // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
@@ -2349,10 +2350,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
         // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
         guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
-        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule: never an outing's stay (it keeps
-        // no venue, Codex r2) nor a question already titled with a name (Codex r5 on #620).
-        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null,
-          calendarCheckBase.outings.has(check.id)),
+        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule (an outing's stay too, #642;
+        // never a question already titled with a name, Codex r5 on #620).
+        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null),
+        outing: calendarCheckBase.outings.has(check.id),
         onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
           logAsCategoryId ? { logAsCategoryId } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
@@ -2360,28 +2361,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // to the Review outbox only once the server has every one of them. A guessed venue goes with it (Codex r1 on
         // #620); otherwise the corrections say where it was.
         // `generation`: the tap's account lifetime, carried from before its first await (Codex r17 on #610).
-        answerAfter: async (yes, ids, generation, venue, logAsCategoryId) => {
-          if (!correctionOwner || !check.segmentId) throw new Error("No account.");
-          const id = createReviewClientMutationId();
-          // The account it is registered for: its start checks it is still this one (Codex r14 on #610), and every write
-          // to its record is for that account (r15).
-          const registeredFor = scopedOwnerKey;
-          const registeredOwner = correctionOwner;
-          if (generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
-          // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps
-          // its question and nothing is queued (Codex r16 on #610).
-          if (!checkAnswers.canAnswer(check.id)) throw new Error("This can't be answered here now.");
-          const record = await waitForItemCorrections(correctionOwner, { id, itemId: check.segmentId, newIds: ids,
-            // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
-            action: { kind: "answer", reviewItemId: check.id, logged: yes, ...(venue ? { venue, logAsCategoryId: logAsCategoryId ?? null } : {}) } });
-          if (!record) throw new Error("Nothing to wait for.");
-          return {
-            start: () => {
-              // The one completion path: withdrawn, settled quietly, or held for Undo (Codex r14 on #610).
-              checkAnswers.startAfterCorrections(check.id, yes, id, registeredFor, registeredOwner, generation);
-            },
-            cancel: () => withdrawAnswerAfterCorrections(registeredOwner, id)
-          };
+        answerAfter: (yes, ids, generation, venue, logAsCategoryId) => {
+          if (!correctionOwner || !check.segmentId || !scopedOwnerKey) throw new Error("No account.");
+          return checkAnswers.answerAfterCorrections({ itemId: check.id, segmentId: check.segmentId, logged: yes, newIds: ids, generation,
+            venue: venue ?? null, logAsCategoryId: logAsCategoryId ?? null, owner: correctionOwner, ownerKey: scopedOwnerKey });
         }
       };
     },
