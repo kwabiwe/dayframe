@@ -174,7 +174,8 @@ leave"), `leg_mode`, and `log_place` ("Logs as", #605: blocks for the time the
 person's own blocks don't cover, an outing's trips with it, #612). It takes the
 location owner lock, writes the activity event, the correction row and the
 segment change in one transaction, and replay applies every active correction
-again. A place's place or times, or a trip's times or existence, are refused
+again; `log_place` instead writes its blocks and their event and stores no
+correction row. A place's place or times, or a trip's times or existence, are refused
 (`409`) once the item has a block; a leg's mode is not. An optional
 `clientCorrectionId` (UUID, #597) makes a retry safe: the same id returns the
 correction or Logs as blocks it already made, and an id used by anything else is
