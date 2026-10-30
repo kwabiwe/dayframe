@@ -29,7 +29,8 @@ const server = vi.hoisted(() => ({
   releaseBootstrap: null as (() => void) | null,
   /** Bootstraps that arrive while set answer 500. */
   failBootstraps: false,
-  started: 0
+  started: 0,
+  workspace: "workspace"
 }));
 
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams("date=2026-08-17") }));
@@ -57,7 +58,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         server.holdNextBootstrap = false;
         await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
       }
-      return reply(200, bootstrap(server.activeEntry));
+      return reply(200, bootstrap(server.activeEntry, server.workspace));
     }
     if (method === "POST" && url === "/api/time-entries") {
       if (server.holdPosts) await new Promise<void>((resolve) => server.heldPosts.push(resolve));
@@ -105,6 +106,7 @@ beforeEach(() => {
   server.releaseBootstrap = null;
   server.failBootstraps = false;
   server.started = 0;
+  server.workspace = "workspace";
   probe.runtime = null;
 });
 
@@ -269,6 +271,73 @@ describe("web timer-state polling cadence", () => {
     expect(probe.runtime!.shellData?.activeEntry?.id).toBe("started-2");
   });
 
+  const shownId = () => probe.runtime!.shellData?.activeEntry?.id ?? null;
+  const phoneStart = () => {
+    const at = new Date().toISOString();
+    server.activeEntry = entry({ id: "phone-1", description: "From the phone", startedAt: at, updatedAt: at });
+  };
+
+  it("a newer action's settled reload retires an older one still stalled, so a phone start shows within the unfocused interval (Codex r2 on #637)", async () => {
+    await mount();
+    server.holdNextBootstrap = true; // A's reload stalls
+    let first: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      first = probe.runtime!.startTimer({ description: "A" });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(server.releaseBootstrap).not.toBeNull();
+    await act(async () => {
+      await probe.runtime!.startTimer({ description: "B" });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(shownId()).toBe("started-2");
+
+    focused = false;
+    phoneStart();
+    await advance(61_000);
+    expect(shownId()).toBe("phone-1");
+    void first;
+  });
+
+  it("a workspace switch while an action's reload stalls lets the new workspace's phone timer show (Codex r2 on #637)", async () => {
+    await mount();
+    server.holdNextBootstrap = true;
+    await act(async () => {
+      void probe.runtime!.startTimer({ description: "A" });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(server.releaseBootstrap).not.toBeNull();
+
+    // The switch, as AppShell does it: the session change, then the new workspace's data.
+    server.workspace = "workspace-2";
+    server.activeEntry = null;
+    await act(async () => {
+      await beforeSessionChange();
+      await probe.runtime!.refresh({ force: true });
+    });
+    expect(probe.runtime!.shellData?.workspace.id).toBe("workspace-2");
+
+    focused = false;
+    phoneStart();
+    await advance(61_000);
+    expect(shownId()).toBe("phone-1");
+    expect(probe.runtime!.shellData?.workspace.id).toBe("workspace-2");
+  });
+
+  it("a stalled action stops holding polls off after 30 s", async () => {
+    await mount();
+    server.holdNextBootstrap = true; // never released
+    await act(async () => {
+      void probe.runtime!.startTimer({ description: "A" });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    phoneStart();
+    await advance(25_000);
+    expect(shownId()).not.toBe("phone-1"); // still set aside: the action's reload may yet land
+    await advance(20_000); // past 30 s, and the next 10 s poll
+    expect(shownId()).toBe("phone-1");
+  });
+
   it("an action's poll is deduped with one already in flight", async () => {
     await mount();
     server.holdTimerState = true;
@@ -336,7 +405,7 @@ describe("web timer-state polling cadence", () => {
   });
 });
 
-function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
+function bootstrap(activeEntry: TimeEntryRow | null, workspace = "workspace"): BootstrapData {
   const entries = activeEntry ? [activeEntry] : [];
   return {
     viewerTimeZone: null,
@@ -357,8 +426,8 @@ function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
     user: { id: "user-1", dailyGoalMinutes: 480, weeklyGoalMinutes: 2400, goalsRevision: 1 },
-    workspace: { id: "workspace" },
-    workspaces: [{ id: "workspace", name: "Workspace" }]
+    workspace: { id: workspace },
+    workspaces: [{ id: workspace, name: workspace }]
   } as unknown as BootstrapData;
 }
 

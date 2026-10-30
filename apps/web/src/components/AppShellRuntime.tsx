@@ -152,6 +152,8 @@ const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
 export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS;
 export const BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS = 10_000;
 export const DATE_DATA_CACHE_LIMIT = 8;
+/** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
+export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -180,8 +182,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const workspaceGenerationRef = useRef(0);
   // Polls the timer state now, inside the running poll chain (set by that chain; WEB-UI-4).
   const pollTimerStateNowRef = useRef<(() => void) | null>(null);
-  // The user's own timer actions still settling, each until its own reload has (`trackTimerAction`).
-  const timerActionsPendingRef = useRef(0);
+  // The user's own timer actions still settling, each until its own reload has (`trackTimerAction`), by
+  // sequence: when it started and for which workspace lifetime.
+  const timerActionsRef = useRef(new Map<number, { startedAt: number; generation: number }>());
+  const timerActionSeqRef = useRef(0);
+  /**
+   * Whether an action of the user's is still current: retired once a newer action settles (superseded), once
+   * the workspace or account changes, and once it has run TIMER_ACTION_SETTLE_LIMIT_MS (a stalled reload),
+   * so a stuck action never holds polls off (Codex r2 on #637).
+   */
+  const hasCurrentTimerAction = useCallback(() => {
+    const now = Date.now();
+    for (const [seq, action] of timerActionsRef.current) {
+      if (action.generation !== workspaceGenerationRef.current || now - action.startedAt >= TIMER_ACTION_SETTLE_LIMIT_MS) {
+        timerActionsRef.current.delete(seq);
+      }
+    }
+    return timerActionsRef.current.size > 0;
+  }, []);
   // The period the URL shows now, read by `refresh` so it is one stable callback: a refresh asked
   // for (or a Delete's onSynced bound) before a period change loads the period shown when it runs,
   // and an answer for a period left meanwhile is dropped (WEB-UI-3).
@@ -517,7 +535,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         consecutiveFailures = 0;
         // An action of the user's is still settling: its own reload has the newest state, and the
         // poll that follows it confirms. The answer is set aside so it never supersedes that reload.
-        if (timerActionsPendingRef.current > 0) return;
+        if (hasCurrentTimerAction()) return;
         const changed = timerStateChanged(timerStateRef.current, next);
         timerStateRef.current = next;
         if (changed) await refresh();
@@ -541,6 +559,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const unregister = onBeforeSessionChange(async () => {
       epoch += 1;
       consecutiveFailures = 0;
+      // Actions of the session left never hold the next session's polls off.
+      timerActionsRef.current.clear();
     });
 
     pollSoon();
@@ -554,25 +574,29 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [refresh]);
+  }, [hasCurrentTimerAction, refresh]);
 
   // The user's own timer actions (start, switch, stop, delete, split, join, an edit of the running
-  // block) in progress, each until its own reload has settled. While any is, a poll's answer is set
-  // aside, so a poll never supersedes an action's reload. When the last one settles (and the gate is
-  // idle), one timer-state poll confirms them all, never beside a poll already in flight.
+  // block) in progress, each until its own reload has settled. While one is current, a poll's answer
+  // is set aside, so a poll never supersedes an action's reload. An action settling retires itself
+  // and every older one (superseded: its reload has the newer state). When none is current (and the
+  // gate is idle), one timer-state poll confirms them all, never beside a poll already in flight.
   const trackTimerAction = useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
-    timerActionsPendingRef.current += 1;
+    const seq = ++timerActionSeqRef.current;
+    timerActionsRef.current.set(seq, { startedAt: Date.now(), generation: workspaceGenerationRef.current });
     try {
       return await run();
     } finally {
-      timerActionsPendingRef.current -= 1;
-      if (timerActionsPendingRef.current === 0) {
+      for (const older of timerActionsRef.current.keys()) {
+        if (older <= seq) timerActionsRef.current.delete(older);
+      }
+      if (!hasCurrentTimerAction()) {
         void mutationGateRef.current.whenIdle().then(() => {
-          if (timerActionsPendingRef.current === 0) pollTimerStateNowRef.current?.();
+          if (!hasCurrentTimerAction()) pollTimerStateNowRef.current?.();
         });
       }
     }
-  }, []);
+  }, [hasCurrentTimerAction]);
 
   // A period change asks the running chain for one poll now (never a second chain), so another
   // device's Start or Stop shows as soon as the new period does.
