@@ -561,3 +561,130 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     expect(view.result.current.failedDays).toEqual([]);
   });
 });
+
+describe("Calendar › List reads in flight across invalidations (Codex r3 on #634)", () => {
+  const weekStart = (weeksBack: number) => {
+    const day = local(10, 26 - 7 * weeksBack);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+  };
+  /** A server whose answers are made when asked (so a held answer is the data as it was then), optionally held. */
+  function heldServer() {
+    const remote = new Map<string, TimeEntryRow[]>();
+    const held: Array<() => void> = [];
+    const state = { holding: false };
+    clientFetch.mockImplementation((url: string) => {
+      const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
+      const [year, month, day] = date.split("-").map(Number);
+      const entries = remote.get(date) ?? [entry(`week-${date}`, new Date(year, month - 1, day + 2, 9))];
+      const answer = { ok: true, json: async () => ({ workspace: { id: "w" }, user: { id: "u" }, weekEntries: entries }) };
+      if (!state.holding) return Promise.resolve(answer);
+      return new Promise((resolve) => held.push(() => resolve(answer)));
+    });
+    return { remote, held, state };
+  }
+  type Props = { focusDate: string; staleKey: number; refreshToken: number };
+  async function weeksHook(initial: Props) {
+    const { useCalendarListWeeks } = await import("./useCalendarListWeeks");
+    return renderHook((props: Props) => useCalendarListWeeks({
+      anchorWeekStart: local(10, 26), currentWeekStart: local(10, 26), enabled: true, owner: "w:u", ...props
+    }), { initialProps: initial });
+  }
+  const ids = (entries: readonly TimeEntryRow[]) => entries.map((row) => row.id);
+  const release = async (held: Array<() => void>) => {
+    while (held.length) await act(async () => { held.shift()!(); await vi.advanceTimersByTimeAsync(0); });
+    await flush();
+    await flush();
+  };
+
+  it("reads a week once more when a read begun before an edit settles while the List is back on that week", async () => {
+    const server = heldServer();
+    const view = await weeksHook({ focusDate: "2026-10-30", staleKey: 0, refreshToken: 0 });
+    for (let week = 0; week < 6; week += 1) {
+      act(() => view.result.current.load("earlier"));
+      await flush();
+      await flush();
+    }
+    const far = weekStart(4);
+    // A bootstrap refresh, then a visit to the far week: its revalidation is out (held).
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
+    server.state.holding = true;
+    view.rerender({ focusDate: far, staleKey: 1, refreshToken: 0 });
+    await flush();
+    // Back to today; the far week's block is deleted elsewhere; an edit; the far week visited again before the old
+    // read finishes (the visit skips it: a read is out).
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
+    await flush();
+    server.remote.set(far, []);
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 1 });
+    await flush();
+    view.rerender({ focusDate: far, staleKey: 1, refreshToken: 1 });
+    await flush();
+    // The old read lands (with the row), then the fresh one: the deleted row goes.
+    server.state.holding = false;
+    await release(server.held);
+    expect(ids(view.result.current.entries)).not.toContain(`week-${far}`);
+  });
+
+  it("reads a place day once more when a read begun before a refresh settles while the List is back on it", async () => {
+    const markers = new Map<string, string>();
+    const held: Array<() => void> = [];
+    let holding = false;
+    clientFetch.mockImplementation((url: string) => {
+      const date = decodeURIComponent(String(url).split("date=")[1]);
+      // The day as it is when asked: a held answer is that old copy.
+      const marker = markers.get(date) ?? "before";
+      const answer = { ok: true, json: async () => ({ date, timeZone: marker, dayStart: `${date}T00:00:00.000Z`, dayEnd: `${date}T23:59:59.999Z`, gaps: [], items: [], openTrip: null }) };
+      if (!holding) return Promise.resolve(answer);
+      return new Promise((resolve) => held.push(() => resolve(answer)));
+    });
+    const { useLocationTimelinesWithStatus } = await import("./location/LocationListRows");
+    // Sparse: today and one far day, so the far day's read is the one out.
+    const dates = ["2026-10-30", "2026-10-05"];
+    const view = renderHook(({ liveKey, focus }) => useLocationTimelinesWithStatus(dates, ["2026-10-30"], liveKey, 0, "w:u", true, focus),
+      { initialProps: { liveKey: 0, focus: "2026-10-30" } });
+    for (let pass = 0; pass < 12; pass += 1) await flush();
+    const far = "2026-10-05";
+    view.rerender({ liveKey: 1, focus: "2026-10-30" });
+    await flush();
+    holding = true;
+    view.rerender({ liveKey: 1, focus: far });
+    await flush();
+    view.rerender({ liveKey: 1, focus: "2026-10-30" });
+    await flush();
+    markers.set(far, "after");
+    view.rerender({ liveKey: 2, focus: "2026-10-30" });
+    await flush();
+    view.rerender({ liveKey: 2, focus: far });
+    await flush();
+    holding = false;
+    await release(held);
+    for (let pass = 0; pass < 8; pass += 1) await flush();
+    expect(view.result.current.days.get(far)?.timeZone).toBe("after");
+  });
+
+  it("marks a week stale when a bootstrap refresh lands during its first load, and reads it when visited", async () => {
+    const server = heldServer();
+    const view = await weeksHook({ focusDate: "2026-10-30", staleKey: 0, refreshToken: 0 });
+    for (let week = 0; week < 3; week += 1) {
+      act(() => view.result.current.load("earlier"));
+      await flush();
+      await flush();
+    }
+    const loading = weekStart(4);
+    server.state.holding = true;
+    act(() => view.result.current.load("earlier"));
+    await flush();
+    // A bootstrap refresh while it loads, and its block deleted elsewhere after the read was made.
+    view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
+    await flush();
+    server.remote.set(loading, []);
+    server.state.holding = false;
+    await release(server.held);
+    expect(ids(view.result.current.entries)).toContain(`week-${loading}`);
+    // A visit reads it again: the deletion shows.
+    view.rerender({ focusDate: loading, staleKey: 1, refreshToken: 0 });
+    await flush();
+    await flush();
+    expect(ids(view.result.current.entries)).not.toContain(`week-${loading}`);
+  });
+});

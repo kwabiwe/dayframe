@@ -122,7 +122,10 @@ export function useCalendarListWeeks({
   }, [generation, refreshToken]);
   // The newest read of each week ("generation:startKey"), so an older answer never replaces a newer one.
   const readSeqRef = useRef(new Map<string, number>());
-  const loadedDuringEditRef = useRef<(forGeneration: number, startKey: string) => void>(() => undefined);
+  const loadedDuringEditRef = useRef<(forGeneration: number, startKey: string, edit: boolean) => void>(() => undefined);
+  const revalidateRef = useRef<(forGeneration: number, startKey: string, edit?: boolean) => void>(() => undefined);
+  // Every invalidation (an edit or a bootstrap refresh), so a week loading through one is known to predate it.
+  const invalidationRef = useRef(0);
   const inFlightRef = useRef<{ generation: number; direction: ListWeeksDirection } | null>(null);
 
   const state: ListWeeksState = stored && stored.generation === generation
@@ -185,6 +188,7 @@ export function useCalendarListWeeks({
     setStatus({ generation, loading: direction, error: null });
     let added = false;
     const tokenAtStart = refreshTokenRef.current;
+    const invalidationAtStart = invalidationRef.current;
     void readWeek(startKey, generation, (entries) => {
       if (added) {
         replaceWeek(generation, startKey)(entries);
@@ -205,7 +209,10 @@ export function useCalendarListWeeks({
       if (generationRef.current === generation) setStatus({ generation, loading: null, error: null });
       // Loaded while an edit landed: what it read may predate the edit, so it is stale (read at once when it is in the
       // window the List's top day is in, as a week loading at the List's end usually is).
-      if (committed && refreshTokenRef.current !== tokenAtStart) loadedDuringEditRef.current(generation, startKey);
+      // Loaded through a bootstrap refresh only: stale, read when visited (Codex r3 on #634).
+      if (committed && invalidationRef.current !== invalidationAtStart) {
+        loadedDuringEditRef.current(generation, startKey, refreshTokenRef.current !== tokenAtStart);
+      }
     }).catch(() => {
       if (generationRef.current === generation) setStatus({ generation, loading: null, error: direction });
     }).finally(() => {
@@ -223,6 +230,10 @@ export function useCalendarListWeeks({
   }, [stored]);
   const refreshWindow = listRefreshWindow(focusDate ?? anchorKey);
   const windowKey = refreshWindow ? `${refreshWindow.from}..${refreshWindow.to}` : "";
+  const windowRef = useRef(refreshWindow);
+  useLayoutEffect(() => {
+    windowRef.current = refreshWindow;
+  });
   // Stale weeks, each with the mark it was given: a read clears it only when it started after that mark and committed,
   // so a failed (or older) read leaves the week stale and the next visit or trigger reads it again.
   const staleRef = useRef<{ generation: number; weeks: Map<string, number>; inFlight: Map<string, number>; mark: number }>(
@@ -250,6 +261,14 @@ export function useCalendarListWeeks({
         const left = (stale.inFlight.get(startKey) ?? 1) - 1;
         if (left > 0) stale.inFlight.set(startKey, left);
         else stale.inFlight.delete(startKey);
+        // A read that started before the week was marked stale settles while the week is in the List's current window:
+        // a visit skipped it because this read was out, so read it once more now (Codex r3 on #634). A read started after
+        // the mark never re-reads itself (a failure shows the week's line instead), nor does a week outside the window.
+        const mark = stale.weeks.get(startKey);
+        if (left <= 0 && mark !== undefined && mark > startedAt && generationRef.current === forGeneration &&
+          weekInListRefreshWindow(startKey, windowRef.current)) {
+          revalidateRef.current(forGeneration, startKey);
+        }
       });
   };
   // Weeks whose newest read again failed: their old copy shows with a quiet line saying so (Codex r2 on #634).
@@ -270,6 +289,7 @@ export function useCalendarListWeeks({
   useEffect(() => {
     if (lastRefreshRef.current === refreshToken) return;
     lastRefreshRef.current = refreshToken;
+    invalidationRef.current += 1;
     const current = storedRef.current;
     if (!enabled || !current || current.generation !== generation) return;
     const loaded = [...current.earlier, ...current.later];
@@ -298,6 +318,7 @@ export function useCalendarListWeeks({
   useEffect(() => {
     if (lastStaleKeyRef.current === staleKey) return;
     lastStaleKeyRef.current = staleKey;
+    invalidationRef.current += 1;
     const current = storedRef.current;
     if (!enabled || !current || current.generation !== generation) return;
     markStale(generation, [...current.earlier, ...current.later]);
@@ -329,14 +350,13 @@ export function useCalendarListWeeks({
     // `windowKey` stands for the window.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, readWeek, replaceWeek, windowKey]);
-  const revalidateRef = useRef(revalidate);
   useLayoutEffect(() => {
     revalidateRef.current = revalidate;
-    loadedDuringEditRef.current = (forGeneration, startKey) => {
+    loadedDuringEditRef.current = (forGeneration, startKey, edit) => {
       const stale = staleFor(forGeneration);
       stale.mark += 1;
       stale.weeks.set(startKey, stale.mark);
-      if (weekInListRefreshWindow(startKey, refreshWindow)) revalidate(forGeneration, startKey, true);
+      if (edit && weekInListRefreshWindow(startKey, refreshWindow)) revalidate(forGeneration, startKey, true);
     };
   });
   const retryWeek = useCallback((startKey: string) => {

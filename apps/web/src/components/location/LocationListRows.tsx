@@ -98,6 +98,12 @@ export function useLocationTimelinesWithStatus(dates: readonly string[], liveDat
   const datesKey = dates.join(",");
   const liveDatesKey = liveDates.join(",");
 
+  const refreshWindow = listRefreshWindow(focusDate);
+  const windowRef = useRef(refreshWindow);
+  useLayoutEffect(() => {
+    windowRef.current = refreshWindow;
+  });
+
   const queueFor = (forGeneration: number) => {
     if (queueRef.current?.generation !== forGeneration) {
       queueRef.current?.dispose();
@@ -115,7 +121,7 @@ export function useLocationTimelinesWithStatus(dates: readonly string[], liveDat
         if (isFailed) days.add(date);
         else days.delete(date);
         return { generation: forGeneration, days };
-      }));
+      }), (date) => inListRefreshWindow(date, windowRef.current));
     }
     return queueRef.current;
   };
@@ -146,7 +152,6 @@ export function useLocationTimelinesWithStatus(dates: readonly string[], liveDat
     queue.want(live, true);
   }, [enabled, liveDatesKey, liveKey, generation]);
   // After an edit: the days near the List's top day and the edited days at once; every other day read is stale.
-  const refreshWindow = listRefreshWindow(focusDate);
   const windowKey = refreshWindow ? `${refreshWindow.from}..${refreshWindow.to}` : "";
   const lastStaleRef = useRef(staleKey);
   useEffect(() => {
@@ -224,7 +229,9 @@ type TimelineQueue = {
 };
 
 function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void,
-  onFailed: (date: string, failed: boolean) => void = () => undefined): TimelineQueue {
+  onFailed: (date: string, failed: boolean) => void = () => undefined,
+  /** Whether a day is in the List's current refresh window. */
+  inWindow: (date: string) => boolean = () => false): TimelineQueue {
   const due = new Set<string>();
   const inFlight = new Map<string, AbortController>();
   const againAfterFlight = new Set<string>();
@@ -255,6 +262,9 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
             if (marked !== undefined && marked <= startedAt) stale.delete(date);
           }
           if (againAfterFlight.delete(date)) due.add(date);
+          // A read begun before the day was marked stale, settling while the day is in the current window: a visit
+          // skipped it because this read was out, so read it once more (Codex r3 on #634). Never for a read begun after.
+          else if ((stale.get(date) ?? -1) > startedAt && inWindow(date)) due.add(date);
           drain();
         });
     }
