@@ -375,6 +375,17 @@ describe("web timer-state polling cadence", () => {
     expect(bootstraps()).toHaveLength(loaded);
   });
 
+  it("a session change while the poll's reload is in flight commits nothing from the old session (Codex r4 on #637)", async () => {
+    await mount();
+    phoneStart(); // the old session's timer
+    server.holdNextBootstrap = true;
+    await advance(10_000); // a poll sees the change and its reload is held
+    expect(server.releaseBootstrap).not.toBeNull();
+    await act(async () => { await beforeSessionChange(); });
+    await act(async () => { server.releaseBootstrap?.(); await vi.advanceTimersByTimeAsync(10); });
+    expect(shownId()).toBeNull();
+  });
+
   it("an action's poll is deduped with one already in flight", async () => {
     await mount();
     server.holdTimerState = true;

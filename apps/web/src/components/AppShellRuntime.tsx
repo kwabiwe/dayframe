@@ -406,7 +406,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
    * when it committed, so the poll keeps its old fingerprint otherwise and the next poll retries
    * (Codex r3 on #637).
    */
-  const reconcileFromPoll = useCallback(async (): Promise<boolean> => {
+  const reconcileFromPoll = useCallback(async (stale: () => boolean = () => false): Promise<boolean> => {
     if (mutationGateRef.current.isActive()) return false;
     const baseline = refreshRequestRef.current;
     const date = selectedDateRef.current;
@@ -419,7 +419,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         baseline !== refreshRequestRef.current ||
         date !== selectedDateRef.current ||
         generation !== workspaceGenerationRef.current ||
-        mutationGateRef.current.isActive()
+        mutationGateRef.current.isActive() ||
+        // The poll that asked is stale (an account or workspace change since, or its chain is gone):
+        // nothing from the session left is committed (Codex r4 on #637).
+        stale()
       ) return false;
       // Succeeded: now it supersedes the loads still in flight (they started before it).
       refreshRequestRef.current += 1;
@@ -570,7 +573,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         // A changed fingerprint is kept only once its reload has committed (which records the
         // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
         if (!timerStateChanged(timerStateRef.current, next)) timerStateRef.current = next;
-        else await reconcileFromPoll();
+        else await reconcileFromPoll(stale);
       } catch {
         if (!stale()) consecutiveFailures += 1;
       } finally {
