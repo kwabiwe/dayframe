@@ -8,7 +8,14 @@ const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  // The init script may set data-ui after React has read it (hydration), and nothing else would say so: watch the
+  // attribute itself, so the Proposed structure (the day row, the timer bar) always follows it (owner bug, 30 Oct 2026).
+  const observer = new MutationObserver(listener);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-ui"] });
+  return () => {
+    listeners.delete(listener);
+    observer.disconnect();
+  };
 }
 
 function readPreview() {
