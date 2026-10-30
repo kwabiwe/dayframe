@@ -104,7 +104,7 @@ describe("LocationEvidenceMap", () => {
     const result = render(<LocationEvidenceMap evidence={evidence()} />);
 
     expect(await screen.findByText("Endpoint estimate")).not.toBeNull();
-    expect(await screen.findByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+    expect(await screen.findByText("Map unavailable")).not.toBeNull();
     await waitFor(() => expect(mocks.maps).toHaveLength(1));
     expect(mocks.maps[0]?.options.style).toMatchObject({
       version: 8,
@@ -129,7 +129,7 @@ describe("LocationEvidenceMap", () => {
     act(() => { for (const x of tiles) map.emit("sourcedataloading", tileEvent(x)); });
     act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
     act(() => { for (const x of tiles.slice(1)) map.emit("sourcedata", tileEvent(x)); });
-    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    expect(screen.getByText("Loading map…")).not.toBeNull();
     act(() => map.emit("load"));
 
     expect(screen.queryByRole("status")).toBeNull();
@@ -150,7 +150,7 @@ describe("LocationEvidenceMap", () => {
     act(() => map.emit("error", { sourceId: "route", error: new Error("bad data") }));
     act(() => map.emit("load"));
 
-    const note = screen.getByText("Some of the map background didn’t load. Evidence remains visible.");
+    const note = screen.getByText("Some of the map didn’t load.");
     expect(note.className).toContain("is-degraded");
     expect(note.className).not.toContain("is-error");
     expect(screen.getByText("Endpoint estimate")).not.toBeNull();
@@ -159,7 +159,7 @@ describe("LocationEvidenceMap", () => {
   it("shows the soft note when the style fails, and asks again next time", async () => {
     mocks.clientFetch.mockResolvedValue(new Response("{}", { status: 503 }));
     const first = render(<LocationEvidenceMap evidence={evidence()} />);
-    expect(await screen.findByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+    expect(await screen.findByText("Map unavailable")).not.toBeNull();
     first.unmount();
     render(<LocationEvidenceMap evidence={evidence()} />);
     await waitFor(() => expect(mocks.maps).toHaveLength(2));
@@ -192,7 +192,7 @@ describe("LocationEvidenceMap", () => {
     expect(options.center).toBeUndefined();
     // The layers are added as soon as the style loads, and nothing refits after the tiles.
     await waitFor(() => expect(mocks.maps[0]?.addLayer).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByText("Loading map background…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Loading map…")).toBeNull());
     expect(mocks.maps[0]?.fitBounds).not.toHaveBeenCalled();
   });
 
@@ -262,14 +262,14 @@ describe("LocationEvidenceMap", () => {
       // The style can't load: an error with no tile or source.
       act(() => map.emit("error", { error: new Error("Failed to fetch style") }));
       expect(map.setStyle).toHaveBeenCalledWith(expect.objectContaining({ version: 8, sources: {}, layers: [expect.objectContaining({ type: "background" })] }), { diff: false });
-      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Map unavailable")).not.toBeNull();
       // The blank style loads and the route is drawn on it.
       act(() => map.emit("style.load"));
       expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "straight-line-fallback-line" }));
       // The first load window ends without tiles: still the note, never "ready".
       act(() => { vi.advanceTimersByTime(10_000); });
       act(() => map.emit("load"));
-      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Map unavailable")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -286,11 +286,11 @@ describe("LocationEvidenceMap", () => {
       await vi.waitFor(() => expect(map.addSource).toHaveBeenCalled());
       // The base source's TileJSON fails: a source error, no tile, before any tile request.
       act(() => map.emit("error", { sourceId: "base", error: new Error("TileJSON 502") }));
-      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Map unavailable")).not.toBeNull();
       expect(map.setStyle).not.toHaveBeenCalled();
       act(() => map.emit("load"));
       act(() => { vi.advanceTimersByTime(10_000); });
-      expect(screen.getByText("Map background is unavailable. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Map unavailable")).not.toBeNull();
       expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "straight-line-fallback-line" }));
     } finally {
       vi.useRealTimers();
@@ -307,13 +307,13 @@ describe("LocationEvidenceMap", () => {
       await vi.waitFor(() => expect(mocks.maps).toHaveLength(1));
       const map = mocks.maps[0]!;
       act(() => { vi.advanceTimersByTime(12_000); });
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      expect(screen.getByText("Loading map…")).not.toBeNull();
       // The style loads at 12 s, then the first view.
       act(() => map.emit("style.load"));
       expect(map.addLayer).toHaveBeenCalled();
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      expect(screen.getByText("Loading map…")).not.toBeNull();
       act(() => map.emit("load"));
-      expect(screen.queryByText("Loading map background…")).toBeNull();
+      expect(screen.queryByText("Loading map…")).toBeNull();
       expect(screen.queryByRole("status")).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -338,11 +338,11 @@ describe("LocationEvidenceMap", () => {
       act(() => { vi.advanceTimersByTime(10_000); });
       // Four new tiles after the window: not admitted, and their successes settle nothing.
       act(() => { for (const x of [10, 11, 12, 13]) { map.emit("sourcedataloading", tileEvent(x)); map.emit("sourcedata", tileEvent(x)); } });
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      expect(screen.getByText("Loading map…")).not.toBeNull();
       act(() => { for (const x of [0, 1, 2]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      expect(screen.getByText("Loading map…")).not.toBeNull();
       act(() => map.emit("sourcedata", tileEvent(3)));
-      expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Some of the map didn’t load.")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -366,7 +366,7 @@ describe("LocationEvidenceMap", () => {
     act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
     act(() => { for (const x of [1, 2, 3]) map.emit("sourcedata", tileEvent(x)); });
     // Everything has settled, but the window is still open: no verdict yet, no early warning.
-    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    expect(screen.getByText("Loading map…")).not.toBeNull();
     act(() => map.emit("load"));
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -375,7 +375,7 @@ describe("LocationEvidenceMap", () => {
     const map = await mapWithFourPendingTiles();
     act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
     act(() => map.emit("load"));
-    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    expect(screen.getByText("Loading map…")).not.toBeNull();
     // A repeated outcome for a settled tile changes nothing; the last one decides.
     act(() => map.emit("error", { ...tileEvent(0), error: new Error("502") }));
     act(() => map.emit("sourcedata", tileEvent(3)));
@@ -386,7 +386,7 @@ describe("LocationEvidenceMap", () => {
     const map = await mapWithFourPendingTiles();
     act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
     act(() => map.emit("load"));
-    expect(screen.getByText("Loading map background…")).not.toBeNull();
+    expect(screen.getByText("Loading map…")).not.toBeNull();
     // A leg switch cancels tile 3: neither failure nor success.
     act(() => map.emit("sourcedataabort", tileEvent(3)));
     expect(screen.queryByRole("status")).toBeNull();
@@ -398,7 +398,7 @@ describe("LocationEvidenceMap", () => {
     act(() => { for (const x of [0, 1]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
     act(() => map.emit("sourcedata", tileEvent(2)));
     act(() => map.emit("sourcedataabort", tileEvent(3)));
-    expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+    expect(screen.getByText("Some of the map didn’t load.")).not.toBeNull();
   });
 
   it("stops a stuck tile holding the verdict 20 s after the style loads (Codex r5 on #626)", async () => {
@@ -408,7 +408,7 @@ describe("LocationEvidenceMap", () => {
       act(() => { for (const x of [0, 1, 2]) map.emit("sourcedata", tileEvent(x)); });
       // Past the 10 s window, short of the cap (vi.waitFor above may have moved the fake clock a little).
       act(() => { vi.advanceTimersByTime(15_000); });
-      expect(screen.getByText("Loading map background…")).not.toBeNull();
+      expect(screen.getByText("Loading map…")).not.toBeNull();
       act(() => { vi.advanceTimersByTime(5_000); });
       expect(screen.queryByRole("status")).toBeNull();
       // Its late outcome changes nothing.
@@ -426,7 +426,7 @@ describe("LocationEvidenceMap", () => {
       act(() => { for (const x of [0, 1]) map.emit("error", { ...tileEvent(x), error: new Error("502") }); });
       act(() => map.emit("sourcedata", tileEvent(2)));
       act(() => { vi.advanceTimersByTime(20_000); });
-      expect(screen.getByText("Some of the map background didn’t load. Evidence remains visible.")).not.toBeNull();
+      expect(screen.getByText("Some of the map didn’t load.")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

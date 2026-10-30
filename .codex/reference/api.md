@@ -25,7 +25,9 @@ Reports, ingest, timer mutations or bootstrap caps.
 ## Review presentation read
 
 `POST /api/review/presentation` is a private, read-only app-session route for
-the mobile Today/Review presentation. It accepts only contract version 1 and a
+the iPhone's Today and Calendar › List "?" presentation (and the web's
+timer-trip clash read, #623; there is no Review page or screen since location
+v4 step 15). It accepts only contract version 1 and a
 strict `window`, `backlog`, or ID-bounded `lookup` request. Validate the 64 KiB
 body before expensive work, IANA zone/local-day boundaries, ordered finite
 instants, the 61-day DST-allowance window, page limit (1–200), opaque cursor,
@@ -51,11 +53,21 @@ for time away from a saved place, so cached and backlog items keep their
 round-trip labels and never fall back to the Commute category. The `move-route`
 feature adds `routeLabel` (a Move's second line, "Home → Gym", PRD D19) to
 Location Review records for Moves, so cards beyond the bootstrap's page keep it.
+The `outing` feature adds `outing` (an opaque key and the record's role) to an
+outing's records (PRD D19) so the client shows them as one question, and
+`outing-count` makes `outstanding` count an outing once. The `learned-name`
+feature adds `learnedName: true` to a record named by a learned name, and the
+`venue` feature adds `venuePlaceId` (the Apple venue picked or suggested for an
+unsaved stay) for the client's own name lookup.
 The `timer-trip-clash` feature adds `timerTripClash: { timeEntryId, tripId,
 tripStartedAt, tripStoppedAt, overlapSeconds }` to a timer-trip clash's Review
 record ("a block ran into your trip", #611), read from its event's payload, so a
 client paging every record counts clashes past the bootstrap's 100 Review items
-(the List's dot). A clash with an incomplete payload carries no field.
+(the List's dot). A clash with an incomplete payload carries no field. Clients
+(iPhone #622, web #623) read 200 records a page with the cursor; End it is
+`accept` with the record's `proposalHash` as `expectedProposalHash` (it ends the
+block where the trip started), Keep it is `ignore_once`, and a clash that no
+longer holds answers `proposal_changed`.
 
 A Review edit may carry `descriptionTyped: true` (PRD D19): current iPhone and web editors start a
 Move's name empty and send it with any name the person typed. A Move description without it that
@@ -64,7 +76,7 @@ stored; with it, the typed words are stored as they are.
 
 `accept` and Location `confirm` may carry the optional 64-lower-hex
 `expectedProposalHash`. New Quick Confirm envelopes (Today offered the shortcut until Blocks parity
-moved confirming to Review) require it and the
+moved confirming to Review, now Calendar › List) require it and the
 server checks it under the existing mutation lock immediately before applying
 the existing action. A mismatch returns `proposal_changed` with scoped
 canonical-open evidence and writes no entry. Historical envelopes without the
@@ -113,6 +125,7 @@ hash automatically, discard receipts, or infer permission to reconfirm from refr
 - `GET /api/timer-state` is the lightweight active-timer fingerprint. It accepts ordinary web-cookie/mobile-bearer app sessions and, only through `x-dayframe-ingest-token`, a separate integration token with `time:read`. It returns `activeEntryId`, `updatedAt`, and `serverNow` with `private, no-store`; it does not enqueue or drain Live Activity delivery. High-frequency reads must not touch integration-token usage on every request.
 - Timer/event mutation routes schedule Live Activity desired-state enqueue and APNs drain through the supported post-response boundary plus the existing durable revisioned outbox. APNs latency/failure never changes or delays an already committed timer result. Low-frequency authenticated bootstrap reconciliation and the protected retry cron reconstruct current desired state before draining, so a failed post-response schedule or enqueue cannot strand an empty outbox. Do not move that repair work onto `/api/timer-state` or replace the post-response boundary with a bare unawaited promise.
 - Location retained-evidence replay is an authenticated, private/no-store command. It accepts only device/version/rollout acknowledgement metadata, uses server time, returns coordinate-free counts, and must share ingestion's owner lock, semantic cutover, and idempotent event-first transaction.
+- Timer-into-trip checks (location v4 design §7, `timer-trip-clash-service.ts`) run only while `DAYFRAME_TIMER_TRIP_CHECKS=on`: set for Vercel Preview (staging), off in production. While on, time-entry edit, delete, split and an entry-scoped Stop also take the owner advisory lock that Starts and other Stops already take (`pg_advisory_xact_lock` on workspace and user, the location owner lock) before any row, so a clash is decided with replay's and corrections' view; off, they take no extra lock and no clash is asked.
 - A Location Review confirmation has one transaction owner. `change_place_and_confirm` may carry the existing strict `ReviewEntryEdit` payload so saved-place feedback, category, description, start, and stop either commit together or roll back together; clients must not sequence a place correction and a second confirm request.
 
 ## Timer Regression Matrix
@@ -144,6 +157,30 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 `POST /api/review/:id` accepts every resolving/structural Location action through the strict shared `{ clientMutationId, mutation }` envelope. Reject malformed envelopes rather than falling back to a direct action. Complete `edit_and_confirm` requires both valid timestamps; optional edits on other structural actions preserve the existing server validation. Receipt replay returns exact stored IDs/results. Complex actions share the Location replay owner lock and one transaction for all side effects. On permanent conflict, scoped canonical statuses identify each source independently after rollback; mobile must not infer the adjacent merge item's status from the primary. See `offline-review-mutations.md` for the SQLite/account contract.
 
 A generic (non-Location) `edit_and_confirm` keeps the moment's own provenance: the entry is stored with the review event's source and the item's confidence (falling back to `manual_app`/`high` only when the item has no event) and is marked `user_edited_at`, so a later Health re-import never overwrites the user's changes. An edited `health_sleep_import` finds the night already logged from Health by its suggested (original) window, like `accept` does, and that one entry takes the user's name, activity, times and the item's confidence (its tags are kept unless the edit sends tags) and records the event's sleep resolution link.
+
+## Location timeline and corrections
+
+`GET /api/timeline?date=YYYY-MM-DD[&tz=Area/City]` (location v4 step 8) returns
+the day's location timeline, read-only, cut in `tz` when given (the iPhone),
+else the web viewer's zone cookie, else UTC; an impossible date is `400`. It
+reads through migration 021's indexes. `GET /api/timeline/items/{id}/evidence?kind=place|trip&startedAt=ISO`
+returns one item's map for the correction sheets. Both are app-session,
+`private, no-store`.
+
+`POST /api/timeline/corrections` (step 11, migration 022) corrects one item:
+`place` (a saved or learned place, not both), `times`, `delete` (a trip that
+wasn't one, or a place: "I wasn't here", #603), `merge` (a trip: "I didn't
+leave"), `leg_mode`, and `log_place` ("Logs as", #605: blocks for the time the
+person's own blocks don't cover, an outing's trips with it, #612). It takes the
+location owner lock, writes the activity event, the correction row and the
+segment change in one transaction, and replay applies every active correction
+again; `log_place` instead writes its blocks and their event and stores no
+correction row. A place's place or times, or a trip's times or existence, are refused
+(`409`) once the item has a block; a leg's mode is not. An optional
+`clientCorrectionId` (UUID, #597) makes a retry safe: the same id returns the
+correction or Logs as blocks it already made, and an id used by anything else is
+`409`. Busy is `503` with `code: "timeline_busy"` and `Retry-After: 5`. Targets
+hold place IDs, modes and times, never coordinates.
 
 ## Safe Location request diagnostics
 

@@ -1,0 +1,153 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { loadMapKit, onPageFailure, type MkPlace } from "@/components/location/MapKitEvidenceMap";
+
+/**
+ * Apple's places near an unknown place, on the web (UI review, owner 29 Oct 2026; PRD D19 A7), as the iPhone's
+ * sheet lists them: the nearest five and a search, from Apple MapKit JS next to its Apple map. Picking one names
+ * the visit: the dialog then offers to save it under that name ("Save this place"), so a name is never a rule
+ * until it's saved. The visit's centre goes to Apple's search from this browser only; it is never logged or kept,
+ * and nothing Apple returns is stored except the name a person saves.
+ */
+
+const NEARBY_RADIUS_METERS = 250;
+const NEARBY_ROWS = 5;
+const SEARCH_DELAY_MS = 300;
+
+type Row = { key: string; title: string; detail: string };
+type State = { status: "loading" | "results" | "empty" | "unavailable"; rows: Row[] };
+
+/** Metres between two nearby points (equirectangular is exact enough at this scale). */
+function metresBetween(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
+  const toRadians = Math.PI / 180;
+  const x = (b.longitude - a.longitude) * toRadians * Math.cos(((a.latitude + b.latitude) / 2) * toRadians);
+  const y = (b.latitude - a.latitude) * toRadians;
+  return Math.sqrt(x * x + y * y) * 6_371_000;
+}
+
+function formatDistance(metres: number) {
+  return metres < 1000 ? `${Math.max(10, Math.round(metres / 10) * 10)} m away` : `${(metres / 1000).toFixed(1)} km away`;
+}
+
+export function NearbyPlaces({
+  centre,
+  disabled,
+  onPick,
+  onUnavailable
+}: {
+  centre: { latitude: number; longitude: number };
+  disabled: boolean;
+  onPick: (name: string) => void;
+  /** MapKit failed for the page: the dialog drops this list. */
+  onUnavailable: () => void;
+}) {
+  const [nearby, setNearby] = useState<State>({ status: "loading", rows: [] });
+  // The latest search's answer, kept with the text it was for, so a newer query never shows an older answer.
+  const [searched, setSearched] = useState<{ query: string; state: State } | null>(null);
+  const [query, setQuery] = useState("");
+  const latest = useRef({ onUnavailable });
+  useEffect(() => {
+    latest.current = { onUnavailable };
+  });
+  const { latitude, longitude } = centre;
+
+  useEffect(() => onPageFailure(() => latest.current.onUnavailable()), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadMapKit().then((mapkit) => {
+      if (cancelled) return;
+      const search = new mapkit.PointsOfInterestSearch({ center: new mapkit.Coordinate(latitude, longitude), radius: NEARBY_RADIUS_METERS });
+      search.search((error, data) => {
+        if (cancelled) return;
+        if (error) {
+          setNearby({ status: "unavailable", rows: [] });
+          return;
+        }
+        const rows = toRows(data?.places ?? [], { latitude, longitude }).slice(0, NEARBY_ROWS);
+        setNearby({ status: rows.length ? "results" : "empty", rows });
+      });
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [latitude, longitude]);
+
+  useEffect(() => {
+    const text = query.trim();
+    if (!text) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void loadMapKit().then((mapkit) => {
+        if (cancelled) return;
+        const search = new mapkit.Search({
+          coordinate: new mapkit.Coordinate(latitude, longitude),
+          region: new mapkit.CoordinateRegion(new mapkit.Coordinate(latitude, longitude), new mapkit.CoordinateSpan(0.05, 0.05)),
+          includePointsOfInterest: true
+        });
+        search.search(text, (error, data) => {
+          if (cancelled) return;
+          const rows = error ? [] : toRows(data?.places ?? [], { latitude, longitude }).slice(0, 6);
+          setSearched({ query: text, state: { status: error ? "unavailable" : rows.length ? "results" : "empty", rows } });
+        });
+      }).catch(() => undefined);
+    }, SEARCH_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, latitude, longitude]);
+
+  const text = query.trim();
+  const typed = text.length > 0;
+  const shown: State = !typed ? nearby
+    : searched?.query === text ? searched.state
+      // A newer query shows "Looking…", never the last query's rows to pick from (Codex r3 on #633).
+      : { status: "loading", rows: [] };
+  return (
+    <div className="location-correction-nearby" data-section="nearby">
+      <label className="location-correction-nearby-search">
+        <DayframeIcon glyph="search" size={16} />
+        <input aria-label="Search places" disabled={disabled} onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search places" type="search" value={query} />
+      </label>
+      {shown.rows.length ? (
+        <ul aria-label={typed ? "Places found" : "Places nearby"} className="location-correction-options">
+          {shown.rows.map((row) => (
+            <li key={row.key}>
+              <button aria-label={`${row.title}, ${row.detail}. Names this visit; you can then save it`} className="location-correction-option is-nearby"
+                disabled={disabled} onClick={() => onPick(row.title)} type="button">
+                <DayframeIcon glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                <span><b>{row.title}</b><small>{row.detail}</small></span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p aria-live="polite" className="location-correction-nearby-note" role="status">
+          {shown.status === "loading" ? (typed ? "Looking…" : "Looking nearby…") : shown.status === "unavailable" ? "Nearby places aren’t available right now."
+            : typed ? "No places match." : "No places nearby."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function toRows(places: MkPlace[], centre: { latitude: number; longitude: number }): Row[] {
+  const seen = new Set<string>();
+  return places
+    .flatMap((place) => {
+      const title = place.name?.trim();
+      if (!title || !place.coordinate) return [];
+      const metres = metresBetween(centre, place.coordinate);
+      const key = place.id ?? `${title}@${place.coordinate.latitude},${place.coordinate.longitude}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [{ key, title, detail: formatDistance(metres), metres }];
+    })
+    .sort((a, b) => a.metres - b.metres)
+    .map(({ key, title, detail }) => ({ key, title, detail }));
+}

@@ -401,12 +401,12 @@ The iPhone's place and trip sheets and the web's correction dialogs share one la
 1. **Title and times.**
 2. **The question**, if the item asks one, in its muted card with compact pills and one Yes at most. A near guess asks "Visited {name}?" with Yes and Edit; Edit sets the guess aside for the plain "Where were you?".
 3. **The map:** only the visit's own area, or the trip's route; no readings, saved places, anchors, rejected samples or gap lines. Its one line is at most "Based on N readings" for an unknown place or a trip, and nothing for a saved or named place. The list of silences and stops ("No readings 19:44–19:59") never appears on a sheet; on iPhone it is in Settings › Something not syncing? › Location details (today's places and trips, read one at a time).
-4. **"Where were you?"** (places only): on iPhone Apple's nearby places and search first, nearest first, then the saved places nearest first and "Leave as unknown", all as one plain divider list (no card) with a tick on the one chosen; "Show all saved places" as quiet text for the rest. The title is left out when the question above already asks it.
+4. **"Where were you?"** (places only): on iPhone, and on the web with Apple MapKit JS, Apple's nearby places and search first, nearest first, then the saved places nearest first and "Leave as unknown", all as one plain divider list (no card) with a tick on the one chosen; "Show all saved places" as quiet text for the rest. The title is left out when the question above already asks it.
 5. **"Logs as":** compact activity chips — the shared chip face (the activity's glyph on its colour tile, the name; the chosen one with a neutral ring and check), 32 pt / px tall with a 44 pt target and rows 12 apart. No activity picked means "don't log": "Don't log" is never a selected or filled pill, only quiet text to clear a pick.
 6. **Times.**
 7. **Corrections**, untitled: "Not listed? Save this place" and "I wasn't here" for a place; a trip's legs, "I didn't leave" and "This wasn't a trip". Each is a compact pill; confirmations ask in place.
 
-Titles are sentence case and sparing ("Where were you?", "Logs as", "Legs"); no all-caps labels and no developer words ("Fix the shape", "More places (24)"). Done stays secondary until something changed.
+Titles are sentence case and sparing ("Where were you?", "Logs as", "Legs"); no all-caps labels and no developer words ("Fix the shape", "More places (24)"). Done stays secondary until something changed. The web dialog (UI review W12, owner 29 October 2026) is 440 px wide with a 160 px map, plain 36 px time and name fields, and no helper sentences (none under "Leave as unknown", the saved places or an unpicked Logs as).
 
 ### Motion
 
