@@ -39,7 +39,7 @@ Where a rule here conflicts with the approved Dayframe Blocks direction, it gove
 - Use coral for the primary action and live recording, `danger` for destructive action and category colours for data identity. On Blocks surfaces, selected navigation uses a neutral fill (the selected iPhone tab is the exception: `accentText`), and durations, totals, chart marks and map pins never use coral.
 - Pair category colours with labels, small rounded-square block markers, rails or borders, or on Blocks surfaces with text on a solid block whose ink is chosen by measured contrast. Never rely on colour alone or assume a palette colour is accessible body text.
 - One activity marker shape everywhere (X3, owner 12 October 2026): a small activity/category marker on web and iPhone is a rounded-square block, never a round dot. Web uses `--activity-marker-radius` (30%); iPhone uses `activityMarkerRadius(size)` from `@dayframe/shared`. Non-activity dots (status, now line, goal dots, avatars, pagination) stay round.
-- Use a 44 px/pt minimum interactive target and visible focus/selected states. Both platforms should prefer fill, spacing, and hairline dividers over default outlines; retain lines for focus, validation, essential control boundaries, calendar grids and semantic data structure.
+- Use a 44 px/pt minimum interactive target and visible focus/selected states. Both platforms should prefer fill, spacing, and hairline dividers over default outlines; row dividers are inset on both sides and never touch the container edges, and inline answers use the one compact pill (32 px/pt with a 44 hit area; owner rules 28 Oct 2026, #614 web and #616 iPhone, guarded by each platform's `dividers.contract.test.ts`); retain lines for focus, validation, essential control boundaries, calendar grids and semantic data structure.
 - Web keyboard focus is always neutral grey through the shared `focus`/`control-border` treatment. Apply it to fields, buttons, links, compound controls, options, menus, disclosures, Calendar blocks and icon actions; never use blue `info` or accent colour as a focus indicator. Selected/active accent remains a separate state, and invalid focused fields retain a separate danger cue.
 - On web, field-like controls draw one 1 px `--control-border` line at rest (3:1 or more on every surface; WCAG 1.4.11) and on focus turn it the focus colour and add a 1 px inset (`box-shadow: inset 0 0 0 1px`), so the ring reads 2 px without moving anything (web UI audit WUI-017); standalone actions keep one external 2 px focus ring. A field must never show both, and an input whose wrapper owns the line never draws its own.
 - A compound web field owns its perimeter on the wrapper with `:focus-within`. Nested inputs suppress their own border/outline, and nested actions keep a separate inset keyboard indicator.
@@ -71,16 +71,16 @@ Where a rule here conflicts with the approved Dayframe Blocks direction, it gove
 - Use one animation owner. Keep native navigation and tabs native, use a UI-thread transition for local React Native presence/layout, and reserve Swift/SwiftUI for targeted interactions that genuinely require native ownership.
 - Reduce Motion may remove nonessential travel, scale, and springs, but it must preserve state, focus, feedback, and accessibility announcements.
 
-## Today top and Review nudge (Blocks parity)
+## Today top and things to check (Blocks parity)
 
 - Follow the prototype (`design/blocks/ios.html`): uppercase 11-point date
   eyebrow in the tertiary text colour; the goal total in the display face
   (30 points) with "framed of 8h" and the percentage on one baseline; 18-point
   hour cells on the inset surface with 4-point gaps and 5-point corners.
-- The nudge is one surface-filled card (22-point corners): a stack of up to
-  three tilted activity blocks, a 15-point bold title, one line of secondary
-  detail, and a tertiary chevron. It is the only Review element on Today; do
-  not add rows, a legend or a second Review control.
+- The Review nudge card is gone (location v4 steps 14–15): Today's only check
+  element is the quiet "N to check today" chip (`TodayChecksChip`), absent when
+  nothing is left to check today, which opens Calendar › List at today's first
+  "?". Do not add rows, a legend or a second check control.
 
 ## Review Checklist
 
