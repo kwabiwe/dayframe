@@ -1653,6 +1653,74 @@ dialog.ui-dialog.ui-dialog--compact {
   width: min(520px, calc(100vw - 24px));
 }
 
+/* The place and trip dialogs are narrower (UI review W12, owner 29 Oct 2026). */
+dialog.ui-dialog.ui-dialog--compact:has(.location-correction) {
+  width: min(440px, calc(100vw - 24px));
+}
+
+/* Apple's nearby places in the place dialog (MapKit JS only): a search field over the list's rows. */
+.location-correction-nearby {
+  display: grid;
+  gap: 4px;
+}
+
+.location-correction-nearby-search {
+  display: flex;
+  min-height: var(--web-control-height);
+  align-items: center;
+  gap: 8px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.location-correction-nearby-search:focus-within {
+  border-color: var(--focus);
+}
+
+.location-correction-nearby-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  outline: 0;
+}
+
+.location-correction-nearby .location-correction-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.location-correction-option.is-nearby {
+  width: 100%;
+  grid-template-columns: 22px minmax(0, 1fr);
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-correction-nearby li + li .location-correction-option::before {
+  --divider-inset: 2px;
+  --divider-inset-start: 36px;
+  position: absolute;
+  top: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.location-correction-nearby-note {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--text-secondary);
+  font-size: var(--type-meta);
+}
+
 dialog.ui-dialog.ui-dialog--wide {
   width: min(720px, calc(100vw - 24px));
 }
@@ -6126,9 +6194,10 @@ dialog.ui-dialog.df-range-custom {
   }
 }
 
-/* One height for the map's frame and its loading placeholder (glitch fix 3), so the sheet never jumps. */
+/* One height for the map's frame and its loading placeholder (glitch fix 3), so the sheet never jumps; 160 px in the
+   slimmer place and trip dialogs (UI review W12, owner 29 Oct 2026). */
 :root {
-  --location-evidence-frame-height: 18rem;
+  --location-evidence-frame-height: 160px;
 }
 
 .location-evidence-frame {
@@ -6145,6 +6214,11 @@ dialog.ui-dialog.df-range-custom {
 .location-evidence-map {
   width: 100%;
   min-height: var(--location-evidence-frame-height);
+}
+
+/* MapKit JS sizes its view to the container's own height, not a minimum (a 0 px view draws nothing). */
+.location-evidence-map.is-mapkit {
+  height: var(--location-evidence-frame-height);
 }
 
 .location-evidence-empty {
@@ -13334,6 +13408,19 @@ dialog.ui-dialog.df-palette {
   }
 }
 
+/* A week whose refresh failed (request-storm fix, Codex r2 on #634): its own quiet line above the week's first day,
+   the List's edge copy and retry pill, rows unchanged. */
+.timeline-list-week-stale > td {
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: var(--type-meta);
+  font-weight: var(--fw-regular);
+}
+
+.timeline-list-week-stale .timeline-list-edge-retry {
+  margin-left: 8px;
+}
+
 .timeline-list-continued > td {
   padding: 4px 8px 8px;
   color: var(--text-secondary);
@@ -14662,7 +14749,7 @@ button.timeline-location-hit:focus-visible {
 /* Correcting the location timeline (location v4 step 13): the dialog's sections. */
 .location-correction {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* One layout for every place and trip dialog (owner feedback, 29 Oct 2026; brand guide "Place and trip
@@ -14762,25 +14849,25 @@ button.timeline-location-hit:focus-visible {
 .location-correction-time {
   display: grid;
   gap: 4px;
-  border-radius: 14px;
-  padding: 10px 14px;
-  background: var(--surface-muted);
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--type-label);
   font-weight: var(--fw-medium);
 }
 
 .location-correction-time input {
-  min-height: 44px;
+  min-height: var(--web-control-height);
   border: var(--web-control-border-width) solid var(--control-border);
   border-radius: 10px;
   padding: 0 10px;
   background: var(--surface-inset);
   color: var(--text-primary);
   font: inherit;
-  font-size: 20px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
-  font-weight: var(--fw-strong);
+  font-weight: var(--fw-medium);
 }
 
 .location-correction-modes {
@@ -15087,9 +15174,32 @@ button.timeline-location-hit:focus-visible {
 /* The hint, and "Don't log" as quiet text once an activity is picked; one line either way, so nothing moves. */
 .location-correction-log-foot {
   display: flex;
-  min-height: 44px;
+  min-height: 0;
   align-items: center;
   gap: 12px;
+}
+
+.location-correction-log-foot:not(:has(*)) {
+  display: none;
+}
+
+/* MapLibre's zoom buttons follow the theme in the dialog (UI review W12). */
+:root[data-theme="dark"] .location-correction-map .maplibregl-ctrl-group {
+  background: var(--surface-raised, var(--surface));
+}
+
+:root[data-theme="dark"] .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group {
+    background: var(--surface-raised, var(--surface));
+  }
+
+  :root:not([data-theme="light"]) .location-correction-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+    filter: invert(1);
+  }
 }
 
 .location-correction-log-foot .location-correction-hint {
@@ -15104,12 +15214,12 @@ button.timeline-location-hit:focus-visible {
 
 .location-correction-save input {
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--web-control-height);
   flex: 1 1 180px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
   padding: 0 12px;
-  background: var(--surface);
+  background: var(--surface-inset);
   color: var(--text-primary);
   font: inherit;
 }
@@ -15332,7 +15442,8 @@ button.timeline-location-hit:focus-visible {
   .df-erow-group + .df-erow-group > .df-erow::before,
   .location-correction-option + .location-correction-option::before,
   .location-correction-leg + .location-correction-leg::before,
-  .settings-group .df-set-trips::before {
+  .settings-group .df-set-trips::before,
+  .location-correction-nearby li + li .location-correction-option::before {
     height: 0;
     border-top: 1px solid CanvasText;
     background: none;

@@ -56,7 +56,7 @@ const WEEK_BEFORE = entry("week-before", 8, 3);
 vi.mock("@/components/useCalendarListWeeks", () => ({
   useCalendarListWeeks: () => ({
     entries: [WEEK_BEFORE], rangeStart: new Date(2026, 9, 5), rangeEnd: new Date(2026, 9, 19), loading: null, error: null,
-    reachedEarliest: false, reachedLatest: true, load: () => undefined
+    reachedEarliest: false, reachedLatest: true, load: () => undefined, failedWeeks: [], retryWeek: () => undefined
   })
 }));
 

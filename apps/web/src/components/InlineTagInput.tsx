@@ -339,7 +339,7 @@ export function InlineTagInput({
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [effectivePickerOpen]);
+  }, [effectivePickerOpen, pickerReturnRef]);
 
   useLayoutEffect(() => {
     if (!portal || (!shouldOpen && !effectivePickerOpen && !activityOpen)) return undefined;

@@ -68,7 +68,7 @@ import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivi
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
-import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
 import { getReviewItemSyncStates, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
@@ -1919,7 +1919,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const scopedDayKey = localDayKey(minuteNow);
   useEffect(() => {
     if (!reviewListAtCap || !scopedOwner) {
-      setScopedReviewItems([]);
+      setScopedReviewItems((current) => keepScopedReviewItems(current, []));
       return;
     }
     const timeZone = currentTimeZone();
@@ -1937,7 +1937,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         readSuppressedReviewItemIds(scopedOwner)
       ])
         .then(([snapshot, suppressed]) => {
-          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot, suppressed));
+          // The same items keep the same array, so the Calendar's data (and its timeline read) stays put.
+          if (current && mine === sequence) setScopedReviewItems((items) => keepScopedReviewItems(items, scopedOpenReviewItems(snapshot, suppressed)));
         })
         .catch(() => undefined);
     };

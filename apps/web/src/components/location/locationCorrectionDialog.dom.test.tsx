@@ -17,14 +17,17 @@ const evidenceFetch = vi.hoisted(() => vi.fn());
 const mapStandIn = vi.hoisted(() => ({ mounts: 0, evidence: [] as unknown[] }));
 vi.mock("next/dynamic", async () => {
   const { useEffect } = await import("react");
-  return { default: () => function EvidenceMapStandIn({ caption, evidence, visitOnly }: { caption?: string | null; evidence?: unknown; visitOnly?: boolean }) {
+  // Apple's Nearby list (MapKit JS only) is its own dynamic chunk: not a map.
+  return { default: (loader: () => unknown) => String(loader).includes("NearbyPlaces") ? () => null : function EvidenceMapStandIn({ caption, evidence, visitOnly }: { caption?: string | null; evidence?: unknown; visitOnly?: boolean }) {
     useEffect(() => { mapStandIn.mounts += 1; }, []);
     mapStandIn.evidence.push(evidence);
     return <div data-testid="evidence-map" data-visit-only={String(Boolean(visitOnly))}>{caption}</div>;
   } };
 });
 vi.mock("@/lib/client-auth-fetch", () => ({
-  clientFetch: (url: string, init?: RequestInit) => url.includes("/evidence?") ? evidenceFetch(url, init) : clientFetch(url, init)
+  clientFetch: (url: string, init?: RequestInit) => url.includes("/api/mapkit-token")
+    ? Promise.resolve({ ok: false, status: 404, json: async () => ({ available: false }) })
+    : url.includes("/evidence?") ? evidenceFetch(url, init) : clientFetch(url, init)
 }));
 
 const { DIALOG_SECTION_ORDER, editedInstant, legEvidence, LocationCorrectionDialog } = await import("./LocationCorrectionDialog");
@@ -694,7 +697,8 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
         target={{ kind: "place", place: place(), label: "Unknown place" }} />);
       const map = await screen.findByTestId("evidence-map");
       expect(map.textContent).toBe("Based on 14 readings");
-      expect(map.getAttribute("data-visit-only")).toBe("true");
+      // The dialog's map (PlaceSheetMap: MapKit JS or MapLibre) only ever draws the visit's area or the trip's route.
+      expect(map.getAttribute("data-visit-only")).toBe("false");
       expect(document.body.textContent).not.toMatch(/No readings|Fix the shape|More places/);
       cleanup();
       render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}

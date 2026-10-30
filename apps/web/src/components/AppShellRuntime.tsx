@@ -5,13 +5,13 @@ import { useSearchParams } from "next/navigation";
 import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
-  timerStatePollDelay,
   type DayframePaletteKey,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { joinSplitTimeEntries, splitRunningTimeEntry } from "@/lib/time-entry-split";
 import { onBeforeSessionChange } from "@/lib/session-change";
+import { webTimerStatePollDelay } from "@/lib/timer-state-poll";
 import {
   applyPendingTimerDetails,
   clearPendingTimerDetails,
@@ -152,6 +152,8 @@ const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
 export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS;
 export const BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS = 10_000;
 export const DATE_DATA_CACHE_LIMIT = 8;
+/** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
+export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -180,6 +182,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const workspaceGenerationRef = useRef(0);
   // Polls the timer state now, inside the running poll chain (set by that chain; WEB-UI-4).
   const pollTimerStateNowRef = useRef<(() => void) | null>(null);
+  // The user's own timer actions still settling, each until its own reload has (`trackTimerAction`), by
+  // sequence: when it started and for which workspace lifetime.
+  const timerActionsRef = useRef(new Map<number, { startedAt: number; generation: number }>());
+  const timerActionSeqRef = useRef(0);
+  /**
+   * Whether an action of the user's is still current: retired once a newer action settles (superseded), once
+   * the workspace or account changes, and once it has run TIMER_ACTION_SETTLE_LIMIT_MS (a stalled reload),
+   * so a stuck action never holds polls off (Codex r2 on #637).
+   */
+  const hasCurrentTimerAction = useCallback(() => {
+    const now = Date.now();
+    for (const [seq, action] of timerActionsRef.current) {
+      if (action.generation !== workspaceGenerationRef.current || now - action.startedAt >= TIMER_ACTION_SETTLE_LIMIT_MS) {
+        timerActionsRef.current.delete(seq);
+      }
+    }
+    return timerActionsRef.current.size > 0;
+  }, []);
   // The period the URL shows now, read by `refresh` so it is one stable callback: a refresh asked
   // for (or a Delete's onSynced bound) before a period change loads the period shown when it runs,
   // and an answer for a period left meanwhile is dropped (WEB-UI-3).
@@ -379,6 +399,40 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [commitData]);
 
+  /**
+   * The poll's reload, after a changed fingerprint. Unlike `refresh` it supersedes nothing until it has
+   * succeeded: a failed one never discards a reload still in flight (an action's), and an answer
+   * overtaken by a newer load, a period change, a workspace change or a mutation is dropped. True only
+   * when it committed, so the poll keeps its old fingerprint otherwise and the next poll retries
+   * (Codex r3 on #637).
+   */
+  const reconcileFromPoll = useCallback(async (stale: () => boolean = () => false): Promise<boolean> => {
+    if (mutationGateRef.current.isActive()) return false;
+    const baseline = refreshRequestRef.current;
+    const date = selectedDateRef.current;
+    const generation = workspaceGenerationRef.current;
+    try {
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
+      if (!response.ok) return false;
+      const payload = (await response.json()) as BootstrapData;
+      if (
+        baseline !== refreshRequestRef.current ||
+        date !== selectedDateRef.current ||
+        generation !== workspaceGenerationRef.current ||
+        mutationGateRef.current.isActive() ||
+        // The poll that asked is stale (an account or workspace change since, or its chain is gone):
+        // nothing from the session left is committed (Codex r4 on #637).
+        stale()
+      ) return false;
+      // Succeeded: now it supersedes the loads still in flight (they started before it).
+      refreshRequestRef.current += 1;
+      commitData(payload, "canonical");
+      return true;
+    } catch {
+      return false;
+    }
+  }, [commitData]);
+
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
     const cached = cachedDateData(date);
     if (cached) {
@@ -468,62 +522,116 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   // One poll chain for the provider's life (`refresh` is stable): a period change never restarts
   // it. The in-flight flag belongs to this chain, and a chain torn down mid-request discards its
-  // answer, so a new chain always starts and the old one never acts (WEB-UI-4).
+  // answer, so a new chain always starts and the old one never acts (WEB-UI-4). Cadence
+  // (`webTimerStatePollDelay`, performance.md): 10 s visible and focused, 60 s visible but not
+  // focused, none while hidden; focus, a return to visibility and the user's own timer actions poll
+  // at once (never beside one in flight); failures back off to 120 s. An account or workspace change
+  // drops the answer in flight and the backoff.
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
+    let epoch = 0;
     let timeout: number | null = null;
     let consecutiveFailures = 0;
 
-    const schedule = (delay: number) => {
-      if (cancelled || document.visibilityState !== "visible") return;
+    const hidden = () => document.visibilityState === "hidden";
+    const clear = () => {
       if (timeout !== null) window.clearTimeout(timeout);
-      timeout = window.setTimeout(() => void poll(), delay);
+      timeout = null;
+    };
+    const scheduleIn = (delay: number) => {
+      clear();
+      if (cancelled || hidden()) return;
+      timeout = window.setTimeout(() => {
+        timeout = null;
+        void poll();
+      }, delay);
+    };
+    const scheduleNext = () => scheduleIn(webTimerStatePollDelay({ focused: document.hasFocus(), consecutiveFailures }));
+    // One poll now, deduped: a poll in flight already answers it, and requests in a row collapse.
+    const pollSoon = () => {
+      if (cancelled || hidden() || inFlight) return;
+      scheduleIn(0);
     };
 
     const poll = async () => {
-      if (cancelled || document.visibilityState !== "visible" || inFlight) return;
+      if (cancelled || hidden() || inFlight) return;
       inFlight = true;
+      const pollEpoch = epoch;
+      const generation = workspaceGenerationRef.current;
+      const stale = () => cancelled || pollEpoch !== epoch || generation !== workspaceGenerationRef.current;
       try {
         const response = await clientFetch("/api/timer-state", { cache: "no-store" });
-        if (cancelled) return;
+        if (stale()) return;
         if (!response.ok) throw new Error(`Unable to check the recording state: ${response.status}`);
         const next = (await response.json()) as TimerStateFingerprint;
-        if (cancelled) return;
-        const changed = timerStateChanged(timerStateRef.current, next);
-        timerStateRef.current = next;
+        if (stale()) return;
         consecutiveFailures = 0;
-        if (changed) await refresh();
+        // An action of the user's is still settling: its own reload has the newest state, and the
+        // poll that follows it confirms. The answer is set aside so it never supersedes that reload.
+        if (hasCurrentTimerAction()) return;
+        // A changed fingerprint is kept only once its reload has committed (which records the
+        // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
+        if (!timerStateChanged(timerStateRef.current, next)) timerStateRef.current = next;
+        else await reconcileFromPoll(stale);
       } catch {
-        consecutiveFailures += 1;
+        if (!stale()) consecutiveFailures += 1;
       } finally {
         inFlight = false;
-        schedule(timerStatePollDelay(consecutiveFailures));
+        scheduleNext();
       }
     };
 
-    pollTimerStateNowRef.current = () => schedule(0);
+    pollTimerStateNowRef.current = pollSoon;
 
     const resume = () => {
-      if (document.visibilityState !== "visible") {
-        if (timeout !== null) window.clearTimeout(timeout);
-        timeout = null;
+      if (hidden()) {
+        clear();
         return;
       }
-      schedule(0);
+      pollSoon();
     };
+    const unregister = onBeforeSessionChange(async () => {
+      epoch += 1;
+      consecutiveFailures = 0;
+      // Actions of the session left never hold the next session's polls off.
+      timerActionsRef.current.clear();
+    });
 
-    schedule(0);
+    pollSoon();
     window.addEventListener("focus", resume);
     document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
-      pollTimerStateNowRef.current = null;
-      if (timeout !== null) window.clearTimeout(timeout);
+      if (pollTimerStateNowRef.current === pollSoon) pollTimerStateNowRef.current = null;
+      clear();
+      unregister();
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [refresh]);
+  }, [hasCurrentTimerAction, reconcileFromPoll]);
+
+  // The user's own timer actions (start, switch, stop, delete, split, join, an edit of the running
+  // block) in progress, each until its own reload has settled. While one is current, a poll's answer
+  // is set aside, so a poll never supersedes an action's reload. An action settling retires itself
+  // and every older one (superseded: its reload has the newer state). When none is current (and the
+  // gate is idle), one timer-state poll confirms them all, never beside a poll already in flight.
+  const trackTimerAction = useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
+    const seq = ++timerActionSeqRef.current;
+    timerActionsRef.current.set(seq, { startedAt: Date.now(), generation: workspaceGenerationRef.current });
+    try {
+      return await run();
+    } finally {
+      for (const older of timerActionsRef.current.keys()) {
+        if (older <= seq) timerActionsRef.current.delete(older);
+      }
+      if (!hasCurrentTimerAction()) {
+        void mutationGateRef.current.whenIdle().then(() => {
+          if (!hasCurrentTimerAction()) pollTimerStateNowRef.current?.();
+        });
+      }
+    }
+  }, [hasCurrentTimerAction]);
 
   // A period change asks the running chain for one poll now (never a second chain), so another
   // device's Start or Stop shows as soon as the new period does.
@@ -748,7 +856,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     void sendDetailsPatch(targetId, patch.body).catch(() => undefined);
   }, [baseFor, sendDetailsPatch, serverEntryId]);
 
-  const startTimer = useCallback(async (
+  const startTimerUntracked = useCallback(async (
     input: TimerDraftInput = {},
     options: { dedupeRunning?: boolean; guard?: (snapshot: BootstrapData) => string | null; startedAt?: string } = {}
   ): Promise<TimerStartOutcome> => {
@@ -758,7 +866,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) {
       outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing) });
     }
-    return runTimerStartMutation({
+    const outcome = await runTimerStartMutation({
       beforeStart: async () => {
         // The block this Start replaces gets its pending edits first, at its real id.
         const current = dataRef.current;
@@ -824,7 +932,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
       }
     });
+    return outcome;
   }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId, setTimerDraft]);
+  const startTimer = useCallback(
+    (...args: Parameters<typeof startTimerUntracked>) => trackTimerAction(() => startTimerUntracked(...args)),
+    [startTimerUntracked, trackTimerAction]
+  );
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
     const decision = entryContinuationDecision(entry);
@@ -987,15 +1100,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // One Stop at a time: pressing again while one waits or runs joins it (no stacked waiters).
   const stopTimer = useCallback((input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     if (pendingStopRef.current) return pendingStopRef.current;
-    const stopping = stopTimerNow(input).finally(() => {
+    const stopping = trackTimerAction(() => stopTimerNow(input)).finally(() => {
       if (pendingStopRef.current === stopping) pendingStopRef.current = null;
       setIsStopPending(false);
     });
     pendingStopRef.current = stopping;
     return stopping;
-  }, [stopTimerNow]);
+  }, [stopTimerNow, trackTimerAction]);
 
-  const deleteActiveTimer = useCallback(async (): Promise<MutationOutcome> => {
+  const deleteActiveTimerUntracked = useCallback(async (): Promise<MutationOutcome> => {
     const requested = dataRef.current?.activeEntry;
     if (!requested) return { ok: false, error: "There is no running block to delete." };
     // As Stop: a block whose Start is still in flight waits behind it, then the real block (the id
@@ -1039,6 +1152,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
+  const deleteActiveTimer = useCallback(
+    (...args: Parameters<typeof deleteActiveTimerUntracked>) => trackTimerAction(() => deleteActiveTimerUntracked(...args)),
+    [deleteActiveTimerUntracked, trackTimerAction]
+  );
 
   /**
    * Inside the gate, as a split or its Undo ends: the running block's edits not saved yet are saved now. Its
@@ -1060,7 +1177,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [saveLeftoverEdits]);
 
-  const splitActiveTimer = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
+  const splitActiveTimerUntracked = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
     const requested = dataRef.current?.activeEntry;
     if (!requested) return { ok: false, error: "There is no running block to split." };
     // As Stop and Discard: a block whose Start is still in flight waits behind it, and a rejected Start
@@ -1119,8 +1236,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }));
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId, versionOf]);
+  const splitActiveTimer = useCallback(
+    (...args: Parameters<typeof splitActiveTimerUntracked>) => trackTimerAction(() => splitActiveTimerUntracked(...args)),
+    [splitActiveTimerUntracked, trackTimerAction]
+  );
 
-  const joinSplitTimer = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
+  const joinSplitTimerUntracked = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
     await mutationGateRef.current.whenIdle();
     const result = await mutationGateRef.current.run(() => endingWithLeftoverEdits(async (): Promise<MutationOutcome> => {
       // Edits typed into the second part and not saved yet would be lost by the join (Codex r2 on #607).
@@ -1162,8 +1283,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }));
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [baseFor, commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId]);
+  const joinSplitTimer = useCallback(
+    (...args: Parameters<typeof joinSplitTimerUntracked>) => trackTimerAction(() => joinSplitTimerUntracked(...args)),
+    [joinSplitTimerUntracked, trackTimerAction]
+  );
 
-  const updateActiveDetails = useCallback(async (
+  const updateActiveDetailsUntracked = useCallback(async (
     draft: TimerDraft,
     options: { closing?: boolean } = {}
   ): Promise<MutationOutcome> => {
@@ -1178,6 +1303,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [refresh, saveActiveDetails, serverEntryId]);
+  const updateActiveDetails = useCallback(
+    (...args: Parameters<typeof updateActiveDetailsUntracked>) => trackTimerAction(() => updateActiveDetailsUntracked(...args)),
+    [updateActiveDetailsUntracked, trackTimerAction]
+  );
 
   // The tab is closing, reloading or going to the background (stability audit WEB-UI-2): edits
   // autosave would send after its 650 ms debounce are sent now through the ordinary save, which is
@@ -1271,14 +1400,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     };
   }, [pendingOwner, restorePendingDetails]);
 
-  const updateActiveEntryFromCalendar = useCallback(async (
+  const updateActiveEntryFromCalendarUntracked = useCallback(async (
     input: ActiveEntryCompactMutationInput
   ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     const draftSnapshot = draftRef.current;
     refreshRequestRef.current += 1;
-    return runActiveEntryCompactMutation({
+    const outcome = await runActiveEntryCompactMutation({
       commit: (nextData) => commitData(nextData, "optimistic"),
       draftSnapshot,
       gate: mutationGateRef.current,
@@ -1321,11 +1450,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setError: setTimerError,
       snapshot
     });
+    return outcome;
   }, [baseFor, commitData, refresh, setTimerDraft, setTimerDraftBase]);
+  const updateActiveEntryFromCalendar = useCallback(
+    (...args: Parameters<typeof updateActiveEntryFromCalendarUntracked>) => trackTimerAction(() => updateActiveEntryFromCalendarUntracked(...args)),
+    [updateActiveEntryFromCalendarUntracked, trackTimerAction]
+  );
 
   const readShellData = useCallback(() => dataRef.current, []);
 
-  const updateActiveStartTime = useCallback(async (
+  const updateActiveStartTimeUntracked = useCallback(async (
     startedAt: string,
     options: { expectedEntryIds?: readonly string[] } = {}
   ): Promise<MutationOutcome> => {
@@ -1400,6 +1534,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [adoptServerDetails, baseFor, commitData, refresh, serverEntryId, setTimerDraftBase]);
+  const updateActiveStartTime = useCallback(
+    (...args: Parameters<typeof updateActiveStartTimeUntracked>) => trackTimerAction(() => updateActiveStartTimeUntracked(...args)),
+    [updateActiveStartTimeUntracked, trackTimerAction]
+  );
 
   const createManualEntry = useCallback(async (input: ManualEntryInput): Promise<MutationOutcome> => {
     const result = await mutationGateRef.current.run(async () => {

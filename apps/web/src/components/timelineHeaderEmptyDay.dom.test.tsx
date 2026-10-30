@@ -36,7 +36,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: vi.fn(async () => ({ ok
 vi.mock("@/components/useCalendarListWeeks", () => ({
   useCalendarListWeeks: () => ({
     entries: weeks.entries, rangeStart: weeks.start, rangeEnd: weeks.end, loading: null, error: null,
-    reachedEarliest: true, reachedLatest: true, load: () => undefined
+    reachedEarliest: true, reachedLatest: true, load: () => undefined, failedWeeks: [], retryWeek: () => undefined
   })
 }));
 
