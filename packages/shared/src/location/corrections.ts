@@ -35,8 +35,17 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     itemId,
     clientCorrectionId,
     placeId: z.string().uuid().nullable(),
-    learnedPlaceId: z.string().uuid().nullable()
-  }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." }),
+    learnedPlaceId: z.string().uuid().nullable(),
+    // A place to save with the correction, in one transaction: a refused correction leaves no place behind, and a
+    // retry under the same clientCorrectionId never saves it twice.
+    newPlace: z.object({
+      name: z.string().trim().min(1).max(120),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      radiusMeters: z.number().int().min(25).max(1000)
+    }).optional()
+  }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." })
+    .refine((value) => !(value.newPlace && (value.placeId || value.learnedPlaceId)), { message: "Choose a place or a new one, not both." }),
   z.object({
     kind: z.literal("times"),
     subject: z.enum(["place", "trip"]),

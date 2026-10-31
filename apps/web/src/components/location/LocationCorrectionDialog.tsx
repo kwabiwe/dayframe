@@ -248,7 +248,8 @@ export function LocationCorrectionDialog({
   // retry after a lost reply gets the saved receipt back instead of a refusal.
   const correctionIds = useRef(new Map<string, string>());
   const send = (correction: TimelineCorrectionRequest) => {
-    const signature = JSON.stringify(correction);
+    // A new place keeps one id whatever its name becomes: a lost reply may have saved it.
+    const signature = correction.kind === "place" && correction.newPlace ? `new-place:${correction.itemId}` : JSON.stringify(correction);
     let id = correctionIds.current.get(signature);
     if (!id) {
       id = crypto.randomUUID();
@@ -288,18 +289,10 @@ export function LocationCorrectionDialog({
     return () => { alive.current = false; };
   }, []);
   // "Save this place" made the place but couldn't set the visit to it: a retry sets it, and makes no second place.
-  const [createdPlaceId, setCreatedPlaceId] = useState<string | null>(null);
-  // Whether a creation was sent whose outcome isn't known, and the places that existed when the dialog opened.
-  // The creation sent whose outcome isn't known (its reply was lost): its own name and spot, kept until a lookup
-  // that worked finds the place or confirms it isn't there (Codex r8 on #609).
-  const pendingCreation = useRef<{ name: string; latitude: number; longitude: number } | null>(null);
-  // Its name, for rendering (the footer's label and recovery read state, never the ref, during render).
-  const [pendingCreationName, setPendingCreationName] = useState<string | null>(null);
-  const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
   const newPlaceNameRef = useRef<HTMLInputElement | null>(null);
-  // Asked only where Apple's nearby places could show: a place not in a block whose evidence has a centre.
-  const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place" && !target.place.blockIds.length
+  // Asked only where Apple's nearby places could show: a place whose evidence has a centre.
+  const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place"
     && Boolean(evidence && evidence !== "unavailable" && evidence.map.centre));
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
   // Saved places nearest the visit first, as far as the map knows (the place dialog lists at most two within 1 km).
@@ -373,9 +366,13 @@ export function LocationCorrectionDialog({
     const { place } = target;
     const out: TimelineCorrectionRequest[] = [];
     if (choice !== saved.picked) {
+      const map = evidence && evidence !== "unavailable" ? evidence.map : null;
+      const newName = choice.startsWith("new:") ? choice.slice(4) : null;
       out.push({ kind: "place", subject: "place", itemId: place.id,
         placeId: choice.startsWith("saved:") ? choice.slice(6) : null,
-        learnedPlaceId: choice.startsWith("learned:") ? choice.slice(8) : null });
+        learnedPlaceId: choice.startsWith("learned:") ? choice.slice(8) : null,
+        ...(newName && map?.centre ? { newPlace: { name: newName, latitude: map.centre.coordinates[1], longitude: map.centre.coordinates[0],
+          radiusMeters: Math.round(Math.min(250, Math.max(75, map.stayRadiusMeters ?? 100))) } } : {}) });
     }
     if (saved.stoppedAt) {
       const startChanged = start !== timeValue(saved.startedAt);
@@ -488,61 +485,8 @@ export function LocationCorrectionDialog({
       setError("Give the place a name.");
       return;
     }
-    // The other edits go with it (Codex r1 on #636): check them before anything is created.
-    const others = corrections();
-    if (typeof others === "string") {
-      setError(others);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    let placeId = createdPlaceId;
-    const [longitude, latitude] = evidence.map.centre.coordinates;
-    // A creation whose reply was lost may have saved the place: before trying again, look for it — by the name
-    // and spot that creation sent (not what the fields say now), among places this dialog didn't open with — and use
-    // it, even if the name was edited since (Codex r7, r8 on #609; /api/places takes no idempotency key). A lookup
-    // that fails isn't "not there": nothing is created until one works.
-    const attempted = pendingCreation.current;
-    if (!placeId && attempted) {
-      const lookup = await findCreatedPlace(attempted.name, attempted.latitude, attempted.longitude, openingPlaceIds.current);
-      if (!alive.current) return;
-      if (lookup === "failed") {
-        setBusy(false);
-        setError("Couldn't check whether the place was saved. Check your connection and try again.");
-        return;
-      }
-      pendingCreation.current = null;
-      setPendingCreationName(null);
-      if (lookup) {
-        placeId = lookup;
-        setCreatedPlaceId(placeId);
-      }
-    }
-    if (!placeId) {
-      const radiusMeters = Math.round(Math.min(250, Math.max(75, evidence.map.stayRadiusMeters ?? 100)));
-      pendingCreation.current = { name, latitude, longitude };
-      setPendingCreationName(name);
-      const response = await clientFetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, latitude, longitude, radiusMeters }) }).catch(() => null);
-      const created = response?.ok ? await response.json().catch(() => null) as { place?: { id?: string } } | null : null;
-      if (!alive.current) return;
-      placeId = created?.place?.id ?? null;
-      // Only a definitive refusal (4xx) is a known "nothing saved"; a 5xx or gateway error, an unreadable body or a lost
-      // reply may have committed, so its outcome stays unknown and the next try looks first (Codex r9 on #609).
-      if (placeId || (response && response.status >= 400 && response.status < 500)) {
-        pendingCreation.current = null;
-        setPendingCreationName(null);
-      }
-      if (!placeId) {
-        setBusy(false);
-        setError("The place wasn't saved. Saving a place needs a connection.");
-        return;
-      }
-      setCreatedPlaceId(placeId);
-    }
-    // The visit set to the new place, then the dialog's other edits (times, Logs as), as one Save.
-    setBusy(false);
-    await apply(`saved:${placeId}`);
+    // The place is saved with the correction, then the dialog's other edits (times, Logs as), as one Save.
+    await apply(`new:${name}`);
   }
 
   /** "I wasn't here": the place leaves the day and the trips either side become one (step 12 part 4). */
@@ -581,7 +525,7 @@ export function LocationCorrectionDialog({
   const pendingNow = corrections();
   // A creation whose outcome isn't known counts as a change, so the footer recovers it instead of answering Yes
   // (Codex r3 on #636).
-  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim()) || pendingCreationName !== null;
+  const changed = typeof pendingNow === "string" || pendingNow.length > 0 || Boolean(newPlaceName.trim());
   const footer = (
     <>
       <Button disabled={busy} onClick={onClose}>Cancel</Button>
@@ -690,9 +634,8 @@ export function LocationCorrectionDialog({
     ...savedRows.filter((option) => option.id !== currentRow?.id || needle).map((option) => ({ key: `saved:${option.id}`, glyph: placeGlyph(option), name: option.name,
       note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place" }))
   ];
-  // Also for a wrongly matched saved place. Never for a place in a block: the server refuses to change its place,
-  // and by then the new place would already exist.
-  const canSaveNew = !place.blockIds.length && Boolean(centre);
+  // Also for a wrongly matched saved place, logged or not: a block follows its visit to the new place.
+  const canSaveNew = Boolean(centre);
   // The list opens at its rows (up to five) and holds that height while searching, with room for a search's answer and
   // its "Save “X” as a place" slot where a new place can be saved.
   const showsNearby = canSaveNew && mapProvider === "mapkit";
@@ -726,8 +669,7 @@ export function LocationCorrectionDialog({
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
         // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
         // A creation whose reply was lost (from a tap, a search or the field) is looked up first (Codex r2 on #636).
-        : <Button disabled={busy} onClick={() => void (canSaveNew && (newPlaceName.trim() || pendingCreationName !== null)
-          ? saveThisPlace(newPlaceName.trim() ? undefined : pendingCreationName ?? undefined) : apply())} variant="primary">Save</Button>}
+        : <Button disabled={busy} onClick={() => void (canSaveNew && newPlaceName.trim() ? saveThisPlace() : apply())} variant="primary">Save</Button>}
     </>
   );
   return (
@@ -805,7 +747,7 @@ export function LocationCorrectionDialog({
                 {logAs ? <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p> : null}
               </div>
             ) : null}
-            {open ? null : (
+            {open || place.blockIds.length ? null : (
               <div aria-label="Times" className="location-correction-times" data-section="times" role="group">
                 <label className="location-correction-time"><span>Start</span>
                   <TimeField clock={clock} disabled={busy} label="Start time" onChange={setStart} value={start} />
@@ -844,31 +786,6 @@ export function LocationCorrectionDialog({
     </ModalDialog>
   );
 
-}
-
-/** Metres between two points a few metres apart (equirectangular is exact enough at this scale). */
-function metresBetween(latitudeA: number, longitudeA: number, latitudeB: number, longitudeB: number) {
-  const radians = Math.PI / 180;
-  const x = (longitudeB - longitudeA) * radians * Math.cos(((latitudeA + latitudeB) / 2) * radians);
-  const y = (latitudeB - latitudeA) * radians;
-  return Math.sqrt(x * x + y * y) * 6_371_000;
-}
-
-/**
- * A place "Save this place" already created though its reply was lost: same name, within 10 m of the visit's centre,
- * and not among the places the dialog opened with. Null when the list says there is none; "failed" when the list
- * can't be read, which says nothing either way.
- */
-async function findCreatedPlace(name: string, latitude: number, longitude: number, existing: ReadonlySet<string>): Promise<string | null | "failed"> {
-  const response = await clientFetch("/api/places", { cache: "no-store" }).catch(() => null);
-  const body = response?.ok ? await response.json().catch(() => null) as { places?: Array<{ id?: unknown; name?: unknown; latitude?: unknown; longitude?: unknown }> } | null : null;
-  if (!body || !Array.isArray(body.places)) return "failed";
-  const wanted = name.trim().toLowerCase();
-  const found = (body?.places ?? []).find((place) => typeof place.id === "string" && !existing.has(place.id) &&
-    typeof place.name === "string" && place.name.trim().toLowerCase() === wanted &&
-    typeof place.latitude === "number" && typeof place.longitude === "number" &&
-    metresBetween(latitude, longitude, place.latitude, place.longitude) <= 10);
-  return typeof found?.id === "string" ? found.id : null;
 }
 
 /** "120 m", "1.4 km". */
