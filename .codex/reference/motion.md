@@ -690,11 +690,11 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 
 ## iPhone place and trip sheets, v3 (owner, 30 Oct 2026)
 
-- Trigger: a row, the search field, More options, Edit on a guess, ✕, the handle, Save, Not now.
+- Trigger: a row, the search field, More options, a time field, ✕, the handle, Save or Yes, Don't log.
 - Owner: `BottomSheetShell` / `SwipeDismissSheet` own presentation and every exit; ✕ takes the shell's own discard, so it leaves as a swipe does. A leg still pushes in its keyed view.
-- Entrance/update/exit: the guess card and More options fade in and out with the local presence fades (no travel); the map and the results area hold their heights, so typing moves nothing. Results swap in place; the search spinner shows only while Apple is asked.
-- Interruption: a tap while a change is being kept does nothing (`frozen`); a refused keep leaves the sheet open with its message.
-- Accessibility: Reduce Motion uses the shorter opacity fades and holds the spinner still. Rows are 52-point buttons named with their distance; ✕ and More options are labelled, and More options reports expanded.
+- Entrance/update/exit: a guess only changes the words of the title's fixed line and the primary's label, and ticks a row, so nothing moves. The map's frame is there from the start and MapKit mounts `SHEET_MAP_DELAY_MS` later, once the spring has settled, fading in. The results area opens at its height with still placeholder rows; a different count from Apple animates its height once (`MOBILE_MOTION.layout`), and typing moves nothing. More options fades in and the sheet's own scroll (`BottomSheetScroller`, the one scroll owner) brings its row to the top; closing scrolls back first, then removes it. Opening a time scrolls the fields and the one wheel into full view above the pinned footer. Results swap in place; the search spinner shows only while Apple is asked.
+- Interruption: a tap while a change is being kept does nothing (`frozen`); a refused keep leaves the sheet open with its message. A tap on More options during its scroll back keeps it open; unmounting clears the timer. A finger on the sheet stops a scroll.
+- Accessibility: Reduce Motion uses the shorter opacity fades, jumps the scrolls, closes More options at once, sets the list's height without animating and mounts the map at once, and holds the spinner still. Placeholder rows are hidden from VoiceOver. Rows are 52-point buttons named with their distance; ✕ and More options are labelled, and More options reports expanded.
 
 ## Day swipe tick (owner, 30 Oct 2026)
 
