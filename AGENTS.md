@@ -1,5 +1,9 @@
 # Dayframe Agent Rules
 
+## Start Here
+
+Read `.codex-dayframe-qa/STATUS.md` in the main checkout first: the living status, git-ignored. After you merge a PR, ship a build or record an owner decision, update that file in the same session: rewrite stale lines, no diary.
+
 ## Project Overview
 
 Dayframe is a personal time-intelligence app. It combines fast manual task tracking with iOS mobile capture from HealthKit, geofences, shortcuts/NFC-style actions, and offline event sync.
