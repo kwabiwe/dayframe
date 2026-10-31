@@ -318,7 +318,8 @@ export function InlineTagInput({
     if (!effectivePickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (editorRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
+      // Only its own button and panel keep it open: a click in the description closes it too (owner, 31 Oct 2026).
+      if (pickerTriggerRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
       // Focus goes where the press puts it, or back to the Tags button when that is nowhere
       // (non-focusable content, or a button WebKit does not focus), never the page (Codex r5).
       const hadFocus = Boolean(pickerPanelRef.current?.contains(document.activeElement));

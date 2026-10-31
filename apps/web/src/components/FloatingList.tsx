@@ -263,7 +263,7 @@ export function FloatingListSearch({
   value: string;
 }) {
   // The neutral ring shows for keyboard focus only, never after a click or tap (UI review round 2).
-  const focusRing = useKeyboardFocusRing();
+  const focusRing = useKeyboardFocusRing({ keyboardOnly: true });
   return (
     <div className={`ui-compound-control df-flist-search ${className}`.trim()} data-focus-ring={focusRing.focusRing} {...focusRing.handlers}>
       <Search aria-hidden="true" size={15} />

@@ -55,6 +55,8 @@ type MapKit = {
   };
   Search: new (options: { coordinate?: MkCoordinate; region?: object; includePointsOfInterest?: boolean }) => {
     search(query: string, callback: (error: unknown, data?: { places?: MkPlace[] }) => void): number;
+    /** Results as you type, near the search's coordinate ("rivers" finds Riverside…). */
+    autocomplete?(query: string, callback: (error: unknown, data?: { results?: Array<{ displayLines?: string[]; coordinate?: { latitude: number; longitude: number } }> }) => void): number;
     cancel?(id: number): boolean;
   };
 };
