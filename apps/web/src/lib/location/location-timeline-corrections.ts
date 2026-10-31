@@ -17,14 +17,17 @@ import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import { recordReviewTitleHistory } from "./review-title-history";
 import { resolveLocationReviewActionWithClient } from "./location-review-service";
 import { ensureTravelCategoryId } from "../automatic-category-service";
+import { insertPlaceWith } from "../event-service";
+import { PERSON_EDIT_ACTION } from "../time-entry-provenance";
+import { LOCATION_AUTO_LOG_SOURCE } from "./location-auto-log";
 
 /**
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
  * transaction: an activity event, the correction row tied to the time it covers, then the segment it
  * changes. Replay applies every active correction again (`activeTimelineCorrections` +
- * `applyTimelineCorrections`), so replay never undoes what the person set. A place's place or times, or a
- * trip's times or existence, are not corrected here once it has a block: its block is what the person
- * edits. A leg's mode is, on any trip. Step 12 part 4: a place the person wasn't at joins the trips either
+ * `applyTimelineCorrections`), so replay never undoes what the person set. A place's times, or a trip's
+ * times or existence, are not corrected here once it has a block: its block is what the person edits. A
+ * place's place is, and its block follows (`moveBlocksToPlace`). A leg's mode is, on any trip. Step 12 part 4: a place the person wasn't at joins the trips either
  * side into one ("I wasn't here"), and a trip they didn't take joins the two visits to one place either side
  * ("I didn't leave"); neither when a block was made from any item it joins. Never coordinates.
  */
@@ -129,18 +132,82 @@ async function lockSegment(client: pg.PoolClient, session: RequestSession, table
  * `segmentId`, the row id). An open Review suggestion has an event but no time entry, so it is no block
  * (Codex r1 on #566).
  */
-async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
-  const result = await client.query(
-    `select 1 from time_entries te
+const SEGMENT_BLOCKS_SQL = `from time_entries te
        join activity_events ae on ae.id = te.created_from_event_id
         and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
       where te.workspace_id = $1 and te.user_id = $2
         and (te.created_from_event_id = $5::uuid
           or (ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = $3)
-          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))
-      limit 1`,
+          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))`;
+
+async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
+  const result = await client.query(`select 1 ${SEGMENT_BLOCKS_SQL} limit 1`,
     [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId]);
   return (result.rowCount ?? 0) > 0;
+}
+
+type PlaceDefaults = { id: string; name: string; description: string | null; categoryId: string | null };
+const titleKey = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+
+/**
+ * A logged visit set to another place: its blocks follow. Each keeps its times and whatever the person chose:
+ * only a title or activity that came from the old place takes the new place's, which may be no activity at all (a
+ * new place has none, and the old one's would be wrong). A block the person moved to another place is left alone.
+ * Each block becomes the person's (`user_edited_at`, with its audit row and what it held before), so replay never
+ * moves or removes it. The decided event and Review item name the new place too. Runs before the stay changes.
+ */
+async function moveBlocksToPlace(
+  client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow,
+  target: { placeId: string | null; learnedPlaceId: string | null }, correctionId: string
+) {
+  const blocks = (await client.query<{
+    id: string; description: string | null; categoryId: string | null; placeId: string | null; source: string; userEditedAt: Date | null;
+  }>(
+    `select te.id, te.description, te.category_id as "categoryId", te.place_id as "placeId", te.source, te.user_edited_at as "userEditedAt"
+       ${SEGMENT_BLOCKS_SQL} order by te.id for update of te`,
+    [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId])).rows;
+  const stay = (await client.query<{ placeId: string | null; learnedName: string | null }>(
+    `select st.place_id as "placeId", lp.name as "learnedName" from stay_segments st
+       left join learned_places lp on lp.id = st.learned_place_id and lp.workspace_id = st.workspace_id and lp.user_id = st.user_id
+      where st.id = $1 and st.workspace_id = $2 and st.user_id = $3`,
+    [row.id, session.workspaceId, session.userId])).rows[0];
+  const places = new Map((await client.query<PlaceDefaults>(
+    `select p.id, ${placeDisplayNameSql("p")} as name, nullif(btrim(p.default_activity_description), '') as description,
+            p.default_category_id as "categoryId"
+       from places p where p.workspace_id = $1 and p.id = any($2::uuid[])`,
+    [session.workspaceId, [stay?.placeId, target.placeId].filter(Boolean)])).rows.map((place) => [place.id, place]));
+  const before = stay?.placeId ? places.get(stay.placeId) : undefined;
+  const after = target.placeId ? places.get(target.placeId) : undefined;
+  const learnedName = target.learnedPlaceId ? (await client.query<{ name: string | null }>(
+    `select nullif(btrim(name), '') as name from learned_places where id = $1 and workspace_id = $2 and user_id = $3`,
+    [target.learnedPlaceId, session.workspaceId, session.userId])).rows[0]?.name ?? null : null;
+  const title = after ? after.description ?? after.name : learnedName;
+  const placeTitles = new Set([before?.description, before?.name, stay?.learnedName, "Unknown place"].map(titleKey));
+  for (const block of blocks) {
+    if (block.placeId !== (stay?.placeId ?? null)) continue;
+    // Never edited by the person, the block is all the place's own.
+    const unedited = block.source === LOCATION_AUTO_LOG_SOURCE && !block.userEditedAt;
+    const followsTitle = title !== null && (unedited || placeTitles.has(titleKey(block.description)));
+    const followsActivity = Boolean(after) && (unedited || (before?.categoryId != null && block.categoryId === before.categoryId));
+    await client.query(
+      `update time_entries
+          set place_id = $4, place_label = $5, description = $6, category_id = $7, user_edited_at = now(), updated_at = now()
+        where id = $1 and workspace_id = $2 and user_id = $3`,
+      [block.id, session.workspaceId, session.userId, target.placeId, target.placeId ? null : learnedName?.slice(0, 120) ?? null,
+        followsTitle ? title : block.description, followsActivity ? after?.categoryId ?? null : block.categoryId]);
+    await client.query(
+      `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+       values ($1, $2, '${PERSON_EDIT_ACTION}', 'time_entry', $3, $4::jsonb, now())`,
+      [session.workspaceId, session.userId, block.id, JSON.stringify({ timelineCorrectionId: correctionId,
+        before: { placeId: block.placeId, description: block.description, categoryId: block.categoryId } })]);
+  }
+  await client.query(
+    `update review_items set suggested_place_id = $4, title = coalesce($5, title)
+      where workspace_id = $2 and user_id = $3 and location_segment_id = $1 and status <> 'open'`,
+    [row.id, session.workspaceId, session.userId, target.placeId, title]);
+  await client.query(
+    `update activity_events set suggested_place_id = $3 where id = $1 and workspace_id = $2`,
+    [row.createdFromEventId, session.workspaceId, target.placeId]);
 }
 
 function overlaps(aFrom: number, aTo: number, bFrom: number, bTo: number) {
@@ -306,8 +373,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
     const row = await lockSegment(client, session, table, request.itemId);
-    // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16).
-    if (request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row)) {
+    // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16). A place's
+    // place changes with its block.
+    const inBlock = request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row);
+    if (inBlock && request.kind !== "place") {
       throw new TimelineCorrectionError(request.subject === "place"
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);
@@ -330,7 +399,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     const span = request.kind === "leg_mode"
       ? { startedAt: iso(request.legStartedAt), stoppedAt: iso(request.legStoppedAt) }
       : correctionSpan(row, itemStartedAt, itemStoppedAt);
-    const target = targetFor(request);
+    // Every check is behind it: the place exists only if the correction does.
+    const applied: TimelineCorrectionRequest = request.kind === "place" && request.newPlace
+      ? { ...request, placeId: (await insertPlaceWith(client, request.newPlace, session)).id } : request;
+    const target = targetFor(applied);
     const event = await client.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
        values ($1, $2, 'manual_app', 'timeline_correction', now(), 'high', $3::jsonb, 'confirmed', $4)
@@ -351,8 +423,9 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         where workspace_id = $2 and user_id = $3 and id <> $1 and replaced_at is null
           and subject = $4 and kind = $5 and span_started_at = $6::timestamptz and span_stopped_at = $7::timestamptz`,
       [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
+    if (inBlock && applied.kind === "place") await moveBlocksToPlace(client, session, request.itemId, row, applied, correction.id);
     if (joined) await applyJoin(client, session, row, joined);
-    else await applyToSegment(client, session, table, row, request, legIndex, span);
+    else await applyToSegment(client, session, table, row, applied, legIndex, span);
     // A trip the correction removed, joined or moved settles a timer's "?" about it now, not at the next replay.
     const nowMs = Date.now();
     await reconcileTimerTripClashes(client, session, {
