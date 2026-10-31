@@ -394,6 +394,33 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
+  it("corrects a wrongly matched saved place to a new place, from the one search", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockReset()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ place: { id: "place-new" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place({ placeId: places[1].id, name: "Exampleton Library", matchKind: "saved" }), label: "Exampleton Library" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Pret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save “Pret” as a place" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/places", "/api/timeline/corrections"]);
+    expect(sent()[1]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: "place-new", learnedPlaceId: null });
+  });
+
+  it("offers no new place for a visit in a block: the server would refuse it after creating the place", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      target={{ kind: "place", place: place({ placeId: places[1].id, name: "Exampleton Library", matchKind: "saved", blockIds: ["block-1"] }), label: "Exampleton Library" }} />);
+    await screen.findByTestId("evidence-map");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Pret" } });
+    expect(screen.queryByRole("button", { name: "Save “Pret” as a place" })).toBeNull();
+    moreOptions();
+    expect(screen.queryByLabelText("Name for this place")).toBeNull();
+  });
+
   it("makes a saved place once: a retry after the visit wasn't set to it only sets it (Codex r1 on #609)", async () => {
     evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
     clientFetch.mockReset()

@@ -298,8 +298,8 @@ export function LocationCorrectionDialog({
   const openingPlaceIds = useRef(new Set(places.map((option) => option.id)));
   const [newPlaceName, setNewPlaceName] = useState("");
   const newPlaceNameRef = useRef<HTMLInputElement | null>(null);
-  // Asked only where Apple's nearby places could show: an unknown place whose evidence has a centre.
-  const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place" && !target.place.placeId
+  // Asked only where Apple's nearby places could show: a place not in a block whose evidence has a centre.
+  const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place" && !target.place.blockIds.length
     && Boolean(evidence && evidence !== "unavailable" && evidence.map.centre));
   const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
   // Saved places nearest the visit first, as far as the map knows (the place dialog lists at most two within 1 km).
@@ -690,10 +690,12 @@ export function LocationCorrectionDialog({
     ...savedRows.filter((option) => option.id !== currentRow?.id || needle).map((option) => ({ key: `saved:${option.id}`, glyph: placeGlyph(option), name: option.name,
       note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place" }))
   ];
-  const canSaveNew = !place.placeId && Boolean(centre);
+  // Also for a wrongly matched saved place. Never for a place in a block: the server refuses to change its place,
+  // and by then the new place would already exist.
+  const canSaveNew = !place.blockIds.length && Boolean(centre);
   // The list opens at its rows (up to five) and holds that height while searching, with room for a search's answer and
   // its "Save “X” as a place" slot where a new place can be saved.
-  const showsNearby = !place.placeId && mapProvider === "mapkit" && Boolean(centre);
+  const showsNearby = canSaveNew && mapProvider === "mapkit";
   const nearbySettled = evidence !== null && (!canSaveNew || (mapProvider !== "probing" && (!showsNearby || nearbyCount !== null)));
   if (heldRows === null && nearbySettled && !needle) {
     setHeldRows(Math.min(5, Math.max(canSaveNew ? 3 : 2, rows.length + (showsNearby ? nearbyCount ?? 0 : 0))));
