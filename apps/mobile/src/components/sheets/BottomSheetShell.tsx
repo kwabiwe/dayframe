@@ -19,11 +19,15 @@ import {
   type SwipeDismissSheetHandle,
 } from "@/components/SwipeDismissSheet";
 import { keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
+import { MOBILE_MOTION } from "../../lib/motion";
+import { createSheetScroller, type SheetScroller } from "../../lib/sheetScroller";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 
 type BottomSheetOutcome = "commit" | "discard";
+
+export type BottomSheetScroller = Pick<SheetScroller, "reveal" | "top">;
 // Expo Router's iOS NativeTabs host reserves a 52-point presentation strip
 // below React sheet content, even though window/screen metrics remain full-size.
 // A root-hosted overlay is attached to UIWindow, so it can safely settle through
@@ -78,6 +82,7 @@ export function BottomSheetShell({
   testID,
   commitRef,
   discardRef,
+  scrollerRef,
   secondaryAction,
   actionTone,
   children,
@@ -107,7 +112,9 @@ export function BottomSheetShell({
   commitRef?: { current: (() => void) | null };
   /** Set to the sheet's own discard (its usual exit, no change), for a close control inside it. */
   discardRef?: { current: (() => void) | null };
-  /** A quiet action beside the primary one (the place sheet's "Not now"): it does its own work; the sheet stays until told. */
+  /** Set to the sheet's own scroller, for content that opens below the fold. */
+  scrollerRef?: { current: BottomSheetScroller | null };
+  /** A quiet action beside the primary one (the place sheet's "Don't log"): it does its own work; the sheet stays until told. */
   secondaryAction?: { disabled?: boolean; label: string; onPress: () => void; testID: string };
   /** The action's fill: coral for a filter's primary "Show", neutral for a Done (the date sheet's). Defaults by layout. */
   /** "quiet" (owner item O, 28 Oct 2026): a secondary-looking Done while nothing has changed. */
@@ -116,6 +123,26 @@ export function BottomSheetShell({
 }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const scrollView = useRef<ScrollView | null>(null);
+  const scrollMetrics = useRef({ offset: 0, viewport: 0, content: 0 });
+  const [scrollRoom, setScrollRoom] = useState(0);
+  useEffect(() => {
+    if (!scrollerRef) return;
+    const scroller = createSheetScroller({
+      afterScrollBackMs: MOBILE_MOTION.sheet,
+      inner: () => (scrollView.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.() ?? null,
+      metrics: scrollMetrics.current,
+      nextFrame: (run) => { requestAnimationFrame(run); },
+      reduceMotion,
+      room: setScrollRoom,
+      scrollTo: (y, animated) => scrollView.current?.scrollTo({ y, animated }),
+    });
+    scrollerRef.current = scroller;
+    return () => {
+      scroller.dispose();
+      scrollerRef.current = null;
+    };
+  }, [reduceMotion, scrollerRef]);
   const compactCalendarLayout = calendarLayout && windowHeight <= 700;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const outcome = useRef<{
@@ -323,6 +350,11 @@ export function BottomSheetShell({
           ) : (
             <ScrollView
               testID={`${testID}-scroll`}
+              ref={scrollView}
+              onContentSizeChange={(_width, height) => { scrollMetrics.current.content = height; }}
+              onLayout={(event) => { scrollMetrics.current.viewport = event.nativeEvent.layout.height; }}
+              onScroll={(event) => { scrollMetrics.current.offset = event.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={32}
               keyboardShouldPersistTaps="handled"
               automaticallyAdjustKeyboardInsets
               contentContainerStyle={s.body}
@@ -330,6 +362,7 @@ export function BottomSheetShell({
               style={s.scroll}
             >
               {children}
+              {scrollRoom ? <View style={{ height: scrollRoom }} /> : null}
             </ScrollView>
           )}
           {secondaryAction ? (

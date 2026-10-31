@@ -403,11 +403,11 @@ export function useLocationCorrections({
       cancel: () => withdrawAnswerAfterCorrections(owner, id)
     };
   };
-  const activities = useMemo(() => [...(data?.categories ?? [])]
+  const allActivities = useMemo(() => [...(data?.categories ?? [])]
     .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
-    .slice(0, 8)
     // Each with its colour and icon, for the compact activity chips (owner feedback, 29 Oct 2026).
     .map((category) => ({ id: category.id, name: category.name, color: category.color ?? null, icon: category.icon ?? null })), [data?.categories]);
+  const activities = useMemo(() => allActivities.slice(0, 8), [allActivities]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
   // row as it was. Removal is tried again while it fails, without saying it again (Codex r1 on #602).
@@ -451,6 +451,7 @@ export function useLocationCorrections({
       onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing, options.beforeEnqueue)}
       logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && activities.length && !stale ? {
         activities,
+        allActivities,
         // Every Logs as waits for all of the place's corrections still on the phone — this sheet's new ones and any
         // from an earlier Done (a sheet reopened before they were sent) — and goes as `log_place` only once the server
         // has acknowledged every one; a refused one logs nothing (Codex r4 and r5 on #610). With none waiting, it is
@@ -458,7 +459,7 @@ export function useLocationCorrections({
         onLog: (categoryId) => {
           const sheetOwner = open.ownerKey;
           const placeItemId = shown.place.id;
-          const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
+          const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
           const generation = currentMobileAccountEpoch();
           void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation).then((waiting) => {
@@ -478,7 +479,7 @@ export function useLocationCorrections({
           }, () => sayForLog(sheetOwner, "That place wasn't logged. Try again."));
         },
         onLogAfter: async (categoryId, ids, generation) => {
-          const name = activities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
+          const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids, generation);
           if (!waiting) throw new Error("Nothing to wait for.");
           return waiting;

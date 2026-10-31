@@ -2344,7 +2344,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
         yesLabel: question.logLabel ?? null,
         // An answer that isn't available stays unavailable: no "Not now" in place of a missing one (Codex r16 on #610).
-        noLabel: question.skipLabel ?? null,
+        // In the sheet Not now says what it does (owner, 31 Oct 2026); the List's row keeps its short word.
+        noLabel: question.skipLabel === "Not now" ? "Don't log" : question.skipLabel ?? null,
         // No changes in the sheet: checkAnswers.answer is the one gated entry point, so it never goes ahead of a
         // correction queued for its place or trip from an earlier Done (Codex r6 and r7 on #610).
         // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
