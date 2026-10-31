@@ -19,7 +19,7 @@ import {
   type SwipeDismissSheetHandle,
 } from "@/components/SwipeDismissSheet";
 import { keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
-import { MOBILE_MOTION } from "@/lib/motion";
+import { MOBILE_MOTION } from "../../lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
