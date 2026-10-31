@@ -763,6 +763,7 @@ export function LocationCorrectionDialog({
                   pickLabel="Saves it as a place and sets this visit to it"
                   query={query}
                   rows={3}
+                  savedNames={places.filter((option) => option.id === place.placeId || distances?.has(option.id)).map((option) => option.name)}
                   searchRows={5}
                 />
               ) : null}

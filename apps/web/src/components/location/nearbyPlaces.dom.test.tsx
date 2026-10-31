@@ -48,6 +48,22 @@ describe("NearbyPlaces", () => {
     expect(onPick).toHaveBeenCalledWith("Near Café");
   });
 
+  it("leaves out a place the dialog already lists, so a tap can't save a duplicate", async () => {
+    const fake = fakeMapKit([
+      { name: "The Dental Abode", id: "a", coordinate: { latitude: 51.5001, longitude: -0.1 } },
+      { name: "Near Café", id: "b", coordinate: { latitude: 51.5002, longitude: -0.1 } }
+    ], [{ name: "the dental abode", id: "c", coordinate: { latitude: 51.5001, longitude: -0.1 } }, { name: "Dental Lab", id: "d", coordinate: { latitude: 51.5003, longitude: -0.1 } }]);
+    (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;
+    const onNearbyCount = vi.fn();
+    const view = render(<NearbyPlaces centre={centre} disabled={false} onNearbyCount={onNearbyCount} onPick={vi.fn()} onUnavailable={vi.fn()} savedNames={["The Dental Abode"]} />);
+    const list = await screen.findByRole("list", { name: "Places nearby" });
+    expect([...list.querySelectorAll("b")].map((title) => title.textContent)).toEqual(["Near Café"]);
+    expect(onNearbyCount).toHaveBeenLastCalledWith(1);
+    view.rerender(<NearbyPlaces centre={centre} disabled={false} onPick={vi.fn()} onUnavailable={vi.fn()} query="dental" savedNames={["The Dental Abode"]} />);
+    const found = await screen.findByRole("list", { name: "Places found" });
+    await waitFor(() => expect([...found.querySelectorAll("b")].map((title) => title.textContent)).toEqual(["Dental Lab"]));
+  });
+
   it("searches Apple's places by name", async () => {
     const fake = fakeMapKit([], [{ name: "Example Library", coordinate: { latitude: 51.51, longitude: -0.1 } }]);
     (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;

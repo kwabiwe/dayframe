@@ -42,6 +42,7 @@ export function NearbyPlaces({
   pickLabel = "Names this visit; you can then save it",
   query: controlledQuery,
   rows = NEARBY_ROWS,
+  savedNames = [],
   searchRows = 6
 }: {
   centre: { latitude: number; longitude: number };
@@ -57,6 +58,8 @@ export function NearbyPlaces({
   query?: string;
   /** How many nearby places show before a search (Proposed: 3). */
   rows?: number;
+  /** Places the host already lists: Apple's row of the same name would save a duplicate. */
+  savedNames?: string[];
   /** How many places a search shows (Proposed: 3). */
   searchRows?: number;
   /** MapKit failed for the page: the dialog drops this list. */
@@ -67,9 +70,9 @@ export function NearbyPlaces({
   const [searched, setSearched] = useState<{ query: string; state: State } | null>(null);
   const [ownQuery, setQuery] = useState("");
   const query = controlledQuery ?? ownQuery;
-  const latest = useRef({ onNearbyCount, onSearching, onUnavailable });
+  const latest = useRef({ onNearbyCount, onSearching, onUnavailable, savedNames });
   useEffect(() => {
-    latest.current = { onNearbyCount, onSearching, onUnavailable };
+    latest.current = { onNearbyCount, onSearching, onUnavailable, savedNames };
   });
   const { latitude, longitude } = centre;
 
@@ -87,7 +90,7 @@ export function NearbyPlaces({
           latest.current.onNearbyCount?.(0);
           return;
         }
-        const found = toRows(data?.places ?? [], { latitude, longitude }).slice(0, rows);
+        const found = toRows(data?.places ?? [], { latitude, longitude }, latest.current.savedNames).slice(0, rows);
         setNearby({ status: found.length ? "results" : "empty", rows: found });
         latest.current.onNearbyCount?.(found.length);
       });
@@ -110,7 +113,7 @@ export function NearbyPlaces({
           includePointsOfInterest: true
         });
         const answer = (error: unknown, places: MkPlace[]) => {
-          const rows = error ? [] : toRows(places, { latitude, longitude }).slice(0, searchRows);
+          const rows = error ? [] : toRows(places, { latitude, longitude }, latest.current.savedNames).slice(0, searchRows);
           setSearched({ query: text, state: { status: error ? "unavailable" : rows.length ? "results" : "empty", rows } });
         };
         const fullSearch = () => search.search(text, (error, data) => {
@@ -193,12 +196,13 @@ export function NearbyPlaces({
   );
 }
 
-function toRows(places: MkPlace[], centre: { latitude: number; longitude: number }): Row[] {
+function toRows(places: MkPlace[], centre: { latitude: number; longitude: number }, savedNames: string[]): Row[] {
   const seen = new Set<string>();
+  const saved = new Set(savedNames.map((name) => name.trim().toLowerCase()));
   return places
     .flatMap((place) => {
       const title = place.name?.trim();
-      if (!title || !place.coordinate) return [];
+      if (!title || !place.coordinate || saved.has(title.toLowerCase())) return [];
       const metres = metresBetween(centre, place.coordinate);
       const key = place.id ?? `${title}@${place.coordinate.latitude},${place.coordinate.longitude}`;
       if (seen.has(key)) return [];
