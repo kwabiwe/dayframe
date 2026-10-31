@@ -138,7 +138,8 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   // The last answer stays until the next one arrives, so nothing jumps while typing.
   const held = useRef<AppleRow[]>([]);
   if (settled) held.current = settled;
-  const appleRows = settled ?? held.current;
+  // Ticked by the guess as of now: a held row's own flag could answer for a place it no longer stands for.
+  const appleRows = (settled ?? held.current).map((row) => ({ ...row, guessed: isGuess(row) }));
   const saved = savedRows(text);
   const count = appleRows.length + saved.length;
   const loading = !typed && (awaitingCentre || (Boolean(nearbyProvider) && (!nearby || nearby.status === "loading")));
@@ -146,19 +147,22 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
     : typed ? (searching ? null : "No places match.")
       : !hasCentre ? null
         : !nearbyProvider ? "Nearby places need Apple Maps on this iPhone." : "No places nearby.";
-  // Its height: Apple's three plus the saved rows until Apple answers, then what there is. Typing holds it.
-  const slots = useRef(SHEET_RESULT_MIN_ROWS);
-  if (!typed) {
-    slots.current = Math.max(SHEET_RESULT_MIN_ROWS, Math.min(SHEET_RESULT_ROWS,
-      (loading ? Math.max(SHEET_APPLE_ROWS, appleRows.length) : appleRows.length) + saved.length));
-  }
-  const height = slots.current * SHEET_RESULT_ROW_HEIGHT;
+  // Its height: Apple's three plus the saved rows until Apple answers, then what there is. Typing holds the last
+  // committed one.
+  const opening = Math.max(SHEET_RESULT_MIN_ROWS, Math.min(SHEET_RESULT_ROWS,
+    (loading ? Math.max(SHEET_APPLE_ROWS, appleRows.length) : appleRows.length) + saved.length));
+  const [heldSlots, setHeldSlots] = useState(opening);
+  useEffect(() => {
+    if (!typed) setHeldSlots(opening);
+  }, [opening, typed]);
+  const slots = typed ? heldSlots : opening;
+  const height = slots * SHEET_RESULT_ROW_HEIGHT;
   const animatedHeight = useSharedValue(height);
   useEffect(() => {
     animatedHeight.value = reduceMotion ? height : withTiming(height, { duration: MOBILE_MOTION.layout });
   }, [animatedHeight, height, reduceMotion]);
   const heightStyle = useAnimatedStyle(() => ({ height: animatedHeight.value }));
-  const placeholders = loading ? Math.max(0, slots.current - appleRows.length - saved.length) : 0;
+  const placeholders = loading ? Math.max(0, slots - appleRows.length - saved.length) : 0;
   const appleList = appleRows.map((row, index) => (
     <ResultRow accessibilityHint={row.guessed ? "Says yes to this place" : "Saves it as a place and sets this visit to it"} checked={row.guessed} detail={row.detail}
       disabled={disabled} divided={index > 0 || (typed && saved.length > 0)} glyph={DAYFRAME_APP_ICONS.places} key={row.key}

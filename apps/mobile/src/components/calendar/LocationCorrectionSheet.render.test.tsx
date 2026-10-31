@@ -791,6 +791,39 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(action(named).props.accessibilityLabel).toBe("Save");
   });
 
+  it("Yes to the guess replaces a place picked before it that failed to keep, and keeps a time edit", async () => {
+    const venue = { name: "Holland & Barrett", street: null, applePlaceId: "I.hb" };
+    const onAnswer = vi.fn();
+    const onQueue = vi.fn(async () => { throw new Error("no"); });
+    const tree = sheetWith({ onQueue: onQueue as never, question: { ...ask, guess: venue, onAnswer } });
+    tap(tree, `location-correction-place-${SAVED}`);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    onQueue.mockClear();
+    act(() => { tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onGuessPick(); });
+    expect(onQueue).not.toHaveBeenCalled();
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null);
+  });
+
+  it("mounts the map after the sheet's spring, and an early close leaves nothing running", () => {
+    vi.useFakeTimers();
+    try {
+      const tree = sheetWith({ reduceMotion: false, evidence: nearSaved });
+      expect(tree.root.findAllByType("LocationEvidenceMap" as never)).toHaveLength(0);
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(tree.root.findAllByType("LocationEvidenceMap" as never)).toHaveLength(1);
+      const early = sheetWith({ reduceMotion: false, evidence: nearSaved });
+      act(() => { early.unmount(); });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells the list it is waiting for a centre while an unknown place's evidence loads, with no save callback yet", () => {
+    const tree = sheetWith({ evidence: null, onSavePlace: undefined });
+    expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.awaitingCentre).toBe(true);
+  });
+
   it("offers All activities only when there are more, and clears a pick with Clear beside the footer's Don't log", () => {
     const every = [...logs.activities, { id: "cat-gym", name: "Gym", color: "teal", icon: null }];
     const tree = sheetWith({ logAs: { ...logs, allActivities: every } });

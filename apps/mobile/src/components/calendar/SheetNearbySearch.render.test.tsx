@@ -131,6 +131,15 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     expect(onGuessPick).toHaveBeenCalledTimes(1);
     act(() => { row("a").props.onPress(); });
     expect(onPick).toHaveBeenCalledWith("Place a", "I.a");
+    // While typing the old rows hold, ticked by the guess as of now, and the tap goes with the tick.
+    type(tree, "Pret");
+    act(() => { tree.update(<SheetNearbySearch centre={centre} evidence={evidence(25)} guess={{ name: "Place a", street: null, applePlaceId: "I.a" }} onGuessPick={onGuessPick} onPick={onPick} reduceMotion theme={theme} />); });
+    expect(row("a").props.accessibilityState.selected).toBe(true);
+    expect(row("d").props.accessibilityState.selected).toBe(false);
+    onPick.mockClear();
+    act(() => { row("d").props.onPress(); });
+    expect(onPick).toHaveBeenCalledWith("Place d", "I.d");
+    expect(onGuessPick).toHaveBeenCalledTimes(1);
   });
 
   it("lists saved places first as you type, Apple's after; with nothing typed Apple's come first", async () => {

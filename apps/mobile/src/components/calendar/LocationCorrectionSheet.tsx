@@ -491,8 +491,11 @@ export function LocationCorrectionSheet({
       setSaveError("Those times don't work yet. Fix them, then answer.");
       return;
     }
+    // Yes to a guess replaces a place picked before it (one that failed to keep); times and Logs as stay.
+    const answerChoice: PlaceChoice = venue ? { kind: "keep" } : choice;
+    if (venue) setChoice(answerChoice);
     const corrections = target.kind === "place"
-      ? placeCorrections(target.place, { choice, times }, places)
+      ? placeCorrections(target.place, { choice: answerChoice, times }, places)
       : tripCorrections(target.trip, { times });
     if (!corrections.length) {
       // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
@@ -653,7 +656,7 @@ export function LocationCorrectionSheet({
       >
         {placeSection ? (
           <View style={styles.section} testID="location-correction-where">
-            <SheetNearbySearch awaitingCentre={evidence === null && placeCanSave} centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
+            <SheetNearbySearch awaitingCentre={evidence === null && !stale && target.kind === "place" && !target.place.placeId && correctable(item)} centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
               guess={guess} onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })} onGuessPick={() => answerFromSheet(true, guess)}
               onPick={(name, applePlaceId) => savePlace(name, applePlaceId)}
               onSaveTyped={placeCanSave ? (name) => savePlace(name) : undefined}
