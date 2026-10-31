@@ -700,9 +700,9 @@ export function LocationCorrectionDialog({
   if (heldRows === null && nearbySettled && !needle) {
     setHeldRows(Math.min(5, Math.max(canSaveNew ? 3 : 2, rows.length + (showsNearby ? nearbyCount ?? 0 : 0))));
   }
-  const savedList = rows.length ? (
-    <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
-      {rows.map((row) => (
+  const placeList = (items: typeof rows, label: string) => items.length ? (
+    <ul aria-label={label} className="location-correction-options">
+      {items.map((row) => (
         <li key={row.key}>
           <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
             onClick={() => void apply(row.key)} type="button">
@@ -714,6 +714,9 @@ export function LocationCorrectionDialog({
       ))}
     </ul>
   ) : null;
+  // "This place" leads, above Apple's rows.
+  const leadingRows = currentRow && !needle ? 1 : 0;
+  const savedList = placeList(rows.slice(leadingRows), text ? "Saved places found" : "Saved places nearby");
   const yesQuestion = question?.yesLabel ? question : null;
   const footerNext = (
     <>
@@ -746,6 +749,7 @@ export function LocationCorrectionDialog({
           <div className="location-correction-results" style={{ height: (heldRows ?? 5) * 48 }}>
             <div className="location-correction-results-list">
               {/* Searching: every saved place that matches first, then Apple's, nearest first. */}
+              {placeList(rows.slice(0, leadingRows), "This place")}
               {text ? savedList : null}
               {evidence === null ? Array.from({ length: 5 }, (_, index) => <span aria-hidden="true" className="location-correction-placeholder" key={index} />) : null}
               {showsNearby && centre ? (
