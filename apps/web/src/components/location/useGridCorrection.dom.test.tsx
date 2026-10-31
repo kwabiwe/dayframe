@@ -67,7 +67,7 @@ function Grid({ owner = "w1:u1", items = [suggestion("q1", {})], timelines = [ti
  * A place dialog's own answer buttons (UI review round 2): no question card; the question is a plain line (except
  * "Where were you?"), Not now is the footer's quiet button and Yes its primary.
  */
-const answer = (name: "Yes" | "Not now", question?: string) => {
+const answer = (name: "Yes" | "Don't log", question?: string) => {
   if (question) expect(document.querySelector("p.location-correction-ask")?.textContent).toBe(question);
   return within(screen.getByRole("dialog")).getByRole("button", { name });
 };
@@ -106,7 +106,7 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
   it("answers an outing's \"?\" for the outing: Not now and Yes decide its trips with it", async () => {
     const view = render(<Grid items={outing()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(answer("Not now"));
+    fireEvent.click(answer("Don't log"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(posted()).toEqual([{ url: `/api/review/${STAY}`, mutation: { action: "ignore_outing", memberReviewItemIds: [WALK] } }]);
     view.rerender(<Grid items={[{ ...outing()[0], title: "Boots" }, outing()[1]]} />);
@@ -207,7 +207,7 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(document.querySelector(".location-correction-ask")).toBeNull();
     expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Yes" })).toBeNull();
-    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Not now" })).toBeNull();
+    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Don't log" })).toBeNull();
   });
   it("keeps an outing's question when the server says part of it was decided elsewhere, and says so (Codex r2 on #609)", async () => {
     clientFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
@@ -215,15 +215,15 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     const refresh = vi.fn(async () => undefined);
     render(<Grid items={outing()} refresh={refresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the cafe" }));
-    fireEvent.click(answer("Not now"));
+    fireEvent.click(answer("Don't log"));
     expect((await screen.findByRole("alert")).textContent).toContain("decided elsewhere");
     // Still asking: its Not now is still there.
-    expect(answer("Not now")).toBeTruthy();
+    expect(answer("Don't log")).toBeTruthy();
     expect(refresh).toHaveBeenCalledTimes(1);
     // A stay decided elsewhere has nothing left to ask: the dialog closes.
     clientFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
       canonicalReviewStatuses: { [STAY]: "ignored", [WALK]: "accepted" } }), { status: 409 }));
-    fireEvent.click(answer("Not now"));
+    fireEvent.click(answer("Don't log"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -262,7 +262,7 @@ describe("the Grid's place dialogs (Codex r1 on #609)", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "q2" })));
     screen.getByRole("button", { name: "q2" }).focus();
     fireEvent.click(screen.getByRole("button", { name: "q2" }));
-    fireEvent.click(answer("Not now", "Visited Boots?"));
+    fireEvent.click(answer("Don't log", "Visited Boots?"));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("scroller")));
   });
   it("moves focus on when a saved Logs as removes the opener (Codex r3 on #609)", async () => {

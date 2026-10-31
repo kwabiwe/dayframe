@@ -53,7 +53,7 @@ describe("web focus and control contracts", () => {
   it("gives the persistent timer Description's focus to the command bar without hiding validation (Trello 213)", () => {
     // No box after a click or tap; keyboard-origin focus (data-focus-ring) shows the neutral perimeter.
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:focus-within \{[^}]*border-color:\s*transparent;/s);
-    expect(styles).toMatch(/\.swiss-timer-description-control \.inline-tag-picker-search:focus-within,\s*\.swiss-timer-description-control\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\) \{[^}]*border-color:\s*var\(--focus\);/s);
+    expect(styles).toMatch(/\.swiss-timer-description-control\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\) \{[^}]*border-color:\s*var\(--focus\);/s);
     expect(styles).not.toContain(".df-cmd:has(");
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\) \{[^}]*border-color:\s*var\(--danger\);/s);
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\):focus-within \{[^}]*box-shadow:\s*inset 0 -2px 0 var\(--danger\);/s);

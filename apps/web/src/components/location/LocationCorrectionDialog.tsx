@@ -132,8 +132,9 @@ function EvidenceMap({ evidence, knownPlace, leg = null }: {
     const shown = legStartedAt && legStoppedAt ? legEvidence(evidence, { startedAt: legStartedAt, stoppedAt: legStoppedAt }) : evidence;
     return { ...shown, reviewItemId: shown.reviewItemId ?? "", eventId: shown.eventId ?? "" };
   }, [evidence, legStartedAt, legStoppedAt]);
-  if (evidence === null) return <p className="location-correction-map is-loading" data-section="map">Loading the map…</p>;
-  if (!mapEvidence) return <p className="location-correction-map is-loading" data-section="map">The map isn’t available right now.</p>;
+  const loadingClass = `location-correction-map is-loading${knownPlace ? "" : " is-unknown"}`;
+  if (evidence === null) return <p className={loadingClass} data-section="map">Loading the map…</p>;
+  if (!mapEvidence) return <p className={loadingClass} data-section="map">The map isn’t available right now.</p>;
   // The map reads only the segment and its geometry; a timeline item may have no Review item or event. Only the
   // visit's own area (or the trip's route), and one plain line at most: never the silences (owner, 29 Oct 2026).
   return (
@@ -313,6 +314,10 @@ export function LocationCorrectionDialog({
   const [query, setQuery] = useState("");
   const [moreOptions, setMoreOptions] = useState(false);
   const [searching, setSearching] = useState(false);
+  // How many of Apple's places came back, and the list's height from then on (owner, 31 Oct 2026).
+  const [nearbyCount, setNearbyCount] = useState<number | null>(null);
+  const [heldRows, setHeldRows] = useState<number | null>(null);
+  const [allActivities, setAllActivities] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -661,7 +666,7 @@ export function LocationCorrectionDialog({
 
   const { place } = target;
   const open = place.stoppedAt == null;
-  const logActivities = activities.slice(0, 8);
+  const logActivities = allActivities ? activities : activities.slice(0, 8);
 
   // The dialog is the question (owner, 30 Oct 2026): the map, a short list where a tap answers, and the footer.
   // The list: Apple's three nearest places, then up to two saved places within about 1 km; everything else
@@ -670,7 +675,7 @@ export function LocationCorrectionDialog({
   const text = query.trim();
   const needle = text.toLowerCase();
   const savedRows = needle
-    ? places.filter((option) => option.name.toLowerCase().includes(needle)).slice(0, 3)
+    ? places.filter((option) => option.name.toLowerCase().includes(needle))
     : distances
       ? sortedPlaces.filter((option) => option.id !== currentPlaceId && (distances.get(option.id) ?? Infinity) <= 1_000).slice(0, 2)
       : [];
@@ -686,10 +691,32 @@ export function LocationCorrectionDialog({
       note: distances?.has(option.id) ? `Saved place · ${formatMetres(distances.get(option.id)!)} away` : "Saved place" }))
   ];
   const canSaveNew = !place.placeId && Boolean(centre);
+  // The list opens at its rows (up to five) and holds that height while searching, with room for a search's answer and
+  // its "Save “X” as a place" slot where a new place can be saved.
+  const showsNearby = !place.placeId && mapProvider === "mapkit" && Boolean(centre);
+  const nearbySettled = evidence !== null && (!canSaveNew || (mapProvider !== "probing" && (!showsNearby || nearbyCount !== null)));
+  if (heldRows === null && nearbySettled && !needle) {
+    setHeldRows(Math.min(5, Math.max(canSaveNew ? 3 : 2, rows.length + (showsNearby ? nearbyCount ?? 0 : 0))));
+  }
+  const savedList = rows.length ? (
+    <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
+      {rows.map((row) => (
+        <li key={row.key}>
+          <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
+            onClick={() => void apply(row.key)} type="button">
+            <DayframeIcon glyph={row.glyph} size={18} />
+            <span><b>{row.name}</b>{row.note ? <small>{row.note}</small> : null}</span>
+            {picked === row.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
+          </button>
+        </li>
+      ))}
+    </ul>
+  ) : null;
   const yesQuestion = question?.yesLabel ? question : null;
   const footerNext = (
     <>
-      {question ? <Button disabled={busy} onClick={() => void answer(false)} variant="ghost">{question.noLabel}</Button> : null}
+      {/* "Don't log" closes the question, with Undo, and the place stays as a row that isn't logged; ✕ is later, no change. */}
+      {question ? <Button disabled={busy} onClick={() => void answer(false)} variant="ghost">{question.noLabel === "Not now" ? "Don't log" : question.noLabel}</Button> : null}
       {yesQuestion && !changed
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
         // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
@@ -714,35 +741,26 @@ export function LocationCorrectionDialog({
           </label>
           {/* A fixed area of five rows: it scrolls inside, stays blank below fewer, and "Save “X” as a place" has a
               pinned slot at its foot, so the map, search, More options and footer never move (owner, 30 Oct 2026). */}
-          <div className="location-correction-results">
+          <div className="location-correction-results" style={{ height: (heldRows ?? 5) * 48 }}>
             <div className="location-correction-results-list">
-              {!place.placeId && mapProvider === "mapkit" && centre ? (
+              {/* Searching: every saved place that matches first, then Apple's, nearest first. */}
+              {text ? savedList : null}
+              {evidence === null ? Array.from({ length: 5 }, (_, index) => <span aria-hidden="true" className="location-correction-placeholder" key={index} />) : null}
+              {showsNearby && centre ? (
                 <NearbyPlaces
                   centre={{ latitude: centre.coordinates[1], longitude: centre.coordinates[0] }}
                   disabled={busy}
+                  onNearbyCount={setNearbyCount}
                   onPick={(name) => void saveThisPlace(name)}
                   onSearching={setSearching}
                   onUnavailable={() => setMapProvider("maplibre")}
                   pickLabel="Saves it as a place and sets this visit to it"
                   query={query}
                   rows={3}
-                  searchRows={3}
+                  searchRows={5}
                 />
               ) : null}
-              {rows.length ? (
-                <ul aria-label={text ? "Saved places found" : "Saved places nearby"} className="location-correction-options">
-                  {rows.map((row) => (
-                    <li key={row.key}>
-                      <button aria-current={picked === row.key ? "true" : undefined} className="location-correction-option" disabled={busy}
-                        onClick={() => void apply(row.key)} type="button">
-                        <DayframeIcon glyph={row.glyph} size={18} />
-                        <span><b>{row.name}</b>{row.note ? <small>{row.note}</small> : null}</span>
-                        {picked === row.key ? <Check aria-hidden="true" className="location-correction-check" size={16} strokeWidth={2.5} /> : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              {text ? null : savedList}
             </div>
             {text && canSaveNew ? (
               <button className="location-correction-option is-save" disabled={busy} onClick={() => void saveThisPlace(text)} type="button">
@@ -771,6 +789,11 @@ export function LocationCorrectionDialog({
                       <ActivityChipFace activity={{ color: activity.color ?? activity.id, icon: activity.icon ?? null, name: activity.name }} checked={logAs === activity.id} />
                     </button>
                   ))}
+                  {activities.length > 8 && !allActivities ? (
+                    <button className="df-rchip location-correction-all-activities" disabled={busy} onClick={() => setAllActivities(true)} type="button">
+                      All activities <span className="df-tnum">{activities.length}</span>
+                    </button>
+                  ) : null}
                 </div>
                 {logAs ? <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p> : null}
               </div>
@@ -791,9 +814,6 @@ export function LocationCorrectionDialog({
                   ref={newPlaceNameRef} placeholder="Save this place as…" type="text" value={newPlaceName} />
                 <Button disabled={busy || !newPlaceName.trim()} onClick={() => void saveThisPlace()}>Save place</Button>
               </div>
-            ) : null}
-            {original !== "unknown" ? (
-              <button className="location-correction-more" disabled={busy} onClick={() => void apply("unknown")} type="button">Leave as unknown</button>
             ) : null}
             {!open && target.joinsTrips ? (
               <div aria-label="Fix this place" className="location-correction-shape" role="group">

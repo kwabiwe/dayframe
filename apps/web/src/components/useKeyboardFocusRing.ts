@@ -96,7 +96,7 @@ export function useKeyboardFocusMarks() {
 }
 
 /** Spread `handlers` on the wrapper and expose `focusRing` as `data-focus-ring`. */
-export function useKeyboardFocusRing() {
+export function useKeyboardFocusRing({ keyboardOnly = false }: { keyboardOnly?: boolean } = {}) {
   const [keyboardFocus, setKeyboardFocus] = useState(false);
 
   useEffect(() => {
@@ -109,7 +109,8 @@ export function useKeyboardFocusRing() {
     handlers: {
       // A press inside the field hides the ring at once, even if focus does not move.
       onPointerDownCapture: () => setKeyboardFocus(false),
-      onFocus: () => setKeyboardFocus(modality !== "pointer"),
+      // keyboardOnly: a field a panel focuses as it opens rings only after a key, never on a click's late hand-off.
+      onFocus: () => setKeyboardFocus(keyboardOnly ? modality === "keyboard" : modality !== "pointer"),
       onBlur: (event: FocusEvent<HTMLElement>) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         setKeyboardFocus(false);

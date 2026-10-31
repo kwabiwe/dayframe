@@ -67,7 +67,6 @@ describe("command timer Description (H3, Trello 213)", () => {
     // Only while the Description input itself has keyboard-origin focus; the nested tag picker's
     // search keeps the ordinary field border (Codex r2).
     const keyboard = rule(
-      ".swiss-timer-description-control .inline-tag-picker-search:focus-within,\n" +
         '.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus)'
     );
     expect(keyboard).toContain("border-color: var(--focus);");

@@ -202,8 +202,8 @@ describe("TimeEntryQuickEditorModal", () => {
 
     expect(await screen.findByTestId("time-entry-quick-editor-modal")).not.toBeNull();
     expect(screen.getByRole("button", { name: "#Planning, remove tag" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: /Choose Start date/ }).textContent).toBe("");
-    expect(screen.getByRole("button", { name: /Choose End date/ }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: /Choose Start date/ }).textContent).not.toBe("");
+    expect(screen.getByRole("button", { name: /Choose End date/ }).textContent).not.toBe("");
 
     await userEvent.click(screen.getByRole("button", { name: "#Planning, remove tag" }));
     await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));

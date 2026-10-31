@@ -257,7 +257,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     renderList();
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(sleepRow()).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
@@ -273,7 +273,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const opened = screen.getByRole("dialog", { name: "Office → Unknown place" });
     const asked = within(opened).getByRole("group", { name: /^Getting around, \d\d:00–\d\d:30\?$/ });
     expect(within(asked).getByRole("button", { name: "Yes" })).toBeTruthy();
-    expect(within(asked).getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(within(asked).getByRole("button", { name: /^(Not now|Don't log)$/ })).toBeTruthy();
     // The trip's own dialog: its legs and its fixes (the editor it had under the question is gone).
     expect(within(opened).getByRole("group", { name: "Legs" })).toBeTruthy();
     expect(within(opened).getByRole("button", { name: "I didn't leave" })).toBeTruthy();
@@ -305,7 +305,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     fireEvent.click(later);
     const asked = screen.getByRole("group", { name: /^Getting around, 1\d:00–1\d:30\?$/ });
     expect(asked.closest("tr")?.dataset.questionFor).toBe(other.id);
-    fireEvent.click(within(asked).getByRole("button", { name: "Not now" }));
+    fireEvent.click(within(asked).getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual([`/api/review/${other.id}`]);
     expect(rows()).toHaveLength(1);
@@ -408,12 +408,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     fireEvent.click(askingRow("Unknown place")!);
     // Card B: the outing's trips are decided with it, silently. "Where were you?" is the dialog itself: no line, and Not now.
     expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
-    expect(within(dialog()!).getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ })).toBeTruthy();
     expect(screen.queryByText(/With its trips/)).toBeNull();
     // With no guess there is nothing to say Yes to: the dialog's choices name it.
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
     expect(within(dialog()!).getByRole("textbox", { name: "Search places" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -425,7 +425,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const props = baseProps();
     const { rerender } = render(<EntriesTable {...props} reviewItems={reviewItems} />);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     // Sleep is the List's last "?": focus moves on to the chip.
     await waitFor(() => expect(document.activeElement).toBe(chip(2)));
     // A refresh no longer lists it (capped, or decided elsewhere meanwhile); Undo still brings it back.
@@ -448,13 +448,13 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     const withoutSleep = reviewItems.filter((item) => item.id !== SLEEP);
     rerender(<EntriesTable {...baseProps()} reviewItems={withoutSleep} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     rerender(<EntriesTable {...baseProps()} reviewItems={[...withoutSleep]} />);
@@ -469,7 +469,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       canonicalReviewStatuses: { [stay.id]: "open", [walk.id]: "accepted" } }), { status: 409 }));
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     // The refresh after the answer no longer lists either card.
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
@@ -480,7 +480,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     fireEvent.click(askingRow("Unknown place")!);
     expect(screen.queryByText(/With its trips/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls.at(-1)?.[1].body).mutation.action).not.toBe("ignore_outing");
   });
@@ -488,7 +488,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
   it("moves focus to the List when the last question is answered (Codex r2 on #568)", async () => {
     const { container } = render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[2]]} />);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".timeline-list-scroll")));
   });
 
@@ -501,7 +501,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
       render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
       fireEvent.click(sleepRow()!);
-      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
       const before = startViewTransition.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -518,12 +518,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const [stay, walk] = outingPair();
     const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
@@ -540,12 +540,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     // No replacement data arrives: the stale bootstrap still lists both.
     render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     const last = JSON.parse(clientFetch.mock.calls.at(-1)?.[1].body).mutation;
     expect(last.action).not.toBe("ignore_outing");
@@ -558,7 +558,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
     render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(askingRow("Unknown place")).toBeNull();
@@ -810,7 +810,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const office = officeRow()!;
     office.focus();
     fireEvent.click(office);
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(dialog()).toBeNull();
     // The row that opened it is gone; Sleep is the next "?" down the List.
     await waitFor(() => expect(document.activeElement).toBe(sleepRow()));
@@ -860,7 +860,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     rerender(<EntriesTable {...baseProps()} reviewItems={[...reviewItems]} />);
     expect(dialog()).toBeTruthy();
     expect(dialog()!.querySelector(".location-correction-ask")).toBeNull();
-    expect(within(dialog()!).queryByRole("button", { name: "Not now" })).toBeNull();
+    expect(within(dialog()!).queryByRole("button", { name: /^(Not now|Don't log)$/ })).toBeNull();
   });
 
   it("opens a linked \"?\" again when the link comes back after leaving the URL (Codex r2 on #609)", async () => {
@@ -885,7 +885,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     render(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
     expect(badge()).toBe(3);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(chip(2)).toBeTruthy();
     expect(badge()).toBe(2);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -893,7 +893,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(badge()).toBe(3);
     // A refused save brings it back in both.
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(badge()).toBe(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -909,7 +909,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
     render(<Shell items={[stay, walk]}><EntriesTable {...baseProps()} reviewItems={[stay, walk]} /></Shell>);
     fireEvent.click(askingRow("Unknown place")!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(chip(1)).toBeTruthy();
@@ -922,7 +922,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const list = () => <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
     const view = render(<Shell items={reviewItems}>{list()}</Shell>);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     // Left while held for Undo, and opened again: still away, and its Undo is there.
     view.rerender(<Shell items={reviewItems}>{null}</Shell>);
     expect(badge()).toBe(2);
@@ -933,7 +933,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(badge()).toBe(3);
     // Answered again, sent, and the List left and opened again while it is saving: never answerable twice.
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     view.rerender(<Shell items={reviewItems}>{null}</Shell>);
@@ -953,7 +953,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const view = render(<Shell items={reviewItems} refresh={refresh}>{null}</Shell>);
     view.rerender(<Shell items={reviewItems} refresh={refresh}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     view.rerender(<Shell items={reviewItems} refresh={refresh}>{null}</Shell>);
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -974,7 +974,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const save = holdSaves(new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
     const view = render(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
     fireEvent.click(sleepRow()!);
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: /^(Not now|Don't log)$/ }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(clientFetch).toHaveBeenCalledTimes(1);
     // The workspace changes while it is saving: the new one has nothing to check.
@@ -1027,7 +1027,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const list = <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
     const view = render(<Shell items={reviewItems}>{list}</Shell>);
     fireEvent.click(officeRow()!);
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(badge()).toBe(2);
     // To the Grid while it is held for Undo: the office asks nothing there, and its dialog has no Yes.
     view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
@@ -1096,7 +1096,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const list = <EntriesTable {...baseProps()} reviewItems={reviewItems} />;
     const view = render(<Shell items={reviewItems}>{list}</Shell>);
     fireEvent.click(officeRow()!);
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ }));
     expect(badge()).toBe(2);
     // On the Grid, while the List holds its Not now, the office is logged as Errands.
     view.rerender(<Shell items={reviewItems}><GridProbe /></Shell>);
@@ -1157,7 +1157,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       view.rerender(<Shell items={reviewItems}><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
       // Back in w1, the office's "?" is answered in the List and held for Undo.
       fireEvent.click(officeRow()!);
-      fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+      fireEvent.click(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ }));
       expect(badge()).toBe(2);
       await act(async () => { land(); });
       // The receipt settled it in the current lifetime's controller: the held Not now is never sent, and Undo brings
@@ -1175,7 +1175,7 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       // Another workspace that happens to show a "?" with the same id: the receipt isn't its.
       view.rerender(<Shell items={reviewItems} owner="w2:u1"><EntriesTable {...baseProps()} reviewItems={reviewItems} /></Shell>);
       fireEvent.click(officeRow()!);
-      fireEvent.click(within(dialog()!).getByRole("button", { name: "Not now" }));
+      fireEvent.click(within(dialog()!).getByRole("button", { name: /^(Not now|Don't log)$/ }));
       await act(async () => { land(); });
       fireEvent.click(screen.getByRole("button", { name: "Undo" }));
       expect(officeRow()).toBeTruthy();

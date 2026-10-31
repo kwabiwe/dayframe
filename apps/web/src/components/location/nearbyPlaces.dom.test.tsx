@@ -86,6 +86,23 @@ describe("NearbyPlaces", () => {
     expect(onSearching).toHaveBeenLastCalledWith(false);
   });
 
+  it("searches as you type with autocomplete near the visit, nearest first, and backs it up with a full search", async () => {
+    const near = { displayLines: ["Riverside Leisure Centre", "Chelmsford"], coordinate: { latitude: 51.5002, longitude: -0.1 } };
+    const far = { displayLines: ["Rivers Café"], coordinate: { latitude: 51.52, longitude: -0.1 } };
+    const fake = fakeMapKit([], [{ name: "Full search place", coordinate: { latitude: 51.51, longitude: -0.1 } }]);
+    const Search = fake.mapkit.Search as unknown as { prototype: { autocomplete?: unknown } };
+    Search.prototype.autocomplete = (query: string, done: (error: null, data: { results: unknown[] }) => void) => done(null, { results: query === "rivers" ? [far, near] : [] });
+    (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;
+    const counted = vi.fn();
+    const view = (query: string) => <NearbyPlaces centre={centre} disabled={false} onNearbyCount={counted} onPick={vi.fn()} onUnavailable={vi.fn()} query={query} />;
+    const { rerender } = render(view("rivers"));
+    const list = await screen.findByRole("list", { name: "Places found" });
+    expect([...list.querySelectorAll("b")].map((title) => title.textContent)).toEqual(["Riverside Leisure Centre", "Rivers Café"]);
+    rerender(view("xyz"));
+    expect(await screen.findByText("Full search place")).not.toBeNull();
+    await waitFor(() => expect(counted).toHaveBeenCalledWith(0));
+  });
+
   it("drops out when MapKit fails for the page", async () => {
     const fake = fakeMapKit([]);
     (window as unknown as { mapkit: unknown }).mapkit = fake.mapkit;

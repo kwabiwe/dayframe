@@ -672,12 +672,6 @@ html.ui-dialog-open {
   gap: var(--web-field-gap);
 }
 
-.ui-field > label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: var(--fw-medium);
-}
-
 .ui-control {
   width: 100%;
   min-height: var(--web-control-height);
@@ -4757,7 +4751,6 @@ dialog.ui-dialog.df-range-custom {
   box-shadow: inset 0 -2px 0 var(--danger);
 }
 
-.swiss-timer-description-control .inline-tag-picker-search:focus-within,
 .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
   border-color: var(--focus);
   box-shadow: inset 0 0 0 1px var(--focus);
@@ -6437,22 +6430,19 @@ dialog.ui-dialog.df-range-custom {
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
-.calendar-compact-duration-field > span {
-  color: var(--muted);
-  font-size: var(--type-label);
+.calendar-compact-duration-field > span,
+.df-ce-field span,
+.df-ce-label,
+.df-start-field-label,
+.df-rf-description span,
+.location-correction-time > span,
+.ui-field > label {
+  /* The card kit's one label (owner, 31 Oct 2026): sentence case, above its field. */
+  color: var(--text-secondary);
+  font-size: var(--type-meta);
   font-weight: var(--fw-medium);
-  letter-spacing: 0.02em;
-}
-
-/* The block editors' field labels: the #391 small uppercase head (WUI-018), above each time box, as
-   on the iPhone entry sheet (owner, 21 Oct 2026). Scoped to the editor panel. */
-.calendar-compact-editor-panel .calendar-compact-field-label,
-.calendar-compact-editor-panel .calendar-compact-editor-fields label > span,
-.calendar-compact-editor-panel .calendar-compact-duration-field > span {
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   line-height: 16px;
-  text-transform: uppercase;
 }
 
 .calendar-compact-editor-icons {
@@ -6492,8 +6482,7 @@ dialog.ui-dialog.df-range-custom {
   outline-offset: 1px;
 }
 
-.calendar-compact-category-field > button:focus-visible,
-.calendar-compact-date-trigger:focus-visible {
+.calendar-compact-category-field > button:focus-visible {
   outline: 0;
 }
 
@@ -6830,24 +6819,6 @@ dialog.ui-dialog.df-range-custom {
   min-width: 0;
 }
 
-.calendar-compact-date-trigger {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  justify-content: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.calendar-compact-date-trigger:hover,
-.calendar-compact-date-trigger[aria-expanded="true"] {
-  background: transparent;
-  color: var(--foreground);
-}
-
 .calendar-compact-date-time-controls > input {
   min-width: 0;
   border-radius: 10px 0 0 10px;
@@ -6868,7 +6839,6 @@ dialog.ui-dialog.df-range-custom {
   font-variant-numeric: tabular-nums;
 }
 
-.calendar-compact-date-trigger strong,
 .calendar-compact-duration-input input,
 .calendar-compact-duration > .tabular {
   font-variant-numeric: tabular-nums;
@@ -10691,11 +10661,6 @@ dialog.ui-dialog.df-palette {
 .df-ce-field span,
 .df-ce-label {
   margin: 0 0 8px;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: var(--fw-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .df-ce-field span {
@@ -11677,11 +11642,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-rf-description span {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: var(--fw-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  display: block;
 }
 
 .df-rf-description input {
@@ -12409,15 +12370,13 @@ dialog.ui-dialog.df-palette {
   background: transparent;
 }
 
-/* The #391 eyebrow: small uppercase ("FRIDAY 16 OCTOBER", "RECORDING"), as the iPhone sheet's. */
+/* The eyebrow takes the card kit's label. */
 .df-ed-eyebrow {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--type-meta);
   font-weight: var(--fw-medium);
-  letter-spacing: 0.06em;
   line-height: 16px;
-  text-transform: uppercase;
 }
 
 /* "Logged automatically · {place}" under an auto-logged block's heading (PRD D17). */
@@ -12428,13 +12387,12 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-ed-head h2 {
+  /* The card kit's one header: the dialogs' title. */
   margin: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: var(--fw-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -12619,21 +12577,6 @@ dialog.ui-dialog.df-palette {
   font-weight: var(--fw-medium);
   line-height: 28px;
   font-variant-numeric: tabular-nums;
-}
-
-/* The date glyph keeps a 44 × 44 px target that overhangs the box's padding, not its height. */
-.calendar-compact-editor-panel .calendar-compact-date-trigger {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  margin: 0 -12px 0 -6px;
-  color: var(--muted);
-}
-
-.calendar-compact-editor-panel .calendar-compact-date-trigger:hover,
-.calendar-compact-editor-panel .calendar-compact-date-trigger[aria-expanded="true"] {
-  color: var(--foreground);
 }
 
 .calendar-compact-editor-panel .calendar-compact-running-value {
@@ -12952,14 +12895,6 @@ dialog.ui-dialog.df-palette {
   gap: 4px;
 }
 
-.df-start-field-label {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: var(--fw-medium);
-  letter-spacing: 0.06em;
-  line-height: 16px;
-  text-transform: uppercase;
-}
 
 .df-start-date-picker {
   min-width: 0;
@@ -14954,8 +14889,7 @@ button.timeline-location-hit:focus-visible {
   font-size: 12px;
 }
 
-.location-correction-back,
-.location-correction-more {
+.location-correction-back {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
@@ -15970,18 +15904,38 @@ button.timeline-location-hit:focus-visible {
   padding: 6px 2px;
 }
 
-/* The dialog keeps one height: the map's frame and five result rows are fixed, so typing moves nothing; More options
-   may grow it, and on phones the dialog scrolls inside the viewport (owner, 30 Oct 2026). */
-:root .location-correction.is-next .location-correction-map {
+/* The list holds the height it opened with (up to five rows, set inline), so typing moves nothing; More options may grow
+   the dialog, and on phones it scrolls inside the viewport (owner, 31 Oct 2026). */
+:root .location-correction.is-next .location-correction-map.is-loading {
   box-sizing: border-box;
-  height: 189px;
+  height: 160px;
   flex: none;
+}
+
+/* An unknown place's readings line comes with its map: its frame holds that line's room while it loads. */
+:root .location-correction.is-next .location-correction-map.is-loading.is-unknown {
+  height: 189px;
 }
 
 :root .location-correction-results {
   display: flex;
-  height: 240px;
   flex-direction: column;
+}
+
+/* A row's room while the places load. */
+:root .location-correction-placeholder {
+  display: block;
+  box-sizing: border-box;
+  height: 48px;
+  padding: 8px 2px;
+}
+
+:root .location-correction-placeholder::before {
+  display: block;
+  height: 100%;
+  border-radius: 8px;
+  background: var(--surface-inset);
+  content: "";
 }
 
 :root .location-correction-results-list {
@@ -16085,6 +16039,136 @@ button.timeline-location-hit:focus-visible {
 
 :root .location-correction.is-next .location-correction-save input {
   min-height: var(--web-control-height);
+}
+
+/* ---------- The card kit (owner, 31 Oct 2026): one label, one field, one 36 px button, one header and footer ---------- */
+/* Every card (block editor, Add time, place and trip dialogs, activity and place editors, Settings dialogs) uses them;
+   `cardKit.contract.test.ts` keeps them from drifting. Buttons are slim pills at the control height: 36 px with a mouse,
+   44 px on touch. Outside cards, the 32 px inline answer pill stays (owner rule, 28 Oct 2026). */
+:root :is(.df-rbtn, .df-rbtn--sm, .ui-dialog .ui-button, .ui-dialog .ui-button.is-compact, .calendar-compact-save, .calendar-compact-cancel) {
+  min-height: var(--web-control-height);
+  height: var(--web-control-height);
+  padding-inline: 16px;
+}
+
+@media (min-width: 761px) and (not (any-pointer: coarse)) {
+  :root :is(.calendar-compact-editor, .time-entry-quick-editor-modal) {
+    --web-control-height: 36px;
+  }
+}
+
+/* Fields: the inset fill with no border at rest or after a click; the neutral ring only for keyboard focus
+   (`data-kb-focus`, set page-wide by useKeyboardFocusMarks); an invalid field keeps its danger underline. */
+:root :is(.ui-control, .ui-compound-control, .location-correction-save input),
+:root :is(.ui-control, .ui-compound-control, .location-correction-save input):is(:focus, :focus-within) {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+:root :is(.ui-control, .location-correction-save input)[data-kb-focus],
+:root .ui-compound-control:not(.df-flist-search):has([data-kb-focus]) {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root .ui-control[aria-invalid="true"],
+:root .ui-compound-control:has([aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root .ui-control[aria-invalid="true"][data-kb-focus],
+:root .ui-compound-control:has([aria-invalid="true"]):has([data-kb-focus]) {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* The block editor's Start, End and Duration boxes in the time field's look. */
+:root .calendar-compact-editor-panel :is(.calendar-compact-date-time-controls, .calendar-compact-duration-input input, .calendar-compact-duration, .calendar-compact-running-value) {
+  min-height: var(--web-control-height);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+:root .calendar-compact-editor-panel :is(.calendar-compact-date-time-controls > input, .calendar-compact-duration-input input, .calendar-compact-duration > .tabular, .calendar-compact-running-value) {
+  font-size: 15px;
+}
+
+:root .calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within,
+:root .calendar-compact-editor-panel .calendar-compact-duration-input input:focus {
+  box-shadow: none;
+}
+
+:root .calendar-compact-editor-panel .calendar-compact-date-time-controls:has([data-kb-focus]),
+:root .calendar-compact-editor-panel .calendar-compact-duration-input input[data-kb-focus] {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+}
+
+:root .calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]),
+:root .calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+:root .calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]):has([data-kb-focus]),
+:root .calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"][data-kb-focus] {
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* No calendar icon in the time box: the date is quiet text beside the label, and still opens the picker. */
+:root .calendar-compact-date-time-controls {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root .df-card-label-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+:root .df-card-label-row .calendar-compact-date-picker {
+  min-width: 0;
+}
+
+:root .df-card-date {
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--type-meta);
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:root .df-card-date svg {
+  display: none;
+}
+
+:root .df-card-date strong {
+  font-weight: inherit;
+}
+
+:root .df-card-date:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+/* The block editor's description is a field like the others. */
+:root .calendar-compact-editor-panel .time-entry-quick-description-control .inline-tag-input-anchor {
+  min-height: var(--web-control-height);
+}
+
+:root .calendar-compact-editor-panel .time-entry-quick-description-control input {
+  min-height: calc(var(--web-control-height) - 2px);
+  font-size: 15px;
+}
+
+:root .calendar-compact-editor-panel .time-entry-quick-description-control .inline-tag-picker-trigger {
+  width: var(--web-control-height);
+  height: calc(var(--web-control-height) - 2px);
+  flex-basis: var(--web-control-height);
 }
 
 /* Touch screens: segments and text fields at 44 px, last in the cascade (WUI-019, WUI-046). */

@@ -35,6 +35,7 @@ function formatDistance(metres: number) {
 export function NearbyPlaces({
   centre,
   disabled,
+  onNearbyCount,
   onPick,
   onSearching,
   onUnavailable,
@@ -45,6 +46,8 @@ export function NearbyPlaces({
 }: {
   centre: { latitude: number; longitude: number };
   disabled: boolean;
+  /** How many nearby places came back (none on a failure): the dialog's list settles on its height from it. */
+  onNearbyCount?: (count: number) => void;
   onPick: (name: string) => void;
   /** Whether a typed search is waiting on Apple (the dialog's quiet spinner). */
   onSearching?: (searching: boolean) => void;
@@ -64,9 +67,9 @@ export function NearbyPlaces({
   const [searched, setSearched] = useState<{ query: string; state: State } | null>(null);
   const [ownQuery, setQuery] = useState("");
   const query = controlledQuery ?? ownQuery;
-  const latest = useRef({ onSearching, onUnavailable });
+  const latest = useRef({ onNearbyCount, onSearching, onUnavailable });
   useEffect(() => {
-    latest.current = { onSearching, onUnavailable };
+    latest.current = { onNearbyCount, onSearching, onUnavailable };
   });
   const { latitude, longitude } = centre;
 
@@ -81,10 +84,12 @@ export function NearbyPlaces({
         if (cancelled) return;
         if (error) {
           setNearby({ status: "unavailable", rows: [] });
+          latest.current.onNearbyCount?.(0);
           return;
         }
         const found = toRows(data?.places ?? [], { latitude, longitude }).slice(0, rows);
         setNearby({ status: found.length ? "results" : "empty", rows: found });
+        latest.current.onNearbyCount?.(found.length);
       });
     }).catch(() => undefined);
     return () => {
@@ -104,10 +109,26 @@ export function NearbyPlaces({
           region: new mapkit.CoordinateRegion(new mapkit.Coordinate(latitude, longitude), new mapkit.CoordinateSpan(0.05, 0.05)),
           includePointsOfInterest: true
         });
-        search.search(text, (error, data) => {
-          if (cancelled) return;
-          const rows = error ? [] : toRows(data?.places ?? [], { latitude, longitude }).slice(0, searchRows);
+        const answer = (error: unknown, places: MkPlace[]) => {
+          const rows = error ? [] : toRows(places, { latitude, longitude }).slice(0, searchRows);
           setSearched({ query: text, state: { status: error ? "unavailable" : rows.length ? "results" : "empty", rows } });
+        };
+        const fullSearch = () => search.search(text, (error, data) => {
+          if (!cancelled) answer(error, data?.places ?? []);
+        });
+        if (!search.autocomplete) {
+          fullSearch();
+          return;
+        }
+        // As you type, near the visit: "rivers" finds Riverside Leisure Centre. A full search backs it up.
+        search.autocomplete(text, (error, data) => {
+          if (cancelled) return;
+          const places = (data?.results ?? []).flatMap((result) => {
+            const name = result.displayLines?.[0];
+            return name && result.coordinate ? [{ name, coordinate: result.coordinate }] : [];
+          });
+          if (error || !places.length) fullSearch();
+          else answer(null, places);
         });
       }).catch(() => undefined);
     }, SEARCH_DELAY_MS);
@@ -133,6 +154,14 @@ export function NearbyPlaces({
       : controlledQuery !== undefined ? { ...held, status: "loading" }
         : { status: "loading", rows: [] };
   const quiet = controlledQuery !== undefined && shown.status === "loading";
+  // The nearest places' room while they load, so the dialog's list doesn't jump.
+  if (quiet && !shown.rows.length) {
+    return (
+      <div aria-hidden="true" className="location-correction-nearby" data-section="nearby">
+        {Array.from({ length: rows }, (_, index) => <span className="location-correction-placeholder" key={index} />)}
+      </div>
+    );
+  }
   return (
     <div className="location-correction-nearby" data-section="nearby">
       {controlledQuery === undefined ? (

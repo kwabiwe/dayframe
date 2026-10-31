@@ -1024,7 +1024,27 @@ export function TimeEntryQuickEditorPanel({
 
         <div className="calendar-compact-temporal-fields" data-clock={clock}>
           <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Start</span>
+            <div className="df-card-label-row">
+              <span className="calendar-compact-field-label">Start</span>
+              <DatePickerPopover
+                ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
+                className="calendar-compact-date-picker"
+                disabled={controlsDisabled}
+                label={formatShortDate(draft.startedAtDate)}
+                onChange={(date) => controller.updateTemporalField("startedAtDate", date, "start", true)}
+                onOpenChange={(open) => {
+                  if (open) controller.setSuggestionsOpen(false);
+                  controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current);
+                }}
+                panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
+                panelLabel="Choose Start date"
+                portal
+                max={today}
+                today={today}
+                triggerClassName="df-card-date"
+                value={draft.startedAtDate}
+                            />
+            </div>
             <div className="calendar-compact-date-time-controls">
               <input
                 aria-describedby={feedbackMode === "error" && startIsInvalid ? temporalErrorId : undefined}
@@ -1040,30 +1060,33 @@ export function TimeEntryQuickEditorPanel({
                 // once left (Codex r2 on #446: never append " AM" under the caret).
                 value={controller.activeTemporalOwner === "start" ? draft.startedAtTime : displayTypedTime(draft.startedAtTime, clock)}
               />
-              <DatePickerPopover
-                ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
-                className="calendar-compact-date-picker"
-                disabled={controlsDisabled}
-                iconOnly
-                label={formatAccessibleDate(draft.startedAtDate)}
-                onChange={(date) => controller.updateTemporalField("startedAtDate", date, "start", true)}
-                onOpenChange={(open) => {
-                  if (open) controller.setSuggestionsOpen(false);
-                  controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current);
-                }}
-                panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
-                panelLabel="Choose Start date"
-                portal
-                max={today}
-                today={today}
-                triggerClassName="calendar-compact-date-trigger"
-                value={draft.startedAtDate}
-              />
             </div>
           </div>
 
           <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">End</span>
+            <div className="df-card-label-row">
+              <span className="calendar-compact-field-label">End</span>
+              {isRunning ? null : (
+                <DatePickerPopover
+                  ariaLabel={`Choose End date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
+                  className="calendar-compact-date-picker"
+                  disabled={controlsDisabled}
+                  label={formatShortDate(draft.stoppedAtDate)}
+                  onChange={(date) => controller.updateTemporalField("stoppedAtDate", date, "finish", true)}
+                  onOpenChange={(open) => {
+                    if (open) controller.setSuggestionsOpen(false);
+                    controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
+                  }}
+                  panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
+                  panelLabel="Choose End date"
+                  portal
+                  max={today}
+                  today={today}
+                  triggerClassName="df-card-date"
+                  value={draft.stoppedAtDate}
+                />
+              )}
+            </div>
             {isRunning ? (
               <div className="calendar-compact-running-value">Running</div>
             ) : (
@@ -1083,25 +1106,6 @@ export function TimeEntryQuickEditorPanel({
                 {finishDayOffset > 0 ? (
                   <span className="calendar-compact-day-offset" aria-hidden="true" title={finishDescription}>+{finishDayOffset}</span>
                 ) : null}
-                <DatePickerPopover
-                  ariaLabel={`Choose End date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
-                  className="calendar-compact-date-picker"
-                  disabled={controlsDisabled}
-                  iconOnly
-                  label={formatAccessibleDate(draft.stoppedAtDate)}
-                  onChange={(date) => controller.updateTemporalField("stoppedAtDate", date, "finish", true)}
-                  onOpenChange={(open) => {
-                    if (open) controller.setSuggestionsOpen(false);
-                    controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
-                  }}
-                  panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
-                  panelLabel="Choose End date"
-                  portal
-                  max={today}
-                  today={today}
-                  triggerClassName="calendar-compact-date-trigger"
-                  value={draft.stoppedAtDate}
-                />
               </div>
             )}
           </div>
@@ -1356,6 +1360,13 @@ export async function saveTimeEntryQuickEdit(entryId: string, plan: CalendarEntr
   } catch {
     return { ok: false, error: "Unable to save this block. Check your connection and try again." } as const;
   }
+}
+
+/** The date beside a time box's label ("Fri 30 Oct"): quiet text that opens the picker (the card kit has no calendar icon). */
+function formatShortDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return dateKey;
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" }).format(new Date(year, month - 1, day)).replace(",", "");
 }
 
 function formatAccessibleDate(value: string) {

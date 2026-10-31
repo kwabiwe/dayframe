@@ -169,17 +169,18 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
       target={{ kind: "place", place: place({ learnedPlaceId: "00000000-0000-4000-8000-000000000201", name: "Corner café", matchKind: "learned" }), label: "Corner café" }} />);
     moreOptions();
     typeTime("Start time", "08:50");
-    // Leave as unknown applies at once, with the edited time.
-    fireEvent.click(screen.getByRole("button", { name: "Leave as unknown" }));
+    // A tapped place applies at once, with the edited time.
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "Home" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Home/ }));
     expect((await screen.findByRole("alert")).textContent).toBe("New times must overlap the item's times.");
     expect(onCorrected).toHaveBeenCalledTimes(1);
     expect(sent().slice(0, 2).map((body) => body.kind)).toEqual(["place", "times"]);
     // Back to the learned place, times as they were: that is a change from what saved (unknown).
     typeTime("Start time", "08:40");
+    fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "" } });
     fireEvent.click(within(screen.getByRole("list", { name: "Saved places nearby" })).getByRole("button", { name: /Corner café/ }));
     await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(3));
     expect((within(screen.getByRole("list", { name: "Saved places nearby" })).getByRole("button", { name: /Corner café/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Leave as unknown" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
     expect(sent()[2]).toEqual({ kind: "place", subject: "place", itemId: "seg-cafe", placeId: null, learnedPlaceId: "00000000-0000-4000-8000-000000000201" });
     release({ ok: true, json: async () => ({ ok: true }) });
@@ -281,7 +282,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
     expect(document.querySelector(".location-correction-ask")).toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Don't log" }));
     expect(onAnswer).toHaveBeenLastCalledWith(false);
     expect(onClose).toHaveBeenCalledTimes(2);
   });
@@ -537,9 +538,9 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     // The pinned slot under the results, only while there's text.
     expect(screen.getByRole("button", { name: "Save “home” as a place" }).parentElement?.className).toBe("location-correction-results");
     expect(screen.getByText("Saved place · 5.4 km away")).not.toBeNull();
-    // At most three by search.
+    // Every saved place that matches.
     fireEvent.change(screen.getByLabelText("Search places"), { target: { value: "e" } });
-    expect(names("Saved places found")).toHaveLength(3);
+    expect(names("Saved places found")).toHaveLength(4);
   });
 
   it("gives a trip its own dialog: its legs, I didn't leave and This wasn't a trip", async () => {

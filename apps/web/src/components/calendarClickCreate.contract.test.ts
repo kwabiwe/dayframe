@@ -39,7 +39,7 @@ describe("Calendar click-to-create contract", () => {
     expect(quickEditor).toContain('aria-label={entry ? `Edit ${title}` : "New block"}');
     expect(quickEditor).toContain("formatDuration(preview.plan.durationSeconds)");
     expect(quickEditor.match(/<DatePickerPopover/g)).toHaveLength(2);
-    expect(quickEditor.match(/iconOnly/g)).toHaveLength(2);
+    expect(quickEditor).not.toContain("iconOnly");
     expect(quickEditor).toMatch(/\{props\.mode === "entry" && props\.onDelete \? \([\s\S]*aria-label=\{isRunning \? `Discard \$\{title\}` : `Delete \$\{title\}`\}/s);
   });
 
