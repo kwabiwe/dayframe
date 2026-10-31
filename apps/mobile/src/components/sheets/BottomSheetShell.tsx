@@ -20,20 +20,14 @@ import {
 } from "@/components/SwipeDismissSheet";
 import { keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
 import { MOBILE_MOTION } from "../../lib/motion";
+import { createSheetScroller, type SheetScroller } from "../../lib/sheetScroller";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 
 type BottomSheetOutcome = "commit" | "discard";
 
-/**
- * Moves the sheet's own scroll, animated unless Reduce Motion: a view to the top (with room added below it when the
- * content is too short to get there), a whole view into sight above the footer, or back to the top.
- */
-export type BottomSheetScroller = {
-  reveal: (view: View | null, mode: "top" | "whole") => void;
-  top: () => void;
-};
+export type BottomSheetScroller = Pick<SheetScroller, "reveal" | "top">;
 // Expo Router's iOS NativeTabs host reserves a 52-point presentation strip
 // below React sheet content, even though window/screen metrics remain full-size.
 // A root-hosted overlay is attached to UIWindow, so it can safely settle through
@@ -132,53 +126,23 @@ export function BottomSheetShell({
   const scrollView = useRef<ScrollView | null>(null);
   const scrollMetrics = useRef({ offset: 0, viewport: 0, content: 0 });
   const [scrollRoom, setScrollRoom] = useState(0);
-  const scrollRoomRef = useRef(0);
-  const room = useCallback((next: number) => {
-    scrollRoomRef.current = next;
-    setScrollRoom(next);
-  }, []);
   useEffect(() => {
     if (!scrollerRef) return;
-    let clearing: ReturnType<typeof setTimeout> | null = null;
-    const scrollTo = (y: number, added = 0) => {
-      const { content, viewport } = scrollMetrics.current;
-      scrollView.current?.scrollTo({ y: Math.max(0, Math.min(y, content + added - viewport)), animated: !reduceMotion });
-    };
-    scrollerRef.current = {
-      // After a frame: the sheet's new height and the view's own layout are in by then.
-      reveal: (view, mode) => requestAnimationFrame(() => {
-        const inner = (scrollView.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.();
-        if (!view || !inner) return;
-        view.measureLayout(inner as never, (_x, y, _width, height) => {
-          const { offset, viewport } = scrollMetrics.current;
-          if (mode === "top") {
-            if (clearing) clearTimeout(clearing);
-            clearing = null;
-            const { content, viewport } = scrollMetrics.current;
-            const own = content - scrollRoomRef.current;
-            // Only a sheet that already scrolls: a shorter one shows it all.
-            const needed = own > viewport ? Math.max(0, y - (own - viewport)) : 0;
-            const added = needed - scrollRoomRef.current;
-            room(needed);
-            // The room is laid out by the next frame.
-            requestAnimationFrame(() => scrollTo(y, added > 0 ? added : 0));
-          } else if (y + height > offset + viewport) scrollTo(Math.min(y, y + height - viewport));
-          else if (y < offset) scrollTo(y);
-        }, () => undefined);
-      }),
-      top: () => {
-        scrollTo(0);
-        // The added room goes once the scroll back has run.
-        if (clearing) clearTimeout(clearing);
-        clearing = reduceMotion ? null : setTimeout(() => room(0), MOBILE_MOTION.sheet);
-        if (reduceMotion) room(0);
-      },
-    };
+    const scroller = createSheetScroller({
+      afterScrollBackMs: MOBILE_MOTION.sheet,
+      inner: () => (scrollView.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.() ?? null,
+      metrics: scrollMetrics.current,
+      nextFrame: (run) => { requestAnimationFrame(run); },
+      reduceMotion,
+      room: setScrollRoom,
+      scrollTo: (y, animated) => scrollView.current?.scrollTo({ y, animated }),
+    });
+    scrollerRef.current = scroller;
     return () => {
-      if (clearing) clearTimeout(clearing);
+      scroller.dispose();
       scrollerRef.current = null;
     };
-  }, [reduceMotion, room, scrollerRef]);
+  }, [reduceMotion, scrollerRef]);
   const compactCalendarLayout = calendarLayout && windowHeight <= 700;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const outcome = useRef<{
