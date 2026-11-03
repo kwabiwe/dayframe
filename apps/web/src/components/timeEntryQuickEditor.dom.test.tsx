@@ -43,6 +43,35 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 
+  it("picks an activity from @ in the description and waits for Save", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    renderModal({ onSave });
+    const input = await screen.findByLabelText<HTMLInputElement>("Description");
+    const user = userEvent.setup();
+    await user.type(input, " @foc");
+    expect(await screen.findByRole("option", { name: "Focus" })).toBeDefined();
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Plan release");
+    expect(onSave).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ categoryId: "focus" })
+    })));
+  });
+
+  it("keeps a typed @word when Activities is dismissed", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    renderModal({ onSave });
+    const input = await screen.findByLabelText<HTMLInputElement>("Description");
+    const user = userEvent.setup();
+    await user.type(input, " @foc");
+    expect(await screen.findByRole("option", { name: "Focus" })).toBeDefined();
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("Plan release @foc");
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
+  });
+
   it("splits a finished block at a line moved a minute at a time, and duplicates it (card G)", async () => {
     const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
     const onDuplicate = vi.fn(async () => ({ ok: true as const }));
