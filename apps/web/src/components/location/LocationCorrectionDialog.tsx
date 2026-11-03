@@ -183,17 +183,28 @@ export function editedInstant(original: string, value: string) {
 }
 
 async function sendCorrection(correction: TimelineCorrectionRequest) {
+  const retryMessage = "Couldn't save that. Check your connection and try again.";
   const response = await clientFetch("/api/timeline/corrections", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(correction)
-  });
-  const body = await response.json().catch(() => null) as { error?: string; logged?: { resolvedReviewItemIds?: unknown } } | null;
-  if (response.ok) {
-    const resolved = body?.logged?.resolvedReviewItemIds;
-    return { failure: null, resolvedReviewItemIds: Array.isArray(resolved) ? resolved.filter((id): id is string => typeof id === "string") : [] };
+  }).catch(() => null);
+  const body = await response?.json().catch(() => null) as {
+    error?: string;
+    correction?: { kind?: unknown; target?: { placeId?: unknown } };
+    logged?: { resolvedReviewItemIds?: unknown };
+  } | null;
+  const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
+    ? body.correction.target.placeId : null;
+  if (correction.kind === "place" && correction.newPlace && response?.ok && !placeId) {
+    // Keep the original id when a successful response didn't carry a readable creation receipt.
+    return { failure: retryMessage, placeId: null, resolvedReviewItemIds: [] };
   }
-  return { failure: body?.error ?? "Couldn't save that. Try again.", resolvedReviewItemIds: [] };
+  if (response?.ok) {
+    const resolved = body?.logged?.resolvedReviewItemIds;
+    return { failure: null, placeId, resolvedReviewItemIds: Array.isArray(resolved) ? resolved.filter((id): id is string => typeof id === "string") : [] };
+  }
+  return { failure: body?.error ?? (response ? "Couldn't save that. Try again." : retryMessage), placeId: null, resolvedReviewItemIds: [] };
 }
 
 export function LocationCorrectionDialog({
@@ -256,7 +267,8 @@ export function LocationCorrectionDialog({
       correctionIds.current.set(signature, id);
     }
     // Saved, it is done: the same change made again later is a new correction with a new id.
-    return sendCorrection({ ...correction, clientCorrectionId: id }).then(({ failure, resolvedReviewItemIds }) => {
+    return sendCorrection({ ...correction, clientCorrectionId: id }).then((result) => {
+      const { failure, resolvedReviewItemIds } = result;
       if (!failure) {
         correctionIds.current.delete(signature);
         unrefreshed.current = true;
@@ -269,7 +281,7 @@ export function LocationCorrectionDialog({
         unrefreshed.current = false;
         onReceiptAfterClose?.();
       }
-      return failure;
+      return result;
     });
   };
   // Saves not yet followed by a read of the day (onCorrected while open, onReceiptAfterClose once gone).
@@ -288,7 +300,6 @@ export function LocationCorrectionDialog({
     alive.current = true;
     return () => { alive.current = false; };
   }, []);
-  // "Save this place" made the place but couldn't set the visit to it: a retry sets it, and makes no second place.
   const [newPlaceName, setNewPlaceName] = useState("");
   const newPlaceNameRef = useRef<HTMLInputElement | null>(null);
   // Asked only where Apple's nearby places could show: a place whose evidence has a centre.
@@ -368,6 +379,7 @@ export function LocationCorrectionDialog({
     if (choice !== saved.picked) {
       const map = evidence && evidence !== "unavailable" ? evidence.map : null;
       const newName = choice.startsWith("new:") ? choice.slice(4) : null;
+      if (newName && !map?.centre) return "Wait for the visit's map before saving a place.";
       out.push({ kind: "place", subject: "place", itemId: place.id,
         placeId: choice.startsWith("saved:") ? choice.slice(6) : null,
         learnedPlaceId: choice.startsWith("learned:") ? choice.slice(8) : null,
@@ -409,7 +421,7 @@ export function LocationCorrectionDialog({
     setError(null);
     let savedAny = false;
     for (const correction of pending) {
-      const failure = await send(correction).catch(() => "Couldn't save that. Check your connection and try again.");
+      const { failure, placeId } = await send(correction);
       if (!alive.current) return;
       if (failure) {
         // What did save is the new starting point, and the List shows it.
@@ -419,7 +431,13 @@ export function LocationCorrectionDialog({
         return;
       }
       savedAny = true;
-      setSaved((current) => correction.kind === "place" ? { ...current, picked: choice }
+      const acknowledgedChoice = correction.kind === "place" && correction.newPlace && placeId ? `saved:${placeId}` : choice;
+      if (acknowledgedChoice !== choice) {
+        // A later edit in this Save may fail. Acknowledge the creation before the resulting refresh.
+        setPicked(acknowledgedChoice);
+        setNewPlaceName("");
+      }
+      setSaved((current) => correction.kind === "place" ? { ...current, picked: acknowledgedChoice }
         : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
           : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
@@ -462,9 +480,8 @@ export function LocationCorrectionDialog({
     if (initialTarget.kind !== "trip") return;
     setBusy(true);
     setError(null);
-    const failure = await send(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
-      : { kind: "delete", subject: "trip", itemId: initialTarget.trip.id })
-      .catch(() => "Couldn't save that. Check your connection and try again.");
+    const { failure } = await send(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
+      : { kind: "delete", subject: "trip", itemId: initialTarget.trip.id });
     if (!alive.current) return;
     if (failure) {
       setBusy(false);
@@ -494,8 +511,7 @@ export function LocationCorrectionDialog({
     if (target.kind !== "place") return;
     setBusy(true);
     setError(null);
-    const failure = await send({ kind: "delete", subject: "place", itemId: target.place.id })
-      .catch(() => "Couldn't save that. Check your connection and try again.");
+    const { failure } = await send({ kind: "delete", subject: "place", itemId: target.place.id });
     if (!alive.current) return;
     if (failure) {
       setBusy(false);
@@ -668,7 +684,7 @@ export function LocationCorrectionDialog({
       {yesQuestion && !changed
         ? <Button disabled={busy} onClick={() => void answer(true)} variant="primary">{yesQuestion.yesLabel}</Button>
         // A name typed in Save this place is saved too, with the rest (Codex r1 on #636).
-        // A creation whose reply was lost (from a tap, a search or the field) is looked up first (Codex r2 on #636).
+        // A creation whose reply was lost retries with its existing correction id.
         : <Button disabled={busy} onClick={() => void (canSaveNew && newPlaceName.trim() ? saveThisPlace() : apply())} variant="primary">Save</Button>}
     </>
   );

@@ -39,6 +39,8 @@ const place = (patch: Partial<TimelinePlace> = {}): TimelinePlace => ({
   name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [], ...patch
 });
 const places = [{ id: "00000000-0000-4000-8000-000000000101", name: "Home", role: "home" }, { id: "00000000-0000-4000-8000-000000000102", name: "Exampleton Library", role: null }];
+const newPlaceId = "00000000-0000-4000-8000-000000000103";
+const placeReceipt = { ok: true, json: async () => ({ ok: true, correction: { kind: "place", target: { placeId: newPlaceId } } }) };
 const leg: TripLeg = { startedAt: at(8, 12), stoppedAt: at(8, 40), mode: "underground", confidence: "unsure", runnerUp: "train", unobserved: true, distanceMeters: 11_000 };
 /** Enough of an item's evidence for the dialog: where the visit was, and the saved places near it. */
 const evidence = (nearbySavedPlaces: Array<{ id: string; distanceMeters: number }> = []) => ({
@@ -413,7 +415,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
 
   it("saves a new place in the correction itself, for a wrongly matched visit in a block too (owner 31 Oct 2026)", async () => {
     evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
-    clientFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    clientFetch.mockResolvedValueOnce(placeReceipt);
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place({ placeId: places[1].id, name: "Exampleton Library", matchKind: "saved", blockIds: ["block-1"] }), label: "Exampleton Library" }} />);
@@ -434,7 +436,7 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     moreOptions();
     expect(screen.queryByLabelText("Start time")).toBeNull();
     view.unmount();
-    clientFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    clientFetch.mockResolvedValueOnce(placeReceipt);
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
@@ -449,7 +451,8 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
 
   it("retries a lost reply under one id, even with the name edited, so a place is never saved twice", async () => {
     evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
-    clientFetch.mockReset().mockRejectedValueOnce(new Error("lost")).mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    clientFetch.mockRejectedValueOnce(new Error("lost")).mockResolvedValueOnce({ ok: true, json: async () => null })
+      .mockResolvedValueOnce(placeReceipt);
     const onClose = vi.fn();
     render(<LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={vi.fn()} places={places}
       target={{ kind: "place", place: place(), label: "Unknown place" }} />);
@@ -460,9 +463,40 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await screen.findByRole("alert");
     fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Pret A Manger" } });
     fireEvent.click(screen.getByRole("button", { name: "Save place" }));
+    await screen.findByRole("alert");
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    const [first, second] = bodies();
-    expect(second.clientCorrectionId).toBe(first.clientCorrectionId);
+    const requests = bodies();
+    expect(requests).toHaveLength(3);
+    expect(new Set(requests.map((request) => request.clientCorrectionId)).size).toBe(1);
+  });
+
+  it("retries only the failed time edit after a new place is saved and the dialog refreshes", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    clientFetch.mockResolvedValueOnce(placeReceipt)
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Try the time edit again." }) });
+    const onClose = vi.fn();
+    const onCorrected = vi.fn();
+    const dialog = (visit: TimelinePlace, savedPlaces = places) => (
+      <LocationCorrectionDialog clock="24h" onClose={onClose} onCorrected={onCorrected} places={savedPlaces}
+        target={{ kind: "place", place: visit, label: visit.name ?? "Unknown place" }} />
+    );
+    const view = render(dialog(place()));
+    await screen.findByTestId("evidence-map");
+    moreOptions();
+    typeTime("Start time", "08:45");
+    fireEvent.change(screen.getByLabelText("Name for this place"), { target: { value: "Bakery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Try the time edit again.");
+    expect(onCorrected).toHaveBeenCalledOnce();
+    view.rerender(dialog(place({ placeId: newPlaceId, name: "Bakery", matchKind: "saved" }),
+      [...places, { id: newPlaceId, name: "Bakery", role: null }]));
+    expect((screen.getByLabelText("Name for this place") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(bodies().map((request) => request.kind)).toEqual(["place", "times", "times"]);
+    expect(bodies()[2]).toEqual(bodies()[1]);
   });
 
   it("lists at most two saved places within 1 km, nearest first, and finds the far ones by search", async () => {
