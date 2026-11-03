@@ -47,7 +47,7 @@ export const FLOATING_LIST_HINTS = {
     { glyph: "#", label: "tag", spoken: "Type # to add a tag." },
     { glyph: "↵", label: "use", spoken: "Enter on a suggestion uses it." }
   ],
-  /** Suggestions in the block editors (no `@` list there): a suggestion fills the draft. */
+  /** Choosing a suggestion in a block editor fills the draft. */
   suggestionsEditor: [
     { glyph: "#", label: "tag", spoken: "Type # to add a tag." },
     { glyph: "↵", label: "use", spoken: "Enter on a suggestion uses it." }
