@@ -48,7 +48,7 @@ describe("Calendar range and toolbar contract", () => {
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
     expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar is-next"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
-    expect(timeline).toContain("timelineHref(searchParams.toString(), state, nextState)");
+    expect(timeline).toContain("timelineHref(nextSearch, state, nextState)");
     expect(timeline).toContain('window.history.pushState(null, "", href)');
     expect(timeline).toContain("document.cookie");
     expect(timeline).toContain("updateTimelinePreference");

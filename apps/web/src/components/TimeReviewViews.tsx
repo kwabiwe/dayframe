@@ -337,8 +337,12 @@ export function TimeReviewViews({
    */
   async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean; reposition?: boolean } = {}) {
     const nextState = { ...state, ...overrides };
-    const href = timelineHref(searchParams.toString(), state, nextState);
     const originSearch = searchParams.toString();
+    const nextSearch = new URLSearchParams(originSearch);
+    const leaveEntryLink = options.reposition && state.view === "list" && nextSearch.has("entry");
+    // A deliberate date choice takes over the List's scroll from the linked entry.
+    if (leaveEntryLink) nextSearch.delete("entry");
+    const href = timelineHref(nextSearch, state, nextState);
 
     if (
       nextState.date === state.date &&
@@ -346,6 +350,7 @@ export function TimeReviewViews({
       nextState.view === state.view
     ) {
       clearDateLoadError();
+      if (leaveEntryLink) window.history.replaceState(null, "", href);
       if (options.reposition && state.view === "list") setListFocusToken((token) => token + 1);
       return;
     }
@@ -590,8 +595,8 @@ export function TimeReviewViews({
   // scrolling can leave the List on another day, and the two must agree (owner bug, 29 Oct 2026).
   const headerDayKey = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
   const headerRanges = headerDayKey === state.date ? ranges : resolveTimelineRanges({ ...state, date: headerDayKey });
-  // The toolbar's date box (UI review round 2): its words and arrows. List moves a week at a time, as its strip shows one.
-  const navScope: TimelineScope = isList ? "week" : state.scope;
+  // The List's date box names one day and its arrows move from that day.
+  const navScope: TimelineScope = isList ? "day" : state.scope;
   // A narrow Week shows five or three days, chosen by the grid's width, never a sideways scroll (owner, 30 Oct 2026).
   const narrowWeek = !isList && state.scope === "week" && weekColumns < 7 ? weekWindow(ranges.weekDays, ranges.day.start, weekColumns) : null;
   const rangeLabel = formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey);

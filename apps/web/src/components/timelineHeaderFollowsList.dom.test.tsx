@@ -119,6 +119,28 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
     expect([report.searchParams.get("from"), report.searchParams.get("to")]).toEqual(["2026-10-05", "2026-10-11"]);
   });
 
+  it("steps by one day from the visible List day even when its URL carries week scope", async () => {
+    navigation.search = "date=2026-10-14&scope=week&view=list";
+    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    const { getByRole } = await renderList();
+    act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    await user.click(getByRole("button", { name: "Previous day" }));
+    expect(window.location.search).toBe("?date=2026-10-07&scope=week&view=list");
+  });
+
+  it("clears a linked block's scroll target when Today is chosen for the current URL day", async () => {
+    navigation.search = "date=2026-10-18&scope=day&view=list&entry=week-before";
+    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    const { getByRole } = await renderList();
+    act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
+    const priorFocus = listed.continuous!.focusRequest;
+    await userEvent.setup({ advanceTimers: () => undefined }).click(getByRole("button", { name: /^Today$/ }));
+    expect(window.location.search).toBe("?date=2026-10-18&scope=day&view=list");
+    expect(listed.continuous!.focusRequest).not.toBe(priorFocus);
+    expect(listed.continuous!.focusDayStartMs).toBe(local(18, 0).getTime());
+  });
+
   it("brings the List back to the URL's day when that day is chosen again, by mouse and by keyboard", async () => {
     const { container, getByRole } = await renderList();
     const first = listed.continuous!.focusRequest;
