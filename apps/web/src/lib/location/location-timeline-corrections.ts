@@ -172,11 +172,13 @@ async function moveBlocksToPlace(
 ) {
   const blocks = (await client.query<{
     id: string; description: string | null; categoryId: string | null; placeId: string | null; source: string; userEditedAt: Date | null;
-    eventType: string; ownerAuthoredTitle: boolean; nameSource: string | null; activitySource: string | null;
+    eventType: string; ownerAuthoredTitle: boolean | null; nameSource: string | null; activitySource: string | null;
+    suggestedCategoryId: string | null;
   }>(
     `select te.id, te.description, te.category_id as "categoryId", te.place_id as "placeId", te.source, te.user_edited_at as "userEditedAt",
             ae.event_type as "eventType", ae.raw_payload -> '${REVIEW_DECISION_PAYLOAD_KEY}' ->> 'ownerAuthoredDescription' = 'true' as "ownerAuthoredTitle",
-            ae.raw_payload ->> 'nameSource' as "nameSource", ae.raw_payload ->> 'activitySource' as "activitySource"
+            ae.raw_payload ->> 'nameSource' as "nameSource", ae.raw_payload ->> 'activitySource' as "activitySource",
+            ae.suggested_category_id as "suggestedCategoryId"
        ${SEGMENT_BLOCKS_SQL} order by te.id for update of te`,
     [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId])).rows;
   const stay = (await client.query<{ placeId: string | null; linkedPlaceId: string | null; learnedName: string | null }>(
@@ -215,6 +217,20 @@ async function moveBlocksToPlace(
       [session.workspaceId, session.userId, editedIds]);
     for (const { id, defaults } of result.rows) followed.set(id, defaults);
   }
+  // A plain Review confirmation takes the suggestion as-is. An edited confirmation can choose the same
+  // category explicitly, so only the receipt for the plain action proves the block inherited it.
+  const confirmCandidates = blocks.filter((block) => !block.userEditedAt && block.source === "location_learning"
+    && block.eventType !== "location_place_logged" && block.activitySource !== "learned"
+    && before && block.categoryId === before.categoryId && block.categoryId === block.suggestedCategoryId).map((block) => block.id);
+  const confirmed = new Set<string>();
+  if (confirmCandidates.length) {
+    const result = await client.query<{ id: string }>(
+      `select metadata ->> 'entryId' as id from audit_log
+        where workspace_id = $1 and user_id = $2 and entity_type = 'location_segment'
+          and entity_id = $3 and action = 'confirm' and metadata ->> 'entryId' = any($4::text[])`,
+      [session.workspaceId, session.userId, row.id, confirmCandidates]);
+    for (const { id } of result.rows) confirmed.add(id);
+  }
   for (const block of blocks) {
     const logsAs = block.eventType === "location_place_logged";
     // Logs as reads the stay's raw saved ID, which can be null for a linked learned place.
@@ -223,7 +239,7 @@ async function moveBlocksToPlace(
     const inherited = followed.get(block.id) ?? {
       title: !block.userEditedAt && !logsAs && !block.ownerAuthoredTitle && block.nameSource !== "learned"
         && (auto || placeTitles.has(foldReviewText(block.description))),
-      activity: !block.userEditedAt && auto && block.activitySource !== "learned"
+      activity: confirmed.has(block.id) || (!block.userEditedAt && auto && block.activitySource !== "learned")
     };
     await client.query(
       `update time_entries

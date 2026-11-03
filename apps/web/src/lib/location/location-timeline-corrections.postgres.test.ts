@@ -785,6 +785,26 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-by-person", placeId: right, learnedPlaceId: null }, session);
     expect(await block(manualEntry)).toMatchObject({ placeId: right, description: null, categoryId: gym });
 
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const confirmVisit = async (itemId: string, base: number, action: unknown) => {
+      const event = await stay(itemId, base);
+      await db.query(`update activity_events set suggested_category_id = $2, review_status = 'needs_review' where id = $1`, [event, gym]);
+      const review = (await db.query<{ id: string }>(
+        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status,
+           suggested_place_id, suggested_category_id, suggested_started_at, suggested_stopped_at)
+         select workspace_id, user_id, $1, id, 'location_stay', 'PureGym', 'open', place_id, $2, started_at, stopped_at
+           from stay_segments where created_from_event_id = $1 returning id`, [event, gym])).rows[0].id;
+      const result = await resolveLocationReviewAction(review, action, session);
+      expect(result).toHaveProperty("entryId");
+      return (result as { entryId: string }).entryId;
+    };
+    const plain = await confirmVisit("logged-review-default", 2500, { action: "confirm" });
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-review-default", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(plain)).toMatchObject({ placeId: right, description: "Pret", categoryId: cafes });
+    const chosen = await confirmVisit("logged-review-chosen", 2600, { action: "edit_and_confirm", edit: { categoryId: gym, description: "Training" } });
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-review-chosen", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(chosen)).toMatchObject({ placeId: right, description: "Training", categoryId: gym });
+
     // Semantic emission used the linked saved place while the stay still had only a learned ID.
     const learned = (await db.query<{ id: string }>(
       `insert into learned_places (workspace_id, user_id, place_id, cluster_key, name, latitude, longitude, first_seen_at, last_seen_at, status)
