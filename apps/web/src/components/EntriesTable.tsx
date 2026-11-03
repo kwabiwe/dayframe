@@ -579,13 +579,13 @@ export function EntriesTable({
     }
     const index = Math.max(0, low - 1);
     const dayStart = offsets[index].dayStart;
-    // Today, or a date reached with an arrow, can have no heading. Keep its date at the insertion point
-    // so the next arrow can step through the gap. A deliberate scroll restores the actual top date.
+    // An arrow owns the selected day until the person scrolls, even when a gap or the end of the
+    // List makes the browser stop on another heading. Without an arrow, keep the empty Today rule.
     const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
-    const steppedToEmptyDay = continuous?.focusEmptyDay && focusReleasedByUser.current !== focusRequest;
-    const atFocus = focusDayStartMs !== null && dayStart <= focusDayStartMs && focusDayStartMs < newerStart;
-    const shown = atFocus && (steppedToEmptyDay || focusDayStartMs === todayStartMs) ? focusDayStartMs : dayStart;
-    const columnDay = steppedToEmptyDay ? shown : dayStart;
+    const arrowOwnsDay = continuous?.focusEmptyDay && focusReleasedByUser.current !== focusRequest;
+    const emptyToday = focusDayStartMs === todayStartMs && dayStart <= todayStartMs && todayStartMs < newerStart;
+    const shown = focusDayStartMs !== null && (arrowOwnsDay || emptyToday) ? focusDayStartMs : dayStart;
+    const columnDay = arrowOwnsDay ? shown : dayStart;
     setColumnDayStartMs((current) => current === columnDay ? current : columnDay);
     setTopDayStartMs((current) => current === shown ? current : shown);
   };
@@ -707,6 +707,7 @@ export function EntriesTable({
   const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip || row.place));
   /** Opens a "?" by its row and brings the row into view. */
   const openCheckRow = (next: LocationListRow) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     const nextId = checkOf(next)!.id;
     applyTimelineRegroup(() => setFocusedCheck(nextId));
     // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
@@ -768,6 +769,7 @@ export function EntriesTable({
    * opened) comes into view. The editor's own entrance is the motion; with Reduce Motion the scroll is instant.
    */
   const openBlockCheck = (entry: TimeEntryRow, checkId: string) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     applyTimelineRegroup(() => setFocusedCheck(checkId));
     // A block inside a group of repeats shows with its group opened.
     setRevealedEntryId(entry.id);
