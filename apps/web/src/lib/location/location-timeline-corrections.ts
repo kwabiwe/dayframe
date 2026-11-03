@@ -17,14 +17,18 @@ import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import { recordReviewTitleHistory } from "./review-title-history";
 import { resolveLocationReviewActionWithClient } from "./location-review-service";
 import { ensureTravelCategoryId } from "../automatic-category-service";
+import { insertPlaceWith } from "../event-service";
+import { PERSON_EDIT_ACTION } from "../time-entry-provenance";
+import { foldReviewText, REVIEW_DECISION_PAYLOAD_KEY } from "../review-decision-signal";
+import { LOCATION_AUTO_LOG_SOURCE } from "./location-auto-log";
 
 /**
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
  * transaction: an activity event, the correction row tied to the time it covers, then the segment it
  * changes. Replay applies every active correction again (`activeTimelineCorrections` +
- * `applyTimelineCorrections`), so replay never undoes what the person set. A place's place or times, or a
- * trip's times or existence, are not corrected here once it has a block: its block is what the person
- * edits. A leg's mode is, on any trip. Step 12 part 4: a place the person wasn't at joins the trips either
+ * `applyTimelineCorrections`), so replay never undoes what the person set. A place's times, or a trip's
+ * times or existence, are not corrected here once it has a block: its block is what the person edits. A
+ * place's place is, and its block follows (`moveBlocksToPlace`). A leg's mode is, on any trip. Step 12 part 4: a place the person wasn't at joins the trips either
  * side into one ("I wasn't here"), and a trip they didn't take joins the two visits to one place either side
  * ("I didn't leave"); neither when a block was made from any item it joins. Never coordinates.
  */
@@ -129,18 +133,133 @@ async function lockSegment(client: pg.PoolClient, session: RequestSession, table
  * `segmentId`, the row id). An open Review suggestion has an event but no time entry, so it is no block
  * (Codex r1 on #566).
  */
-async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
-  const result = await client.query(
-    `select 1 from time_entries te
+const SEGMENT_BLOCKS_SQL = `from time_entries te
        join activity_events ae on ae.id = te.created_from_event_id
         and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
       where te.workspace_id = $1 and te.user_id = $2
         and (te.created_from_event_id = $5::uuid
           or (ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = $3)
-          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))
-      limit 1`,
+          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))`;
+
+async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
+  const result = await client.query(`select 1 ${SEGMENT_BLOCKS_SQL} limit 1`,
     [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId]);
   return (result.rowCount ?? 0) > 0;
+}
+
+type PlaceDefaults = { id: string; name: string; description: string | null; categoryId: string | null };
+type FollowedPlaceDefaults = { title: boolean; activity: boolean };
+
+async function acceptedLearnedPlace(client: pg.PoolClient, session: RequestSession, id: string | null) {
+  if (!id) return null;
+  return (await client.query<{ name: string | null; placeId: string | null }>(
+    `select nullif(btrim(lp.name), '') as name, p.id as "placeId"
+       from learned_places lp left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
+      where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
+    [id, session.workspaceId, session.userId])).rows[0] ?? null;
+}
+
+/**
+ * A logged visit set to another place: its blocks follow. Each keeps its times and whatever the person chose:
+ * only a title or activity that came from the old place takes the new place's, which may be no activity at all (a
+ * new place has none, and the old one's would be wrong). A block the person moved to another place is left alone.
+ * Each block becomes the person's (`user_edited_at`, with its audit row and what it held before), so replay never
+ * moves or removes it. The decided event and Review item name the new place too. Runs before the stay changes.
+ */
+async function moveBlocksToPlace(
+  client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow,
+  target: { placeId: string | null; learnedPlaceId: string | null }, correctionId: string, replacingPlaceCorrection: boolean
+) {
+  const blocks = (await client.query<{
+    id: string; description: string | null; categoryId: string | null; placeId: string | null; source: string; userEditedAt: Date | null;
+    eventType: string; ownerAuthoredTitle: boolean | null; nameSource: string | null; activitySource: string | null;
+    suggestedCategoryId: string | null;
+  }>(
+    `select te.id, te.description, te.category_id as "categoryId", te.place_id as "placeId", te.source, te.user_edited_at as "userEditedAt",
+            ae.event_type as "eventType", ae.raw_payload -> '${REVIEW_DECISION_PAYLOAD_KEY}' ->> 'ownerAuthoredDescription' = 'true' as "ownerAuthoredTitle",
+            ae.raw_payload ->> 'nameSource' as "nameSource", ae.raw_payload ->> 'activitySource' as "activitySource",
+            ae.suggested_category_id as "suggestedCategoryId"
+       ${SEGMENT_BLOCKS_SQL} order by te.id for update of te`,
+    [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId])).rows;
+  const stay = (await client.query<{ placeId: string | null; linkedPlaceId: string | null; learnedName: string | null }>(
+    `select st.place_id as "placeId", coalesce(ae.suggested_place_id, p.id) as "linkedPlaceId", lp.name as "learnedName"
+       from stay_segments st
+       left join learned_places lp on lp.id = st.learned_place_id and lp.workspace_id = st.workspace_id and lp.user_id = st.user_id
+       left join places p on p.id = lp.place_id and p.workspace_id = st.workspace_id and lp.status = 'accepted'
+       left join activity_events ae on ae.id = st.created_from_event_id
+        and ae.workspace_id = st.workspace_id and ae.user_id = st.user_id and lp.id is not null
+      where st.id = $1 and st.workspace_id = $2 and st.user_id = $3`,
+    [row.id, session.workspaceId, session.userId])).rows[0];
+  const oldPlaceId = stay.placeId ?? stay.linkedPlaceId;
+  const learned = await acceptedLearnedPlace(client, session, target.learnedPlaceId);
+  const newPlaceId = target.placeId ?? learned?.placeId ?? null;
+  const places = new Map((await client.query<PlaceDefaults>(
+    `select p.id, ${placeDisplayNameSql("p")} as name, nullif(btrim(p.default_activity_description), '') as description,
+            p.default_category_id as "categoryId"
+       from places p where p.workspace_id = $1 and p.id = any($2::uuid[])`,
+    [session.workspaceId, [oldPlaceId, newPlaceId].filter(Boolean)])).rows.map((place) => [place.id, place]));
+  const before = oldPlaceId ? places.get(oldPlaceId) : undefined;
+  const after = newPlaceId ? places.get(newPlaceId) : undefined;
+  const learnedName = learned?.name ?? null;
+  const title = after ? after.description ?? after.name : learnedName;
+  const placeTitles = new Set([before?.description, before?.name, stay.learnedName, "Unknown place"].map(foldReviewText).filter(Boolean));
+  // A correction protects its blocks from replay. If it was the last edit, its receipt still tells us
+  // which fields follow the place. A later block edit has no per-field provenance, so keep its values.
+  const editedIds = blocks.filter((block) => block.userEditedAt).map((block) => block.id);
+  const followed = new Map<string, FollowedPlaceDefaults>();
+  if (replacingPlaceCorrection && editedIds.length) {
+    const result = await client.query<{ id: string; defaults: FollowedPlaceDefaults }>(
+      `select a.entity_id as id, a.metadata -> 'placeDefaults' as defaults
+         from audit_log a join time_entries te on te.id = a.entity_id and te.workspace_id = a.workspace_id
+          and te.user_id = a.user_id and te.user_edited_at = a.created_at
+        where a.workspace_id = $1 and a.user_id = $2 and a.entity_id = any($3::uuid[])
+          and a.entity_type = 'time_entry' and a.action = '${PERSON_EDIT_ACTION}' and a.metadata ? 'placeDefaults'`,
+      [session.workspaceId, session.userId, editedIds]);
+    for (const { id, defaults } of result.rows) followed.set(id, defaults);
+  }
+  // A plain Review confirmation takes the suggestion as-is. An edited confirmation can choose the same
+  // category explicitly, so only the receipt for the plain action proves the block inherited it.
+  const confirmCandidates = blocks.filter((block) => !block.userEditedAt && block.source === "location_learning"
+    && block.eventType !== "location_place_logged" && block.activitySource !== "learned"
+    && before && block.categoryId === before.categoryId && block.categoryId === block.suggestedCategoryId).map((block) => block.id);
+  const confirmed = new Set<string>();
+  if (confirmCandidates.length) {
+    const result = await client.query<{ id: string }>(
+      `select metadata ->> 'entryId' as id from audit_log
+        where workspace_id = $1 and user_id = $2 and entity_type = 'location_segment'
+          and entity_id = $3 and action = 'confirm' and metadata ->> 'entryId' = any($4::text[])`,
+      [session.workspaceId, session.userId, row.id, confirmCandidates]);
+    for (const { id } of result.rows) confirmed.add(id);
+  }
+  for (const block of blocks) {
+    const logsAs = block.eventType === "location_place_logged";
+    // Logs as reads the stay's raw saved ID, which can be null for a linked learned place.
+    if (block.placeId !== oldPlaceId && !(logsAs && block.placeId === stay.placeId)) continue;
+    const auto = block.source === LOCATION_AUTO_LOG_SOURCE;
+    const inherited = followed.get(block.id) ?? {
+      title: !block.userEditedAt && !logsAs && !block.ownerAuthoredTitle && block.nameSource !== "learned"
+        && (auto || placeTitles.has(foldReviewText(block.description))),
+      activity: confirmed.has(block.id) || (!block.userEditedAt && auto && block.activitySource !== "learned")
+    };
+    await client.query(
+      `update time_entries
+          set place_id = $4, place_label = $5, description = $6, category_id = $7, user_edited_at = now(), updated_at = now()
+        where id = $1 and workspace_id = $2 and user_id = $3`,
+      [block.id, session.workspaceId, session.userId, newPlaceId, newPlaceId ? null : learnedName?.slice(0, 120) ?? null,
+        inherited.title ? title : block.description, inherited.activity ? after?.categoryId ?? null : block.categoryId]);
+    await client.query(
+      `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+       values ($1, $2, '${PERSON_EDIT_ACTION}', 'time_entry', $3, $4::jsonb, now())`,
+      [session.workspaceId, session.userId, block.id, JSON.stringify({ timelineCorrectionId: correctionId, placeDefaults: inherited,
+        before: { placeId: block.placeId, description: block.description, categoryId: block.categoryId } })]);
+  }
+  await client.query(
+    `update review_items set suggested_place_id = $4, title = coalesce($5, title)
+      where workspace_id = $2 and user_id = $3 and location_segment_id = $1 and status <> 'open'`,
+    [row.id, session.workspaceId, session.userId, newPlaceId, title]);
+  await client.query(
+    `update activity_events set suggested_place_id = $4 where id = $1 and workspace_id = $2 and user_id = $3`,
+    [row.createdFromEventId, session.workspaceId, session.userId, newPlaceId]);
 }
 
 function overlaps(aFrom: number, aTo: number, bFrom: number, bTo: number) {
@@ -306,8 +425,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
     const row = await lockSegment(client, session, table, request.itemId);
-    // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16).
-    if (request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row)) {
+    // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16). A place's
+    // place changes with its block.
+    const inBlock = request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row);
+    if (inBlock && request.kind !== "place") {
       throw new TimelineCorrectionError(request.subject === "place"
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);
@@ -330,7 +451,10 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     const span = request.kind === "leg_mode"
       ? { startedAt: iso(request.legStartedAt), stoppedAt: iso(request.legStoppedAt) }
       : correctionSpan(row, itemStartedAt, itemStoppedAt);
-    const target = targetFor(request);
+    // Every check is behind it: the place exists only if the correction does.
+    const applied: TimelineCorrectionRequest = request.kind === "place" && request.newPlace
+      ? { ...request, placeId: (await insertPlaceWith(client, request.newPlace, session)).id } : request;
+    const target = targetFor(applied);
     const event = await client.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
        values ($1, $2, 'manual_app', 'timeline_correction', now(), 'high', $3::jsonb, 'confirmed', $4)
@@ -346,13 +470,16 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         JSON.stringify(target), event.rows[0].id]);
     const correction = correctionFromRow(inserted.rows[0]);
     // A newer correction of the same kind for the same item replaces the older one.
-    await client.query(
+    const replaced = await client.query(
       `update location_timeline_corrections set replaced_at = now(), replaced_by_id = $1
         where workspace_id = $2 and user_id = $3 and id <> $1 and replaced_at is null
           and subject = $4 and kind = $5 and span_started_at = $6::timestamptz and span_stopped_at = $7::timestamptz`,
       [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
+    if (inBlock && applied.kind === "place") {
+      await moveBlocksToPlace(client, session, request.itemId, row, applied, correction.id, Boolean(replaced.rowCount));
+    }
     if (joined) await applyJoin(client, session, row, joined);
-    else await applyToSegment(client, session, table, row, request, legIndex, span);
+    else await applyToSegment(client, session, table, row, applied, legIndex, span);
     // A trip the correction removed, joined or moved settles a timer's "?" about it now, not at the next replay.
     const nowMs = Date.now();
     await reconcileTimerTripClashes(client, session, {
@@ -393,11 +520,7 @@ async function applyToSegment(
       await recordReviewTitleHistory(client, session, suggestionEvents);
       // A learned place linked to a saved place offers the saved place, as Review emission resolves it, so
       // confirming before replay logs the same place as after (Codex r7 on #566).
-      const offeredPlaceId = request.placeId ?? (request.learnedPlaceId ? (await client.query<{ placeId: string | null }>(
-        `select lp.place_id as "placeId" from learned_places lp
-           join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
-          where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
-        [request.learnedPlaceId, session.workspaceId, session.userId])).rows[0]?.placeId ?? null : null);
+      const offeredPlaceId = request.placeId ?? (await acceptedLearnedPlace(client, session, request.learnedPlaceId))?.placeId ?? null;
       await client.query(
         `with suggestion as (
            update review_items ri

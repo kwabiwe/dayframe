@@ -712,5 +712,118 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const travel = await db.query(`select 1 from categories where workspace_id = $1 and starter_key = 'travel' and is_archived = false`, [workspaceId]);
     expect(travel.rowCount).toBe(1);
   });
+
+  it("moves a logged visit's block to the corrected place, keeping what the person chose (owner 31 Oct 2026)", async () => {
+    const db = database!;
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    const category = async (name: string) => (await db.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, $2, 'teal') returning id`, [workspaceId, name])).rows[0].id;
+    const gym = await category("Gym");
+    const cafes = await category("Cafés");
+    const place = async (name: string, categoryId: string | null) => (await db.query<{ id: string }>(
+      `insert into places (workspace_id, name, latitude, longitude, radius_meters, default_category_id) values ($1, $2, 10, 20, 100, $3) returning id`,
+      [workspaceId, name, categoryId])).rows[0].id;
+    const wrong = await place("PureGym", gym);
+    const right = await place("Pret", cafes);
+    const stay = async (itemId: string, base: number, learnedPlaceId: string | null = null) => {
+      const event = (await db.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, suggested_place_id, review_status)
+         values ($1, $2, 'location_learning', 'place_stay', $3, 'high', $4::jsonb, $5, 'confirmed') returning id`,
+        [workspaceId, userId, at(base), JSON.stringify({ clientSegmentId: itemId }), wrong])).rows[0].id;
+      await db.query(
+        `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, place_id,
+           created_from_event_id, centre, metadata, learned_place_id)
+         values ($1, $2, $3, 'device-1', 'finalised', $4, $5, $6, $7, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography,
+           jsonb_build_object('placeMatchKind', $8::text), $9)`,
+        [workspaceId, userId, itemId, at(base), at(base + 60), learnedPlaceId ? null : wrong, event, learnedPlaceId ? "learned" : "saved", learnedPlaceId]);
+      return event;
+    };
+    const visit = async (itemId: string, base: number, description: string, categoryId: string, edited: boolean, learnedPlaceId: string | null = null) => {
+      const event = await stay(itemId, base, learnedPlaceId);
+      return (await db.query<{ id: string }>(
+        `insert into time_entries (workspace_id, user_id, source, description, category_id, place_id, started_at, stopped_at, created_from_event_id, user_edited_at)
+         values ($1, $2, 'location_auto_log', $3, $4, $5, $6, $7, $8, $9) returning id`,
+        [workspaceId, userId, description, categoryId, wrong, at(base), at(base + 60), event, edited ? at(base + 90) : null])).rows[0].id;
+    };
+    const block = async (id: string) => (await db.query(
+      `select place_id as "placeId", description, category_id as "categoryId", started_at as "startedAt", user_edited_at is not null as edited
+         from time_entries where id = $1`, [id])).rows[0];
+
+    // Logged by the place: all of it follows, the times stay, and it is the person's now.
+    const auto = await visit("logged-auto", 2000, "PureGym", gym, false);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-auto", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(auto)).toMatchObject({ placeId: right, description: "Pret", categoryId: cafes, edited: true });
+    expect(new Date((await block(auto)).startedAt).toISOString()).toBe(at(2000));
+    expect((await db.query(`select metadata from audit_log where entity_id = $1 and action = 'time_entry.edited'`, [auto])).rows[0].metadata.before)
+      .toEqual({ placeId: wrong, description: "PureGym", categoryId: gym });
+    expect((await db.query(`select suggested_place_id as id from activity_events where raw_payload ->> 'clientSegmentId' = 'logged-auto'`)).rows[0].id).toBe(right);
+
+    // The person's own title and activity stay; the block still moves.
+    const edited = await visit("logged-edited", 2100, "Leg day", gym, true);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-edited", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(edited)).toMatchObject({ placeId: right, description: "Leg day", categoryId: gym });
+
+    // A new place, in one transaction: it has no activity, so the old place's goes rather than staying wrong.
+    const created = await visit("logged-new", 2200, "PureGym", gym, false);
+    const clientCorrectionId = "66000000-0000-4000-8000-0000000000f7";
+    const request = { kind: "place", subject: "place", itemId: "logged-new", placeId: null, learnedPlaceId: null, clientCorrectionId,
+      newPlace: { name: "Bakery", latitude: 10, longitude: 20, radiusMeters: 100 } };
+    const first = await correctLocationTimeline(request, session);
+    expect(await correctLocationTimeline(request, session)).toEqual(first);
+    const bakeries = await db.query<{ id: string }>(`select id from places where workspace_id = $1 and name = 'Bakery'`, [workspaceId]);
+    expect(bakeries.rows).toHaveLength(1);
+    expect(await block(created)).toMatchObject({ placeId: bakeries.rows[0].id, description: "Bakery", categoryId: null });
+
+    // A second place correction still carries the inherited fields, even though the first protected the block from replay.
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-auto", placeId: bakeries.rows[0].id, learnedPlaceId: null }, session);
+    expect(await block(auto)).toMatchObject({ placeId: bakeries.rows[0].id, description: "Bakery", categoryId: null });
+
+    // Logs as chose Gym explicitly. Its equality to the old place's default cannot make it inherited.
+    await stay("logged-by-person", 2300);
+    const manual = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "logged-by-person", categoryId: gym }, session);
+    const [manualEntry] = manual.logged!.entryIds;
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-by-person", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(manualEntry)).toMatchObject({ placeId: right, description: null, categoryId: gym });
+
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const confirmVisit = async (itemId: string, base: number, action: unknown) => {
+      const event = await stay(itemId, base);
+      await db.query(`update activity_events set suggested_category_id = $2, review_status = 'needs_review' where id = $1`, [event, gym]);
+      const review = (await db.query<{ id: string }>(
+        `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status,
+           suggested_place_id, suggested_category_id, suggested_started_at, suggested_stopped_at)
+         select workspace_id, user_id, $1, id, 'location_stay', 'PureGym', 'open', place_id, $2, started_at, stopped_at
+           from stay_segments where created_from_event_id = $1 returning id`, [event, gym])).rows[0].id;
+      const result = await resolveLocationReviewAction(review, action, session);
+      expect(result).toHaveProperty("entryId");
+      return (result as { entryId: string }).entryId;
+    };
+    const plain = await confirmVisit("logged-review-default", 2500, { action: "confirm" });
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-review-default", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(plain)).toMatchObject({ placeId: right, description: "Pret", categoryId: cafes });
+    const chosen = await confirmVisit("logged-review-chosen", 2600, { action: "edit_and_confirm", edit: { categoryId: gym, description: "Training" } });
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-review-chosen", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(chosen)).toMatchObject({ placeId: right, description: "Training", categoryId: gym });
+
+    // Semantic emission used the linked saved place while the stay still had only a learned ID.
+    const learned = (await db.query<{ id: string }>(
+      `insert into learned_places (workspace_id, user_id, place_id, cluster_key, name, latitude, longitude, first_seen_at, last_seen_at, status)
+       values ($1, $2, $3, 'linked-gym', 'Learned gym', 10, 20, $4, $4, 'accepted') returning id`,
+      [workspaceId, userId, wrong, at(2400)])).rows[0].id;
+    const linked = await visit("logged-linked", 2400, "PureGym", gym, false, learned);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-linked", placeId: right, learnedPlaceId: null }, session);
+    expect(await block(linked)).toMatchObject({ placeId: right, description: "Pret", categoryId: cafes, edited: true });
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-linked", placeId: null, learnedPlaceId: learned }, session);
+    expect(await block(linked)).toMatchObject({ placeId: wrong, description: "PureGym", categoryId: gym, edited: true });
+
+    // Refused: no place is left behind.
+    await expect(correctLocationTimeline({ ...request, itemId: "gone", clientCorrectionId: undefined, newPlace: { ...request.newPlace, name: "Orphan" } }, session))
+      .rejects.toMatchObject({ status: 404 });
+    expect((await db.query(`select 1 from places where workspace_id = $1 and name = 'Orphan'`, [workspaceId])).rowCount).toBe(0);
+
+    // A block's times are still the block's.
+    await expect(correctLocationTimeline({ kind: "times", subject: "place", itemId: "logged-auto", startedAt: at(2000), stoppedAt: at(2030) }, session))
+      .rejects.toMatchObject({ status: 409 });
+  });
 });
 
