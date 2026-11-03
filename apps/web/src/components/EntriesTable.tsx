@@ -583,7 +583,7 @@ export function EntriesTable({
     // List makes the browser stop on another heading. Without an arrow, keep the empty Today rule.
     const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
     const arrowOwnsDay = continuous?.focusEmptyDay && focusReleasedByUser.current !== focusRequest;
-    const emptyToday = focusDayStartMs === todayStartMs && dayStart <= todayStartMs && todayStartMs < newerStart;
+    const emptyToday = todayStartMs !== null && focusDayStartMs === todayStartMs && dayStart <= todayStartMs && todayStartMs < newerStart;
     const shown = focusDayStartMs !== null && (arrowOwnsDay || emptyToday) ? focusDayStartMs : dayStart;
     const columnDay = arrowOwnsDay ? shown : dayStart;
     setColumnDayStartMs((current) => current === columnDay ? current : columnDay);
