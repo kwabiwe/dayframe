@@ -720,6 +720,10 @@ export function EntriesTable({
       ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
     return nextId;
   };
+  const openColumnCheck = (checkId: string) => {
+    const row = checkRows.find((other) => checkOf(other)?.id === checkId);
+    if (row) openCheckRow(row);
+  };
   /**
    * Owner concern 4 (28 Oct 2026): "N to check" steps oldest first through every "?" that still asks, across
    * days. A "?" on a day the List hasn't loaded opens that day (the List then opens it, see `check=` below).
@@ -1887,10 +1891,7 @@ export function EntriesTable({
             onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
             onCorrectTrip={(trip, route) => openCorrection({ kind: "trip", trip, route })}
             onHide={() => setPlacesColumn(false)}
-            onOpenCheck={(checkId) => {
-              const row = checkRows.find((other) => checkOf(other)?.id === checkId);
-              if (row) openCheckRow(row);
-            }}
+            onOpenCheck={openColumnCheck}
             timeline={timeline} />
         );
       })() : null}
