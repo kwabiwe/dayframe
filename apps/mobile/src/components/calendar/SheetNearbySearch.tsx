@@ -41,12 +41,14 @@ export type SheetSavedRow = { key: string; title: string; detail: string; glyph:
  * arrive, with a quiet spinner in the field. The visit's centre goes to MapKit only, on this iPhone; it is never logged or kept. Ranked with the visit itself
  * (`stay`: its times, accuracy, spread and past picks), as the "?"'s guess is, so the list and the guess agree (PRD D23).
  */
-export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = false, evidence = null, guess = null, onGuess, onGuessPick, onPick, onSaveTyped, reduceMotion = false, savedRows = () => [], theme }: {
+export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = false, evidence = null, excludeSavedMatches = false, guess = null, onGuess, onGuessPick, onPick, onSaveTyped, reduceMotion = false, savedRows = () => [], theme }: {
   /** The visit's centre is still loading, and Apple will be asked once it arrives. */
   awaitingCentre?: boolean;
   /** The visit's centre, for Apple's places; null keeps this to the saved places. */
   centre: { latitude: number; longitude: number } | null;
   disabled?: boolean;
+  /** Skip duplicate Apple and typed rows when the visit already offers the same saved place. */
+  excludeSavedMatches?: boolean;
   /**
    * The near guess for the sheet's "?" (PRD D23): the ranker's suggestion, else its top destination within 50 m,
    * or null; said once per list, the same rule as the Calendar's own guess (`useCheckVenueGuess`). `proposal` is
@@ -119,9 +121,12 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   }, [guessKey]);
   const text = query.trim();
   const typed = text.length > 0;
+  const saved = savedRows(text);
+  const savedNames = new Set(excludeSavedMatches ? saved.map(({ title }) => title.trim().toLowerCase()) : []);
+  const alreadySaved = (name: string) => savedNames.has(name.trim().toLowerCase());
   // Apple's three nearest, as the saved places are nearest first. The guess comes from the ranking, so it may be
   // further out, or the caller's own: it takes the last row, as itself if the list doesn't have it yet.
-  const nearest = [...(nearby?.places ?? [])].sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const nearest = (nearby?.places ?? []).filter((place) => !alreadySaved(place.title)).sort((a, b) => a.distanceMeters - b.distanceMeters);
   const isGuess = (place: { title: string; placeId?: string | null }) => Boolean(guess)
     && (guess!.applePlaceId ? place.placeId === guess!.applePlaceId : place.title.trim() === guess!.name);
   const guessPlace = nearest.find(isGuess);
@@ -134,13 +139,12 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   const searching = searchable && (search?.query.trim() !== text || search.status === "typing" || search.status === "loading");
   const settled: AppleRow[] | null = !typed ? nearbyRows
     : searching || (searchProvider && !searchable) ? null
-      : (search?.suggestions ?? []).slice(0, SHEET_APPLE_ROWS).map((suggestion) => ({ key: suggestion.id, title: suggestion.title, detail: suggestion.subtitle ?? "", placeId: null, guessed: false }));
+      : (search?.suggestions ?? []).filter((suggestion) => !alreadySaved(suggestion.title)).slice(0, SHEET_APPLE_ROWS).map((suggestion) => ({ key: suggestion.id, title: suggestion.title, detail: suggestion.subtitle ?? "", placeId: null, guessed: false }));
   // The last answer stays until the next one arrives, so nothing jumps while typing.
   const held = useRef<AppleRow[]>([]);
   if (settled) held.current = settled;
   // Ticked by the guess as of now: a held row's own flag could answer for a place it no longer stands for.
-  const appleRows = (settled ?? held.current).map((row) => ({ ...row, guessed: isGuess(row) }));
-  const saved = savedRows(text);
+  const appleRows = (settled ?? held.current).filter((row) => !alreadySaved(row.title)).map((row) => ({ ...row, guessed: isGuess(row) }));
   const count = appleRows.length + saved.length;
   const loading = !typed && (awaitingCentre || (Boolean(nearbyProvider) && (!nearby || nearby.status === "loading")));
   const note = count || loading ? null
@@ -195,7 +199,7 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
           {typed ? appleList : savedList}
           {Array.from({ length: placeholders }, (_, index) => <PlaceholderRow key={index} theme={theme} />)}
         </ScrollView>
-        {typed && onSaveTyped ? (
+        {typed && onSaveTyped && !alreadySaved(text) ? (
           <ResultRow disabled={disabled} divided glyph="plus" onPress={() => onSaveTyped(text)} testID="location-correction-save-typed" theme={theme}
             title={`Save “${text}” as a place`} />
         ) : null}

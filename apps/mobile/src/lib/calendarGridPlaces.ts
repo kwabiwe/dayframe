@@ -20,14 +20,16 @@ const LEG_GLYPHS: Record<TripLegMode, string> = {
 };
 
 export function withPlacesAndLegs<T extends NativeCalendarPresentation>(model: T, timeline: LocationTimeline | null,
-  checks: readonly ListCheck[], formatTime: (ms: number) => string): T {
+  checks: readonly ListCheck[], formatTime: (ms: number) => string, allowLoggedPlaceChange = false): T {
   if (!timeline) return model;
   const trips = tripsByBlockId(timeline);
   const asking = new Map(checks.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []));
   const names = new Map(timeline.items.flatMap((item) => item.kind === "place" ? [[item.id, item.name] as const] : []));
-  const besidesHome = timeline.items.some((item) => item.kind === "trip" || (item.kind === "place" && item.role !== "home" && item.name !== "Home"));
+  const showPlaces = timeline.items.some((item) => item.kind === "trip"
+    || (allowLoggedPlaceChange && item.blockIds.length > 0)
+    || (item.role !== "home" && item.name !== "Home"));
   const nowMs = model.nowMs;
-  const placesLane = besidesHome ? timeline.items.map((item) => {
+  const placesLane = showPlaces ? timeline.items.map((item) => {
     const startedAtMs = Date.parse(item.startedAt);
     const stoppedAtMs = item.stoppedAt ? Date.parse(item.stoppedAt) : nowMs;
     const label = item.kind === "place"

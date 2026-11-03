@@ -696,6 +696,8 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Interruption: a tap while a change is being kept does nothing (`frozen`); a refused keep leaves the sheet open with its message. A tap on More options during its scroll back keeps it open; unmounting clears the timer. A finger on the sheet stops a scroll.
 - Accessibility: Reduce Motion uses the shorter opacity fades, jumps the scrolls, closes More options at once, sets the list's height without animating and mounts the map at once, and holds the spinner still. Placeholder rows are hidden from VoiceOver. Rows are 52-point buttons named with their distance; ✕ and More options are labelled, and More options reports expanded.
 
+- Logged visits open from the Grid's Places lane, including on Home-only days. The existing sheet owns entrance, search resizing, and dismissal. A saved-place selection previews after it is kept on the phone. A newly named place appears after its server receipt, when the app refreshes the affected blocks. A local write failure keeps the draft in the sheet, and a permanent rejection restores the server view. Reduce Motion uses the same path as the other visit sheets.
+
 ## Day swipe tick (owner, 30 Oct 2026)
 
 - One selection tick for each day a swipe changes, from the gesture's owner: `handleHorizontalPan` in `DayframeCalendarScrollCoordinator` for the Grid (`DayframeCalendarDaySwipeTickGate`), `playDaySwipeTick` from the List's pan. Both thin swipes under 120 ms apart and follow the Dayframe switch; iOS follows System Haptics. The Today pill, the week strip, the chip and links keep their own behaviour and never tick through here. Nothing moves, so Reduce Motion has no other path.

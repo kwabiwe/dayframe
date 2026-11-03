@@ -137,6 +137,36 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props.evidence).toBe(evidence);
   });
 
+  it("keeps logged-place choices available while its map is offline", async () => {
+    const logged = { ...place, blockIds: ["entry-1"] };
+    const savePlace = vi.fn(async () => undefined);
+    const queue = vi.fn(async () => undefined);
+    const mountLogged = () => {
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<LocationCorrectionSheet allowLoggedPlaceChange clockFormat="24h" evidence="unavailable" onDismissed={vi.fn()}
+          onQueue={queue} onSavePlace={savePlace} places={[{ id: SAVED, name: "Exampleton Library", role: null }]}
+          presentationId={1} reduceMotion rootHosted={false} target={{ kind: "place", place: logged, label: "Unknown place" }} theme={theme} />);
+      });
+      return tree;
+    };
+    const typed = mountLogged();
+    const search = typed.root.findByType("SheetNearbySearch" as never);
+    expect(search.props.centre).toBeNull();
+    expect(search.props.excludeSavedMatches).toBe(true);
+    expect(search.props.savedRows("exampleton")).toMatchObject([{ key: SAVED }]);
+    await act(async () => { search.props.onSaveTyped("Corner shop"); });
+    expect(savePlace).toHaveBeenCalledWith("Corner shop", [], undefined, null);
+
+    const saved = mountLogged();
+    const options = saved.root.findByType("SheetNearbySearch" as never);
+    await act(async () => { options.props.savedRows("exampleton")[0].onPress(); });
+    expect(queue).toHaveBeenCalledWith([{
+      request: { kind: "place", subject: "place", itemId: "seg-a", placeId: SAVED, learnedPlaceId: null, visitStartedAt: logged.startedAt },
+      preview: { name: "Exampleton Library", role: null, refreshBlocks: true }
+    }], { closing: true });
+  });
+
   it("a tap on a saved place answers at once, with its name, as the web's list does", async () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" });
     sheet.press(`location-correction-place-${SAVED}`);

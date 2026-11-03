@@ -90,6 +90,27 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
       .toEqual(["6f000000-0000-4000-8000-000000000001", "6f000000-0000-4000-8000-000000000002"]);
   });
 
+  it("retries an unreadable new-place receipt and projects the acknowledged place by its server ID", async () => {
+    const request = { kind: "save_visit_place", subject: "place", itemId: "seg-a", name: "Bakery", visitStartedAt: "2026-08-27T12:00:00.000Z",
+      radiusMeters: 100, clientCorrectionId: createId() } as const;
+    const [first, repeat] = await Promise.all([request, { ...request, clientCorrectionId: createId() }].map((item) =>
+      outbox.enqueueTimelineCorrections(OWNER_A, [{ request: item, preview: { name: "Bakery", refreshBlocks: true } }])));
+    expect(repeat[0].clientCorrectionId).toBe(first[0].clientCorrectionId);
+    const fetch = vi.fn(async (_url: string, _init: RequestInit) => json(200, { ok: true }))
+      .mockImplementationOnce(async () => json(400, { error: "Invalid request." }))
+      .mockImplementationOnce(async () => json(200, { ok: true, correction: { kind: "place", target: { placeId: "invalid" } } }))
+      .mockImplementationOnce(async () => json(200, { ok: true, correction: { kind: "place", target: { placeId: PLACE_ID } } }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toEqual([]);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(fetch.mock.calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([request, request, request]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toMatchObject([{
+      request: { kind: "place", placeId: PLACE_ID }, preview: { name: "Bakery", refreshBlocks: true }
+    }]);
+  });
+
   it("keeps a refusal for the List to say why, moves on to the next, and drops it when told", async () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-in-block" }, { createId });
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-c" }, { createId });

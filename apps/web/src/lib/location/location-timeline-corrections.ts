@@ -112,18 +112,20 @@ type SegmentRow = {
   id: string; startedAt: Date; stoppedAt: Date | null; createdFromEventId: string | null; metadata: Record<string, unknown>;
 };
 
-async function lockSegment(client: pg.PoolClient, session: RequestSession, table: "stay_segments" | "commute_segments", itemId: string) {
+async function lockSegment(client: pg.PoolClient, session: RequestSession, table: "stay_segments" | "commute_segments", itemId: string, visitStartedAt?: string) {
   // Trusted table name; the item is the timeline's id for it (its client segment id).
   const result = await client.query<SegmentRow>(
     `select id, started_at as "startedAt", stopped_at as "stoppedAt", created_from_event_id as "createdFromEventId", metadata
        from ${table}
       where workspace_id = $1 and user_id = $2 and client_segment_id = $3 and status <> 'superseded'
       order by updated_at desc
-      limit 1
+      limit $4
       for update`,
-    [session.workspaceId, session.userId, itemId]);
+    [session.workspaceId, session.userId, itemId, visitStartedAt ? 2 : 1]);
   const row = result.rows[0];
-  if (!row) throw new TimelineCorrectionError("That place or trip is no longer in your day.", 404);
+  // Some older blocks carry only the segment ID. If two live visits share it, refuse before moving either.
+  if (result.rows.length > 1) throw new TimelineCorrectionError("This visit can't be matched to one place. Refresh Calendar and try again.", 409);
+  if (!row || (visitStartedAt && row.startedAt.getTime() !== Date.parse(visitStartedAt))) throw new TimelineCorrectionError("That place or trip is no longer in your day.", 404);
   return row;
 }
 
@@ -278,7 +280,9 @@ function correctionSpan(row: SegmentRow, startedAt: string, stoppedAt: string) {
     ? { startedAt: iso(kept.startedAt), stoppedAt: iso(kept.stoppedAt) } : { startedAt, stoppedAt };
 }
 
-function targetFor(request: TimelineCorrectionRequest): TimelineCorrection["target"] {
+type AppliedTimelineCorrection = Exclude<TimelineCorrectionRequest, { kind: "save_visit_place" }>;
+
+function targetFor(request: AppliedTimelineCorrection): TimelineCorrection["target"] {
   switch (request.kind) {
     case "place": return { placeId: request.placeId, learnedPlaceId: request.learnedPlaceId };
     case "times": return { startedAt: iso(request.startedAt), stoppedAt: iso(request.stoppedAt) };
@@ -424,11 +428,12 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     }
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
-    const row = await lockSegment(client, session, table, request.itemId);
+    const visitStartedAt = request.kind === "save_visit_place" || request.kind === "place" ? request.visitStartedAt : undefined;
+    const row = await lockSegment(client, session, table, request.itemId, visitStartedAt);
     // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16). A place's
     // place changes with its block.
     const inBlock = request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row);
-    if (inBlock && request.kind !== "place") {
+    if (inBlock && request.kind !== "place" && request.kind !== "save_visit_place") {
       throw new TimelineCorrectionError(request.subject === "place"
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);
@@ -452,21 +457,31 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       ? { startedAt: iso(request.legStartedAt), stoppedAt: iso(request.legStoppedAt) }
       : correctionSpan(row, itemStartedAt, itemStoppedAt);
     // Every check is behind it: the place exists only if the correction does.
-    const applied: TimelineCorrectionRequest = request.kind === "place" && request.newPlace
-      ? { ...request, placeId: (await insertPlaceWith(client, request.newPlace, session)).id } : request;
+    let applied: AppliedTimelineCorrection;
+    if (request.kind === "save_visit_place") {
+      const { latitude, longitude } = (await client.query<{ latitude: number | null; longitude: number | null }>(
+        `select ST_Y(centre::geometry) as latitude, ST_X(centre::geometry) as longitude from stay_segments
+          where id=$1 and workspace_id=$2 and user_id=$3`, [row.id, session.workspaceId, session.userId])).rows[0];
+      if (latitude == null || longitude == null) throw new TimelineCorrectionError("This visit has no map location to save.", 422);
+      const place = await insertPlaceWith(client, { name: request.name, radiusMeters: request.radiusMeters, latitude, longitude }, session);
+      applied = { kind: "place", subject: "place", itemId: request.itemId, placeId: place.id, learnedPlaceId: null };
+    } else {
+      applied = request.kind === "place" && request.newPlace
+        ? { ...request, placeId: (await insertPlaceWith(client, request.newPlace, session)).id } : request;
+    }
     const target = targetFor(applied);
     const event = await client.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
        values ($1, $2, 'manual_app', 'timeline_correction', now(), 'high', $3::jsonb, 'confirmed', $4)
        returning id`,
-      [session.workspaceId, session.userId, JSON.stringify({ subject: request.subject, kind: request.kind, itemId: request.itemId, target }), clientEventId]);
+      [session.workspaceId, session.userId, JSON.stringify({ subject: applied.subject, kind: applied.kind, itemId: applied.itemId, target }), clientEventId]);
     const inserted = await client.query<CorrectionRow>(
       `insert into location_timeline_corrections
          (workspace_id, user_id, subject, kind, span_started_at, span_stopped_at, target, created_from_event_id)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
        returning id, subject, kind, span_started_at as "spanStartedAt", span_stopped_at as "spanStoppedAt", target,
                  created_at as "createdAt"`,
-      [session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt,
+      [session.workspaceId, session.userId, applied.subject, applied.kind, span.startedAt, span.stoppedAt,
         JSON.stringify(target), event.rows[0].id]);
     const correction = correctionFromRow(inserted.rows[0]);
     // A newer correction of the same kind for the same item replaces the older one.
@@ -474,7 +489,7 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       `update location_timeline_corrections set replaced_at = now(), replaced_by_id = $1
         where workspace_id = $2 and user_id = $3 and id <> $1 and replaced_at is null
           and subject = $4 and kind = $5 and span_started_at = $6::timestamptz and span_stopped_at = $7::timestamptz`,
-      [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
+      [correction.id, session.workspaceId, session.userId, applied.subject, applied.kind, span.startedAt, span.stoppedAt]);
     if (inBlock && applied.kind === "place") {
       await moveBlocksToPlace(client, session, request.itemId, row, applied, correction.id, Boolean(replaced.rowCount));
     }

@@ -2318,10 +2318,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
   // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
+  const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
   const gridModel = useMemo(() => calendarLayout === "grid"
-    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat))
+    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat),
+      supportsLoggedPlaceChange)
     : nativeCalendarModel,
-  [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel]);
+  [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel, supportsLoggedPlaceChange]);
   const gridModelRefreshing = useMemo(() => gridModel === nativeCalendarModel ? nativeCalendarModelRefreshing : { ...gridModel, refreshing: true },
     [gridModel, nativeCalendarModel, nativeCalendarModelRefreshing]);
   // The List's place, trip and leg correction sheets (step 12).

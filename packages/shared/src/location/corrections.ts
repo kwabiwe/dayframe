@@ -34,6 +34,7 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     subject: z.literal("place"),
     itemId,
     clientCorrectionId,
+    visitStartedAt: instant.optional(),
     placeId: z.string().uuid().nullable(),
     learnedPlaceId: z.string().uuid().nullable(),
     // A place to save with the correction, in one transaction: a refused correction leaves no place behind, and a
@@ -46,6 +47,17 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     }).optional()
   }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." })
     .refine((value) => !(value.newPlace && (value.placeId || value.learnedPlaceId)), { message: "Choose a place or a new one, not both." }),
+  // Mobile can keep the intent in its outbox without storing coordinates. Older servers reject this
+  // kind instead of treating it as a correction to an unknown place.
+  z.object({
+    kind: z.literal("save_visit_place"),
+    subject: z.literal("place"),
+    itemId,
+    clientCorrectionId: z.string().uuid(),
+    visitStartedAt: instant,
+    name: z.string().trim().min(1).max(120),
+    radiusMeters: z.number().int().min(25).max(1000)
+  }),
   z.object({
     kind: z.literal("times"),
     subject: z.enum(["place", "trip"]),

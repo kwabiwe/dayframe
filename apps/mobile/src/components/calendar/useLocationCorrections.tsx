@@ -58,8 +58,8 @@ export function useLocationCorrections({
   /** The corrections the server has had, this account's (useTimelineCorrectionQueue). */
   acknowledged?: readonly AcknowledgedTimelineCorrection[];
   clockFormat: ClockFormat;
-  data: Pick<MobileBootstrap, "categories" | "places" | "user" | "workspace"> | null;
-  /** A place logged with Logs as reached the server: the day's blocks are read again. */
+  data: Pick<MobileBootstrap, "categories" | "places" | "user" | "workspace" | "serverBuild"> | null;
+  /** A correction that can change the day's blocks reached the server. */
   onLogged?: () => void;
   /** The queue as the List shows it (useTimelineCorrectionQueue). */
   pending: readonly PendingTimelineCorrection[];
@@ -73,6 +73,7 @@ export function useLocationCorrections({
   const presentations = useRef(0);
   const userId = data?.user.id ?? null;
   const workspaceId = data?.workspace.id ?? null;
+  const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
   const ownerKey = userId && workspaceId ? `${workspaceId}:${userId}` : null;
   // Another account (or none) closes the sheet at once: its item, map and draft are never shown to it.
   const open = opened && opened.ownerKey === ownerKey ? opened : null;
@@ -219,18 +220,29 @@ export function useLocationCorrections({
   const createdPlaces = useRef(new Map<string, string>());
   const savePlace = useCallback(async (presentationId: number, sheetOwnerKey: string, place: TimelinePlace, name: string,
     rest: QueuedCorrection[], beforeEnqueue?: LocationCorrectionBeforeEnqueue) => {
-    if (!userId || !workspaceId || !shownCentre || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) {
+    if (!userId || !workspaceId || sheetOwnerKey !== ownerKey || currentOwner.current !== sheetOwnerKey) {
       throw new Error("The place can't be saved now.");
     }
     // The tap's account lifetime, before its first await (createPlace), carried through queueing and registration
     // (Codex r17 on #610).
     const generation = currentMobileAccountEpoch();
+    const radiusMeters = Math.round(Math.min(250, Math.max(75, shownRadius ?? 100)));
+    if (place.blockIds.length) {
+      if (!supportsLoggedPlaceChange) throw new Error("The server doesn't support this place change yet.");
+      await queue(presentationId, sheetOwnerKey, [{
+        request: { kind: "save_visit_place", subject: "place", itemId: place.id,
+          clientCorrectionId: createTimelineCorrectionId(), visitStartedAt: place.startedAt, name, radiusMeters },
+        preview: { name, refreshBlocks: true }
+      }], true, undefined, generation);
+      return;
+    }
+    if (!shownCentre) throw new Error("The visit location isn't available.");
     const key = `${sheetOwnerKey}|${place.id}|${name}`;
     let placeId = createdPlaces.current.get(key) ?? null;
     if (!placeId) {
       const [longitude, latitude] = shownCentre.coordinates;
       // Under the sheet's own account's session, or not at all (Codex r1 on #606).
-      const created = await createPlace({ name, latitude, longitude, radiusMeters: Math.round(Math.min(250, Math.max(75, shownRadius ?? 100))) },
+      const created = await createPlace({ name, latitude, longitude, radiusMeters },
         undefined, { userId, workspaceId });
       placeId = (created as { place?: { id?: string } })?.place?.id ?? null;
       if (!placeId) throw new Error("The place wasn't saved.");
@@ -244,7 +256,7 @@ export function useLocationCorrections({
       request: { kind: "place", subject: "place", itemId: place.id, placeId, learnedPlaceId: null },
       preview: { name, role: null }
     }, ...rest], true, beforeEnqueue, generation);
-  }, [ownerKey, queue, shownCentre, shownRadius, userId, workspaceId]);
+  }, [ownerKey, queue, shownCentre, shownRadius, supportsLoggedPlaceChange, userId, workspaceId]);
 
   // "Logs as" (step 12 part 4c): held for Undo for the deck's 4.8 s, then queued as `log_place`; once the server
   // has it, the day's blocks are read again so the place shows them.
@@ -362,7 +374,7 @@ export function useLocationCorrections({
   const seenLogs = useRef(new Set<string>());
   useEffect(() => {
     const delivered = acknowledged.filter((item) => !seenLogs.current.has(item.clientCorrectionId)
-      && (sentLogs.current.has(item.clientCorrectionId) || item.request?.kind === "log_place"));
+      && (sentLogs.current.has(item.clientCorrectionId) || item.request?.kind === "log_place" || item.preview?.refreshBlocks));
     if (!delivered.length) return;
     for (const item of delivered) {
       sentLogs.current.delete(item.clientCorrectionId);
@@ -442,6 +454,7 @@ export function useLocationCorrections({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refusedKey, removalRetry]);
 
+  const allowLoggedPlaceChange = supportsLoggedPlaceChange && shown?.kind === "place" && shown.place.blockIds.length > 0;
   const sheet = open && shown ? (
     <LocationCorrectionSheet
       key={`location-correction-${open.id}`}
@@ -490,7 +503,8 @@ export function useLocationCorrections({
       // (`record_poi_once`) adds to the venue history today.
       // Any place not saved yet, as the web's: an "ambiguous" visit near several saved places had no Nearby list, so it
       // never got its guess either.
-      onSavePlace={shown.kind === "place" && !shown.place.placeId && !shown.place.blockIds.length && shownCentre
+      allowLoggedPlaceChange={allowLoggedPlaceChange}
+      onSavePlace={shown.kind === "place" && (allowLoggedPlaceChange || (shownCentre && !shown.place.placeId && !shown.place.blockIds.length))
         ? (name, rest, beforeEnqueue) => savePlace(open.id, open.ownerKey, shown.place, name, rest, beforeEnqueue) : undefined}
       places={places}
       presentationId={open.id}

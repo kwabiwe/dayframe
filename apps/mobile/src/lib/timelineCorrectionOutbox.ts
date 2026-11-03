@@ -44,7 +44,7 @@ export type PendingTimelineCorrection = MobileAccountOwner & {
   failureKind?: "retryable" | "permanent";
 };
 
-export type TimelineCorrectionPreview = { name: string | null; role?: string | null };
+export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean };
 
 export type TimelineCorrectionSyncResult = {
   deliveredCount: number;
@@ -175,7 +175,8 @@ function parsePreview(value: unknown): TimelineCorrectionPreview | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   if (item.name !== null && typeof item.name !== "string") return null;
-  return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}) };
+  return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}),
+    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}) };
 }
 
 /** Keeps a correction on the phone (it shows at once) and returns it; send with `synchroniseTimelineCorrections`. */
@@ -224,9 +225,27 @@ export async function enqueueTimelineCorrections(
     };
   });
   if (!items.length) return items;
-  await withMutation(() => updateAll((current) => [...current, ...items]));
+  const kept: PendingTimelineCorrection[] = [];
+  await withMutation(() => updateAll((current) => {
+    for (const item of items) {
+      const request = item.request;
+      const previous = request.kind === "save_visit_place" ? current.filter((candidate) => (
+        candidate.workspaceId === owner.workspaceId && candidate.userId === owner.userId
+        && candidate.request.subject === "place" && candidate.request.itemId === request.itemId
+        && candidate.failureKind !== "permanent"
+      )).at(-1) : undefined;
+      if (request.kind === "save_visit_place" && previous?.request.kind === "save_visit_place"
+        && previous.request.visitStartedAt === request.visitStartedAt && previous.request.name === request.name) {
+        kept.push(previous);
+      } else {
+        current.push(item);
+        kept.push(item);
+      }
+    }
+    return current;
+  }));
   notify();
-  return items;
+  return kept;
 }
 
 /** This owner's corrections, oldest first, refused ones included. */
@@ -356,7 +375,21 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
-      const resolvedReviewItemIds = await resolvedIds(response);
+      const { resolvedReviewItemIds, placeId } = await readReceipt(response);
+      if (!await stillCurrent()) return finish("session_changed");
+      let request = next.request;
+      if (request.kind === "save_visit_place") {
+        const applied = TimelineCorrectionRequestSchema.safeParse({
+          kind: "place", subject: "place", itemId: request.itemId, visitStartedAt: request.visitStartedAt,
+          clientCorrectionId: next.clientCorrectionId, placeId, learnedPlaceId: null
+        });
+        if (!placeId || !applied.success) {
+          const kept = await recordFailure(next.clientCorrectionId, attemptedAt, false,
+            "Couldn't confirm the saved place. This change will retry.", stillCurrent);
+          return finish(kept === "session_changed" ? "session_changed" : "retryable_failure");
+        }
+        request = { ...applied.data, clientCorrectionId: next.clientCorrectionId };
+      }
       try {
         // An answer waiting for this correction learns it is acknowledged before the queue lets go of it, so an
         // id that has left the queue unmarked was refused or discarded (Codex r2 on #610).
@@ -367,7 +400,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
       }
       // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
       acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-        { ...next, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
+        { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
       deliveredCount += 1;
       try {
         await removeQuietly([next.clientCorrectionId]);
@@ -381,8 +414,10 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
       notify();
       continue;
     }
-    const permanent = PERMANENT_STATUS_CODES.has(response.status);
     const message = await responseMessage(response);
+    // A rollback can temporarily put the old request schema behind a previously compatible bootstrap.
+    const oldServer = next.request.kind === "save_visit_place" && response.status === 400 && message === "Invalid request.";
+    const permanent = !oldServer && PERMANENT_STATUS_CODES.has(response.status);
     // The account may have changed while the reply was read or the queue written: then this correction is not
     // touched (Codex r2 and r3 on #598).
     const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, stillCurrent, response.status);
@@ -399,13 +434,16 @@ async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorre
 }
 
 /** The review items the server resolved with this correction (#609), when its reply says so. */
-async function resolvedIds(response: Response): Promise<string[]> {
+async function readReceipt(response: Response) {
   try {
-    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown } };
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown };
+      correction?: { kind?: unknown; target?: { placeId?: unknown } } };
     const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+    const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
+      ? body.correction.target.placeId : null;
+    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], placeId };
   } catch {
-    return [];
+    return { resolvedReviewItemIds: [], placeId: null };
   }
 }
 
