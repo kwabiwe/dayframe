@@ -19,8 +19,12 @@ describe("the Calendar tab opens today (owner bug, 29 Oct 2026)", () => {
     expect(tabsLayout).toContain("listeners={{ tabPress: () => openCalendarToday?.() }}");
     expect(tabsLayout).not.toMatch(/openOldestCheck|useDashboardOpenOldestCheck/);
     expect(dashboard).not.toMatch(/openOldestCheck|useDashboardOpenOldestCheck/);
-    // The badge stays a count on the tab.
-    expect(tabsLayout).toContain('<NativeTabs.Trigger.Badge hidden={checkCount <= 0}>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>');
+  });
+
+  it("provides a Calendar badge only for a positive count", () => {
+    const badge = between(tabsLayout, "{checkCount > 0 ? (", ") : null}");
+    expect(badge).toContain('<NativeTabs.Trigger.Badge>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>');
+    expect(tabsLayout.match(/<NativeTabs\.Trigger\.Badge/g)).toHaveLength(1);
   });
 
   it("selects today and carries no earlier \"?\" or scroll request over", () => {

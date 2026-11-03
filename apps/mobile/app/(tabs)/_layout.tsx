@@ -75,7 +75,10 @@ function DashboardTabs() {
         >
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.calendar} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.calendar.label}</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Badge hidden={checkCount <= 0}>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>
+          {/* The native trigger prefers badge text over hidden, so zero must have no badge child. */}
+          {checkCount > 0 ? (
+            <NativeTabs.Trigger.Badge>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>
+          ) : null}
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.reports.route}>
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />
