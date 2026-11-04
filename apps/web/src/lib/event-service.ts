@@ -5,6 +5,7 @@ import {
 } from "./time-entry-provenance";
 import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
+import { z } from "zod";
 import {
   defaultCountsTowardGoal,
   ActivityEventInputSchema,
@@ -605,6 +606,14 @@ async function processActivityEventWithClient(
       await client.query("select set_config('statement_timeout', $1, true)", [SCOPED_STOP_STATEMENT_TIMEOUT]);
     }
 
+    const startsTimer = candidate.action === "start_timer";
+    if (startsTimer) {
+      // Resolve a concurrent Start's receipt before validating its catalogue references again.
+      const lockStartedAt = Date.now();
+      await lockUserTimerState(client, session);
+      lockWaitMilliseconds = Date.now() - lockStartedAt;
+    }
+
     if (parsed.clientEventId) {
       const existingEvent = await client.query<{ id: string }>(
         `select id
@@ -637,6 +646,8 @@ async function processActivityEventWithClient(
         };
       }
     }
+
+    if (startsTimer) await assertTimeEntryCatalogueReferences(client, session, candidate);
 
     if (isHealthEvent(parsed.type) || parsed.type === "commute_detected") {
       setSyncPhase(client, "owner_lock");
@@ -735,7 +746,6 @@ async function processActivityEventWithClient(
     }
 
     if (
-      candidate.action === "start_timer" ||
       (candidate.action === "stop_timer" && stopScope.mode !== "entry") ||
       // A timer's "?" about a trip is settled under the owner lock, as replay and answers decide it (design §7).
       (candidate.action === "stop_timer" && timerTripChecksEnabled())
@@ -1516,6 +1526,7 @@ export async function createManualEntry(input: {
   const client = await pool.connect();
   try {
     await client.query("begin");
+    await assertTimeEntryCatalogueReferences(client, session, input);
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
           workspace_id,
@@ -2589,6 +2600,11 @@ export async function updateTimeEntry(
         stoppedAt: hasStoppedAt ? input.stoppedAt ?? null : current.stoppedAt
       });
     }
+    await assertTimeEntryCatalogueReferences(client, session, {
+      projectId: hasProjectId ? input.projectId : null,
+      categoryId: hasCategoryId ? input.categoryId : null,
+      placeId: hasPlaceId ? input.placeId : null
+    });
     const result = await client.query<{ id: string; updatedAt: string | Date }>(
       `update time_entries
      set project_id = case when $2 then $3 else project_id end,
@@ -2715,6 +2731,34 @@ export class TimeEntryValidationError extends Error {
     super(message);
     this.name = "TimeEntryValidationError";
   }
+}
+
+const catalogueIdSchema = z.string().uuid();
+
+/** Catalogue IDs on a block must resolve inside the session's workspace. */
+async function assertTimeEntryCatalogueReferences(
+  client: pg.PoolClient,
+  session: RequestSession,
+  input: { projectId?: string | null; categoryId?: string | null; placeId?: string | null }
+) {
+  const projectId = nullableString(input.projectId);
+  const categoryId = nullableString(input.categoryId);
+  const placeId = nullableString(input.placeId);
+  if (!projectId && !categoryId && !placeId) return;
+
+  const errorMessage = "A selected project, activity or place is unavailable in this workspace.";
+  if ([projectId, categoryId, placeId].some((id) => id !== null && !catalogueIdSchema.safeParse(id).success)) {
+    throw new TimeEntryValidationError(errorMessage);
+  }
+
+  const { rows } = await client.query<{ available: boolean }>(
+    `select
+       ($2::uuid is null or exists (select 1 from projects where workspace_id = $1 and id = $2)) and
+       ($3::uuid is null or exists (select 1 from categories where workspace_id = $1 and id = $3)) and
+       ($4::uuid is null or exists (select 1 from places where workspace_id = $1 and id = $4)) as available`,
+    [session.workspaceId, projectId, categoryId, placeId]
+  );
+  if (!rows[0]?.available) throw new TimeEntryValidationError(errorMessage);
 }
 
 function validateResolvedTimeEntryWindow({

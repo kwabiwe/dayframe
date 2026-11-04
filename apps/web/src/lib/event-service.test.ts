@@ -697,6 +697,7 @@ describe("category persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
+        if (statement.includes("as available")) return { rows: [{ available: true }] };
         if (statement.includes("for update")) {
           return { rows: [{ id: "active-1", startedAt: "2026-07-05T09:00:00.000Z" }] };
         }
@@ -1152,6 +1153,7 @@ describe("category persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
+        if (statement.includes("as available")) return { rows: [{ available: true }] };
         if (statement.includes("for update")) {
           return { rows: [{ id: "active-1", startedAt: "2026-07-05T09:45:00.000Z" }] };
         }
@@ -3738,6 +3740,7 @@ describe("time entry tag transactions", () => {
     vi.resetAllMocks();
     const savedPlaceClient = {
       query: vi.fn(async (statement: string, _values?: unknown[]) => {
+        if (statement.includes("as available")) return { rows: [{ available: true }] };
         if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
         if (statement.includes('"legacyPersonSetEnd"')) {
           return { rows: [{ startedAt: "2026-08-12T10:00:00.000Z", stoppedAt: "2026-08-12T11:00:00.000Z", endChanged: false, legacyPersonSetEnd: false }] };

@@ -41,7 +41,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Timer start/stop should be transactionally event-first: insert `activity_events`, then create/close `time_entries` when the event is high-confidence.
 - Timer writes must scope by both `workspace_id` and `user_id` where active user state matters.
 - Entry-scoped Stop updates only its exact active `time_entries.id` and bypasses the coarse per-user advisory timer lock. Keep a transaction-local 2-second row-lock deadline inside a 5-second statement deadline and map bounded contention to retryable `timer_busy`; current-scope Stop, starts/replacements, and Health sleep serialization retain the advisory lock where required.
-- Check `client_event_id` receipts before the timer lock and again inside the transaction. The existing unique index remains the final replay/race boundary; do not add a redundant Stop receipt table.
+- Check `client_event_id` receipts before the timer lock and again inside the transaction. Start rechecks after taking the lock, before validating the block's catalogue IDs. The existing unique index remains the final replay/race boundary; do not add a redundant Stop receipt table.
 - Category-only and uncategorized entries are valid if approved by product rules; do not reintroduce project requirements in service logic.
 - Add regression coverage for start, stop, manual entry, duplicate `clientEventId`, and cross-workspace isolation.
 - For lock-strategy changes, retain a gated disposable-database test with two real Postgres connections: one holds the user's advisory lock while the other completes an exact entry-scoped Stop. Verify the hosted `activity_events.client_event_id` unique index before staging smoke tests.
