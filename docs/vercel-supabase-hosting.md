@@ -227,3 +227,20 @@ The server that accepts Motion & Fitness evidence requires `supabase/migrations/
 ### Sync recovery schema prerequisite
 
 The bounded sync server requires `supabase/migrations/202609040001_health_sleep_resolution_link.sql` before its Preview or production deployment. It adds nullable, owner-scoped lookup provenance for logical Sleep resolution without backfilling existing events. Validate against the existing staging schema and clean ordered local setup (`packages/db/migrations/006_health_sleep_resolution_link.sql`). An exact Review receipt remains authoritative and replays without rewriting the canonical entry. Production application of this migration remains part of the separately approved release; staging validation is not production authorization.
+
+### Location evidence expiry and uploads
+
+The upload transaction and the daily retention job both delete expired evidence. PostgreSQL cascades those deletes to `location_segment_evidence` by `evidence_id` alone. The partial indexes for stay and trip links cannot serve that lookup. An unindexed cascade can exhaust the upload's statement budget before it saves new readings, leaving the phone retrying HTTP 503.
+
+`supabase/migrations/202611040001_location_evidence_cascade_index.sql` adds an ordinary index on that foreign key. It is compatible with the running API and does not change retention or replay rules. Local ordered setup uses `packages/db/migrations/023_location_evidence_cascade_index.sql`.
+
+After approval, prebuild on populated staging and production databases outside a transaction, using a direct or session connection:
+
+```sql
+create index concurrently idx_location_segment_evidence_evidence_id
+  on public.location_segment_evidence (evidence_id);
+```
+
+Check `pg_index` for both `indisvalid` and `indisready` and verify that `pg_get_indexdef` shows the exact column and no predicate. If a build was interrupted and left an invalid index, drop that invalid index concurrently before retrying. Record the migration only after verification. On staging, send a disposable batch with expired parent evidence and verify both the new evidence acknowledgement and the removal of the expired links. On production, verify the phone's ordinary retries reach the server and compare queue depth and replay outcomes. Check the separate retention job's invocation and response through its existing logs.
+
+If removal is required, drop the index concurrently outside a transaction. Removing it can bring back the upload timeout.

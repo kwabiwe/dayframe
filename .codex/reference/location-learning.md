@@ -429,6 +429,8 @@ arbitrary exception text, SQL, bodies, coordinates, places or source IDs in thes
 records. Success clears only its endpoint's failure; observation cannot cause
 redelivery. Auth/stale/cancelled responses cannot update replacement-owner state.
 
+An `operation_timeout` at `evidence_cleanup` means the upload timed out before its insert. Check expired row counts and the foreign key cascade plan. `location_segment_evidence` needs a full index on `evidence_id` for the cascade, alongside the partial stay and commute indexes. The hosting runbook covers the concurrent index rollout.
+
 Upload uses one parameterised multi-row insert after the coordinate-free summary;
 acknowledge conflict-skipped and policy-rejected IDs only after commit. Preserve
 first-input persistence, classification and expiry. Measured replay lineage uses
