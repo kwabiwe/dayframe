@@ -189,6 +189,7 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: null });
     expect(labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label))).toEqual(["Commute", "Work"]);
     expect(tree.root.findAll((node) => node.props.testID === "calendar-list-show-all")).toHaveLength(0);
+    expect(tree.root.findByProps({ testID: "calendar-list-filter-slot" }).props.style.minHeight).toBeGreaterThan(0);
   });
 
   it("reads the journey in progress whole: where from, since when and its legs so far (Codex r2 on #570)", () => {

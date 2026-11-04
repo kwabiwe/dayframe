@@ -4127,6 +4127,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onSwipeDay={shiftSelectedCalendarDay}
                   openCheckRequest={calendarCheckTarget}
                   clearSelectionRequest={calendarSelectionClear}
+                  timelineLoading={serverCalendarSnapshot.loading}
                   timelineReadAt={calendarTimelineRequestedAt}
                   onRequestFreshRead={() => setCheckTimelineReads((count) => count + 1)}
                   clockFormat={clockFormat}

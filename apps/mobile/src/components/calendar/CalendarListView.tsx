@@ -96,7 +96,8 @@ export function CalendarListView({
   reduceMotion,
   refreshing,
   theme,
-  timeline
+  timeline,
+  timelineLoading = false
 }: {
   /** Open suggestions ("?"), each on the row it is about (location v4 step 14, iPhone part 3a). */
   checks?: readonly ListCheck[];
@@ -137,6 +138,8 @@ export function CalendarListView({
    * the read lacks waits for the next read of that day before asking under its row (Codex r3 on #610).
    */
   timelineReadAt?: number | null;
+  /** A short window for the first read. Later refreshes leave the list available. */
+  timelineLoading?: boolean;
   /** Reads the shown day's places again: a tap on a "?" whose item they lack waits for that read (Codex r4 on #610). */
   onRequestFreshRead?: () => void;
   /** Each suggestion's title, for its own row. */
@@ -321,17 +324,25 @@ export function CalendarListView({
   // The Today pill on today: the same one scroll owner and row measurement as a "?" (a drag stops it; a repeat
   // retargets; at once with Reduce Motion). A day with no rows has nothing to reach, so it goes to the top.
   const handledNowRequest = useRef(scrollToNowRequest);
+  const deferredNowDay = useRef<number | null>(null);
   useEffect(() => {
-    if (!scrollToNowRequest || scrollToNowRequest === handledNowRequest.current) return;
-    handledNowRequest.current = scrollToNowRequest;
-    if (dragging.current) return;
+    if (scrollToNowRequest && scrollToNowRequest !== handledNowRequest.current) {
+      handledNowRequest.current = scrollToNowRequest;
+      deferredNowDay.current = dayStartMs;
+    }
+    if (deferredNowDay.current !== dayStartMs || dragging.current) {
+      deferredNowDay.current = null;
+      return;
+    }
+    if (timelineLoading) return;
+    deferredNowDay.current = null;
     const key = nowRowKey(items.filter((item) => rowViews.current.has(item.key)), nowMs);
     pendingScroll.current = key ? { target: key, dayStartMs } : null;
     if (key) tryScroll();
     else scroller.current?.scrollTo({ y: 0, animated: !reduceMotion });
-    // Once per request, with the rows and time of the render it arrived in.
+    // Once per request, after the rows for its own day have mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToNowRequest]);
+  }, [dayStartMs, scrollToNowRequest, timelineLoading]);
   // A question belongs to the day it was opened on: another day closes it, even for a "?" both days show
   // (overnight sleep), before any request for the new day opens one (Codex r4 on #582).
   const [openDayStartMs, setOpenDayStartMs] = useState(dayStartMs);
@@ -373,7 +384,7 @@ export function CalendarListView({
   const request = liveTap && liveTap.after === (openCheckRequest?.request ?? 0) ? liveTap : liveCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
     || (timelineReadAt ?? 0) >= request.at;
-  const requestedRow = request && request.request !== handledCheckRequest
+  const requestedRow = !timelineLoading && request && request.request !== handledCheckRequest
     ? checkRows.find((row) => row.id === request.id && row.known && readSince(row)) : undefined;
   if (request && requestedRow) {
     setHandledCheckRequest(request.request);
@@ -394,7 +405,7 @@ export function CalendarListView({
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
   // Only once every "?" here is known, so the first is the real first and opens the right way (Codex r1 on #610).
   const firstCheckRow = checkRows.every((row) => row.known) ? checkRows[0] : undefined;
-  if (!clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
+  if (!timelineLoading && !clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
     && (firstCheckRow.inline ? onAnswerCheck : firstCheckRow.open)) {
     setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckRow.id });
     if (firstCheckRow.inline) setOpenCheckId(firstCheckRow.id);
@@ -493,6 +504,7 @@ export function CalendarListView({
       onMomentumScrollEnd={() => { dragging.current = false; }}
       onScrollBeginDrag={() => {
         dragging.current = true;
+        deferredNowDay.current = null;
         dropPendingScroll();
       }}
       onScrollEndDrag={() => { dragging.current = false; }}
@@ -523,17 +535,28 @@ export function CalendarListView({
           </Pressable>
         ) : null}
       </View>
-      {hasLocationPlaces(timeline) ? (
-        // Owner item H (28 Oct 2026): a quiet filter by the day's header, not a filled pill under the List.
-        <Pressable accessibilityHint="Shows or hides places you didn't need to check" accessibilityRole="button" accessibilityState={{ selected: showAll }}
-          hitSlop={8} onPress={() => setShowAll((current) => !current)} style={styles.filter} testID="calendar-list-show-all">
-          <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={13} />
-          <Text {...mobileTextProps("control")} style={[styles.filterText, { color: theme.textSecondary }]}>{showAll ? "Fewer places" : "All places"}</Text>
-        </Pressable>
-      ) : null}
+      <View style={styles.filterSlot} testID="calendar-list-filter-slot">
+        {hasLocationPlaces(timeline) ? (
+          // Owner item H (28 Oct 2026): a quiet filter by the day's header, not a filled pill under the List.
+          <Pressable accessibilityHint="Shows or hides places you didn't need to check" accessibilityRole="button" accessibilityState={{ selected: showAll }}
+            hitSlop={8} onPress={() => setShowAll((current) => !current)} style={styles.filter} testID="calendar-list-show-all">
+            <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={13} />
+            <Text {...mobileTextProps("control")} style={[styles.filterText, { color: theme.textSecondary }]}>{showAll ? "Fewer places" : "All places"}</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Animated.View layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
         style={[styles.card, { backgroundColor: theme.surface }]}>
-        {items.length === 0 ? (
+        {timelineLoading ? (
+          <View accessibilityLabel="Loading calendar day" accessibilityState={{ busy: true }} accessible testID="calendar-list-loading">
+            {[0, 1, 2].map((row) => (
+              <View key={row} style={styles.rowMain}>
+                <View style={[styles.mark, { backgroundColor: theme.surfaceMuted }]} />
+                <View style={[styles.loadingLine, { backgroundColor: theme.surfaceMuted }]} />
+              </View>
+            ))}
+          </View>
+        ) : items.length === 0 ? (
           <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>Nothing framed yet.</Text>
         ) : items.map((item, index) => {
           // Inset past the block and before the row's end (owner rule, 28 Oct 2026), as Today's rows.
@@ -981,6 +1004,8 @@ const styles = StyleSheet.create({
   rowTile: { width: ROW_BLOCK.width, height: 36 },
   stackedModes: { gap: 2 },
   legsToggle: { alignSelf: "flex-start", minHeight: 28, justifyContent: "center" },
+  filterSlot: { minHeight: 32, alignItems: "flex-end" },
+  loadingLine: { height: 12, width: "42%", borderRadius: 6 },
   filter: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", minHeight: 32, paddingHorizontal: 4 },
   filterText: { fontSize: 13, fontWeight: "600" },
   // The compact pill (owner, 28 Oct 2026) is compactPillStyles.pill; COMPACT_PILL_HIT_SLOP keeps 44 points.

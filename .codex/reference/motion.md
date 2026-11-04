@@ -670,6 +670,11 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Async outcome: none of its own; it follows whatever the blocks show (optimistic hide, Undo restore, refresh).
 - Accessibility: Reduce Motion — iPhone brackets and the rail move appear at once; web is identical either way. The bracket is decorative (web `aria-hidden`, iPhone `accessibilityHidden`, never hit-tested); each part's own label ends "Part 2 of 3 of School run", so the trip is named once per part without a separate stop. Brackets use theme tokens only (`textMuted` line, `textSecondary` name), so light and dark themes keep their contrast.
 
+## Calendar List and Reports while data arrives
+
+- Calendar List owns the day frame. The places filter has a permanent slot. On an uncached day, a still loading frame gives the location timeline up to 800 ms to join the blocks before the rows appear. A read failure or an elapsed wait leaves the ordinary rows available. The list's existing local layout transition handles later place and trip enrichment, without running a second transition on the filter. A superseded day or account loses its loading frame and pending scroll. Reduce Motion keeps the same layout and omits layout animation.
+- Reports owns the requested range's loading frame. Uncached Week and Month use the same chart geometry as their real charts. The loading charts receive no touch or accessibility focus. The header and range controls stay in place. A matching result replaces the frame, a stale result cannot replace another range, and a failed read shows its existing retry state. The loading frame has no animation, including with Reduce Motion.
+
 ## Answers in Calendar › List (location v4 step 14, iPhone part 3b)
 
 - Trigger: a tap on a "?" row or a place's "?" (opens or closes its question), "N to check" (opens the next one and scrolls to it, ending any Today request still waiting), Today's "N to check today" (opens the List at the first one with its question showing), an answer ("Log it", the skip, or More…), Undo on the toast, and list changes from refresh or sync.

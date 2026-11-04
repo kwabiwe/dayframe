@@ -63,6 +63,7 @@ import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
   ReportGoalStreak,
   ReportHero,
+  ReportLoadingFrame,
   ReportMonthGrid,
   ReportRangeSwitch,
   ReportWeekColumns,
@@ -802,14 +803,7 @@ function ReportsTabView({
             title={rangeFailure.offline ? "You're offline" : "Report didn't load"}
           />
         ) : !report ? (
-          <View style={s.unavailable}>
-            <Text
-              accessibilityLiveRegion="polite"
-              style={{ color: theme.textSecondary }}
-            >
-              Loading report range…
-            </Text>
-          </View>
+          <ReportLoadingFrame range={range} theme={theme} />
         ) : (
           <Pressable
             accessible={false}
@@ -918,7 +912,6 @@ const s = StyleSheet.create({
     borderRadius: 999,
   },
   chart: { alignItems: "center", paddingVertical: 8 },
-  unavailable: { paddingVertical: 24, gap: 12 },
 });
 
 // Memoised: the Dashboard re-renders every second while a block runs, and Reports formats every

@@ -19,7 +19,7 @@ import type { MobileTheme } from "../../lib/mobileTheme";
 import { localPresenceEntering } from "../../lib/motion";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 import { monthGridLeadingBlanks, reportHeroSpokenLabel, reportStackHeights } from "../../lib/reportsBlocks";
-import type { ReportRangeChoice } from "../../lib/reportsRanges";
+import type { ReportRange, ReportRangeChoice } from "../../lib/reportsRanges";
 
 // Blocks Reports (design/blocks/ios.html, renderReports): range switch, hero total, week columns,
 // month grid and goal streak. ReportsTab owns data, ranges, sheets and the focused day.
@@ -166,6 +166,35 @@ export function ReportHero({
             {delta.text}
           </Text>
         ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** Use the requested range's geometry while its data is unavailable. The empty charts are decorative. */
+export function ReportLoadingFrame({ range, theme }: { range: ReportRange; theme: MobileTheme }) {
+  const days = range.buckets.map((day) => ({ key: day.key, start: day.start, seconds: 0, segments: [] }));
+  return (
+    <View style={styles.loadingFrame} testID="reports-loading-frame">
+      <View style={styles.hero}>
+        <Text {...mobileTextProps("counter")} accessible={false} accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants" numberOfLines={1}
+          style={[styles.heroNumber, styles.loadingTotal, { backgroundColor: theme.surfaceMuted }]}>
+          0h 00m
+        </Text>
+        <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite"
+          style={[styles.heroWords, { color: theme.textSecondary }]}>
+          Loading report range…
+        </Text>
+      </View>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none">
+        {range.axisLayout === "week" ? (
+          <ReportWeekColumns animate={false} days={days} focusedKey={null} onFocus={() => {}} theme={theme} todayKey="" />
+        ) : range.axisLayout === "month" ? (
+          <ReportMonthGrid days={days} theme={theme} todayKey="" />
+        ) : (
+          <View style={[styles.loadingChart, { backgroundColor: theme.surface }]} />
+        )}
       </View>
     </View>
   );
@@ -394,6 +423,9 @@ const styles = StyleSheet.create({
   segment: { flexShrink: 1, minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
   segmentLabel: { fontSize: 14, fontWeight: "700" },
   hero: { gap: 6 },
+  loadingFrame: { gap: 14 },
+  loadingTotal: { alignSelf: "flex-start", color: "transparent", borderRadius: 12, overflow: "hidden" },
+  loadingChart: { height: 236, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard },
   heroNumber: { fontFamily: MOBILE_DISPLAY_FONT.extraBold, fontSize: 52, fontVariant: ["tabular-nums"], letterSpacing: -2, lineHeight: 56 },
   heroLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   heroWords: { fontSize: 14 },

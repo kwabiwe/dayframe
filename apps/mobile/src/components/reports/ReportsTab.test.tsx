@@ -57,6 +57,7 @@ vi.mock("@/lib/haptics", () => ({ playHaptic: mocks.haptic }));
 vi.mock("./ReportsBlocks", () => ({
   ReportGoalStreak: "ReportGoalStreak",
   ReportHero: "ReportHero",
+  ReportLoadingFrame: "ReportLoadingFrame",
   ReportMonthGrid: "ReportMonthGrid",
   ReportRangeSwitch: "ReportRangeSwitch",
   ReportWeekColumns: "ReportWeekColumns",
@@ -405,6 +406,23 @@ describe("Revision 3 Reports owner", () => {
     expect(tree.root.findByType("ReportDonutCard" as never).props.totalSeconds).toBe(3600);
     act(() => tree.unmount());
   });
+  it("shows a Month-shaped frame until the uncached Month is ready", async () => {
+    const tree = await render();
+    let finishMonth!: () => void;
+    mocks.fetch.mockImplementation((input: ReportSummaryRequest) =>
+      input.buckets.length === 30
+        ? new Promise((resolve) => { finishMonth = () => resolve(result(input)); })
+        : Promise.resolve(result(input)),
+    );
+    await act(async () => tree.root.findByType("ReportRangeSwitch" as never).props.onChoose("month"));
+    expect(tree.root.findByType("ReportLoadingFrame" as never).props.range.axisLayout).toBe("month");
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
+    await act(async () => finishMonth());
+    expect(tree.root.findAllByType("ReportLoadingFrame" as never)).toHaveLength(0);
+    expect(tree.root.findByType("ReportMonthGrid" as never).props.days).toHaveLength(30);
+    act(() => tree.unmount());
+  });
+
   it("ignores late Year after Month and never reuses numbers for uncached failed range", async () => {
     const tree = await render();
     let resolveYear!: (value: ReportSummary) => void;
@@ -451,7 +469,7 @@ describe("Revision 3 Reports owner", () => {
     );
     await act(async () => offline.props.onAction());
     expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(1);
-    expect(JSON.stringify(tree.toJSON())).not.toContain("Loading report range");
+    expect(tree.root.findAllByType("ReportLoadingFrame" as never)).toHaveLength(0);
     expect(pending.length).toBeGreaterThan(0);
     await act(async () => pending.forEach((finish) => finish()));
     expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(0);
