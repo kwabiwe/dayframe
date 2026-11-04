@@ -1064,7 +1064,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify({
             source: "manual_app",
             type: "timer_stop",
-            occurredAt: new Date().toISOString(),
+            // The event service supplies its clock when occurredAt is omitted.
             clientEventId: `web-timer-stop:${targetId}`,
             rawPayload: {
               origin: "web_timer",

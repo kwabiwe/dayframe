@@ -213,6 +213,7 @@ Required checks:
 - Queue lane isolation (stability audit 22 Oct 2026, iphone-timer-sync-4/5): in airplane mode let Health and location work queue (a Health import, a short trip), then start and stop a block on the iPhone; reconnect. The Stop lands on the web immediately, without waiting for the Health/location upload, and the queued Health/location work follows.
 - Web start timer.
 - Web stop timer.
+- Web clock skew (WEB-UI-7). Run `appShellTimerIntent.dom.test.tsx` and check an ordinary web Start and Stop with the browser clock ahead and behind the server. On reload the saved end reflects server time. Verify that an explicit end edit still keeps its chosen time and that queued iPhone events still replay their original tap timestamps.
 - Mobile start timer.
 - Mobile stop timer.
 - Active timer refresh on both surfaces.

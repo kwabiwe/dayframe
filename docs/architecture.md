@@ -37,6 +37,7 @@ Every newly captured signal must have an `activity_events` record before it crea
 - A reviewed unknown visit may give the derived entry either a workspace saved-place `place_id` or a user-selected one-time `place_label`, never both. Read models expose the resolved `placeName` plus `placeKind`; edits preserve the one-time label unless place selection is explicitly changed.
 - Editing or deleting an existing time entry is a mutation of already-derived user data; it does not invent a new capture signal.
 - Technical idempotency uses source identifiers such as `client_event_id`, Health sample/session identity, Location segment identity, and Review mutation receipts. User-intended time overlaps remain valid.
+- Ordinary web Stop omits `occurredAt` so the event service dates the end from the server clock. It still targets one canonical entry and uses its stable `client_event_id` for retries. The web's optimistic end settles from the server on refresh. Explicit time edits send the chosen timestamp.
 - Mobile explicit Stop uses one durable `client_event_id` and the original tap timestamp across direct delivery and replay. Its `timer_stop` event targets one canonical `time_entries.id`; `superseded` is a successful no-op when that exact timer is no longer active.
 
 The primary services are:

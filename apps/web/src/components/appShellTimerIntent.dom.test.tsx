@@ -25,6 +25,52 @@ afterEach(() => cleanup());
 describe("AppShellRuntime latest block intent", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it.each([
+    ["fast", "2026-08-17T07:00:00.000Z"],
+    ["slow", "2026-08-17T03:00:00.000Z"]
+  ])("shows the saved server end after Stop with a %s browser clock", async (_clock, browserNow) => {
+    const serverNow = "2026-08-17T05:00:05.000Z";
+    const running = entry();
+    let serverData = bootstrap(running);
+    mocks.clientFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "/api/events") {
+        const stop = JSON.parse(String(options?.body)) as { occurredAt?: string };
+        const stoppedAt = stop.occurredAt ?? serverNow;
+        if (Date.parse(stoppedAt) <= Date.parse(running.startedAt)) {
+          return response({ error: "Stop time must be after the block's start." }, 422);
+        }
+        serverData = bootstrap(null, [{ ...running, stoppedAt }]);
+        return response({ eventId: "stop-a", stopOutcome: "stopped", timeEntryId: running.id }, 201);
+      }
+      if (url.startsWith("/api/bootstrap")) return response(serverData);
+      if (url === "/api/timer-state") return response({
+        activeEntryId: serverData.activeEntry?.id ?? null,
+        updatedAt: running.updatedAt,
+        serverNow
+      });
+      return response({}, 404);
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(browserNow));
+    try {
+      render(
+        <AppShellRuntimeProvider>
+          <PersistentTimerBar />
+          <TimerIntentHarness initial={serverData} />
+        </AppShellRuntimeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Hydrate block A" }));
+      const stop = await screen.findByRole("button", { name: "Stop recording" });
+      fireEvent.click(stop);
+
+      await waitFor(() => expect(screen.getByTestId("saved-end").textContent).toBe(serverNow));
+      expect(screen.getByTestId("active-timer").textContent).toBe("idle");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps PersistentTimerBar Start and Quick Action reachable while exact Stop A is in flight", async () => {
     const timerA = entry({ id: "80000000-0000-4000-8000-000000000001", description: "A" });
     const timerB = entry({
@@ -169,6 +215,7 @@ function TimerIntentHarness({ initial }: { initial: BootstrapData }) {
         ? data.activeEntry.categoryName ?? data.activeEntry.description ?? "running"
         : "idle"}
     </output>
+    <output data-testid="saved-end">{data?.entries[0]?.stoppedAt}</output>
   </>;
 }
 
