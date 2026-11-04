@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { DAYFRAME_THEME, blockColorsFor } from "@dayframe/shared";
+import { DAYFRAME_THEME, blockColorsFor, type LocationTimeline } from "@dayframe/shared";
+import { withPlacesAndLegs } from "./calendarGridPlaces";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import {
@@ -52,6 +53,23 @@ describe("native Calendar presentation boundary", () => {
     });
     expect(state.model.reduceMotion).toBe(true);
     expect(state.model.reduceTransparency).toBe(true);
+  });
+
+  it("gives a logged Home visit a Places lane target when corrections are supported", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const { model } = build(now, bootstrap([]));
+    const home = {
+      kind: "place", id: "visit-home", name: "Home", role: "home", matchKind: "saved", confidence: "high",
+      placeId: "place-home", learnedPlaceId: null, blockIds: ["logged-home"], status: "finalised",
+      startedAt: iso(model.dayStartMs + 60_000), stoppedAt: iso(model.dayStartMs + 120_000)
+    } as const;
+    const day: LocationTimeline = {
+      date: "2026-07-10", timeZone: "UTC", dayStart: iso(model.dayStartMs), dayEnd: iso(model.dayEndMs),
+      items: [{ ...home, blockIds: [...home.blockIds] }], gaps: [], openTrip: null
+    };
+    const formatTime = (ms: number) => iso(ms);
+    expect(withPlacesAndLegs(model, day, [], formatTime)).toMatchObject({ placesLane: [] });
+    expect(withPlacesAndLegs(model, day, [], formatTime, true)).toMatchObject({ placesLane: [{ id: home.id, kind: "place" }] });
   });
 
   it("uses now for active-entry geometry and keeps the stable active entry identifier", () => {

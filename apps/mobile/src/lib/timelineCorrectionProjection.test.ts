@@ -29,6 +29,12 @@ const queued = (request: TimelineCorrectionRequest, extra: Partial<PendingTimeli
 });
 
 describe("the List with the corrections the phone still holds (location v4 step 12)", () => {
+  it("does not project a logged correction onto another visit that reused its ID", () => {
+    const correction = queued({ kind: "place", subject: "place", itemId: "seg-a", visitStartedAt: at(1000),
+      placeId: PLACE_ID, learnedPlaceId: null });
+    expect(projectTimelineCorrections(timeline, [correction])).toEqual(timeline);
+  });
+
   it("names a place with the picked place, set by you", () => {
     const projected = projectTimelineCorrections(timeline, [
       queued({ kind: "place", subject: "place", itemId: "seg-a", placeId: PLACE_ID, learnedPlaceId: null }, { preview: { name: "Exampleton Library", role: null } })

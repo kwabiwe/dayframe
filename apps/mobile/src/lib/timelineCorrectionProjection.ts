@@ -57,6 +57,7 @@ export function projectTimelineCorrections(
     items = items.map((item): TimelinePlace | TimelineTrip => {
       if (item.id !== request.itemId) return item;
       if (request.kind === "place" && item.kind === "place") {
+        if (request.visitStartedAt && Date.parse(request.visitStartedAt) !== Date.parse(item.startedAt)) return item;
         const matchKind = request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown";
         return {
           ...item,

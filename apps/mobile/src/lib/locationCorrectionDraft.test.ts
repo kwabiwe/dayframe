@@ -61,6 +61,15 @@ describe("what a correction sheet sends on Done (location v4 step 12)", () => {
     expect(notATrip(trip)).toEqual({ request: { kind: "delete", subject: "trip", itemId: "trip-1" } });
   });
 
+  it("changes a logged visit's saved place on a compatible server without sending block times", () => {
+    const logged = { ...place, blockIds: ["entry-1"] };
+    const times = { startMs: at(1), stopMs: at(50) };
+    expect(placeCorrections(logged, { choice: { kind: "saved", id: SAVED }, times }, options, true)).toEqual([
+      { request: { kind: "place", subject: "place", itemId: place.id, placeId: SAVED, learnedPlaceId: null, visitStartedAt: logged.startedAt },
+        preview: { name: options[0].name, role: options[0].role, refreshBlocks: true } }
+    ]);
+  });
+
   // Step 12 part 4: synthetic ids and times.
   it("offers I wasn't here only between two trips with no block, and I didn't leave only between visits to one place", () => {
     const iso = (minutes: number) => new Date(Date.parse("2026-10-27T08:00:00.000Z") + minutes * 60_000).toISOString();

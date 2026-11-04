@@ -782,7 +782,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await stay("logged-by-person", 2300);
     const manual = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "logged-by-person", categoryId: gym }, session);
     const [manualEntry] = manual.logged!.entryIds;
-    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-by-person", placeId: right, learnedPlaceId: null }, session);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-by-person", visitStartedAt: at(2300), placeId: right, learnedPlaceId: null }, session);
     expect(await block(manualEntry)).toMatchObject({ placeId: right, description: null, categoryId: gym });
 
     const { resolveLocationReviewAction } = await import("./location-review-service");
@@ -815,6 +815,28 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(await block(linked)).toMatchObject({ placeId: right, description: "Pret", categoryId: cafes, edited: true });
     await correctLocationTimeline({ kind: "place", subject: "place", itemId: "logged-linked", placeId: null, learnedPlaceId: learned }, session);
     expect(await block(linked)).toMatchObject({ placeId: wrong, description: "PureGym", categoryId: gym, edited: true });
+
+    // Mobile saves from the owned visit's centre using an idempotent request with no coordinates.
+    const mobileCreate = { kind: "save_visit_place", subject: "place", itemId: "logged-linked", visitStartedAt: at(2400),
+      clientCorrectionId: "66000000-0000-4000-8000-0000000000f8", name: "Mobile bakery", radiusMeters: 100 };
+    await expect(correctLocationTimeline({ ...mobileCreate, visitStartedAt: at(2401) }, session)).rejects.toMatchObject({ status: 404 });
+    const mobileReceipt = await correctLocationTimeline(mobileCreate, session);
+    expect(await correctLocationTimeline(mobileCreate, session)).toEqual(mobileReceipt);
+    const mobilePlaces = (await db.query(
+      `select id, latitude, longitude from places where workspace_id = $1 and name = 'Mobile bakery'`, [workspaceId])).rows;
+    expect(mobilePlaces).toEqual([{ id: mobileReceipt.correction!.target.placeId, latitude: 10, longitude: 20 }]);
+    expect(await block(linked)).toMatchObject({ placeId: mobilePlaces[0].id, description: "Mobile bakery", categoryId: null });
+
+    // A legacy block link can be ambiguous when different devices reuse a segment ID.
+    await db.query(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre)
+       values ($1, $2, 'logged-linked', 'device-2', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(21, 11), 4326)::geography)`,
+      [workspaceId, userId, at(2700), at(2760)]);
+    await expect(correctLocationTimeline({
+      ...mobileCreate, clientCorrectionId: "66000000-0000-4000-8000-0000000000f9", name: "Ambiguous bakery"
+    }, session)).rejects.toMatchObject({ status: 409 });
+    expect(await block(linked)).toMatchObject({ placeId: mobilePlaces[0].id });
+    expect((await db.query(`select 1 from places where workspace_id = $1 and name = 'Ambiguous bakery'`, [workspaceId])).rowCount).toBe(0);
 
     // Refused: no place is left behind.
     await expect(correctLocationTimeline({ ...request, itemId: "gone", clientCorrectionId: undefined, newPlace: { ...request.newPlace, name: "Orphan" } }, session))

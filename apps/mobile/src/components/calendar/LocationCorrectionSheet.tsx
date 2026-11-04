@@ -115,6 +115,7 @@ export function LocationCorrectionSheet({
   onDismissed,
   onQueue,
   onSavePlace,
+  allowLoggedPlaceChange = false,
   logAs,
   places,
   presentationId,
@@ -177,6 +178,7 @@ export function LocationCorrectionSheet({
    * `applePlaceId`: the Apple place picked from Nearby under this name, when the name is still that pick's.
    */
   onSavePlace?: (name: string, rest: QueuedCorrection[], beforeEnqueue?: LocationCorrectionBeforeEnqueue, applePlaceId?: string | null) => Promise<void>;
+  allowLoggedPlaceChange?: boolean;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
@@ -346,7 +348,7 @@ export function LocationCorrectionSheet({
       return false;
     }
     const corrections = target.kind === "place"
-      ? placeCorrections(target.place, { choice: picked, times }, places)
+      ? placeCorrections(target.place, { choice: picked, times }, places, allowLoggedPlaceChange)
       : tripCorrections(target.trip, { times });
     // Logs as is held for Undo and sent after the place's own changes, which it then logs.
     const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
@@ -457,7 +459,7 @@ export function LocationCorrectionSheet({
       setCloseKept(true);
     }, () => {
       setSaving(false);
-      setSaveError(chosenName !== undefined
+      setSaveError(allowLoggedPlaceChange ? "That place change couldn't be kept on this iPhone. Try again." : chosenName !== undefined
         ? `“${name}” wasn't saved. Saving a place needs a connection; Save tries again.`
         : "That place couldn't be saved. Saving a place needs a connection; try again.");
     });
@@ -495,7 +497,7 @@ export function LocationCorrectionSheet({
     const answerChoice: PlaceChoice = venue ? { kind: "keep" } : choice;
     if (venue) setChoice(answerChoice);
     const corrections = target.kind === "place"
-      ? placeCorrections(target.place, { choice: answerChoice, times }, places)
+      ? placeCorrections(target.place, { choice: answerChoice, times }, places, allowLoggedPlaceChange)
       : tripCorrections(target.trip, { times });
     if (!corrections.length) {
       // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
@@ -535,8 +537,9 @@ export function LocationCorrectionSheet({
     ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${time(Date.parse(leg.startedAt))}–${time(Date.parse(leg.stoppedAt))}`
     : trip?.route ? `${trip.route} · ${span}` : span;
 
-  // Apple's nearby places for an unknown place that can be saved, from the visit's centre.
-  const nearbyCentre = target.kind === "place" && onSavePlace && !stale && !target.place.placeId
+  const placeCanSave = target.kind === "place" && (!target.place.placeId || allowLoggedPlaceChange) && Boolean(onSavePlace) && !stale;
+  // Apple's nearby places for a visit that can be saved, from the visit's centre.
+  const nearbyCentre = placeCanSave
     && evidence && evidence !== "unavailable" && evidence.map.centre
     ? { latitude: evidence.map.centre.coordinates[1], longitude: evidence.map.centre.coordinates[0] } : null;
   // The sheet's own guess only for the visit as it is now: the same centre and times, and evidence that describes
@@ -550,7 +553,6 @@ export function LocationCorrectionSheet({
     ? question.guess ?? (question.guessable ? keepableVenue(nearbyGuessNow, Boolean(question.outing)) : null) : null;
   // The question's one line, in the title area: a guess only changes its words, so nothing moves when one arrives.
   const asks = question && !leg ? guess ? `Visited ${guess.name}?` : question.text : null;
-  const placeCanSave = target.kind === "place" && !target.place.placeId && Boolean(onSavePlace) && !stale;
   const placeIsNamed = target.kind === "place" && Boolean(target.place.placeId || target.place.learnedPlaceId);
   const currentPlaceId = target.kind === "place" ? target.place.placeId : null;
   // How far each saved place is from the visit, as far as the map knows.
@@ -583,12 +585,12 @@ export function LocationCorrectionSheet({
       ...near.map((option) => row(option, away(option)))
     ];
   };
-  const placeSection = target.kind === "place" && !stale && (correctable(target.place) || nearbyCentre);
+  const placeSection = target.kind === "place" && !stale && (correctable(target.place) || allowLoggedPlaceChange);
   const hasMore = !leg && (target.kind === "place"
     ? !stale && (Boolean(logAs) || (correctable(item) && Boolean(item.stoppedAt)) || placeCanSave || Boolean(target.notHere))
     : correctable(item));
   const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || Boolean(placeName.trim()) || Boolean(attempted) || (!problem && (target.kind === "place"
-    ? placeCorrections(target.place, { choice, times }, places).length > 0
+    ? placeCorrections(target.place, { choice, times }, places, allowLoggedPlaceChange).length > 0
     : tripCorrections(target.trip, { times }).length > 0));
   // The footer: a question with a Yes shows its Yes until something changes (the web's rule). A guess keeps its Yes
   // through edits to the times or Logs as, which go with the answer; a name or a place of the person's own is a Save.
@@ -656,7 +658,9 @@ export function LocationCorrectionSheet({
       >
         {placeSection ? (
           <View style={styles.section} testID="location-correction-where">
-            <SheetNearbySearch awaitingCentre={evidence === null && !stale && target.kind === "place" && !target.place.placeId && correctable(item)} centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
+            <SheetNearbySearch awaitingCentre={evidence === null && (allowLoggedPlaceChange || (!target.place.placeId && correctable(item)))}
+              centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
+              excludeSavedMatches={allowLoggedPlaceChange}
               guess={guess} onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })} onGuessPick={() => answerFromSheet(true, guess)}
               onPick={(name, applePlaceId) => savePlace(name, applePlaceId)}
               onSaveTyped={placeCanSave ? (name) => savePlace(name) : undefined}
@@ -694,7 +698,8 @@ export function LocationCorrectionSheet({
         ) : null}
         {!leg && !correctable(item) ? (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>
-            {target.kind === "trip" ? "This trip is in a block: its times are the block's." : "This place is in a block. Edit the block instead."}
+            {target.kind === "trip" ? "This trip is in a block: its times are the block's."
+              : allowLoggedPlaceChange ? "Edit the block to change its times." : "This place is in a block. Edit the block instead."}
           </Text>
         ) : null}
         {hasMore ? (
