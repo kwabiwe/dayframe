@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import type { LocationTimeline } from "@dayframe/shared";
 
+// Give the initial place read a short chance to settle before showing the complete day.
+const CALENDAR_PRESENTATION_WAIT_MS = 800;
+
 type Stored = { owner: string; dayKey: string; timeline: LocationTimeline | null; requestedAt: number };
 
 /**
@@ -30,10 +33,22 @@ export function useCalendarTimelineSnapshot({
   /** The signed-in workspace and user; null when signed out. */
   owner: string | null;
   refreshKey: unknown;
-}): { timeline: LocationTimeline | null; requestedAt: number | null } {
+}) {
   const [stored, setStored] = useState<Stored | null>(null);
+  const [waitedFor, setWaitedFor] = useState<{ owner: string; dayKey: string } | null>(null);
+  const selected = stored?.owner === owner && stored.dayKey === dayKey ? stored : null;
+  const waiting = enabled && owner !== null && !selected
+    && (waitedFor?.owner !== owner || waitedFor.dayKey !== dayKey);
+
+  useEffect(() => {
+    if (!waiting || owner === null) return;
+    const timeout = setTimeout(() => setWaitedFor({ owner, dayKey }), CALENDAR_PRESENTATION_WAIT_MS);
+    return () => clearTimeout(timeout);
+  }, [dayKey, owner, waiting]);
+
   // Signing out, or another account, drops the last account's places at once.
   if (stored && stored.owner !== owner) setStored(null);
+  if (waitedFor && (waitedFor.owner !== owner || waitedFor.dayKey !== dayKey)) setWaitedFor(null);
   useEffect(() => {
     if (!enabled || !owner) return;
     const controller = new AbortController();
@@ -44,6 +59,10 @@ export function useCalendarTimelineSnapshot({
     fetchTimeline(dayKey, { signal: controller.signal }).then(land, () => land(null));
     return () => controller.abort();
   }, [dayKey, enabled, fetchTimeline, owner, refreshKey]);
-  const current = stored && stored.owner === owner && stored.dayKey === dayKey && stored.timeline?.date === dayKey ? stored : null;
-  return { timeline: current?.timeline ?? null, requestedAt: current?.requestedAt ?? null };
+  const current = selected?.timeline?.date === dayKey ? selected : null;
+  return {
+    timeline: current?.timeline ?? null,
+    requestedAt: current?.requestedAt ?? null,
+    loading: waiting
+  };
 }
