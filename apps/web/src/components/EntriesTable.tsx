@@ -238,6 +238,8 @@ export type ContinuousListProps = {
   onLoad: (direction: "earlier" | "later") => void;
   /** The selected day: the List scrolls its heading (or the nearest earlier one) to the top on each request. */
   focusDayStartMs: number;
+  /** An arrow reached this date even when the nearest heading belongs to an earlier day. */
+  focusEmptyDay?: boolean;
   /** A new value asks for the scroll again (the selected day's key). */
   focusRequest: string;
   /**
@@ -508,6 +510,7 @@ export function EntriesTable({
   }, [continuousError, continuousLoading, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
   // The selected day's positioning request (see below); while it is pending, anchoring waits.
   const focusDoneRef = useRef<string | null>(null);
+  const focusReleasedByUser = useRef<string | null>(null);
   const focusRequest = continuous?.focusRequest ?? null;
   const focusDayStartMs = continuous?.focusDayStartMs ?? null;
   const focusCanGrow = Boolean(continuous && !continuous.reachedEarliest);
@@ -576,13 +579,14 @@ export function EntriesTable({
     }
     const index = Math.max(0, low - 1);
     const dayStart = offsets[index].dayStart;
-    setColumnDayStartMs((current) => current === dayStart ? current : dayStart);
-    // Today with nothing listed yet is named while the List's top is where today would be (between its nearest earlier
-    // heading and the one above it, newest first). Only today: an earlier selected day that lost its last row names the
-    // day really at the top (Codex r5 on #625).
+    // An arrow owns the selected day until the person scrolls, even when a gap or the end of the
+    // List makes the browser stop on another heading. Without an arrow, keep the empty Today rule.
     const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
-    const emptyToday = focusDayStartMs !== null && focusDayStartMs === todayStartMs;
-    const shown = emptyToday && dayStart <= focusDayStartMs && focusDayStartMs < newerStart ? focusDayStartMs : dayStart;
+    const arrowOwnsDay = continuous?.focusEmptyDay && focusReleasedByUser.current !== focusRequest;
+    const emptyToday = todayStartMs !== null && focusDayStartMs === todayStartMs && dayStart <= todayStartMs && todayStartMs < newerStart;
+    const shown = focusDayStartMs !== null && (arrowOwnsDay || emptyToday) ? focusDayStartMs : dayStart;
+    const columnDay = arrowOwnsDay ? shown : dayStart;
+    setColumnDayStartMs((current) => current === columnDay ? current : columnDay);
     setTopDayStartMs((current) => current === shown ? current : shown);
   };
   const trackColumnDayRef = useRef(trackColumnDay);
@@ -658,6 +662,7 @@ export function EntriesTable({
   // It ends when it lands, when no earlier week can come, or at the person's own scrolling (wheel, touch,
   // a key or the scrollbar), which always wins (Codex r3 on #584).
   const endFocusOnUserScroll = () => {
+    if (continuous?.focusEmptyDay) focusReleasedByUser.current = focusRequest;
     if (!focusPending()) return;
     focusDoneRef.current = focusRequest;
     recordScrollAnchor();
@@ -702,6 +707,7 @@ export function EntriesTable({
   const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip || row.place));
   /** Opens a "?" by its row and brings the row into view. */
   const openCheckRow = (next: LocationListRow) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     const nextId = checkOf(next)!.id;
     applyTimelineRegroup(() => setFocusedCheck(nextId));
     // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
@@ -713,6 +719,10 @@ export function EntriesTable({
       .find((element) => element.dataset.locationRow === anchor)
       ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
     return nextId;
+  };
+  const openColumnCheck = (checkId: string) => {
+    const row = checkRows.find((other) => checkOf(other)?.id === checkId);
+    if (row) openCheckRow(row);
   };
   /**
    * Owner concern 4 (28 Oct 2026): "N to check" steps oldest first through every "?" that still asks, across
@@ -763,6 +773,7 @@ export function EntriesTable({
    * opened) comes into view. The editor's own entrance is the motion; with Reduce Motion the scroll is instant.
    */
   const openBlockCheck = (entry: TimeEntryRow, checkId: string) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     applyTimelineRegroup(() => setFocusedCheck(checkId));
     // A block inside a group of repeats shows with its group opened.
     setRevealedEntryId(entry.id);
@@ -1880,10 +1891,7 @@ export function EntriesTable({
             onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
             onCorrectTrip={(trip, route) => openCorrection({ kind: "trip", trip, route })}
             onHide={() => setPlacesColumn(false)}
-            onOpenCheck={(checkId) => {
-              const row = checkRows.find((other) => checkOf(other)?.id === checkId);
-              if (row) openCheckRow(row);
-            }}
+            onOpenCheck={openColumnCheck}
             timeline={timeline} />
         );
       })() : null}
