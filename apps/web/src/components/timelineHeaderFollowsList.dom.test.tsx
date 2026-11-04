@@ -9,7 +9,6 @@ import type { ContinuousListProps } from "./EntriesTable";
 // Owner bug (29 Oct 2026; Codex r1 on #625): in Calendar › List the header — date, week strip, week total and its
 // report link — names the day at the top of the List, and choosing the URL's own day again brings the List back to it.
 
-const navigation = vi.hoisted(() => ({ search: "" }));
 const listed = vi.hoisted(() => ({ continuous: null as ContinuousListProps | null }));
 const runtime = vi.hoisted(() => {
   const values: Record<string, unknown> = { dateLoadError: null, isDateLoading: false, isTimerBusy: false, shellData: null };
@@ -25,7 +24,7 @@ const runtime = vi.hoisted(() => {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/timeline",
-  useSearchParams: () => new URLSearchParams(navigation.search)
+  useSearchParams: () => new URLSearchParams(window.location.search)
 }));
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) => <a href={href} {...props}>{children}</a>
@@ -84,8 +83,7 @@ beforeEach(() => {
   Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: class { disconnect() {} observe() {} unobserve() {} } });
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(local(18, 12));
-  navigation.search = "date=2026-10-14&scope=day&view=list";
-  window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+  window.history.replaceState(null, "", "/timeline?date=2026-10-14&scope=day&view=list");
   listed.continuous = null;
 });
 afterEach(() => {
@@ -120,8 +118,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
   });
 
   it("steps by one day from the visible List day even when its URL carries week scope", async () => {
-    navigation.search = "date=2026-10-14&scope=week&view=list";
-    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    window.history.replaceState(null, "", "/timeline?date=2026-10-14&scope=week&view=list");
     const { getByRole } = await renderList();
     act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
     const user = userEvent.setup({ advanceTimers: () => undefined });
@@ -129,16 +126,19 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
     expect(window.location.search).toBe("?date=2026-10-07&scope=week&view=list");
   });
 
-  it("clears a linked block's scroll target when Today is chosen for the current URL day", async () => {
-    navigation.search = "date=2026-10-18&scope=day&view=list&entry=week-before";
-    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+  it.each([8, 18])("clears a linked block's scroll target when Today is chosen with %i Oct visible", async (topDay) => {
+    window.history.replaceState(null, "", "/timeline?date=2026-10-18&scope=day&view=list&entry=week-before");
     const { getByRole } = await renderList();
-    act(() => listed.continuous!.onVisibleDay!(local(8, 0).getTime()));
+    act(() => listed.continuous!.onVisibleDay!(local(topDay, 0).getTime()));
     const priorFocus = listed.continuous!.focusRequest;
-    await userEvent.setup({ advanceTimers: () => undefined }).click(getByRole("button", { name: /^Today$/ }));
+    const today = getByRole("button", { name: /^Today$/ });
+    expect(today.hasAttribute("disabled")).toBe(false);
+    await userEvent.setup({ advanceTimers: () => undefined }).click(today);
     expect(window.location.search).toBe("?date=2026-10-18&scope=day&view=list");
     expect(listed.continuous!.focusRequest).not.toBe(priorFocus);
     expect(listed.continuous!.focusDayStartMs).toBe(local(18, 0).getTime());
+    act(() => listed.continuous!.onVisibleDay!(local(18, 0).getTime()));
+    expect(today.hasAttribute("disabled")).toBe(true);
   });
 
   it("brings the List back to the URL's day when that day is chosen again, by mouse and by keyboard", async () => {
@@ -166,8 +166,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
   });
 
   it("returns the List and the header to today when Calendar is tapped while the URL already names today (Codex r2 on #625)", async () => {
-    navigation.search = "date=2026-10-18&scope=day&view=list";
-    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    window.history.replaceState(null, "", "/timeline?date=2026-10-18&scope=day&view=list");
     const { ShellSidebarNav, ShellTabBar } = await import("./blocks/ShellNav");
     const { TimeReviewViews } = await import("./TimeReviewViews");
     const { container, getAllByRole } = render(
@@ -204,8 +203,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
   });
 
   it("drops a day choice still loading when Calendar is tapped: the URL stays on today (Codex r3 on #625)", async () => {
-    navigation.search = "date=2026-10-18&scope=day&view=list";
-    window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+    window.history.replaceState(null, "", "/timeline?date=2026-10-18&scope=day&view=list");
     let finish: (outcome: { ok: true }) => void = () => undefined;
     const loadDate = vi.fn(() => new Promise<{ ok: true }>((resolve) => { finish = resolve; }));
     const refresh = vi.fn(async () => undefined);

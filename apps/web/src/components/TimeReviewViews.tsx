@@ -623,10 +623,11 @@ export function TimeReviewViews({
     void navigate(isList ? { date: shifted.date } : shiftTimelineState(state, direction),
       isList ? { reposition: true, listDayStep: true } : undefined);
   };
-  // Greyed when today is what's shown: the top day in List, a visible day in a narrow Week, else the period.
-  const showsToday = todayKey === null || (isList ? headerDayKey === todayKey
+  // Greyed when today is what's shown, unless the List still has a block link to clear.
+  const showsToday = todayKey !== null && (isList ? headerDayKey === todayKey
     : narrowWeek ? narrowWeek.days.some((day) => toTimelineDateKey(day) === todayKey)
       : todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
+  const canClearListEntryLink = isList && searchParams.has("entry");
   // The week strip is the header day's week (Codex r1 on #625): scrolled into another week, its days, totals and report
   // link are that week's, from the List's loaded weeks.
   const headerWeekMoved = headerRanges.week.start.getTime() !== ranges.week.start.getTime();
@@ -692,7 +693,7 @@ export function TimeReviewViews({
               </div>
               <button
                 className="timeline-today-button"
-                disabled={isDateLoading || showsToday}
+                disabled={isDateLoading || todayKey === null || (showsToday && !canClearListEntryLink)}
                 onClick={() => {
                   if (todayKey) void navigate({ date: todayKey }, { reposition: true });
                 }}

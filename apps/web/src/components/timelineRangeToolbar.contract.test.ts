@@ -115,8 +115,9 @@ describe("Calendar range and toolbar contract", () => {
     expect(toolbar).toContain("{!isList ? null : (");
     expect(timeline).toContain('variant="row"');
     expect(timeline).not.toContain("CalendarViewMenu");
-    // Today is always there, greyed whenever today is what's shown, in every view (owner, 30 Oct 2026).
-    expect(toolbar).toContain("disabled={isDateLoading || showsToday}");
+    // Today stays available when it can clear the List's linked block, even if today is visible.
+    expect(timeline).toContain('const canClearListEntryLink = isList && searchParams.has("entry");');
+    expect(toolbar).toContain("disabled={isDateLoading || todayKey === null || (showsToday && !canClearListEntryLink)}");
     // Location days belong to the owner and the selected week (Codex r2 on #584).
     expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);");
     // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).
