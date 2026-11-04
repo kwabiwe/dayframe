@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { processActivityEvent, TimerMutationBusyError, TimerReplacementWindowError, TimerStopBeforeStartError } from "@/lib/event-service";
+import { processActivityEvent, TimeEntryValidationError, TimerMutationBusyError, TimerReplacementWindowError, TimerStopBeforeStartError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     if (isMissingRequiredColumnError(error) || isDatabaseReadinessError(error)) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    if (isDatabasePayloadError(error)) {
+    if (error instanceof TimeEntryValidationError || isDatabasePayloadError(error)) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
     if (error instanceof SyncOperationError || isStatementTimeoutError(error) || isLockNotAvailableError(error)) {

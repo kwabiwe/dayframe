@@ -7,17 +7,21 @@ vi.mock("@/lib/live-activity-post-response", () => ({ scheduleLiveActivityNotifi
 
 import type pg from "pg";
 import { pool } from "@/lib/db";
+import { POST as postEvent } from "../../events/route";
+import { POST as postEntry } from "../route";
 import { DELETE, PATCH } from "./route";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 const T = (hhmm: string) => `2026-10-20T${hhmm}:00.000Z`;
 
 /** Waits until a backend of this database is blocked behind another's lock (the resend on the row lock). */
-async function waitUntilBlocked() {
+async function waitUntilBlocked(blockingPid?: number) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const blocked = await pool.query<{ count: number }>(
       `select count(*)::int as count from pg_stat_activity
-       where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0`
+       where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0
+         and ($1::int is null or $1 = any(pg_blocking_pids(pid)))`,
+      [blockingPid ?? null]
     );
     if ((blocked.rows[0]?.count ?? 0) > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -27,9 +31,10 @@ async function waitUntilBlocked() {
 
 // Stability audit 22 Oct 2026, item 17: an iPhone Edit whose response was lost is resent unchanged.
 // With its outbox command id the resend is answered as delivered and never reverts a newer edit.
-describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of an applied iPhone Edit (Postgres)", () => {
+describe.runIf(runDatabaseIntegration)("Block catalogue ownership and Edit receipts (Postgres)", () => {
   let userId: string;
   let workspaceId: string;
+  let otherWorkspaceId: string;
   let catX: string;
   let catY: string;
   let entryId: string;
@@ -37,6 +42,7 @@ describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of a
   beforeEach(async () => {
     userId = randomUUID();
     workspaceId = randomUUID();
+    otherWorkspaceId = randomUUID();
     catX = randomUUID();
     catY = randomUUID();
     holder.session = { authMode: "provider", scopes: ["app:read", "app:write"], userId, workspaceId };
@@ -56,7 +62,7 @@ describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of a
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await pool.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
+    await pool.query("delete from workspaces where id = any($1::uuid[])", [[workspaceId, otherWorkspaceId]]).catch(() => undefined);
     await pool.query("delete from users where id = $1", [userId]).catch(() => undefined);
   });
 
@@ -101,6 +107,146 @@ describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of a
       [entryId]
     )).rows;
   }
+
+  async function catalogue(owner: string) {
+    const ids = { projectId: randomUUID(), categoryId: randomUUID(), placeId: randomUUID() };
+    await pool.query("insert into projects (id, workspace_id, name) values ($1, $2, 'Project')", [ids.projectId, owner]);
+    await pool.query("insert into categories (id, workspace_id, name) values ($1, $2, 'Activity')", [ids.categoryId, owner]);
+    await pool.query("insert into places (id, workspace_id, name) values ($1, $2, 'Place')", [ids.placeId, owner]);
+    return ids;
+  }
+
+  async function foreignCatalogue() {
+    await pool.query("insert into workspaces (id, name) values ($1, 'Other workspace')", [otherWorkspaceId]);
+    return catalogue(otherWorkspaceId);
+  }
+
+  function post(handler: (request: Request) => Promise<Response>, path: string, body: object) {
+    return handler(new Request(`http://localhost/api/${path}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    }));
+  }
+
+  async function entryCatalogue() {
+    return (await pool.query(
+      `select project_id as "projectId", category_id as "categoryId", place_id as "placeId",
+              description, stopped_at as "stoppedAt"
+       from time_entries where workspace_id = $1 and user_id = $2 order by started_at, id`,
+      [workspaceId, userId]
+    )).rows;
+  }
+
+  async function eventCount() {
+    return (await pool.query<{ count: number }>(
+      "select count(*)::int as count from activity_events where workspace_id = $1 and user_id = $2",
+      [workspaceId, userId]
+    )).rows[0].count;
+  }
+
+  it.each(["manual", "start", "event", "edit"] as const)(
+    "rejects foreign and unknown catalogue IDs in %s without changing blocks or events", async (action) => {
+      const foreign = await foreignCatalogue();
+      if (action === "start" || action === "event") {
+        await pool.query("update time_entries set stopped_at = null where id = $1", [entryId]);
+      }
+      const before = await entryCatalogue();
+      const mutate = async (details: object) => {
+        const body = { ...details, description: "Catalogue test" };
+        if (action === "edit") return patch(body);
+        const response = action === "event"
+          ? await post(postEvent, "events", {
+            ...body, source: "mobile_app", type: "timer_start", clientEventId: "catalogue-check", occurredAt: T("11:00")
+          })
+          : await post(postEntry, "time-entries", {
+            ...body, mode: action, startedAt: T("11:00"), stoppedAt: T("12:00")
+          });
+        return { status: response.status, json: await response.json() as Record<string, unknown> };
+      };
+
+      for (const [field, id] of Object.entries(foreign)) {
+        const foreignResult = await mutate({ [field]: id });
+        const unknownResult = await mutate({ [field]: randomUUID() });
+        expect(foreignResult.status).toBe(action === "edit" ? 400 : 422);
+        expect(unknownResult).toEqual(foreignResult);
+        expect(JSON.stringify(foreignResult.json)).not.toContain(id);
+      }
+      expect(await entryCatalogue()).toEqual(before);
+      expect(await eventCount()).toBe(0);
+      expect(await audit()).toEqual([]);
+
+      const own = await catalogue(workspaceId);
+      expect((await mutate(own)).status).toBe(action === "edit" ? 200 : 201);
+      expect(await entryCatalogue()).toContainEqual(expect.objectContaining({ ...own, description: "Catalogue test" }));
+    }
+  );
+
+  it("allows an unrelated edit or a clear on a block with historical foreign references", async () => {
+    const foreign = await foreignCatalogue();
+    await pool.query("update time_entries set project_id = $2, category_id = $3, place_id = $4 where id = $1",
+      [entryId, foreign.projectId, foreign.categoryId, foreign.placeId]);
+    expect((await patch({ description: "New description" })).status).toBe(200);
+    expect(await entryCatalogue()).toEqual([expect.objectContaining({ ...foreign, description: "New description" })]);
+    expect((await patch({ projectId: null, categoryId: null, placeId: null })).status).toBe(200);
+    expect(await entryCatalogue()).toEqual([expect.objectContaining({
+      projectId: null, categoryId: null, placeId: null, description: "New description"
+    })]);
+  });
+
+  it("returns accepted Start and Edit receipts after the referenced activity is deleted", async () => {
+    const event = { source: "mobile_app", type: "timer_start", occurredAt: T("11:00"),
+      clientEventId: "catalogue-replay", categoryId: catX };
+    const edit = { categoryId: catX, description: "Accepted edit" };
+    const commandId = "mobile-time-entry:catalogue-replay";
+    expect((await post(postEvent, "events", event)).status).toBe(201);
+    expect((await patch(edit, commandId)).status).toBe(200);
+    await pool.query("delete from categories where id = $1 and workspace_id = $2", [catX, workspaceId]);
+
+    const startRetry = await post(postEvent, "events", event);
+    expect(startRetry.status).toBe(200);
+    expect(await startRetry.json()).toMatchObject({ duplicate: true });
+    const editRetry = await patch(edit, commandId);
+    expect(editRetry.status).toBe(200);
+    expect(editRetry.json).toMatchObject({ replayed: true });
+    expect(await eventCount()).toBe(1);
+    expect(await audit()).toHaveLength(1);
+    expect((await entryCatalogue()).map(({ categoryId }) => categoryId)).toEqual([null, null]);
+  });
+
+  it("finds a Start receipt committed while the retry waits on the timer lock", async () => {
+    const request = { source: "mobile_app", type: "timer_start", occurredAt: T("11:00"),
+      clientEventId: "concurrent-catalogue-replay", categoryId: catX };
+    const firstDelivery = await pool.connect();
+    let retry: Promise<Response> | undefined;
+    try {
+      await firstDelivery.query("begin");
+      const { rows: [backend] } = await firstDelivery.query<{ pid: number }>("select pg_backend_pid() as pid");
+      await firstDelivery.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
+      const { rows: [event] } = await firstDelivery.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type,
+             occurred_at, confidence, suggested_category_id)
+         values ($1, $2, $3, 'mobile_app', 'timer_start', $4, 'high', $5) returning id`,
+        [workspaceId, userId, request.clientEventId, request.occurredAt, catX]
+      );
+      const { rows: [entry] } = await firstDelivery.query<{ id: string }>(
+        `insert into time_entries (workspace_id, user_id, category_id, started_at, created_from_event_id)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [workspaceId, userId, catX, request.occurredAt, event.id]
+      );
+      retry = post(postEvent, "events", request);
+      await waitUntilBlocked(backend.pid);
+      await firstDelivery.query("delete from categories where id = $1 and workspace_id = $2", [catX, workspaceId]);
+      await firstDelivery.query("commit");
+
+      const response = await retry;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ duplicate: true, eventId: event.id, timeEntryId: entry.id });
+      expect(await eventCount()).toBe(1);
+    } finally {
+      await firstDelivery.query("rollback");
+      firstDelivery.release();
+      await retry?.catch(() => undefined);
+    }
+  });
 
   // ActiveTimerEditSheet's whole-form save of a completed block (no expectedDetails).
   const phoneA = () => ({ categoryId: catX, description: "phone A", tagNames: ["alpha"], startedAt: T("09:00"), stoppedAt: T("10:00") });
