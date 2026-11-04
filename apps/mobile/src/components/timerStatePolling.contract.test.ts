@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { timerStateChanged, timerStatePollDelay, type TimerStateFingerprint } from "@dayframe/shared";
+import { createDeletionCoordinator } from "../lib/historyDeletion";
 
 const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
@@ -31,7 +32,7 @@ describe("mobile timer-state polling contracts", () => {
 });
 
 // Exercise the Dashboard's actual poll effect without mounting its native views, like the
-// Settings queue race test. Only the network, app state and guarded loader are replaced.
+// Settings queue race test.
 const fetchIndex = dashboardSource.indexOf("const fetched = await fetchTimerState()");
 const effectStart = dashboardSource.lastIndexOf("\n  useEffect(() => {", fetchIndex);
 const effectClose = "\n  }, [authState, transitionToSignedOut]);";
@@ -43,6 +44,15 @@ const runPollEffect = new Function(
   transpileModule(dashboardSource.slice(effectStart, effectEnd), {
     compilerOptions: { target: ScriptTarget.ES2022 }
   }).outputText
+);
+
+const reconcileStart = dashboardSource.indexOf("  function reconcilePendingActiveDeletionWithExternalActiveEntry(");
+const reconcileEnd = dashboardSource.indexOf("  // A Lock Screen Stop made", reconcileStart);
+const createDeletionReconciler = new Function(
+  "deletionCoordinator", "optimisticTimerStartReconciler", "OPTIMISTIC_TIMER_ID_PREFIX", "optimisticTimerIds",
+  "resolveTimerEntryIdAfterQueueBarrier", "applyTimerEntryIdCorrelation",
+  transpileModule(`${dashboardSource.slice(reconcileStart, reconcileEnd)}
+  return reconcilePendingActiveDeletionAfterQueueBarrier;`, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText
 );
 
 // Use the real entry guard as well when a manual bootstrap already owns the loader.
@@ -73,15 +83,24 @@ function startPoll(pollInFlight = { current: false }) {
   vi.useFakeTimers();
   let cleanup: (() => void) | undefined;
   let sessionGeneration = 1;
+  let accountEpoch = 1;
+  let onAppStateChange: ((state: string) => void) | undefined;
+  const appState = {
+    currentState: "active",
+    addEventListener: (_event: string, listener: (state: string) => void) => {
+      onAppStateChange = listener;
+      return { remove: () => { onAppStateChange = undefined; } };
+    }
+  };
   const fingerprint = { current: before };
   const fetchTimerState = vi.fn<() => Promise<TimerStateFingerprint>>().mockResolvedValue(stopped);
-  const reconcileDeletion = vi.fn(async (_entryId: string | null) => new Set<string>());
+  const reconcileDeletion = vi.fn(async (_entryId: string | null, _canReconcile?: () => boolean) => new Set<string>());
   const load = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
   runPollEffect(
     (effect: () => () => void) => { cleanup = effect(); },
     "authenticated",
     { current: "authenticated" },
-    { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
+    appState,
     fingerprint,
     pollInFlight,
     fetchTimerState,
@@ -91,10 +110,18 @@ function startPoll(pollInFlight = { current: false }) {
     { current: load },
     vi.fn(),
     () => sessionGeneration,
-    () => 1,
+    () => accountEpoch,
     class AuthRequiredError extends Error {}
   );
-  return { fingerprint, fetchTimerState, reconcileDeletion, load, cleanup, replaceSession: () => { sessionGeneration += 1; } };
+  return {
+    fingerprint, fetchTimerState, reconcileDeletion, load, cleanup,
+    replaceSession: () => { sessionGeneration += 1; },
+    replaceAccount: () => { accountEpoch += 1; },
+    changeAppState: (state: string) => {
+      appState.currentState = state;
+      onAppStateChange?.(state);
+    }
+  };
 }
 
 describe("foreground timer-state reconciliation", () => {
@@ -186,4 +213,66 @@ describe("foreground timer-state reconciliation", () => {
       poll.cleanup?.();
     }
   });
+
+  it.each(["session", "account", "background", "foreground round trip"])(
+    "leaves Undo held when the poll is interrupted during optimistic ID resolution (%s)",
+    async (lifetime) => {
+      const poll = startPoll();
+      const onCommit = vi.fn();
+      const createCoordinator = () => createDeletionCoordinator<
+        { id: string }, { activeEntry: { id: string } }
+      >({ onCommit, onPendingChange: vi.fn(), onRestore: vi.fn() });
+      const owner = createCoordinator();
+      const coordinator = { current: owner };
+      const localEntry = { id: "optimistic-active-timer:account-a" };
+      const prepared = owner.prepare([localEntry], { activeEntry: localEntry })!;
+      owner.activate(prepared.token);
+      let resolveId!: (id: string) => void;
+      const resolveAfterBarrier = vi.fn(() => new Promise<string>((resolve) => { resolveId = resolve; }));
+      const applyCorrelation = vi.fn();
+      poll.reconcileDeletion.mockImplementation(createDeletionReconciler(
+        coordinator,
+        { current: { deferExternalActiveEntry: () => false } },
+        "optimistic-active-timer:",
+        { current: new Map() },
+        resolveAfterBarrier,
+        applyCorrelation
+      ));
+      poll.fetchTimerState.mockResolvedValueOnce({ ...before, activeEntryId: "another-entry-from-account-a" });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(resolveAfterBarrier).toHaveBeenCalledExactlyOnceWith(localEntry.id);
+
+        if (lifetime === "background" || lifetime === "foreground round trip") {
+          poll.changeAppState("background");
+          if (lifetime === "foreground round trip") {
+            poll.changeAppState("active");
+            await vi.advanceTimersByTimeAsync(0);
+          }
+        } else {
+          if (lifetime === "session") poll.replaceSession();
+          else poll.replaceAccount();
+          owner.dispose();
+          const newOwner = createCoordinator();
+          coordinator.current = newOwner;
+          const newEntry = { id: "server-entry-from-account-b" };
+          const next = newOwner.prepare([newEntry], { activeEntry: newEntry })!;
+          newOwner.activate(next.token);
+        }
+        const held = coordinator.current.current();
+        expect(held?.phase).toBe("active");
+        resolveId("server-entry-from-account-a");
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(coordinator.current.current()).toBe(held);
+        expect(onCommit).not.toHaveBeenCalled();
+        expect(applyCorrelation).not.toHaveBeenCalled();
+        expect(poll.load).not.toHaveBeenCalled();
+        expect(poll.fingerprint.current).toBe(before);
+      } finally {
+        poll.cleanup?.();
+        coordinator.current.dispose();
+      }
+    }
+  );
 });

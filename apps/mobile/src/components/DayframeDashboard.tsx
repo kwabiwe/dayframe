@@ -979,7 +979,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function reconcilePendingActiveDeletionAfterQueueBarrier(
-    externalActiveEntryId: string | null
+    externalActiveEntryId: string | null,
+    canReconcile?: () => boolean
   ) {
     const pending = deletionCoordinator.current?.current();
     if (pending) {
@@ -987,6 +988,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         if (!localId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) continue;
         const durableId = optimisticTimerIds.current.get(localId) ??
           await resolveTimerEntryIdAfterQueueBarrier(localId);
+        // A poll can lose its account or foreground lifetime while waiting for the queue.
+        if (canReconcile?.() === false) return new Set<string>();
         const currentPending = deletionCoordinator.current?.current();
         if (
           durableId &&
@@ -1486,6 +1489,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     let consecutiveFailures = 0;
+    let foregroundGeneration = 0;
 
     const schedule = (delay: number) => {
       if (cancelled || AppState.currentState !== "active") return;
@@ -1503,16 +1507,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       timerStatePollInFlight.current = true;
       const sessionGeneration = currentSessionGeneration();
       const accountEpoch = currentMobileAccountEpoch();
+      const startedInForeground = foregroundGeneration;
       const sameSession = () =>
         !cancelled && authStateCurrent.current === "authenticated" &&
         sessionGeneration === currentSessionGeneration() && accountEpoch === currentMobileAccountEpoch();
+      const canReconcile = () => sameSession() && AppState.currentState === "active" &&
+        startedInForeground === foregroundGeneration;
       try {
         const fetched = await fetchTimerState();
-        if (!sameSession() || AppState.currentState !== "active") return;
+        if (!canReconcile()) return;
         const tombstones = await reconcilePendingActiveDeletionAfterQueueBarrier(
-          fetched.activeEntryId
+          fetched.activeEntryId, canReconcile
         );
-        if (!sameSession() || AppState.currentState !== "active") return;
+        if (!canReconcile()) return;
         const next = fetched.activeEntryId && tombstones.has(fetched.activeEntryId)
           ? { ...fetched, activeEntryId: null }
           : fetched;
@@ -1542,8 +1549,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         schedule(0);
-      } else if (timeout) {
-        clearTimeout(timeout);
+      } else {
+        foregroundGeneration += 1;
+        if (timeout) clearTimeout(timeout);
         timeout = null;
       }
     });
