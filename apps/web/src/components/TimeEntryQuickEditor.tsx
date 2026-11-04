@@ -958,12 +958,20 @@ export function TimeEntryQuickEditorPanel({
           <label className="sr-only" htmlFor="time-entry-quick-description">Description</label>
           <div className="time-entry-quick-description-control" ref={descriptionInteractionRef}>
             <InlineTagInput
+              activities={props.mode === "entry" ? props.categories : undefined}
               ariaLabel="Description"
               className="time-entry-quick-tags"
               closeSignal={controller.dismissTagPanelsSignal}
+              completionScope={props.mode === "entry" ? props.entry.id : undefined}
               disabled={controlsDisabled}
               inputId="time-entry-quick-description"
               inputRef={descriptionRef}
+              onActivityChoose={(categoryId, description, _trigger, scope) => {
+                if (props.mode !== "entry" || scope !== props.entry.id) return;
+                controller.updateField("categoryId", categoryId);
+                controller.updateField("description", description);
+                controller.setSuggestionsOpen(false);
+              }}
               onChange={(value) => {
                 controller.updateField("description", value);
                 controller.setSuggestionsOpen(true);
