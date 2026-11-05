@@ -425,7 +425,9 @@ const serialiseReviewMutation = createSerialMutationQueue();
 const listeners = new Set<() => void>();
 
 async function database() {
+  let opened: SQLite.SQLiteDatabase | undefined;
   databasePromise ??= SQLite.openDatabaseAsync(DATABASE_NAME).then(async (db) => {
+    opened = db;
     await db.execAsync(
       "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"
     );
@@ -569,6 +571,11 @@ async function database() {
       new Date().toISOString()
     );
     return db;
+  }).catch(async (error) => {
+    // A failed open or migration must leave sign-out retryable in this process.
+    if (opened) await opened.closeAsync().catch(() => undefined);
+    databasePromise = null;
+    throw error;
   });
   return databasePromise;
 }

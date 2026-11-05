@@ -1838,6 +1838,24 @@ describe("a block that ran into a trip in the Review outbox", () => {
     expect(count("review_mutation_effects")).toBe(1);
   });
 
+  it.each(["open", "initialize"])("can retry logout in the same process after a Review database %s failure", async (phase) => {
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(170),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    const closeAsync = vi.fn(async () => {});
+    const error = new Error("Temporary SQLite failure");
+    if (phase === "open") mocks.open.mockRejectedValueOnce(error);
+    else mocks.open.mockResolvedValueOnce({ ...adapter(), execAsync: vi.fn().mockRejectedValue(error), closeAsync });
+    await reopen();
+
+    await expect(store.clearActiveReviewAccountData({ owner: owner(data) })).rejects.toThrow(error.message);
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(closeAsync).toHaveBeenCalledTimes(phase === "initialize" ? 1 : 0);
+    await store.clearActiveReviewAccountData({ owner: owner(data) });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+
   it("saves Keep it as ignore_once, which ends nothing", async () => {
     const { data, clash } = clashBootstrap();
     await store.processReviewBootstrap(data);
