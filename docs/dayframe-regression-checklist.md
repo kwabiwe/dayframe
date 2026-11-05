@@ -191,6 +191,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   donut or logged/covered summary; earlier days show their covered total in "Earlier this week"
   (overlaps once, as that day's hero showed: 09:00–11:00 plus 10:00–12:00 yesterday reads 3h; an
   overnight block splits between its days; a clock-change day reads its real length).
+- Today layout during cached and uncached launch and live refresh: introduce and clear the first trip and the first check independently. Quick Start and the same visible history row hold position at default and maximum text size with normal and Reduce Motion. Verify the chip still opens the first check and empty areas add no VoiceOver stops.
 - Where today went (PRD D15) closes the Today ribbon card under one hairline:
   a 12-point bar, largest first, and a 2×2 legend whose durations add up to
   the hero (an Admin block 09:00–10:00 and a Work block running since 09:30
