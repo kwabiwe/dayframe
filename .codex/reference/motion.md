@@ -180,7 +180,7 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Entrance/update/exit: no nudge entrance on first paint, hydration or a cached launch; a nudge that appears later (the first item arrives) fades in; a count change updates the text in place; the last decision fades it out inside the fixed check area.
 - Interruption: a count that drops to zero and returns before the fade completes remounts the same card with a fresh fade; nothing waits on a timer.
 - Async outcome: the nudge follows the cached presentation or the bootstrap count; it never optimistically changes on its own.
-- Accessibility: Reduce Motion shortens the fades (90/70 ms) and keeps the layout settle immediate; the goal frame is one VoiceOver summary below the date header; the nudge is one button with an "Opens Review" hint ("Opens Review on earlier days" when it opens Earlier).
+- Accessibility: Reduce Motion shows and hides Today's check chip in place. The goal frame is one VoiceOver summary below the date header. The chip is one button that opens Calendar List at the first check.
 - Today · Earlier (14 Oct 2026): the "3 today · 9 earlier" line changes text in place like the count (no motion of its own), and the nudge opens Review through the native push with its `segment` parameter, where the control's thumb is placed without motion. The hatched count chip on an Earlier this week row appears and goes in place with the row's data (no motion of its own).
 
 ## Today's blocks rows (Blocks parity step 2a-2a)
