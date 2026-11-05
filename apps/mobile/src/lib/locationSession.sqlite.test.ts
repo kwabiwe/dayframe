@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   nativeCalls: [] as string[],
   appState: { currentState: "active" },
   beforeRun: null as ((sql: string) => Promise<void>) | null,
+  reviewCleanupFailure: false,
   cleanupFailure: false,
   onRemove: null as ((key: string) => Promise<void>) | null,
   onSet: null as ((key: string, value: string) => Promise<void>) | null
@@ -90,6 +91,9 @@ function adapterFor(database: DatabaseSync) {
     getAllAsync: async (sql: string, ...args: never[]) => database.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => {
       if (database === db && h.beforeRun) await h.beforeRun(sql);
+      if (h.reviewCleanupFailure && sql.startsWith("delete from review_mutation_outbox where account_key = ?")) {
+        throw new Error("Synthetic Review cleanup failure");
+      }
       return database.prepare(sql).run(...args);
     },
     withExclusiveTransactionAsync: async (fn: (t: unknown) => Promise<void>) => {
@@ -123,7 +127,7 @@ async function signInThroughApi(owner: typeof A, places: unknown[] = [], enable 
 
 beforeEach(async () => {
   vi.mocked((await import("expo-location")).hasStartedLocationUpdatesAsync).mockResolvedValue(true);
-  h.beforeRun = null; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
+  h.beforeRun = null; h.reviewCleanupFailure = false; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
   vi.resetModules(); h.tasks.clear(); h.asyncStore.clear(); h.secure.clear(); h.nativeSignals = []; h.nativeCalls.length = 0; h.dbs.clear(); calls.length = 0;
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
   db = new DatabaseSync(":memory:");
@@ -157,6 +161,24 @@ const localTables = ["location_evidence_journal", "location_upload_outbox", "loc
 const counts = (owner = A) => localTables.map(table => n(table, key(owner)));
 
 describe("Location logout and authentication — real API and SQLite", () => {
+  it("keeps the session retryable when the departing owner's Review cleanup fails", async () => {
+    await signInThroughApi(A, [place]);
+    const review = await import("./reviewSyncStore");
+    await review.activateReviewAccount({ ...A, workspaceName: "A" });
+    const before = await session.getSessionToken();
+    h.reviewCleanupFailure = true;
+    await expect(api.logout()).rejects.toThrow("Synthetic Review cleanup failure");
+    expect(await session.getSessionToken()).toBe(before);
+    expect(await review.getActiveReviewAccountIdentity()).toMatchObject(A);
+    expect(calls).not.toContain("/api/auth/logout");
+
+    h.reviewCleanupFailure = false;
+    await api.logout();
+    expect(await session.getSessionToken()).toBeNull();
+    expect(await review.getActiveReviewAccountIdentity()).toBeNull();
+    expect(calls.filter((path) => path === "/api/auth/logout")).toHaveLength(1);
+  });
+
   it.each(["enabled", "opted out", "no binding"])("explicit logout deletes the captured owner with %s capture and is idempotent (E1/E3/P2)", async state => {
     await signInThroughApi(A, [place]);
     await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });

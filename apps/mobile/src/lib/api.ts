@@ -835,14 +835,13 @@ export async function logout() {
     // failed delete fails logout while still signed in (Codex r2 on #552).
     await purgeStorageQuarantineContents({ removal: "logout" });
     requireCurrent();
+    // Finish removing the departing owner's unconfirmed Review choices before revoking its session.
+    const { clearActiveReviewAccountData } = await import("./reviewSyncStore");
+    await clearActiveReviewAccountData({ owner: logoutOwner, requireCurrent });
+    requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
       method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
-    }).catch(() => undefined);
-    requireCurrent();
-    await import("./reviewSyncStore").then(({ clearActiveReviewAccountData }) => {
-      requireCurrent();
-      return clearActiveReviewAccountData();
     }).catch(() => undefined);
     requireCurrent();
     // Location timeline corrections the phone still holds leave with the account (step 12).

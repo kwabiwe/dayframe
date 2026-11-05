@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syntheticId, syntheticReviewBootstrap, syntheticReviewEvidence } from "../../../../scripts/fixtures/review-performance";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "", interleave: [] as Array<{ match: string; run: () => void | Promise<void>; after?: boolean }> }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "", separateTransactions: false, interleave: [] as Array<{ match: string; run: () => void | Promise<void>; after?: boolean }> }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("./backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
@@ -35,21 +35,34 @@ async function interleaved<Result>(sql: string, query: () => Result) {
   if (step?.after) await step.run();
   return result;
 }
-function adapter() {
-  const value = {
-    execAsync: async (sql: string) => { db.exec(sql); },
-    getFirstAsync: (sql: string, ...args: never[]) => interleaved(sql, () => db.prepare(sql).get(...args) ?? null),
-    getAllAsync: (sql: string, ...args: never[]) => interleaved(sql, () => db.prepare(sql).all(...args)),
+function queries(connection: DatabaseSync) {
+  return {
+    execAsync: async (sql: string) => { connection.exec(sql); },
+    getFirstAsync: (sql: string, ...args: never[]) => interleaved(sql, () => connection.prepare(sql).get(...args) ?? null),
+    getAllAsync: (sql: string, ...args: never[]) => interleaved(sql, () => connection.prepare(sql).all(...args)),
     runAsync: async (sql: string, ...args: never[]) => {
       if (mocks.failItem && sql.includes("insert into review_mutation_effects") && args.includes(mocks.failItem as never)) throw new Error("simulated disk failure");
-      return db.prepare(sql).run(...args);
-    },
-    withExclusiveTransactionAsync: async (fn: (transaction: unknown) => Promise<void>) => {
-      db.exec("BEGIN IMMEDIATE");
-      try { await fn(value); db.exec("COMMIT"); } catch (error) { db.exec("ROLLBACK"); throw error; }
+      return connection.prepare(sql).run(...args);
     }
   };
-  return value;
+}
+function adapter() {
+  return {
+    ...queries(db),
+    withExclusiveTransactionAsync: async (fn: (transaction: unknown) => Promise<void>) => {
+      // Expo's exclusive transaction opens another connection without the main connection's PRAGMAs.
+      const connection = mocks.separateTransactions
+        ? new DatabaseSync(join(directory, "review.db"), { enableForeignKeyConstraints: false })
+        : db;
+      try {
+        connection.exec("BEGIN IMMEDIATE");
+        try { await fn(queries(connection)); connection.exec("COMMIT"); }
+        catch (error) { connection.exec("ROLLBACK"); throw error; }
+      } finally {
+        if (connection !== db) connection.close();
+      }
+    }
+  };
 }
 const count = (table: string) => Number(db.prepare(`select count(*) as n from ${table}`).get()!.n);
 async function reopen() {
@@ -57,7 +70,7 @@ async function reopen() {
   store = await import("./reviewSyncStore");
 }
 beforeEach(async () => {
-  vi.resetAllMocks(); mocks.failItem = ""; mocks.interleave = [];
+  vi.resetAllMocks(); mocks.failItem = ""; mocks.interleave = []; mocks.separateTransactions = false;
   directory = mkdtempSync(join(tmpdir(), "dayframe-review-test-"));
   db = new DatabaseSync(join(directory, "review.db"));
   mocks.open.mockImplementation(async () => adapter());
@@ -881,7 +894,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -889,7 +902,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
   });
@@ -898,7 +911,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_source_open_observation; pragma user_version=7;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
     expect(count("review_source_open_observation")).toBe(0);
     expect(count("review_mutation_outbox")).toBe(1);
   });
@@ -908,7 +921,7 @@ describe("Review real SQLite transactions", () => {
       create unique index review_mutation_item_active_idx on review_mutation_outbox(account_key, review_item_id); pragma user_version=8;`);
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
     const indexes = db.prepare("select name, sql from sqlite_master where type = 'index' and name like 'review_mutation_%_idx'").all() as Array<{ name: string; sql: string }>;
     expect(indexes.find((index) => index.name === "review_mutation_item_active_idx")?.sql).toContain("action_kind <> 'save_place'");
     expect(indexes.find((index) => index.name === "review_mutation_save_place_idx")?.sql).toContain("action_kind = 'save_place'");
@@ -1753,6 +1766,76 @@ describe("a block that ran into a trip in the Review outbox", () => {
     expect(await store.listReviewSyncIssues()).toEqual([]);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id)).toContain(clash.id);
     expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([]);
+  });
+
+  it.each(["sign out", "replacement bootstrap", "replacement activation"])("does not replay End it after %s on a connection without cascades", async (transition) => {
+    mocks.separateTransactions = true;
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(165),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toHaveLength(1);
+
+    const replacement = { userId: syntheticId(901), workspaceId: syntheticId(902), workspaceName: "Replacement" };
+    if (transition === "sign out") await store.clearActiveReviewAccountData();
+    else if (transition === "replacement bootstrap") {
+      await store.processReviewBootstrap({ ...data, user: { ...data.user, id: replacement.userId },
+        workspace: { ...data.workspace, id: replacement.workspaceId }, reviewItems: [] });
+    } else await store.activateReviewAccount(replacement);
+
+    await reopen();
+    const returned = await store.processReviewBootstrap(data);
+    expect(returned.reviewItems.map((item) => item.id)).toContain(clash.id);
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toEqual([]);
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_effects")).toBe(0);
+  });
+
+  it("removes v9 orphaned account data and preserves a still-owned Review choice on upgrade", async () => {
+    mocks.separateTransactions = true;
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(166),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    // Reproduce the old exclusive transaction's parent-only delete in an existing database.
+    const legacyConnection = new DatabaseSync(join(directory, "review.db"), { enableForeignKeyConstraints: false });
+    try {
+      legacyConnection.exec("delete from review_account_context; delete from review_store_metadata where key = 'active_account'; pragma user_version = 9");
+    } finally {
+      legacyConnection.close();
+    }
+    const replacement = { ...data, user: { ...data.user, id: syntheticId(901) }, workspace: { ...data.workspace, id: syntheticId(902) } };
+    await store.processReviewBootstrap(replacement);
+    await store.enqueueReviewMutation({ bootstrap: replacement, item: clash, clientMutationId: syntheticId(167),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+    await store.enqueueReviewMutation({ bootstrap: replacement, item: replacement.reviewItems[1], clientMutationId: syntheticId(169),
+      mutation: { action: "save_place", name: "Synthetic pool", radiusMeters: 110, categoryId: null, suggestVisits: true, autoLog: false } });
+    expect(count("review_mutation_outbox")).toBe(3);
+
+    await reopen();
+    expect(await store.readPendingTimerTripClashEnds(owner(replacement))).toHaveLength(1);
+    expect(db.prepare("select client_mutation_id from review_mutation_outbox order by client_mutation_id").all())
+      .toEqual([syntheticId(167), syntheticId(169)].map((client_mutation_id) => ({ client_mutation_id })));
+    expect(db.prepare("select client_mutation_id from review_mutation_effects").all()).toEqual([{ client_mutation_id: syntheticId(167) }]);
+    expect(db.prepare("pragma foreign_key_check").all()).toEqual([]);
+  });
+
+  it("keeps a Review choice when logout belongs to another account or loses its session before commit", async () => {
+    mocks.separateTransactions = true;
+    const { data, clash } = clashBootstrap();
+    await store.processReviewBootstrap(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item: clash, clientMutationId: syntheticId(168),
+      mutation: { action: "accept", expectedProposalHash: HASH } });
+
+    await store.clearActiveReviewAccountData({ owner: { workspaceId: syntheticId(901), userId: syntheticId(902) } });
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toHaveLength(1);
+    const requireCurrent = vi.fn().mockImplementationOnce(() => {}).mockImplementationOnce(() => {})
+      .mockImplementation(() => { throw new Error("Session changed"); });
+    await expect(store.clearActiveReviewAccountData({ owner: owner(data), requireCurrent })).rejects.toThrow("Session changed");
+    expect(await store.readPendingTimerTripClashEnds(owner(data))).toHaveLength(1);
+    expect(count("review_mutation_effects")).toBe(1);
   });
 
   it("saves Keep it as ignore_once, which ends nothing", async () => {

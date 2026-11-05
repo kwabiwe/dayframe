@@ -290,6 +290,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   mutation as actionable. Session expiry preserves the same account's mutations as
   sign-in-required; confirmed logout warns with the exact unsynchronised count
   and clears only that active account's Review cache/outbox.
+- On a signed staging iPhone with disposable accounts, queue End it offline and confirm Sign out while still offline. Relaunch, sign in to a second account, then sign back into the first. Check that the second account shows none of the first account's data. Verify that the first account's original question remains open and staging receives no POST for the discarded answer.
 - Review retry coverage includes network/DNS failure, timeout, 408, 429, 5xx,
   temporary lock contention, legacy overlap responses, and a lost success
   response. Permanent category, technical duplicate, supersession, and
