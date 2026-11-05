@@ -44,6 +44,7 @@ export function ReportRangeSwitch({
   onChoose,
   onMore,
   reduceMotion,
+  stretch = false,
   theme,
 }: {
   choice: ReportRangeChoice;
@@ -54,6 +55,7 @@ export function ReportRangeSwitch({
   onChoose: (value: "week" | "month") => void;
   onMore: () => void;
   reduceMotion: boolean;
+  stretch?: boolean;
   theme: MobileTheme;
 }) {
   const selected = choice === "week" ? 0 : choice === "month" ? 1 : 2;
@@ -91,7 +93,7 @@ export function ReportRangeSwitch({
       accessibilityState={{ selected: selected === index }}
       onLayout={measure(index)}
       onPress={onPress}
-      style={styles.segment}
+      style={[styles.segment, stretch && styles.stretchedSegment]}
       testID={`reports-range-${index === 0 ? "week" : index === 1 ? "month" : "more"}`}
     >
       <Text
@@ -107,7 +109,7 @@ export function ReportRangeSwitch({
   );
   return (
     // Prototype .seg: an inset track with a lighter thumb in both themes.
-    <View style={[styles.switch, { backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted }]}>
+    <View style={[styles.switch, stretch && styles.stretchedSwitch, { backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted }]}>
       <Reanimated.View
         pointerEvents="none"
         style={[styles.thumb, { backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.surface }, thumb]}
@@ -418,9 +420,11 @@ export function ReportGoalStreak({
 
 const styles = StyleSheet.create({
   switch: { alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", borderRadius: 999, padding: 3 },
+  stretchedSwitch: { alignSelf: "stretch" },
   thumb: { position: "absolute", top: 3, bottom: 3, left: 0, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18, shadowRadius: 2 },
   // 10-point sides so the switch fits beside "Reports" and the filter on one row (UIA-002).
-  segment: { flexShrink: 1, minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
+  segment: { minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
+  stretchedSegment: { flex: 1, paddingHorizontal: 4 },
   segmentLabel: { fontSize: 14, fontWeight: "700" },
   hero: { gap: 6 },
   loadingFrame: { gap: 14 },

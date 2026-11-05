@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   haptic: vi.fn(),
   announce: vi.fn(),
   fontScale: 1,
+  width: 390,
   subscriber: null as null | (() => void),
 }));
 vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
@@ -37,7 +38,7 @@ vi.mock("react-native", () => ({
   findNodeHandle: () => 1,
   useWindowDimensions: () => ({
     fontScale: mocks.fontScale,
-    width: 390,
+    width: mocks.width,
     height: 844,
   }),
 }));
@@ -187,7 +188,11 @@ describe("Revision 3 Reports owner", () => {
       maxFontSizeMultiplier: 1.5,
     });
     const rangeSwitch = () => tree.root.findByType("ReportRangeSwitch" as never);
-    // More keeps its word; the hero names the range, so the header never reflows (UIA-002).
+    const header = () => tree.root.findByProps({ testID: "reports-header" }).props.style;
+    const initialStyle = header();
+    expect(initialStyle).toContainEqual(expect.objectContaining({ flexDirection: "column" }));
+    expect(rangeSwitch().props.stretch).toBe(true);
+    // The viewport owns the header layout. Changing the range keeps the same controls.
     expect(rangeSwitch().props.moreLabel).toBe("More");
     expect(rangeSwitch().props.moreAccessibilityLabel).toBe(
       "Choose report dates, Today",
@@ -196,8 +201,20 @@ describe("Revision 3 Reports owner", () => {
     expect(rangeSwitch().props.moreLabel).not.toContain("–");
     expect(rangeSwitch().props.moreAccessibilityLabel).toContain("–");
     expect(rangeSwitch().props.moreAccessibilityLabel).toContain("2026");
+    expect(header()).toEqual(initialStyle);
+    expect(rangeSwitch().props.stretch).toBe(true);
     act(() => tree.unmount());
   });
+  it.each([[320, true], [375, false], [430, false]])(
+    "chooses the default-text header on the first render at %i points",
+    async (width, stretch) => {
+      mocks.width = width;
+      const tree = await render();
+      const rangeSwitch = tree.root.findByType("ReportRangeSwitch" as never);
+      expect(rangeSwitch.props.stretch).toBe(stretch);
+      act(() => tree.unmount());
+    },
+  );
   it("preserves seconds after Stop while replacing a cached active contribution", async () => {
     const startedAt = new Date(nowMs - 3600000).toISOString();
     mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
@@ -274,6 +291,7 @@ describe("Revision 3 Reports owner", () => {
       .mockReset()
       .mockImplementation(async (input: ReportSummaryRequest) => result(input));
     mocks.fontScale = 1;
+    mocks.width = 390;
   });
   it("renders selected-only slices and preserves all/some/none recovery", async () => {
     const tree = await render();

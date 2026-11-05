@@ -175,7 +175,8 @@ function ReportsTabView({
   const reportsOwnerActive = useRef(isFocused && foreground);
   const filterRef = useRef<View>(null);
   const calendarRef = useRef<View>(null);
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width } = useWindowDimensions();
+  const stackedHeader = fontScale > 1 || width < 375;
   const { reduceMotion, resolved } = useResolvedReduceMotionPreference();
   const focusedNow = useRef(nowMs);
   activeFilterPresentation.current = filterPresentation;
@@ -670,9 +671,11 @@ function ReportsTabView({
         style={s.screen}
       >
         {measuredNumbers.probe}
-        {/* One row (UIA-002): the title, then the filter and Week · Month · More; on a narrow
-            screen or with large text the controls wrap under the title instead of shrinking. */}
-        <View style={s.titleRow}>
+        {/* Resolve the large-text layout before the range or its data can change. */}
+        <View
+          style={[s.titleRow, stackedHeader && s.stackedTitleRow]}
+          testID="reports-header"
+        >
           <Pressable
             accessible={false}
             onPress={() => setTooltipOutsidePress((value) => value + 1)}
@@ -724,24 +727,25 @@ function ReportsTabView({
                 </Text>
               ) : null}
             </Pressable>
-            <View style={s.switchSlot}>
-            <ReportRangeSwitch
-              choice={choice}
-              moreAccessibilityLabel={`Choose report dates, ${range.title}`}
-              moreLabel={moreLabel}
-              moreRef={calendarRef}
-              onChoose={(value) => {
-                if (value === choice) return;
-                playHaptic("tick");
-                setTooltipOutsidePress((current) => current + 1);
-                announceHero.current = true;
-                setFocusedDayKey(null);
-                setChoice(value);
-              }}
-              onMore={openRanges}
-              reduceMotion={reduceMotion}
-              theme={theme}
-            />
+            <View style={stackedHeader && s.stretchedSwitchSlot}>
+              <ReportRangeSwitch
+                choice={choice}
+                moreAccessibilityLabel={`Choose report dates, ${range.title}`}
+                moreLabel={moreLabel}
+                moreRef={calendarRef}
+                onChoose={(value) => {
+                  if (value === choice) return;
+                  playHaptic("tick");
+                  setTooltipOutsidePress((current) => current + 1);
+                  announceHero.current = true;
+                  setFocusedDayKey(null);
+                  setChoice(value);
+                }}
+                onMore={openRanges}
+                reduceMotion={reduceMotion}
+                stretch={stackedHeader}
+                theme={theme}
+              />
             </View>
           </View>
         </View>
@@ -869,10 +873,10 @@ function ReportsTabView({
 const s = StyleSheet.create({
   screen: { gap: 14 },
   titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 10 },
+  stackedTitleRow: { flexDirection: "column", flexWrap: "nowrap", alignItems: "stretch" },
   titlePress: { flexGrow: 1, flexShrink: 0 },
-  // The filter keeps its 44 points; the switch takes what is left and its labels shorten first.
-  headControls: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%", flexShrink: 1, minWidth: 0 },
-  switchSlot: { flexShrink: 1, minWidth: 0 },
+  headControls: { flexDirection: "row", alignItems: "center", gap: 8 },
+  stretchedSwitchSlot: { flex: 1, minWidth: 0 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
   outsideDismissSurface: { gap: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },

@@ -74,7 +74,7 @@ describe("Blocks Reports pieces", () => {
     expect(more.props.accessibilityLabel).toBe("Choose report dates, Today");
     expect(tree.root.findByProps({ testID: "reports-range-label" }).props.children).toBe("Today");
     // Every segment is a 44-point target.
-    expect(week.props.style.minHeight).toBe(44);
+    expect(week.props.style).toContainEqual(expect.objectContaining({ minHeight: 44 }));
     act(() => week.props.onPress());
     act(() => tree.root.findByProps({ testID: "reports-range-month" }).props.onPress());
     act(() => more.props.onPress());
