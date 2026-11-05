@@ -656,6 +656,7 @@ describe("Review real SQLite transactions", () => {
     });
   });
   it("retires an accepted source with exact result proof outside the Dashboard cache", async () => {
+    mocks.separateTransactions = true;
     const data = bootstrap();
     const item = data.reviewItems[0];
     const entryId = syntheticId(996);
@@ -679,6 +680,7 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(1);
     await store.cacheReviewPresentation({ owner, response: result });
     expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_effects")).toBe(0);
     const canonical = {
       ...data.entries[1],
       id: entryId,
@@ -860,6 +862,7 @@ describe("Review real SQLite transactions", () => {
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).toContain(item.id);
   });
   it("repairs a server-rejected split that an older client queued for a commute", async () => {
+    mocks.separateTransactions = true;
     const data = bootstrap();
     const visit = data.reviewItems[2];
     await store.enqueueReviewMutation({
@@ -877,8 +880,53 @@ describe("Review real SQLite transactions", () => {
         : item)
     });
     expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_effects")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id)).toContain(visit.id);
   });
+
+  it("allows a new answer after discarding a rejection on a connection without cascades", async () => {
+    mocks.separateTransactions = true;
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const initialId = syntheticId(2090);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: initialId, mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValueOnce({ status: 422, json: async () => ({ code: "invalid_action", error: "Synthetic rejection" }) });
+    await store.synchroniseReviewMutations();
+    expect(await store.discardReviewSyncIssue(initialId)).toBe(true);
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_effects")).toBe(0);
+    const fresh = await store.processReviewBootstrap(data);
+    expect(fresh.reviewItems.map(({ id }) => id)).toContain(item.id);
+    await expect(store.enqueueReviewMutation({
+      bootstrap: fresh, item, clientMutationId: syntheticId(2091), mutation: { action: "accept" }
+    })).resolves.toBeDefined();
+  });
+
+  it("clears v10 effects left behind by a deleted mutation while preserving live queued work", async () => {
+    mocks.separateTransactions = true;
+    const data = bootstrap();
+    const staleId = syntheticId(2092);
+    const liveId = syntheticId(2093);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: staleId, mutation: { action: "accept" } });
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[1], clientMutationId: liveId, mutation: { action: "accept" } });
+    const legacy = new DatabaseSync(join(directory, "review.db"), { enableForeignKeyConstraints: false });
+    try {
+      legacy.exec("drop trigger if exists review_mutation_retire_effects; pragma user_version = 10");
+      legacy.prepare("delete from review_mutation_outbox where client_mutation_id = ?").run(staleId);
+    } finally {
+      legacy.close();
+    }
+    expect(count("review_mutation_effects")).toBe(2);
+
+    await reopen();
+    const fresh = await store.processReviewBootstrap(data);
+    expect(fresh.reviewItems.map(({ id }) => id)).toContain(data.reviewItems[0].id);
+    expect(fresh.reviewItems.map(({ id }) => id)).not.toContain(data.reviewItems[1].id);
+    expect(db.prepare("select client_mutation_id from review_mutation_effects").all()).toEqual([{ client_mutation_id: liveId }]);
+    expect(db.prepare("select client_mutation_id from review_mutation_outbox").all()).toEqual([{ client_mutation_id: liveId }]);
+    expect(db.prepare("pragma foreign_key_check").all()).toEqual([]);
+  });
+
   it("keeps intent pending without dispatch when the session changes during local preparation", async () => {
     await store.enqueueReviewMutation(mergeInput());
     mocks.current.mockReturnValue(false);
@@ -894,7 +942,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(11);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -902,7 +950,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(11);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
   });
@@ -911,7 +959,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_source_open_observation; pragma user_version=7;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(11);
     expect(count("review_source_open_observation")).toBe(0);
     expect(count("review_mutation_outbox")).toBe(1);
   });
@@ -921,7 +969,7 @@ describe("Review real SQLite transactions", () => {
       create unique index review_mutation_item_active_idx on review_mutation_outbox(account_key, review_item_id); pragma user_version=8;`);
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(10);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(11);
     const indexes = db.prepare("select name, sql from sqlite_master where type = 'index' and name like 'review_mutation_%_idx'").all() as Array<{ name: string; sql: string }>;
     expect(indexes.find((index) => index.name === "review_mutation_item_active_idx")?.sql).toContain("action_kind <> 'save_place'");
     expect(indexes.find((index) => index.name === "review_mutation_save_place_idx")?.sql).toContain("action_kind = 'save_place'");

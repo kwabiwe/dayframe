@@ -48,7 +48,7 @@ import { isLocationReviewItem } from "./review";
 import { withJsTask } from "./jsTasks";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 10;
+const DATABASE_VERSION = 11;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 // Effects must be removed before their outbox row. Expo opens a separate SQLite connection for
 // exclusive transactions, so the main connection's foreign-key cascades do not cover this work.
@@ -558,6 +558,22 @@ async function database() {
               select 1 from review_account_context where account_key = ${table}.account_key
             )`);
           }
+        }
+        if ((version?.user_version ?? 0) < 11) {
+          // Enforce effect retirement even on Expo's connections without foreign keys enabled.
+          await transaction.execAsync(`
+            delete from review_mutation_effects where not exists (
+              select 1 from review_mutation_outbox
+              where client_mutation_id = review_mutation_effects.client_mutation_id
+                and account_key = review_mutation_effects.account_key
+            );
+            create trigger if not exists review_mutation_retire_effects
+            after delete on review_mutation_outbox
+            begin
+              delete from review_mutation_effects
+              where client_mutation_id = old.client_mutation_id and account_key = old.account_key;
+            end;
+          `);
         }
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
@@ -2606,10 +2622,6 @@ async function settleResolvedElsewhere(
         source.status, checkedAt
       );
     }
-    await transaction.runAsync(
-      "delete from review_mutation_effects where client_mutation_id = ? and account_key = ?",
-      row.client_mutation_id, row.account_key
-    );
     await transaction.runAsync(
       "delete from review_mutation_outbox where client_mutation_id = ? and account_key = ?",
       row.client_mutation_id, row.account_key
