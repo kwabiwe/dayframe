@@ -7,6 +7,7 @@ import { mobileTextProps } from "../../lib/mobileTypography";
 
 /** How long after its latest observation a journey still shows as in progress (the engine's continuity limit). */
 export const OPEN_TRIP_FRESH_MS = 12 * 60_000;
+export const TODAY_OPEN_TRIP_LINE_HEIGHT = 19;
 
 /** The journey to show on Today, or null when there is none or the phone has not been heard from since. */
 export function freshOpenTrip(openTrip: MobileOpenTrip | null | undefined, nowMs: number): MobileOpenTrip | null {
@@ -37,7 +38,7 @@ export function TodayOpenTripLine({
       testID="today-open-trip"
     >
       <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.openTrip} size={16} />
-      <Text {...mobileTextProps("metadata")} style={[styles.text, { color: theme.textMuted }]}>
+      <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[styles.text, { color: theme.textMuted }]}>
         <Text style={[styles.lead, { color: theme.textSecondary }]}>Travelling since {since}</Text>
         {" · logs when you arrive"}
       </Text>
@@ -47,6 +48,6 @@ export function TodayOpenTripLine({
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, minHeight: 24 },
-  text: { flexShrink: 1, fontSize: 14, lineHeight: 19 },
+  text: { flexShrink: 1, fontSize: 14, lineHeight: TODAY_OPEN_TRIP_LINE_HEIGHT },
   lead: { fontWeight: "600" },
 });

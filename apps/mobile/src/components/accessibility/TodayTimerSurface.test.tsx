@@ -130,17 +130,24 @@ function flatStyle(style: unknown): Record<string, unknown> {
 }
 
 describe("TodayTimerSurface (Blocks)", () => {
-  it("adds one quiet Travelling since line under the card while a journey is in progress (location v4 step 5)", () => {
+  it("keeps the same trip area through arrival, refresh and disappearance", () => {
     const openTrip = { startedAt: "2026-10-22T13:44:00.000Z", lastObservedAt: "2026-10-22T14:18:00.000Z", fromPlaceId: null, travelMode: null };
     const { tree } = render(props({ active: running, runningActivityId: "work", openTrip }));
     const slot = tree.root.findByProps({ testID: "today-timer-slot" });
-    const line = slot.findByProps({ testID: "today-open-trip-slot" });
+    const reserve = slot.findByProps({ testID: "today-open-trip-reserve" });
+    const height = flatStyle(reserve.props.style).height;
+    expect(height).toBeGreaterThan(0);
+    const line = reserve.findByProps({ testID: "today-open-trip-slot" });
     // First paint never animates in; it leaves with the card fade.
     expect(line.props.entering).toBeUndefined();
     expect(line.props.exiting).toBeDefined();
     expect(line.findByProps({ testID: "today-open-trip" }).props.accessibilityLabel).toMatch(/^Travelling since \d{2}:\d{2}\. Logs when you arrive\.$/);
     act(() => tree.update(<TodayTimerSurface {...props({ active: running, runningActivityId: "work", openTrip: null })} />));
-    expect(tree.root.findAllByProps({ testID: "today-open-trip-slot" })).toHaveLength(0);
+    expect(reserve.findAllByProps({ testID: "today-open-trip-slot" })).toHaveLength(0);
+    expect(flatStyle(reserve.props.style).height).toBe(height);
+    act(() => tree.update(<TodayTimerSurface {...props({ active: running, runningActivityId: "work", openTrip })} />));
+    expect(reserve.findByProps({ testID: "today-open-trip-slot" }).props.entering).toBeDefined();
+    expect(flatStyle(reserve.props.style).height).toBe(height);
     act(() => tree.unmount());
     // Reduce Motion: no presence animation either way.
     const reduced = render(props({ active: null, openTrip, reduceMotion: true }));

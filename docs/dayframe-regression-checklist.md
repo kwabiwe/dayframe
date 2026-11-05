@@ -186,6 +186,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   goal hour filled in time order, the percentage capped at 100 while the total
   keeps counting. The default goal is eight hours when the account has none.
 - Today's "N to check today" chip (it replaced the Review nudge in location v4 step 14) counts today's "?" and opens Calendar › List at the first; answering the last one there removes it at once, online or offline. Earlier this week rows of days with open Review moments show a small hatched
+- Today layout during cached and uncached launch and live refresh: introduce and clear the first trip and the first check independently. Quick Start and the same visible history row hold position at default and maximum text size with normal and Reduce Motion. Verify the chip still opens the first check and empty areas add no VoiceOver stops.
   count chip before the total, and VoiceOver adds "2 moments to review" to the row. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
   donut or logged/covered summary; earlier days show their covered total in "Earlier this week"
