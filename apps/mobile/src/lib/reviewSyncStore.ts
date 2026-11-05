@@ -48,8 +48,21 @@ import { isLocationReviewItem } from "./review";
 import { withJsTask } from "./jsTasks";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 9;
+const DATABASE_VERSION = 10;
 const ACTIVE_ACCOUNT_KEY = "active_account";
+// Effects must be removed before their outbox row. Expo opens a separate SQLite connection for
+// exclusive transactions, so the main connection's foreign-key cascades do not cover this work.
+const REVIEW_ACCOUNT_TABLES = [
+  "review_mutation_effects",
+  "review_mutation_outbox",
+  "review_item_cache",
+  "review_category_cache",
+  "dashboard_snapshot_cache",
+  "location_review_evidence_cache",
+  "review_presentation_context",
+  "review_presentation_terminal_source",
+  "review_source_open_observation"
+] as const;
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
 const SETTLED_ELSEWHERE_COUNT_KEY = "settled_elsewhere_count";
@@ -412,7 +425,9 @@ const serialiseReviewMutation = createSerialMutationQueue();
 const listeners = new Set<() => void>();
 
 async function database() {
+  let opened: SQLite.SQLiteDatabase | undefined;
   databasePromise ??= SQLite.openDatabaseAsync(DATABASE_NAME).then(async (db) => {
+    opened = db;
     await db.execAsync(
       "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"
     );
@@ -530,11 +545,20 @@ async function database() {
             );
           `);
         }
-        await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
+        if ((version?.user_version ?? 0) < 5) await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
         if ((version?.user_version ?? 0) < 7) await transaction.execAsync(REVIEW_PRESENTATION_V7_SQL);
         await transaction.execAsync(REVIEW_OBSERVATION_V8_SQL);
         if ((version?.user_version ?? 0) < 9) await transaction.execAsync(REVIEW_SAVE_PLACE_V9_SQL);
+        // A prior sign-out or replacement may have deleted the account but left its children.
+        // Remove those orphans before login can recreate the parent and replay an old choice.
+        if ((version?.user_version ?? 0) < 10) {
+          for (const table of REVIEW_ACCOUNT_TABLES) {
+            await transaction.runAsync(`delete from ${table} where not exists (
+              select 1 from review_account_context where account_key = ${table}.account_key
+            )`);
+          }
+        }
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -547,6 +571,11 @@ async function database() {
       new Date().toISOString()
     );
     return db;
+  }).catch(async (error) => {
+    // A failed open or migration must leave sign-out retryable in this process.
+    if (opened) await opened.closeAsync().catch(() => undefined);
+    databasePromise = null;
+    throw error;
   });
   return databasePromise;
 }
@@ -599,6 +628,14 @@ async function activeAccount(transaction?: SQLite.SQLiteDatabase) {
   );
 }
 
+async function removeReviewAccountData(transaction: SQLite.SQLiteDatabase, key: string) {
+  for (const table of REVIEW_ACCOUNT_TABLES) {
+    await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
+  }
+  await transaction.runAsync("delete from review_account_context where account_key = ?", key);
+  await transaction.runAsync("delete from review_store_metadata where key like ?", `%:${key}`);
+}
+
 export async function getActiveReviewAccountIdentity() {
   const account = await activeAccount();
   return account
@@ -647,14 +684,7 @@ async function processReviewBootstrapNow(bootstrap: MobileBootstrap) {
         resetProcessReviewDiagnostics();
       }
       if (previousAccount && previousAccount.account_key !== key) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          previousAccount.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${previousAccount.account_key}`
-        );
+        await removeReviewAccountData(transaction, previousAccount.account_key);
       }
       await transaction.runAsync(
         `insert into review_account_context (
@@ -780,14 +810,7 @@ export async function activateReviewAccount(input: {
         resetProcessReviewDiagnostics();
       }
       if (previousAccount && previousAccount.account_key !== key) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          previousAccount.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${previousAccount.account_key}`
-        );
+        await removeReviewAccountData(transaction, previousAccount.account_key);
       }
       await transaction.runAsync(
         `insert into review_account_context (
@@ -2935,27 +2958,27 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
   return removed;
 }
 
-export async function clearActiveReviewAccountData() {
+export async function clearActiveReviewAccountData({
+  owner,
+  requireCurrent = () => {}
+}: {
+  owner?: { workspaceId: string; userId: string } | null;
+  requireCurrent?: () => void;
+} = {}) {
+  requireCurrent();
   presentationReads.clear();
   resetProcessReviewDiagnostics();
   const db = await database();
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
-      const account = await activeAccount(transaction);
-      if (account) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          account.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${account.account_key}`
-        );
+      const activeKey = await metadata(ACTIVE_ACCOUNT_KEY, transaction);
+      const key = owner ? accountKey(owner) : activeKey;
+      requireCurrent();
+      if (key) await removeReviewAccountData(transaction, key);
+      if (activeKey === key) {
+        await transaction.runAsync("delete from review_store_metadata where key = ?", ACTIVE_ACCOUNT_KEY);
       }
-      await transaction.runAsync(
-        "delete from review_store_metadata where key = ?",
-        ACTIVE_ACCOUNT_KEY
-      );
+      requireCurrent();
     })
   );
   // Again once cleared: an operation that started before the clear finished never lands.

@@ -87,6 +87,8 @@ explicit terminal status and every receipt-linked entry is current in the
 existing Dashboard cache or explicitly `missing`; prove that transaction and
 v4/v5/v6-to-v7 rollback/reopen path against a disposable SQLite database.
 
+Review SQLite v10 removes account-owned rows whose account context was already deleted. It runs before account activation and retains rows with an existing owner. Expo's exclusive transaction opens a separate SQLite connection. A foreign-key PRAGMA on the main connection cannot enforce cascades there. Delete the Review effects, outbox, and caches explicitly before deleting the account context, within the same transaction. Exercise the cleanup with foreign keys disabled on the transaction connection.
+
 ## Sync recovery schema and transaction checks
 
 Apply `supabase/migrations/202610050001_location_motion_activity.sql` to staging before the Preview that accepts Motion & Fitness evidence, and to production before that server deploys and before any phone build that sends `motion_activity` (the clean/local migration is `packages/db/migrations/007_location_motion_activity.sql`, folded into `001_init.sql`). It replaces the `location_evidence` kind check under either name (local auto-named, hosted `location_evidence_type_check`) to admit `motion_activity`, and adds `location_evidence_motion_coordinate_free`; no row changes. Server code that accepts motion must not deploy before it: those inserts would fail and retry. The phone uploads motion only in batches of its own, so a server without this change refuses just those batches (the phone marks them rejected and that motion is lost) while location batches continue.

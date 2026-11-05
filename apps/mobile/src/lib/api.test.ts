@@ -36,6 +36,7 @@ const healthDeliveryOpen = vi.hoisted(() => vi.fn(async (_owner: unknown, _id: s
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard,isHealthDeliveryOpen:healthDeliveryOpen}));
 const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
 vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
+vi.mock("./reviewSyncStore", () => ({ clearActiveReviewAccountData: vi.fn(async () => {}) }));
 const healthSignOut = vi.hoisted(() => ({ end: vi.fn((_markerId: string) => Promise.resolve()), mark: vi.fn(() => Promise.resolve("synthetic-marker")) }));
 vi.mock("./healthSignOut",()=>({endHealthCaptureAfterLogout:healthSignOut.end,markSignedOutHealthExpiryPending:healthSignOut.mark}));
 
