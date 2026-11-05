@@ -149,11 +149,10 @@ private enum DayframeShortcutPerformer {
       return
     }
     let event = DayframeShortcutEvent(action: action, catalog: catalog)
-    let queued = DayframeNativeShortcutQueue.append(event)
 
     switch action {
     case .start(_, let categoryName, _):
-      guard queued else {
+      guard DayframeNativeShortcutQueue.append(event) else {
         return
       }
       // Delivered first, as Stop is: a Live Activity's block is fixed when it starts, and a Stop or
@@ -209,7 +208,7 @@ private enum DayframeShortcutPerformer {
         }
       }
     case .stopRunning:
-      guard queued else {
+      guard DayframeNativeShortcutQueue.append(event) else {
         return
       }
       if let userId = event.userId, let workspaceId = event.workspaceId {
@@ -254,6 +253,8 @@ private enum DayframeShortcutPerformer {
       guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {
         return
       }
+      // A repeat or stale callback must return before queueing a Stop the app could deliver later.
+      let queued = DayframeNativeShortcutQueue.append(event)
       let pushToken = DayframeLiveActivityController.immediatePushToken(
         activityId: activityId,
         entryId: entryId
