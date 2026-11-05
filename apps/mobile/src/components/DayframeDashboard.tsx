@@ -180,7 +180,10 @@ import {
 } from "@/lib/durableLocalProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
-import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
+import {
+  currentSessionGeneration,
+  readOwnedAuthenticatedSessionSnapshot
+} from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
@@ -517,7 +520,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
-  const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
+  const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<boolean>>(async () => false);
   // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
   // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
   const appliedServerDataListeners = useRef(new Set<(startedAtMs: number, server: MobileBootstrap) => void>());
@@ -976,7 +979,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function reconcilePendingActiveDeletionAfterQueueBarrier(
-    externalActiveEntryId: string | null
+    externalActiveEntryId: string | null,
+    canReconcile?: () => boolean
   ) {
     const pending = deletionCoordinator.current?.current();
     if (pending) {
@@ -984,6 +988,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         if (!localId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) continue;
         const durableId = optimisticTimerIds.current.get(localId) ??
           await resolveTimerEntryIdAfterQueueBarrier(localId);
+        // A poll can lose its account or foreground lifetime while waiting for the queue.
+        if (canReconcile?.() === false) return new Set<string>();
         const currentPending = deletionCoordinator.current?.current();
         if (
           durableId &&
@@ -1035,14 +1041,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           setRefreshing(false);
         }
       }
-      return;
+      return false;
     }
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
       if (options?.throwOnError) {
         throw new Error("Dayframe is already refreshing. Please try again.");
       }
-      return;
+      return false;
     }
     refreshInFlight.current = true;
     const settingsSeedGeneration = captureSettingsSeedGeneration();
@@ -1099,7 +1105,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
-        return;
+        return false;
       }
       bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
@@ -1123,13 +1129,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           if (error instanceof AuthRequiredError) transitionToSignedOut();
         });
       });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         transitionToSignedOut({
           preserveAuthPassword: options?.preserveAuthFormOnAuthRequired
         });
         if (options?.throwOnError) throw error;
-        return;
+        return false;
       }
       if (options?.throwOnError) throw error;
       const cachedOfflineDashboardAvailable =
@@ -1149,6 +1156,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           "Dayframe could not refresh your data. Try again in a moment."
         );
       }
+      return false;
     } finally {
       refreshInFlight.current = false;
       if (options?.visibleRefresh) setRefreshing(false);
@@ -1481,6 +1489,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     let consecutiveFailures = 0;
+    let foregroundGeneration = 0;
 
     const schedule = (delay: number) => {
       if (cancelled || AppState.currentState !== "active") return;
@@ -1489,25 +1498,42 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     };
 
     const poll = async () => {
-      if (
-        cancelled ||
-        AppState.currentState !== "active" ||
-        timerStatePollInFlight.current
-      ) return;
+      if (cancelled || AppState.currentState !== "active") return;
+      if (timerStatePollInFlight.current) {
+        // An older effect can still own the in-flight request after a sign-in change.
+        schedule(timerStatePollDelay(consecutiveFailures));
+        return;
+      }
       timerStatePollInFlight.current = true;
+      const sessionGeneration = currentSessionGeneration();
+      const accountEpoch = currentMobileAccountEpoch();
+      const startedInForeground = foregroundGeneration;
+      const sameSession = () =>
+        !cancelled && authStateCurrent.current === "authenticated" &&
+        sessionGeneration === currentSessionGeneration() && accountEpoch === currentMobileAccountEpoch();
+      const canReconcile = () => sameSession() && AppState.currentState === "active" &&
+        startedInForeground === foregroundGeneration;
       try {
         const fetched = await fetchTimerState();
+        if (!canReconcile()) return;
         const tombstones = await reconcilePendingActiveDeletionAfterQueueBarrier(
-          fetched.activeEntryId
+          fetched.activeEntryId, canReconcile
         );
+        if (!canReconcile()) return;
         const next = fetched.activeEntryId && tombstones.has(fetched.activeEntryId)
           ? { ...fetched, activeEntryId: null }
           : fetched;
-        const changed = timerStateChanged(timerStateRef.current, next);
+        // A coalesced, refused or failed bootstrap did not apply this change. Leave it
+        // eligible for the next poll, with the same backoff used by a failed fingerprint.
+        if (timerStateChanged(timerStateRef.current, next) && !(await loadRef.current({ silent: true }))) {
+          if (sameSession()) consecutiveFailures += 1;
+          return;
+        }
+        if (!sameSession()) return;
         timerStateRef.current = next;
         consecutiveFailures = 0;
-        if (changed) await loadRef.current({ silent: true });
       } catch (error) {
+        if (!sameSession()) return;
         if (error instanceof AuthRequiredError) {
           cancelled = true;
           transitionToSignedOut();
@@ -1523,8 +1549,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         schedule(0);
-      } else if (timeout) {
-        clearTimeout(timeout);
+      } else {
+        foregroundGeneration += 1;
+        if (timeout) clearTimeout(timeout);
         timeout = null;
       }
     });
