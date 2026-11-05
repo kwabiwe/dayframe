@@ -157,7 +157,7 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   const loading = !typed && (awaitingCentre || (Boolean(nearbyProvider) && (!nearby || nearby.status === "loading")));
   const note = appleRows.length || loading ? null
     : typed ? (saved.length || searching ? null : "No places match.")
-      : !hasCentre ? null
+      : !hasCentre ? (reserveNearby ? "Nearby places are unavailable." : null)
         : !nearbyProvider ? "Nearby places need Apple Maps on this iPhone."
           : nearby?.status === "error" ? "Nearby places couldn't load." : "No places nearby.";
   const placeholders = loading ? Math.max(0, SHEET_APPLE_ROWS - appleRows.length) : 0;
