@@ -1,5 +1,5 @@
 import { formatLocaleDate } from "../../lib/localeDateFormat";
-import { memo, useEffect, useState, type Ref } from "react";
+import { memo, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Reanimated, {
@@ -44,6 +44,7 @@ export function ReportRangeSwitch({
   onChoose,
   onMore,
   reduceMotion,
+  stretch = false,
   theme,
 }: {
   choice: ReportRangeChoice;
@@ -54,17 +55,31 @@ export function ReportRangeSwitch({
   onChoose: (value: "week" | "month") => void;
   onMore: () => void;
   reduceMotion: boolean;
+  stretch?: boolean;
   theme: MobileTheme;
 }) {
   const selected = choice === "week" ? 0 : choice === "month" ? 1 : 2;
-  const [frames, setFrames] = useState<Array<{ x: number; width: number } | undefined>>([]);
+  const [layout, setLayout] = useState({
+    stretch,
+    revision: 0,
+    frames: [] as Array<{ x: number; width: number } | undefined>,
+  });
+  // Keep the buttons mounted. Only the thumb waits for this arrangement's frames.
+  if (layout.stretch !== stretch) {
+    setLayout({ stretch, revision: layout.revision + 1, frames: [] });
+  }
   const x = useSharedValue(0);
   const width = useSharedValue(0);
-  const frame = frames[selected];
-  useEffect(() => {
-    if (!frame) return;
-    // The first measurement places the thumb; later choices slide it (Reduce Motion: in place).
-    if (width.value === 0 || reduceMotion) {
+  const previousSelection = useRef(selected);
+  const frame = layout.stretch === stretch ? layout.frames[selected] : undefined;
+  useLayoutEffect(() => {
+    const selectionChanged = previousSelection.current !== selected;
+    previousSelection.current = selected;
+    if (!frame) {
+      width.value = 0;
+      return;
+    }
+    if (!selectionChanged || width.value === 0 || reduceMotion) {
       x.value = frame.x;
       width.value = frame.width;
       return;
@@ -72,15 +87,17 @@ export function ReportRangeSwitch({
     const spring = { ...BLOCKS_SPRING.control, reduceMotion: ReduceMotion.Never };
     x.value = withSpring(frame.x, spring);
     width.value = withSpring(frame.width, spring);
-  }, [frame?.x, frame?.width, reduceMotion]);
+  }, [frame, layout.revision, reduceMotion, selected, width, x]);
   const thumb = useAnimatedStyle(() => ({ opacity: width.value ? 1 : 0, transform: [{ translateX: x.value }], width: width.value }));
   const measure = (index: number) => (event: LayoutChangeEvent) => {
     const { x: left, width: measured } = event.nativeEvent.layout;
-    setFrames((current) => {
-      if (current[index]?.x === left && current[index]?.width === measured) return current;
-      const next = [...current];
-      next[index] = { x: left, width: measured };
-      return next;
+    setLayout((current) => {
+      if (current.revision !== layout.revision) return current;
+      const previous = current.frames[index];
+      if (previous?.x === left && previous?.width === measured) return current;
+      const frames = [...current.frames];
+      frames[index] = { x: left, width: measured };
+      return { ...current, frames };
     });
   };
   const segment = (index: number, label: string, onPress: () => void, accessibilityLabel: string, ref?: Ref<View>) => (
@@ -91,7 +108,7 @@ export function ReportRangeSwitch({
       accessibilityState={{ selected: selected === index }}
       onLayout={measure(index)}
       onPress={onPress}
-      style={styles.segment}
+      style={[styles.segment, stretch && styles.stretchedSegment]}
       testID={`reports-range-${index === 0 ? "week" : index === 1 ? "month" : "more"}`}
     >
       <Text
@@ -107,11 +124,11 @@ export function ReportRangeSwitch({
   );
   return (
     // Prototype .seg: an inset track with a lighter thumb in both themes.
-    <View style={[styles.switch, { backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted }]}>
-      <Reanimated.View
+    <View style={[styles.switch, stretch && styles.stretchedSwitch, { backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted }]}>
+      {frame ? <Reanimated.View
         pointerEvents="none"
         style={[styles.thumb, { backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.surface }, thumb]}
-      />
+      /> : null}
       {segment(0, "Week", () => onChoose("week"), "This week")}
       {segment(1, "Month", () => onChoose("month"), "This month")}
       {segment(2, moreLabel, onMore, selected === 2 ? moreAccessibilityLabel : "More ranges: today, year or chosen dates", moreRef)}
@@ -417,10 +434,12 @@ export function ReportGoalStreak({
 }
 
 const styles = StyleSheet.create({
-  switch: { alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", borderRadius: 999, padding: 3 },
+  switch: { alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", borderRadius: 999, padding: 3, overflow: "hidden" },
+  stretchedSwitch: { alignSelf: "stretch" },
   thumb: { position: "absolute", top: 3, bottom: 3, left: 0, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18, shadowRadius: 2 },
   // 10-point sides so the switch fits beside "Reports" and the filter on one row (UIA-002).
-  segment: { flexShrink: 1, minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
+  segment: { minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
+  stretchedSegment: { flex: 1, paddingHorizontal: 4 },
   segmentLabel: { fontSize: 14, fontWeight: "700" },
   hero: { gap: 6 },
   loadingFrame: { gap: 14 },

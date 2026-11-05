@@ -1,4 +1,5 @@
 import { act, create } from "react-test-renderer";
+import { useRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react", async () => {
@@ -15,9 +16,9 @@ vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
   ReduceMotion: { Never: "never" },
   useAnimatedStyle: (fn: () => unknown) => fn(),
-  useSharedValue: (value: number) => ({ value }),
+  useSharedValue: (value: number) => useRef({ value }).current,
   withDelay: (_: number, value: unknown) => value,
-  withSpring: (value: unknown) => value,
+  withSpring: vi.fn((value: unknown) => value),
   withTiming: (value: unknown) => value,
 }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
@@ -32,6 +33,7 @@ import {
   ReportWeekColumns,
   type ReportDayStack,
 } from "./ReportsBlocks";
+import { withSpring } from "react-native-reanimated";
 
 const theme = {
   accent: "#FF6248",
@@ -74,12 +76,53 @@ describe("Blocks Reports pieces", () => {
     expect(more.props.accessibilityLabel).toBe("Choose report dates, Today");
     expect(tree.root.findByProps({ testID: "reports-range-label" }).props.children).toBe("Today");
     // Every segment is a 44-point target.
-    expect(week.props.style.minHeight).toBe(44);
+    expect(week.props.style).toContainEqual(expect.objectContaining({ minHeight: 44 }));
     act(() => week.props.onPress());
     act(() => tree.root.findByProps({ testID: "reports-range-month" }).props.onPress());
     act(() => more.props.onPress());
     expect(onChoose.mock.calls).toEqual([["week"], ["month"]]);
     expect(onMore).toHaveBeenCalledOnce();
+  });
+
+  it("discards stretched measurements on a layout change and springs only on selection", () => {
+    const renderSwitch = (stretch: boolean, choice: "week" | "month" = "month") => (
+      <ReportRangeSwitch
+        choice={choice}
+        moreAccessibilityLabel="Choose report dates"
+        moreLabel="More"
+        onChoose={vi.fn()}
+        onMore={vi.fn()}
+        reduceMotion={false}
+        stretch={stretch}
+        theme={theme}
+      />
+    );
+    const layout = (x: number, width: number) => ({ nativeEvent: { layout: { x, width } } });
+    const spring = vi.mocked(withSpring);
+    spring.mockClear();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(renderSwitch(true)); });
+    const week = tree.root.findByProps({ testID: "reports-range-week" });
+    const month = tree.root.findByProps({ testID: "reports-range-month" });
+    const oldMeasurement = month.props.onLayout;
+    act(() => oldMeasurement(layout(111, 108)));
+    expect(tree.root.findAllByType("AnimatedView" as never)).toHaveLength(1);
+    expect(spring).not.toHaveBeenCalled();
+
+    act(() => tree.update(renderSwitch(false)));
+    expect(tree.root.findByProps({ testID: "reports-range-month" })).toBe(month);
+    act(() => oldMeasurement(layout(111, 109)));
+    expect(tree.root.findAllByType("AnimatedView" as never)).toHaveLength(0);
+    act(() => {
+      week.props.onLayout(layout(3, 58));
+      month.props.onLayout(layout(61, 64));
+    });
+    expect(tree.root.findAllByType("AnimatedView" as never)).toHaveLength(1);
+    expect(spring).not.toHaveBeenCalled();
+
+    act(() => tree.update(renderSwitch(false, "week")));
+    expect(spring.mock.calls.map(([value]) => value)).toEqual([3, 58]);
+    act(() => tree.unmount());
   });
 
   it("reads the hero total with its period and change, and a focused day without the change", () => {
