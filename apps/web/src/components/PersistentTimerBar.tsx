@@ -417,7 +417,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
 
   function startQuickAction(
     action: Pick<QuickAction, "categoryId" | "color" | "label">,
-    guard?: (snapshot: BootstrapData) => string | null
+    switchTarget?: { expectedRunningEntryId: string; guard: (snapshot: BootstrapData) => string | null }
   ) {
     const draft = quickActionTimerDraft(action.categoryId);
     // The Activities list is not closed here: a press on a quick start is a press outside it (which
@@ -429,12 +429,12 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
     // exactly the running block changes nothing and says so; a switch names the block it actually
     // replaced, timed to the switch. A Start superseded by a later one announces nothing. It is
     // asked for before the bar shows its draft, so the runtime keeps the outgoing block's edits.
-    const started = startTimer(draft, { dedupeRunning: true, ...(guard ? { guard } : {}) });
+    const started = startTimer(draft, { dedupeRunning: true, ...switchTarget });
     // The guarded picker waits for the runtime to accept the switch before changing the draft.
-    if (!guard) setTimerDraft(draft);
+    if (!switchTarget) setTimerDraft(draft);
     void started.then((outcome) => {
       if (!outcome.ok) {
-        if (guard && (outcome.error === SWITCH_BLOCK_CHANGED || outcome.error === SWITCH_ACTIVITY_UNAVAILABLE)) {
+        if (switchTarget && (outcome.error === SWITCH_BLOCK_CHANGED || outcome.error === SWITCH_ACTIVITY_UNAVAILABLE)) {
           setCommandNotice(outcome.error);
         }
         return;
@@ -471,7 +471,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
       categoryId: activity?.id ?? null,
       color: activity?.color ?? null,
       label: activity?.name ?? "No activity"
-    }, guard);
+    }, { expectedRunningEntryId: active.id, guard });
   }
 
   // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
@@ -1118,6 +1118,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
         <SwitchActivityDialog
           activities={data.categories}
           currentId={active.categoryId}
+          fallbackFocus={() => timerActionsTriggerRef.current ?? addTimeButtonRef.current ?? descriptionInputRef.current}
           onClose={() => setSwitchScope(null)}
           onSwitch={switchActivity}
         />

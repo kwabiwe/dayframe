@@ -234,6 +234,16 @@ export class TimerReplacementWindowError extends Error {
   }
 }
 
+export class TimerSwitchConflictError extends Error {
+  readonly status = 409;
+  readonly code = "timer_switch_conflict";
+
+  constructor() {
+    super("The block you were switching from is no longer running.");
+    this.name = "TimerSwitchConflictError";
+  }
+}
+
 export class TimerMutationBusyError extends Error {
   readonly code = "timer_busy";
   readonly status = 503;
@@ -506,10 +516,12 @@ function healthSchemaReadinessError(
 }
 
 export async function processActivityEvent(
-  rawInput: unknown, session: RequestSession = getDevSession(), options: SyncTransactionOptions = {}
+  rawInput: unknown,
+  session: RequestSession = getDevSession(),
+  options: SyncTransactionOptions & { expectedRunningEntryId?: string } = {}
 ) {
   if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
-    return processActivityEventWithClient(rawInput, session);
+    return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId);
   }
   const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
   try {
@@ -531,7 +543,8 @@ export async function processActivityEvent(
 async function processActivityEventWithClient(
   rawInput: unknown,
   session: RequestSession,
-  boundedClient?: pg.PoolClient
+  boundedClient?: pg.PoolClient,
+  expectedRunningEntryId?: string
 ): Promise<{
   eventId: string;
   candidate: CandidateActivity;
@@ -871,7 +884,7 @@ async function processActivityEventWithClient(
         }
         startOutcome = "recorded_completed";
       } else if (candidate.shouldClosePrevious) {
-        const replaced = await closeActiveTimersForReplacement(client, session, startedAt);
+        const replaced = await closeActiveTimersForReplacement(client, session, startedAt, expectedRunningEntryId);
         await reconcileTimerTripClashes(client, session, { entryIds: replaced });
       }
 
@@ -1481,7 +1494,8 @@ async function stopCurrentTimerAt(
 async function closeActiveTimersForReplacement(
   client: pg.PoolClient,
   session: RequestSession,
-  stoppedAt: string | Date
+  stoppedAt: string | Date,
+  expectedRunningEntryId?: string
 ) {
   const activeResult = await client.query<{ id: string; startedAt: string | Date }>(
     `select id, started_at as "startedAt"
@@ -1493,6 +1507,9 @@ async function closeActiveTimersForReplacement(
     [session.workspaceId, session.userId]
   );
   const activeEntry = activeResult.rows[0];
+  // Recheck under the same row lock that ends the outgoing block. A Stop scoped to
+  // this row can run without the broader timer lock, so an earlier read is insufficient.
+  if (expectedRunningEntryId && activeEntry?.id !== expectedRunningEntryId) throw new TimerSwitchConflictError();
   if (!activeEntry) return [];
 
   const activeStartedMs = new Date(activeEntry.startedAt).getTime();

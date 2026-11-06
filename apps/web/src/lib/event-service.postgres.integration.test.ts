@@ -5,9 +5,57 @@ import { processActivityEvent } from "./event-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
-describe.runIf(runDatabaseIntegration)("entry-scoped Stop Postgres contention", () => {
+describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
   afterAll(async () => {
     await pool.end();
+  });
+
+  it("refuses a switch after another device replaces its outgoing block", async () => {
+    const userId = randomUUID();
+    const workspaceId = randomUUID();
+    const session = { authMode: "provider" as const, scopes: ["app:write", "events:write"], userId, workspaceId };
+    const start = (minutesAgo: number, description: string, expectedRunningEntryId?: string) =>
+      processActivityEvent({
+        source: "manual_app",
+        type: "timer_start",
+        occurredAt: new Date(Date.now() - minutesAgo * 60_000),
+        rawPayload: { origin: "web_timer" },
+        description
+      }, session, { expectedRunningEntryId });
+
+    try {
+      await pool.query("insert into users (id, email, name) values ($1, $2, 'Switch test')", [userId, `switch-${userId}@example.invalid`]);
+      await pool.query("insert into workspaces (id, name) values ($1, 'Switch test')", [workspaceId]);
+      await pool.query("insert into workspace_members (workspace_id, user_id) values ($1, $2)", [workspaceId, userId]);
+
+      const original = await start(5, "Original block");
+      const replacement = await start(3, "Block from another device");
+      expect(original.timeEntryId).toBeDefined();
+      await expect(start(2, "Stale selection", original.timeEntryId)).rejects.toMatchObject({
+        code: "timer_switch_conflict",
+        status: 409
+      });
+
+      const stored = await pool.query(
+        `select description, stopped_at is null as running from time_entries
+         where workspace_id = $1 and user_id = $2 order by started_at`,
+        [workspaceId, userId]
+      );
+      expect(stored.rows).toEqual([
+        { description: "Original block", running: false },
+        { description: "Block from another device", running: true }
+      ]);
+      const events = await pool.query(
+        "select count(*)::int as count from activity_events where workspace_id = $1 and user_id = $2",
+        [workspaceId, userId]
+      );
+      expect(events.rows[0]?.count).toBe(2);
+      expect(replacement.timeEntryId).toBeDefined();
+      expect((await start(1, "Intentional switch", replacement.timeEntryId)).timeEntryId).toBeDefined();
+    } finally {
+      await pool.query("delete from workspaces where id = $1", [workspaceId]);
+      await pool.query("delete from users where id = $1", [userId]);
+    }
   });
 
   it("uses another connection and bypasses a held per-user advisory lock", async () => {

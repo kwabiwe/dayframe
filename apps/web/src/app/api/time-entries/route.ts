@@ -12,7 +12,8 @@ import {
   TimeEntryValidationError,
   TimerMutationBusyError,
   TimerReplacementWindowError,
-  TimerStopBeforeStartError
+  TimerStopBeforeStartError,
+  TimerSwitchConflictError
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -121,6 +122,10 @@ export async function POST(request: Request) {
     }
 
     const startedAt = optionalTimestamp(body.startedAt, "startedAt");
+    const expectedRunningEntryId = optionalUuid(body.expectedRunningEntryId, "expectedRunningEntryId");
+    if (expectedRunningEntryId && (eventSource !== "manual_app" || startedAt)) {
+      throw new BadRequestError("Switch activity must use the current time on the web.");
+    }
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
     const rawPayload = {
       ...(startedAt ? { origin, startedAt } : { origin }),
@@ -138,7 +143,8 @@ export async function POST(request: Request) {
         description: optionalString(body.description),
         rawPayload
       },
-      session
+      session,
+      ...(expectedRunningEntryId ? [{ expectedRunningEntryId }] : [])
     );
     scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: 201 });
@@ -158,7 +164,7 @@ export async function POST(request: Request) {
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof TimerStopBeforeStartError) {
+    if (error instanceof TimerStopBeforeStartError || error instanceof TimerSwitchConflictError) {
       return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
     }
     if (error instanceof TimerMutationBusyError) {

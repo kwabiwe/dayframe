@@ -344,6 +344,7 @@ export function ModalDialog({
   className,
   contentClassName,
   description,
+  fallbackFocus,
   footer,
   initialFocusRef,
   modal = true,
@@ -360,6 +361,7 @@ export function ModalDialog({
   className?: string;
   contentClassName?: string;
   description?: ReactNode;
+  fallbackFocus?: () => HTMLElement | null;
   footer?: ReactNode;
   initialFocusRef?: RefObject<HTMLElement | null>;
   /**
@@ -381,9 +383,11 @@ export function ModalDialog({
   const exitScrollRef = useRef<DialogScrollSnapshot>([]);
   const closeRef = useRef(onClose);
   const busyRef = useRef(busy);
+  const fallbackFocusRef = useRef(fallbackFocus);
   useLayoutEffect(() => {
     closeRef.current = onClose;
     busyRef.current = busy;
+    fallbackFocusRef.current = fallbackFocus;
   });
   const titleId = useId();
   const descriptionId = useId();
@@ -455,7 +459,7 @@ export function ModalDialog({
       if (modal) {
         openDialogCount = Math.max(0, openDialogCount - 1);
         if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");
-        previouslyFocused?.focus();
+        (previouslyFocused?.isConnected ? previouslyFocused : fallbackFocusRef.current?.())?.focus();
         return;
       }
       document.removeEventListener("pointerdown", onOutsidePress, true);

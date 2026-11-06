@@ -5,9 +5,10 @@ import { FloatingListActivityOption, FloatingListSearch, type FloatingListActivi
 import { ModalDialog } from "@/components/ui/Primitives";
 import { activitiesForMention } from "@/lib/command-parse";
 
-export function SwitchActivityDialog({ activities, currentId, onClose, onSwitch }: {
+export function SwitchActivityDialog({ activities, currentId, fallbackFocus, onClose, onSwitch }: {
   activities: readonly FloatingListActivity[];
   currentId: string | null;
+  fallbackFocus: () => HTMLElement | null;
   onClose: () => void;
   onSwitch: (activity: FloatingListActivity | null) => void;
 }) {
@@ -30,6 +31,7 @@ export function SwitchActivityDialog({ activities, currentId, onClose, onSwitch 
   return (
     <ModalDialog
       description="Choose an activity to finish this block and start the next."
+      fallbackFocus={fallbackFocus}
       initialFocusRef={searchRef}
       onClose={onClose}
       size="compact"

@@ -109,7 +109,7 @@ type RuntimeContext = {
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
   startTimer: (
     input?: TimerDraftInput,
-    options?: { dedupeRunning?: boolean; guard?: (snapshot: BootstrapData) => string | null; startedAt?: string }
+    options?: TimerStartOptions
   ) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
@@ -148,6 +148,13 @@ type RuntimeContext = {
   setProjectedEnds?: (ends: ReadonlyMap<string, string>) => void;
 };
 
+
+type TimerStartOptions = {
+  dedupeRunning?: boolean;
+  expectedRunningEntryId?: string;
+  guard?: (snapshot: BootstrapData) => string | null;
+  startedAt?: string;
+};
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
 export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS;
@@ -860,7 +867,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const startTimerUntracked = useCallback(async (
     input: TimerDraftInput = {},
-    options: { dedupeRunning?: boolean; guard?: (snapshot: BootstrapData) => string | null; startedAt?: string } = {}
+    options: TimerStartOptions = {}
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
@@ -906,10 +913,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setBusy: setIsTimerBusy,
       setError: setTimerError,
       send: async (payload) => {
+        const expectedRunningEntryId = options.expectedRunningEntryId
+          ? serverEntryId(options.expectedRunningEntryId)
+          : undefined;
+        if (options.expectedRunningEntryId && !expectedRunningEntryId) {
+          throw new Error("The block is still syncing. Try Switch activity again.");
+        }
         const response = await clientFetch("/api/time-entries", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(expectedRunningEntryId ? { ...payload, expectedRunningEntryId } : payload)
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
         // Accepted: record which real block the optimistic one on screen is, from the POST itself.

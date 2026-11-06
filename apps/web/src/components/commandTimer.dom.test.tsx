@@ -251,9 +251,23 @@ describe("Switch activity from the running block menu", () => {
 
     expect(runtime.startTimer).toHaveBeenCalledExactlyOnceWith(
       { categoryId: "learn", description: "", tagNames: [] },
-      { dedupeRunning: true, guard: expect.any(Function) }
+      { dedupeRunning: true, expectedRunningEntryId: "running-entry", guard: expect.any(Function) }
     );
     expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+  });
+
+  it("moves focus to Add time when the running block stops while the picker is open", () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
+    const { rerender } = render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    screen.getByRole("combobox", { name: "Search activities" }).focus();
+
+    runtime = runtimeFixture();
+    rerender(<PersistentTimerBar />);
+
+    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add time manually" }));
   });
 
   it("does not switch a replacement block that arrived before the choice", () => {
