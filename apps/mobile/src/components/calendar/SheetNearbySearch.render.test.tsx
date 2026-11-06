@@ -196,6 +196,18 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     expect(order()[0]).toBe("location-correction-place-s");
   });
 
+  it("keeps one accessible Search name when the query is entered and cleared", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<SheetNearbySearch centre={null} onPick={vi.fn()} theme={theme} />); });
+    const searchProps = () => tree.root.findByProps({ testID: "location-correction-search" }).props;
+    expect(searchProps().placeholder).toBe("Search places");
+    expect(searchProps().accessibilityLabel).toBeUndefined();
+    type(tree, "Park");
+    expect(searchProps().accessibilityLabel).toBe("Search places");
+    type(tree, "");
+    expect(searchProps().accessibilityLabel).toBeUndefined();
+  });
+
   it("keeps one height and the old rows while searching, with a quiet spinner and a pinned Save slot", async () => {
     mocks.searchAvailable = true;
     mocks.search.mockImplementation(nearbyAnswer);
