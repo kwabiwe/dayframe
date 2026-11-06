@@ -66,12 +66,17 @@ const typeTime = (label: "Start time" | "End time", value: string) => {
 };
 
 describe("correcting the location timeline on the web (location v4 step 13)", () => {
+  let nativeFocusOnOpen: Element | null;
   beforeEach(() => {
     clientFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     evidenceFetch.mockReset().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
     mapStandIn.mounts = 0;
     mapStandIn.evidence.length = 0;
-    HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
+    nativeFocusOnOpen = null;
+    HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) {
+      nativeFocusOnOpen = this.querySelector("[autofocus]");
+      this.setAttribute("open", "");
+    };
     HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
   });
   afterEach(cleanup);
@@ -93,7 +98,9 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     const opener = screen.getByRole("button", { name: "Open trip" });
     opener.focus();
     rerender(scene(true));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByText(question.text)));
+    const questionText = screen.getByText(question.text);
+    expect(nativeFocusOnOpen).toBe(questionText);
+    await waitFor(() => expect(document.activeElement).toBe(questionText));
     const openLeg = screen.getByRole("button", { name: /Underground\?/ });
     openLeg.focus();
     fireEvent.click(openLeg);
@@ -114,8 +121,10 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     rerender(scene(question.text));
     await act(async () => { await new Promise(requestAnimationFrame); });
     expect(document.activeElement).toBe(search);
+    expect(screen.getByText(question.text).hasAttribute("autofocus")).toBe(false);
     unmount();
     render(scene(question.text));
+    expect(nativeFocusOnOpen).toBe(screen.getByText(question.text));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText(question.text)));
   });
 

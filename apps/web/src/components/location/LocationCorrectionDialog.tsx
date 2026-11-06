@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DAYFRAME_APP_ICONS,
@@ -240,6 +240,15 @@ export function LocationCorrectionDialog({
 }) {
   // Stable across the trip and leg views so changing views never restarts the modal's focus lifetime.
   const questionFocusRef = useRef<HTMLElement | null>(null);
+  const registerQuestion = useCallback((element: HTMLElement | null) => {
+    if (!element) {
+      questionFocusRef.current = null;
+    } else if (element.closest("dialog")?.open === false) {
+      // Mark the initial question before showModal can focus Close. A late question gets no autofocus.
+      element.setAttribute("autofocus", "");
+      questionFocusRef.current = element;
+    }
+  }, []);
   // A trip's leg opens inside its dialog, with a way back (the iPhone sheet's push, as a swap here).
   // The leg is kept by its span, so a refresh that changes the trip's legs finds it again, or (gone, or the legs
   // merged or split around it) goes back to the trip (Codex r3 on #609).
@@ -528,7 +537,7 @@ export function LocationCorrectionDialog({
 
   const questionCard = question && legOfTrip === null ? (
     <div className="location-correction-question" data-section="question" role="group" aria-label={question.text}>
-      <b ref={questionFocusRef} tabIndex={-1}>{question.text}</b>
+      <b ref={registerQuestion} tabIndex={-1}>{question.text}</b>
       <div className="location-correction-question-answers">
         {question.yesLabel ? (
           // Card D item 9: the answer is the neutral dark pill; coral stays for Play/Stop and live recording.
@@ -697,7 +706,7 @@ export function LocationCorrectionDialog({
       footer={footerNext} initialFocusRef={questionFocusRef} onClose={onClose} size="compact" title={target.label}>
       <div className="location-correction is-next">
         {question && question.text !== "Where were you?" ? (
-          <p className="location-correction-ask" ref={(element) => { questionFocusRef.current = element; }} tabIndex={-1}>{question.text}</p>
+          <p className="location-correction-ask" ref={registerQuestion} tabIndex={-1}>{question.text}</p>
         ) : null}
         <EvidenceMap evidence={evidence} knownPlace={Boolean(place.placeId || place.learnedPlaceId)} />
         <div className="location-correction-section" data-section="where">
