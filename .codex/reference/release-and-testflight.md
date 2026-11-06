@@ -39,16 +39,18 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (135)` (2026-10-29)
+- Last repository-recorded verified build: `0.1.0 (140)` (2026-11-05)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `aa984119-2ebd-4b1e-b89b-0333456b0d47`
-- Archived commit: `1958a5d4`, built in a detached worktree pinned to that SHA
-- Performance gate reading (baseline for the next build): staging build of `1958a5d4` on a fresh launch, Today in front with a block running on the iPhone 17, after warm-up windows: gate 1 6.6 % and +0.58 MiB per minute, gate 2 6.2 % and +1.17 MiB per minute (29 Oct). Build 134 (`d872f184`, delivery `6091cf1a-206c-48a6-ba85-3fe6c4bb78a6`), on a clean relaunch: 6.8 % and −0.17, 6.7 % and +1.07 MiB per minute.
+- Delivery/build ID: `34633fbc-6ee3-478c-b3e7-d78286e393d8`
+- Archived commit: `99f1a6c73b41e13e57ad33df8e4d0746d2040d7b`, built in a detached worktree pinned to that SHA
+- The signed staging release gate on the wired iPhone 17 Pro ran on a fresh launch with Today in front and a block running. After warm-up it measured 5.03% of one core and +0.36 MB/min over 306.8 s, within the 10% and +2 MB/min limits. The installed production build repeated the same scene at 5.47% and +0.54 MB/min over 306.7 s.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 135 is recorded as `VALID`, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`; its signed app was checked for Apple Distribution signing, production push and the production App Group before upload. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+App Store Connect reverified build 140 on 6 Nov as `VALID` and `IN_BETA_TESTING` in `Internal Health Debug` only, with en-GB notes and export compliance. The signed archive and export used the production API, production App Group and Apple Distribution signing. Installed 140 passed Calendar day-strip switching, Reports range switching and the Today performance repeat. The installed web-to-iPhone timer refresh repeat remains open.
+
+Build 139 came from `3cf432dd` and is also verified in `Internal Health Debug`. The exact staging gate on the wired iPhone 11 measured 15.37% and 15.50% of one core with +0.44 and +1.32 MB/min. The owner accepted the CPU overage for build 139 only. Installed build 139 still needs its own smoke. Earlier release history is in Git history and dated investigations.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
