@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
   legs: { gap: 6, paddingHorizontal: 14, paddingBottom: 12, paddingLeft: 62 },
   leg: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, minHeight: 44 },
   legTitle: { fontSize: 15, fontWeight: "700" },
-  checksChip: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: listActionsHeight, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 12 },
+  checksChip: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: listActionsHeight, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 8 },
   checksChipText: { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
   // Owner, 28 Oct 2026: the one amber dot on a row's mark (and on the chip), ringed in the card's surface.
   dot: { position: "absolute", top: -3, right: -3, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
