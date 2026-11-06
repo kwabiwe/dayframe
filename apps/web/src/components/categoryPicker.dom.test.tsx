@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useState, type FormEvent } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DayframePaletteKey } from "@dayframe/shared";
@@ -204,6 +204,42 @@ describe("CategoryPicker", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+  });
+
+  it.each(["trigger", "name"])("keeps the draft when Escape reaches the %s before palette focus", async (focus) => {
+    render(<PickerHarness create={vi.fn()} portal />);
+    const user = userEvent.setup();
+    const trigger = screen.getByRole("button", { name: /No activity/ });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
+    const dialog = screen.getByRole("dialog", { name: "Create new activity" });
+    const name = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Name" });
+    const color = within(dialog).getByRole("button", { name: /Choose activity colour/ });
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    fireEvent.change(name, { target: { value: "Deep Work" } });
+
+    const frames: FrameRequestCallback[] = [];
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+    try {
+      const priorFocus = focus === "trigger" ? color : name;
+      priorFocus.focus();
+      fireEvent.click(color);
+      expect(screen.getByRole("listbox", { name: "Activity colour" })).toBeTruthy();
+      expect(document.activeElement).toBe(priorFocus);
+
+      fireEvent.keyDown(priorFocus, { key: "Escape" });
+      expect(screen.queryByRole("listbox", { name: "Activity colour" })).toBeNull();
+      expect(screen.getByRole("dialog", { name: "Create new activity" })).toBe(dialog);
+      expect(name.value).toBe("Deep Work");
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(document.activeElement).toBe(color);
+
+      fireEvent.keyDown(color, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Create new activity" })).toBeNull();
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      frame.mockRestore();
+    }
   });
 
   it("renders the selected activity colour as a real dot in compact picker triggers", () => {

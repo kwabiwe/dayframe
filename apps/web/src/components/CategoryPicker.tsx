@@ -664,6 +664,17 @@ export function CategoryPicker({
     }
   }
 
+  function dismissCreateLayer(restoreIconFocus: boolean) {
+    if (isColorMenuOpen) {
+      closeColorMenu(true);
+    } else if (isIconGridOpen) {
+      setIsIconGridOpen(false);
+      if (restoreIconFocus) iconTriggerRef.current?.focus();
+    } else {
+      cancelCreate();
+    }
+  }
+
   function createInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -673,9 +684,8 @@ export function CategoryPicker({
       event.preventDefault();
       event.stopPropagation();
       event.nativeEvent.stopImmediatePropagation();
-      // With the icon choices open, Escape closes them and keeps the draft (Codex r2 on #593).
-      if (isIconGridOpen) setIsIconGridOpen(false);
-      else cancelCreate();
+      // The inner palette owns Escape even before its deferred focus has landed.
+      dismissCreateLayer(false);
     }
   }
 
@@ -699,13 +709,7 @@ export function CategoryPicker({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
-              // Escape closes the icon choices first and keeps the draft (Codex r1 on #593).
-              if (isIconGridOpen) {
-                setIsIconGridOpen(false);
-                iconTriggerRef.current?.focus();
-                return;
-              }
-              cancelCreate();
+              dismissCreateLayer(true);
             }}
             role="dialog"
           >

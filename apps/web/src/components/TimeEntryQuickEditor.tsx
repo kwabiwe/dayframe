@@ -453,7 +453,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.defaultPrevented || event.key !== "Escape") return;
       if (busyRef.current) {
         event.preventDefault();
         event.stopPropagation();
