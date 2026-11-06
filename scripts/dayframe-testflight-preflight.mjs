@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const iosDir = join(repoRoot, "apps/mobile/ios");
-const xcodebuildPath = "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild";
 const bundleId = process.env.DAYFRAME_IOS_BUNDLE_ID ?? "com.layereight.dayframe";
 const teamId = process.env.DAYFRAME_APPLE_TEAM_ID ?? "65M773ZG6M";
 const ascEnvPath =
@@ -80,9 +79,10 @@ function xcodeBuildSettings(target, configuration = "Release") {
 }
 
 function resolveBuildSettingTokens(value, target) {
-  if (!value) return value;
-  const settings = xcodeBuildSettings(target);
-  return value.replace(/\$\(([^)]+)\)/g, (token, key) => settings[key] ?? token);
+  if (!value?.includes("$(")) return value;
+  const settings = hasFullXcode ? xcodeBuildSettings(target) : {};
+  const resolved = value.replace(/\$\(([^)]+)\)/g, (token, key) => settings[key] ?? token);
+  return resolved.includes("$(") ? null : resolved;
 }
 
 function parseEnvFile(path) {
@@ -149,21 +149,15 @@ console.log(`Bundle: ${bundleId}`);
 console.log(`Team:   ${teamId}`);
 console.log("");
 
-if (existsSync(xcodebuildPath)) {
-  const version = run(xcodebuildPath, ["-version"])
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .join(", ");
-  pass(`Xcode installed (${version})`);
+const xcodebuildPath = run("/usr/bin/xcrun", ["--find", "xcodebuild"]).trim();
+const xcodeVersion = xcodebuildPath
+  ? run(xcodebuildPath, ["-version"]).trim()
+  : "";
+const hasFullXcode = xcodeVersion.startsWith("Xcode ");
+if (hasFullXcode) {
+  pass(`Selected Xcode: ${xcodeVersion.split(/\r?\n/).join(", ")}`);
 } else {
-  fail("Xcode is not installed at /Applications/Xcode.app");
-}
-
-const activeDeveloperDir = run("/usr/bin/xcode-select", ["-p"]).trim();
-if (activeDeveloperDir === "/Applications/Xcode.app/Contents/Developer") {
-  pass("xcode-select points at full Xcode");
-} else {
-  warn(`xcode-select points at ${activeDeveloperDir || "unknown"}; release commands should set DEVELOPER_DIR to Xcode`);
+  fail("The selected developer directory does not provide full Xcode", "Set DEVELOPER_DIR to the Xcode installation used for the archive.");
 }
 
 const infoPlist = join(iosDir, "Dayframe/Info.plist");
