@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import http2 from "node:http2";
 import { paletteColorFor } from "@dayframe/shared";
-import { query } from "./db";
+import { isLockNotAvailableError, query } from "./db";
 import type { RequestSession } from "./session";
+import { withSyncTransaction } from "./sync-transaction";
 
 export type LiveActivityRegistration = {
   token: string;
@@ -23,20 +24,17 @@ export type LiveActivityControl = {
 type ApnsEvent = "update" | "end";
 type ApnsEnvironment = "development" | "production";
 
-type PushTokenRow = {
-  id: string;
-  token: string;
-  activityId: string;
-  activeEntryId: string | null;
-  environment: ApnsEnvironment;
-};
-
 type ActiveTimerRow = {
   id: string;
   description: string | null;
   categoryName: string | null;
   categoryColor: string | null;
   startedAt: string;
+};
+
+type DesiredStateSnapshot = {
+  active: ActiveTimerRow | null;
+  registrations: Array<{ id: string; active_entry_id: string | null; activity_id: string; environment: ApnsEnvironment }> | null;
 };
 
 type LiveActivityPayload = {
@@ -248,7 +246,14 @@ export async function reconcileLiveActivityDesiredState(limit = OUTBOX_BATCH_SIZ
      limit $1`,
     [Math.min(Math.max(limit, 1), OUTBOX_BATCH_SIZE)]
   );
-  for (const owner of owners.rows) await enqueueLatestLiveActivityState(owner);
+  for (const owner of owners.rows) {
+    try {
+      await enqueueLatestLiveActivityState(owner, { skipBusy: true });
+    } catch (error) {
+      if (!isLockNotAvailableError(error)) throw error;
+      // A contended owner should not prevent other owners or the global due-row drain.
+    }
+  }
   return drainLiveActivityOutbox();
 }
 
@@ -299,108 +304,133 @@ export async function drainLiveActivityOutbox(options?: {
 }
 
 async function enqueueLatestLiveActivityState(
-  session: Pick<RequestSession, "workspaceId" | "userId">
+  session: Pick<RequestSession, "workspaceId" | "userId">,
+  { skipBusy = false }: { skipBusy?: boolean } = {}
 ) {
-  const [tokensResult, activeResult] = await Promise.all([
-    query<PushTokenRow>(
-      `select id,
-              token,
-              activity_id as "activityId",
-              active_entry_id as "activeEntryId",
-              environment
-       from live_activity_push_tokens
-       where workspace_id = $1
-         and user_id = $2
-         and invalidated_at is null`,
-      [session.workspaceId, session.userId]
-    ),
-    query<ActiveTimerRow>(
-      `select te.id,
-              te.description,
-              c.name as "categoryName",
-              c.color as "categoryColor",
-              te.started_at as "startedAt"
-       from time_entries te
-       left join categories c on c.id = te.category_id
-       where te.workspace_id = $1
-         and te.user_id = $2
-         and te.stopped_at is null
-       order by te.started_at desc
-       limit 1`,
-      [session.workspaceId, session.userId]
-    )
-  ]);
+  const owner = [session.workspaceId, session.userId];
+  const eligible = await query(
+    `select 1 from live_activity_push_tokens
+     where workspace_id = $1 and user_id = $2 and invalidated_at is null
+     limit 1`,
+    owner
+  );
+  if (!eligible.rowCount) return;
 
-  const active = activeResult.rows[0] ?? null;
-  const timestamp = Math.floor(Date.now() / 1000);
-  await Promise.all(tokensResult.rows.map((token) => {
-    // Activity attributes are immutable. Only the Activity registered for the
-    // canonical running entry may receive its updates; every older run must be
-    // ended rather than repurposed to display a newer timer with a stale Stop
-    // control.
-    const shouldUpdate = Boolean(active && token.activeEntryId === active.id);
-    const event: ApnsEvent = shouldUpdate ? "update" : "end";
-    const payload: LiveActivityPayload = shouldUpdate
-      ? {
-          aps: {
-            timestamp,
-            event,
-            "content-state": contentState(active!, true)
-          }
-        }
-      : {
-          aps: {
-            timestamp,
-            event,
-            "dismissal-date": timestamp - 1,
-            "content-state": stoppedContentState()
-          }
-        };
-    const expiresAt = new Date(
-      (timestamp + (event === "end" ? END_EXPIRY_SECONDS : UPDATE_EXPIRY_SECONDS)) * 1000
-    ).toISOString();
-
-    return query(
-      `insert into live_activity_delivery_outbox (
-       token_id, workspace_id, user_id, event, payload, expires_at
-     ) values ($1, $2, $3, $4, $5::jsonb, $6)
-     on conflict (token_id) do update set
-       workspace_id = excluded.workspace_id,
-       user_id = excluded.user_id,
-       revision = live_activity_delivery_outbox.revision + 1,
-       event = excluded.event,
-       payload = jsonb_set(
-         excluded.payload,
-         '{aps,timestamp}',
-         to_jsonb(greatest(
-           coalesce((excluded.payload #>> '{aps,timestamp}')::bigint, 0),
-           coalesce((live_activity_delivery_outbox.payload #>> '{aps,timestamp}')::bigint, 0) + 1
+  await withSyncTransaction("live_activity_enqueue", async ({ client, phase }) => {
+    phase("owner_lock");
+    // Serialize only desired-state reads and writes. Timer mutations and APNs delivery stay outside.
+    const lockKey = `live-activity-outbox:${session.workspaceId}:${session.userId}`;
+    if (skipBusy) {
+      const lock = await client.query<{ acquired: boolean }>(
+        "select pg_try_advisory_xact_lock(hashtextextended($1, 0)) as acquired", [lockKey]
+      );
+      if (!lock.rows[0]?.acquired) return;
+    } else {
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [lockKey]);
+    }
+    phase("canonical_read");
+    // Read in a fresh statement after acquiring the lock so an older refresh cannot replace a newer Stop.
+    const { rows: [snapshot] } = await client.query<DesiredStateSnapshot>(
+      `select row_to_json(active) as active, (
+         select jsonb_agg(jsonb_build_object(
+           'id', t.id, 'active_entry_id', t.active_entry_id,
+           'activity_id', t.activity_id, 'environment', t.environment
          ))
-       ),
-       status = 'pending',
-       attempt_count = 0,
-       next_attempt_at = now(),
-       expires_at = excluded.expires_at,
-       leased_until = null,
-       last_attempt_at = null,
-       last_delivery_status = null,
-       last_delivery_reason = null,
-       last_apns_id = null,
-       updated_at = now()
-     where live_activity_delivery_outbox.event is distinct from excluded.event
-        -- A running ActivityKit clock already advances from startedAt. Wall time alone is not a new revision.
-        or ((live_activity_delivery_outbox.payload #> '{aps,content-state}') - 'elapsedSeconds')
-           is distinct from ((excluded.payload #> '{aps,content-state}') - 'elapsedSeconds')`,
+         from live_activity_push_tokens t
+         where t.workspace_id = $1 and t.user_id = $2 and t.invalidated_at is null
+       ) as registrations
+       from (select 1) as owner
+       left join lateral (
+         select te.id,
+                te.description,
+                c.name as "categoryName",
+                c.color as "categoryColor",
+                te.started_at as "startedAt"
+         from time_entries te
+         left join categories c on c.id = te.category_id
+         where te.workspace_id = $1
+           and te.user_id = $2
+           and te.stopped_at is null
+         order by te.started_at desc
+         limit 1
+       ) active on true`,
+      owner
+    );
+    if (!snapshot.registrations?.length) return;
+    const { active, registrations } = snapshot;
+    const timestamp = Math.floor(Date.now() / 1000);
+    const update: LiveActivityPayload | null = active ? {
+      aps: { timestamp, event: "update", "content-state": contentState(active, true) }
+    } : null;
+    const end: LiveActivityPayload = {
+      aps: {
+        timestamp,
+        event: "end",
+        "dismissal-date": timestamp - 1,
+        "content-state": stoppedContentState()
+      }
+    };
+
+    phase("effect");
+    // Activity attributes are immutable. Only the current entry's registrations
+    // may receive updates. End older activities in one owner-scoped write.
+    // Only use generations from the timer's snapshot. A newer registration may
+    // have arrived since that read and must not inherit an earlier end.
+    await client.query(
+      `insert into live_activity_delivery_outbox (
+         token_id, workspace_id, user_id, event, payload, expires_at
+       )
+       select t.id, t.workspace_id, t.user_id, desired.event,
+              case when desired.event = 'update' then $4::jsonb else $5::jsonb end,
+              case when desired.event = 'update' then $6::timestamptz else $7::timestamptz end
+       from live_activity_push_tokens t
+       join jsonb_to_recordset($8::jsonb)
+         as observed(id uuid, active_entry_id uuid, activity_id text, environment text)
+         on t.id = observed.id and t.active_entry_id is not distinct from observed.active_entry_id
+         and t.activity_id = observed.activity_id and t.environment = observed.environment
+       cross join lateral (
+         select case when observed.active_entry_id = $3::uuid then 'update' else 'end' end as event
+       ) desired
+       where t.workspace_id = $1 and t.user_id = $2 and t.invalidated_at is null
+       order by t.id
+       on conflict (token_id) do update set
+         workspace_id = excluded.workspace_id,
+         user_id = excluded.user_id,
+         revision = live_activity_delivery_outbox.revision + 1,
+         event = excluded.event,
+         payload = jsonb_set(
+           excluded.payload,
+           '{aps,timestamp}',
+           to_jsonb(greatest(
+             coalesce((excluded.payload #>> '{aps,timestamp}')::bigint, 0),
+             coalesce((live_activity_delivery_outbox.payload #>> '{aps,timestamp}')::bigint, 0) + 1
+           ))
+         ),
+         status = 'pending',
+         attempt_count = 0,
+         next_attempt_at = now(),
+         expires_at = excluded.expires_at,
+         leased_until = null,
+         last_attempt_at = null,
+         last_delivery_status = null,
+         last_delivery_reason = null,
+         last_apns_id = null,
+         updated_at = now()
+       where live_activity_delivery_outbox.event is distinct from excluded.event
+          -- A running ActivityKit clock already advances from startedAt. Wall time alone is not a new revision.
+          or ((live_activity_delivery_outbox.payload #> '{aps,content-state}') - 'elapsedSeconds')
+             is distinct from ((excluded.payload #> '{aps,content-state}') - 'elapsedSeconds')`,
       [
-        token.id,
-        session.workspaceId,
-        session.userId,
-        event,
-        JSON.stringify(payload),
-        expiresAt
+        ...owner,
+        active?.id ?? null,
+        update && JSON.stringify(update),
+        JSON.stringify(end),
+        new Date((timestamp + UPDATE_EXPIRY_SECONDS) * 1000).toISOString(),
+        new Date((timestamp + END_EXPIRY_SECONDS) * 1000).toISOString(),
+        JSON.stringify(registrations)
       ]
     );
-  }));
+  }, { reuseFullCapTimeoutPair: true });
 }
 
 async function expireExhaustedOutboxRows() {

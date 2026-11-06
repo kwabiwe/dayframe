@@ -12,7 +12,14 @@ const database = vi.hoisted(() => ({
   query: vi.fn()
 }));
 
-vi.mock("./db", () => ({ query: database.query }));
+vi.mock("./db", () => ({
+  query: database.query,
+  isLockNotAvailableError: (error: unknown) => (error as { code?: string })?.code === "55P03"
+}));
+vi.mock("./sync-transaction", () => ({
+  withSyncTransaction: (_operation: string, work: (transaction: unknown) => unknown) =>
+    work({ client: { query: database.query }, phase: vi.fn() })
+}));
 
 const http2Mocks = vi.hoisted(() => ({
   calls: [] as Array<{ authority: string; headers?: Record<string, string>; body?: string }>,
@@ -90,14 +97,25 @@ describe("Live Activity durable remote sync", () => {
       if (sql.includes('t.user_id as "userId"')) {
         return Promise.resolve({ rows: database.controlRows, rowCount: database.controlRows.length });
       }
+      if (sql.includes("pg_try_advisory_xact_lock")) {
+        return Promise.resolve({ rows: [{ acquired: true }], rowCount: 1 });
+      }
       if (sql.includes("group by workspace_id, user_id")) {
         return Promise.resolve({ rows: database.ownerRows, rowCount: database.ownerRows.length });
       }
-      if (sql.includes("from live_activity_push_tokens") && sql.includes('activity_id as "activityId"')) {
-        return Promise.resolve({ rows: database.tokenRows, rowCount: database.tokenRows.length });
+      if (sql.includes("select 1 from live_activity_push_tokens")) {
+        return Promise.resolve({ rows: [], rowCount: database.tokenRows.length });
       }
       if (sql.includes("from time_entries te") && sql.includes('as "startedAt"')) {
-        return Promise.resolve({ rows: database.activeRows, rowCount: database.activeRows.length });
+        return Promise.resolve({
+          rows: [{
+            active: database.activeRows[0] ?? null,
+            registrations: database.tokenRows.map(row => ({
+              id: row.id, active_entry_id: row.activeEntryId, activity_id: row.activityId, environment: row.environment
+            }))
+          }],
+          rowCount: 1
+        });
       }
       if (sql.includes("with due as")) {
         const rows = database.claimRows;
@@ -253,7 +271,7 @@ describe("Live Activity durable remote sync", () => {
     expect(outboxWrite?.sql).toContain("revision = live_activity_delivery_outbox.revision + 1");
     expect(outboxWrite?.sql).toContain("live_activity_delivery_outbox.payload #>> '{aps,timestamp}'");
     expect(outboxWrite?.sql).toContain("payload #> '{aps,content-state}'");
-    expect(JSON.parse(String(outboxWrite?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(outboxWrite?.params[3]))).toMatchObject({
       aps: {
         event: "update",
         // Both palettes' fills: the Live Activity follows the phone's appearance (UIA-028).
@@ -294,7 +312,7 @@ describe("Live Activity durable remote sync", () => {
 
     await retryLiveActivityDeliveryBestEffort(session);
     const recovered = database.writes.find((write) => write.sql.includes("live_activity_delivery_outbox"));
-    expect(JSON.parse(String(recovered?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(recovered?.params[3]))).toMatchObject({
       aps: { "content-state": { title: "Recovered timer", isRunning: true } }
     });
     expect(log).toHaveBeenCalledWith(
@@ -326,7 +344,7 @@ describe("Live Activity durable remote sync", () => {
     expect(result.missingConfiguration).toContain("APNS_KEY_ID");
     expect(database.writes.some((write) =>
       write.sql.includes("insert into live_activity_delivery_outbox") &&
-      String(write.params[4]).includes("Cron recovery")
+      String(write.params[3]).includes("Cron recovery")
     )).toBe(true);
   });
 
@@ -360,21 +378,21 @@ describe("Live Activity durable remote sync", () => {
     const writes = database.writes.filter((write) =>
       write.sql.includes("insert into live_activity_delivery_outbox")
     );
-    const oldWrite = writes.find((write) => write.params[0] === "token-old");
-    const newWrite = writes.find((write) => write.params[0] === "token-new");
-    expect(oldWrite?.params[3]).toBe("end");
-    expect(JSON.parse(String(oldWrite?.params[4]))).toMatchObject({
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.params.slice(0, 3)).toEqual([
+      session.workspaceId, session.userId, "80000000-0000-4000-8000-000000000002"
+    ]);
+    expect(writes[0]?.sql).toContain("case when observed.active_entry_id = $3::uuid then 'update' else 'end' end");
+    expect(JSON.parse(String(writes[0]?.params[4]))).toMatchObject({
       aps: { event: "end", "content-state": { isRunning: false, canStop: false } }
     });
-    expect(newWrite?.params[3]).toBe("update");
-    expect(JSON.parse(String(newWrite?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(writes[0]?.params[3]))).toMatchObject({
       aps: {
         event: "update",
         "content-state": { title: "New timer", isRunning: true, canStop: true }
       }
     });
   });
-
   it("delivers a due sandbox update and marks the exact revision delivered", async () => {
     configureApns();
     database.claimRows = [outboxRow({ environment: "development", event: "update" })];

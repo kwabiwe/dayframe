@@ -113,8 +113,10 @@ DAYFRAME_INGEST_TOKEN=...
 APNs delivery uses a durable per-token outbox. Timer mutations enqueue the
 newest state before the immediate provider request. Network failures, 429, and
 5xx responses retry with bounded backoff and `Retry-After`; permanent failures
-stop, and invalid/expired tokens are invalidated. Authenticated timer-state
-reads reconcile due rows promptly. `vercel.json` adds a protected daily sweep,
+stop, and invalid or expired tokens are invalidated. Authenticated bootstrap
+rebuilds the desired state and reconciles due rows after responding. The
+lightweight timer-state route does not enqueue or deliver pushes.
+`vercel.json` adds a protected daily sweep,
 which is the highest cron frequency available on this project's current Hobby
 plan; do not silently change that schedule without checking the Vercel plan.
 Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
