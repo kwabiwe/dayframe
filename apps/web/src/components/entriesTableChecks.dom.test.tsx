@@ -12,8 +12,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(search.params)
 }));
 vi.mock("@/components/AppShellRuntime", () => ({
-  useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
+  useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isDateLoading: calendar.isDateLoading, isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
 }));
+const calendar = vi.hoisted(() => ({ isDateLoading: false }));
 const clientFetch = vi.hoisted(() => vi.fn());
 // A place's or trip's dialog reads its map from the evidence route as it opens: those reads have their own
 // mock (the map stays unavailable here), so `clientFetch` sees only the answers the List sends.
@@ -157,6 +158,7 @@ const pickErrands = () => {
 
 describe("things to check in Calendar › List (location v4 step 14)", () => {
   beforeEach(() => {
+    calendar.isDateLoading = false;
     clientFetch.mockReset().mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     evidenceFetch.mockReset().mockResolvedValue(new Response("{}", { status: 404 }));
     router.push.mockReset();
@@ -382,6 +384,104 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       delete (document as { startViewTransition?: unknown }).startViewTransition;
       delete (window as { matchMedia?: unknown }).matchMedia;
     }
+  });
+
+  it("finishes opening the chip's place question when the Calendar day arrives", async () => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = [reviewItems[0]];
+    const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={items} />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
+    expect(dialog()).toBeNull();
+
+    rerender(<EntriesTable {...props} reviewItems={items} />);
+    await waitFor(() => expect(placeAsk("Visited Office?")).toBeTruthy());
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeNull();
+    closePlace();
+
+    rerender(<EntriesTable {...props} locationTimeline={{ ...timeline }} reviewItems={items} />);
+    expect(dialog()).toBeNull();
+  });
+
+  it("does not open a delayed place dialog after the inline question was closed", async () => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = [reviewItems[0]];
+    const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={items} />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
+    fireEvent.click(officeRow()!);
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeNull();
+
+    rerender(<EntriesTable {...props} reviewItems={items} />);
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(dialog()).toBeNull();
+  });
+
+  it("opens the newest chip selection when several questions get their details together", async () => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = reviewItems.slice(0, 2);
+    const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={items} />);
+    fireEvent.click(await screen.findByRole("button", { name: "2 to check, oldest first" }));
+    fireEvent.click(chip(2));
+    expect(document.querySelector(`tr[data-question-for="${TRIP}"]`)).toBeTruthy();
+
+    rerender(<EntriesTable {...props} reviewItems={items} />);
+    await waitFor(() => expect(within(dialog()!).getByRole("group", { name: /^Walk, / })).toBeTruthy());
+    expect(dialog()?.querySelector(".location-correction-ask")).toBeNull();
+  });
+
+  it("does not reopen an early chip selection after the user positions Calendar on another day", async () => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = [reviewItems[0]];
+    const continuous = { loading: null, error: null, reachedEarliest: true, reachedLatest: true, onLoad: vi.fn(),
+      focusDayStartMs: Date.parse(at(0)), focusRequest: "2026-08-11#0" };
+    const { rerender } = render(<EntriesTable {...props} continuous={continuous} locationTimeline={null} reviewItems={items} />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
+
+    rerender(<EntriesTable {...props} reviewItems={items}
+      continuous={{ ...continuous, focusDayStartMs: Date.parse(at(24)), focusRequest: "2026-08-12#1" }} />);
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(dialog()).toBeNull();
+  });
+
+  it("drops the old chip intent when a new day request is still in flight", async () => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = [reviewItems[0]];
+    const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={items} />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
+
+    calendar.isDateLoading = true;
+    rerender(<EntriesTable {...props} reviewItems={items} />);
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(dialog()).toBeNull();
+
+    calendar.isDateLoading = false;
+    rerender(<EntriesTable {...props} reviewItems={items} />);
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(dialog()).toBeNull();
+  });
+
+  it.each(["Calendar date", "Selected day"])("leaves the date picker open with focus on %s during a delayed reply", async (focusName) => {
+    const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+    const items = [reviewItems[0]];
+    const content = (locationTimeline: LocationTimeline | null, picker: boolean) => <>
+      <button aria-expanded={picker} aria-haspopup="dialog" type="button">Calendar date</button>
+      <div aria-hidden={!picker} aria-label="Choose a date" role="dialog"><button type="button">Selected day</button></div>
+      <EntriesTable {...props} locationTimeline={locationTimeline} reviewItems={items} />
+    </>;
+    const { rerender } = render(content(null, false));
+    fireEvent.click(await screen.findByRole("button", { name: "1 to check, oldest first" }));
+    expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
+
+    rerender(content(null, true));
+    const pickerFocus = screen.getByRole("button", { name: focusName });
+    pickerFocus.focus();
+    rerender(content(timeline, true));
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(document.querySelector("dialog.location-correction-dialog")).toBeNull();
+    expect(document.activeElement).toBe(pickerFocus);
   });
 
   it("steps across days: a \"?\" on a day the List hasn't loaded opens that day at it (owner concern 4)", async () => {

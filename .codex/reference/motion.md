@@ -39,7 +39,7 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 ## Timing And Behaviour
 
-When Calendar List opens a native dialog, settle and skip the List snapshot so the dialog owns its entrance. Reserve the map and results slots on first paint. Evidence and search replies update those slots without resizing the dialog.
+When Calendar List opens a native dialog, settle and skip the List snapshot so the dialog owns its entrance. Reserve the map and results slots on first paint. Evidence and search replies update those slots without resizing the dialog. If a check is selected before its day’s location read, show its inline question immediately. Replace it with that same check’s dialog once the details arrive and the selection is still current. A dismissal, answer, different selection or the start of day navigation cancels the handoff. A failed read leaves the inline question usable.
 
 - Animations run on the UI thread. RN `Animated` values always use `useNativeDriver: true` (opacity and transforms); anything that needs layout uses Reanimated. A JS-thread animation drops frames exactly when the JS thread is busy, such as during Stop's outbox write and re-render (investigation 2026-10-07; `framePacing.contract.test.ts` enforces it).
 - A native-driver animation does not update the JS-side `Animated.Value`. When a view may mount after the animation (a list header, a remounted section), set the final value in the completion callback; otherwise the late view starts from the stale JS value. Today's screen entrance fade left the whole header transparent this way (Simulator, 7 October 2026; `framePacing.contract.test.ts`).
