@@ -1015,7 +1015,8 @@ export function EntriesTable({
     if (!row || !opensDialog(row)) return;
     const frame = requestAnimationFrame(() => {
       // The person may have opened a date picker while the location read was pending.
-      if (document.activeElement?.closest('dialog[open], [role="dialog"]')) {
+      if (document.querySelector('dialog[open], [role="dialog"][aria-hidden="false"]') ||
+        document.activeElement?.closest('[role="dialog"]')) {
         cancelPendingCheckDialog();
         return;
       }

@@ -463,11 +463,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(dialog()).toBeNull();
   });
 
-  it("does not take focus from a date picker opened while an early chip selection is waiting", async () => {
+  it.each(["Calendar date", "Selected day"])("leaves the date picker open with focus on %s during a delayed reply", async (focusName) => {
     const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
     const items = [reviewItems[0]];
     const content = (locationTimeline: LocationTimeline | null, picker: boolean) => <>
-      {picker ? <div aria-label="Choose a date" role="dialog"><button type="button">Selected day</button></div> : null}
+      <button aria-expanded={picker} aria-haspopup="dialog" type="button">Calendar date</button>
+      <div aria-hidden={!picker} aria-label="Choose a date" role="dialog"><button type="button">Selected day</button></div>
       <EntriesTable {...props} locationTimeline={locationTimeline} reviewItems={items} />
     </>;
     const { rerender } = render(content(null, false));
@@ -475,12 +476,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(document.querySelector(`tr[data-question-for="${PLACE}"]`)).toBeTruthy();
 
     rerender(content(null, true));
-    const pickedDay = screen.getByRole("button", { name: "Selected day" });
-    pickedDay.focus();
+    const pickerFocus = screen.getByRole("button", { name: focusName });
+    pickerFocus.focus();
     rerender(content(timeline, true));
     await act(async () => { await new Promise(requestAnimationFrame); });
     expect(document.querySelector("dialog.location-correction-dialog")).toBeNull();
-    expect(document.activeElement).toBe(pickedDay);
+    expect(document.activeElement).toBe(pickerFocus);
   });
 
   it("steps across days: a \"?\" on a day the List hasn't loaded opens that day at it (owner concern 4)", async () => {
