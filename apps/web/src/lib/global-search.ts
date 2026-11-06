@@ -59,7 +59,13 @@ export async function searchDayframe(
            or coalesce(cat.name, '') ilike '%' || $3 || '%'
            or coalesce(${placeDisplayNameSql("pl")}, te.place_label, '') ilike '%' || $3 || '%'
            or coalesce(pl.name, '') ilike '%' || $3 || '%'
-           or coalesce(tag.name, '') ilike '%' || $3 || '%'
+           -- Match the block without filtering the tags carried into Start again.
+           or te.id in (
+             select link.time_entry_id
+             from time_entry_tags link
+             join tags matched_tag on matched_tag.id = link.tag_id and matched_tag.workspace_id = link.workspace_id
+             where link.workspace_id = $1 and matched_tag.name ilike '%' || $3 || '%'
+           )
          )
        group by te.id, cat.id, cat.name, cat.color, pl.id, pl.name, te.place_label
      ),
