@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["DayframeTodayRingModule"],
+    "podspecPath": "./ios/DayframeTodayRing.podspec"
+  }
+}

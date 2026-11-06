@@ -11,12 +11,13 @@ import Reanimated, {
   withTiming,
 } from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { TodayLiveRing } from "./TodayLiveRing";
 import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
-import { BLOCKS_SPRING, useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
+import { BLOCKS_SPRING, useBlockLanding, type LandingRequest } from "../../lib/blocksMotion";
 import { playHaptic } from "../../lib/haptics";
 import { LIVE_FLIGHT_NODE, flightNodeRef } from "../../lib/stopFlight";
 import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor } from "../../lib/todaySwitch";
@@ -90,7 +91,6 @@ export function TodayLiveBlock({
     return blockColorsFor(active.categoryColor, theme.mode, active.categoryLabel ?? "");
   }, [active.categoryColor, active.categoryLabel, theme.mode, theme.surfaceRaised, theme.textPrimary]);
   const landingStyle = useBlockLanding({ distance: LIVE_LANDING_DISTANCE, reduceMotion, request: landing });
-  const ringOpacity = useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion });
   const elapsed = useLiveBlockElapsed(active);
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
@@ -118,10 +118,12 @@ export function TodayLiveBlock({
       style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]}
       testID={ghost ? "today-live-ghost" : "today-live-block"}
     >
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.ring, { borderColor: colors.text, opacity: ringOpacity }]}
-        testID="today-live-ring"
+      <TodayLiveRing
+        color={colors.text}
+        cornerRadius={TODAY_CARD.radius}
+        live={active.hasLiveActiveTimer}
+        paused={motionPaused}
+        reduceMotion={reduceMotion}
       />
       <Pressable
         accessibilityActions={active.hasLiveActiveTimer ? [{ name: "switch", label: "Switch" }] : undefined}
@@ -333,18 +335,6 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: TODAY_CARD.radius,
     overflow: "hidden",
-  },
-  ring: {
-    borderRadius: TODAY_CARD.radius,
-    borderWidth: 2,
-    // Clipping (the ring has no children) lets Core Animation draw the border; a bordered view that
-    // does not clip is drawn as an image on the CPU, and every frame of the breathing redrew it.
-    overflow: "hidden",
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
   },
   main: {
     paddingBottom: TODAY_CARD.liveBottomPadding,
