@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestSession } from "./session";
@@ -8,14 +8,53 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip;
 let database: pg.Pool;
 let session: RequestSession;
 let entryId: string;
+let afterActiveRead: (() => Promise<void>) | undefined;
+let onOwnerLock: (() => void) | undefined;
 const now = Date.now();
 const startedAt = new Date(now - 600_000);
 
-vi.mock("./db", () => ({
-  query: (text: string, values: unknown[] = []) => database.query(text, values)
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function controlledQuery(client: Pick<pg.Pool, "query">, text: string, values: unknown[] = []) {
+  const result = client.query(text, values);
+  if (text.includes("pg_advisory_xact_lock")) onOwnerLock?.();
+  const rows = await result;
+  if (text.includes("select te.id,") && text.includes("te.stopped_at is null")) {
+    await afterActiveRead?.();
+  }
+  return rows;
+}
+
+vi.mock("node:http2", () => ({
+  default: { connect: () => { throw new Error("Synthetic provider network failure"); } }
 }));
 
-const { notifyLiveActivities, registerLiveActivity, retryLiveActivityDeliveryBestEffort } =
+vi.mock("./db", () => ({
+  isLockNotAvailableError: (error: unknown) => (error as { code?: string })?.code === "55P03",
+  query: (text: string, values: unknown[] = []) => controlledQuery(database, text, values),
+  pool: {
+    connect: async () => {
+      const client = await database.connect();
+      return new Proxy(client, {
+        get(target, property) {
+          if (property === "query") {
+            return (text: string, values?: unknown[]) => controlledQuery(target, text, values);
+          }
+          const member = Reflect.get(target, property);
+          return typeof member === "function" ? member.bind(target) : member;
+        }
+      });
+    }
+  }
+}));
+
+const {
+  notifyLiveActivities, reconcileLiveActivityDesiredState, registerLiveActivity, retryLiveActivityDeliveryBestEffort
+} =
   await import("./live-activity-push");
 
 type Outbox = {
@@ -29,14 +68,30 @@ type Outbox = {
   payload: { aps: { timestamp: number; "content-state": { title: string; elapsedSeconds: number } } };
 };
 
-async function outbox() {
+async function outbox(owner = session) {
   const { rows } = await database.query<Outbox>(
     `select revision::text, event, status, attempt_count, next_attempt_at, expires_at, leased_until, payload
        from live_activity_delivery_outbox where workspace_id = $1 and user_id = $2`,
-    [session.workspaceId, session.userId]
+    [owner.workspaceId, owner.userId]
   );
   expect(rows).toHaveLength(1);
   return rows[0];
+}
+
+async function registerRunningTimer(owner: RequestSession, id: string, title: string) {
+  await database.query("insert into users (id, email, name) values ($1, $2, 'QA user')",
+    [owner.userId, `${owner.userId}@example.test`]);
+  await database.query(
+    `insert into time_entries (id, workspace_id, user_id, source, description, started_at)
+     values ($1, $2, $3, 'manual_app', $4, $5)`,
+    [id, owner.workspaceId, owner.userId, title, startedAt]
+  );
+  await registerLiveActivity(owner, {
+    token: randomUUID().replaceAll("-", ""),
+    activityId: "qa-live-activity",
+    activeEntryId: id,
+    environment: "development"
+  });
 }
 
 describeWithDatabase("Live Activity retries on disposable Postgres", () => {
@@ -55,24 +110,14 @@ describeWithDatabase("Live Activity retries on disposable Postgres", () => {
     vi.stubEnv("APNS_BUNDLE_ID", "");
     session = { workspaceId: randomUUID(), userId: randomUUID(), authMode: "dev", scopes: ["app:write"] };
     entryId = randomUUID();
-    await database.query("insert into users (id, email, name) values ($1, $2, 'QA user')",
-      [session.userId, `${session.userId}@example.test`]);
     await database.query("insert into workspaces (id, name) values ($1, 'QA workspace')", [session.workspaceId]);
-    await database.query(
-      `insert into time_entries (id, workspace_id, user_id, source, description, started_at)
-       values ($1, $2, $3, 'manual_app', 'Original timer', $4)`,
-      [entryId, session.workspaceId, session.userId, startedAt]
-    );
-    await registerLiveActivity(session, {
-      token: randomUUID().replaceAll("-", ""),
-      activityId: "qa-live-activity",
-      activeEntryId: entryId,
-      environment: "development"
-    });
+    await registerRunningTimer(session, entryId, "Original timer");
     await notifyLiveActivities(session);
   });
 
   afterEach(async () => {
+    afterActiveRead = undefined;
+    onOwnerLock = undefined;
     vi.useRealTimers();
     vi.unstubAllEnvs();
     if (!database || !session) return;
@@ -98,6 +143,153 @@ describeWithDatabase("Live Activity retries on disposable Postgres", () => {
     await retryLiveActivityDeliveryBestEffort(session);
 
     expect(await outbox()).toEqual(original);
+  });
+
+  it.each([
+    {
+      action: "Stop",
+      sql: "update time_entries set stopped_at = $1 where id = $2",
+      value: new Date(now),
+      expected: { event: "end", revision: "2" }
+    },
+    {
+      action: "edit",
+      sql: "update time_entries set description = $1 where id = $2",
+      value: "Renamed while refreshing",
+      expected: {
+        event: "update",
+        revision: "2",
+        payload: { aps: { "content-state": { title: "Renamed while refreshing" } } }
+      }
+    }
+  ])("keeps the newer $action when an earlier refresh already read the timer", async ({ sql, value, expected }) => {
+    const captured = signal();
+    const resume = signal();
+    const newerLock = signal();
+    afterActiveRead = async () => {
+      afterActiveRead = undefined;
+      captured.resolve();
+      await resume.promise;
+    };
+
+    const stale = notifyLiveActivities(session);
+    let newer: ReturnType<typeof notifyLiveActivities> | undefined;
+    try {
+      await Promise.race([captured.promise, stale]);
+      await database.query(sql, [value, entryId]);
+      onOwnerLock = newerLock.resolve;
+      newer = notifyLiveActivities(session);
+      // The newer enqueue can reach its lock while the earlier enqueue is still paused.
+      // The old code instead writes the new revision before the earlier enqueue resumes.
+      await Promise.race([newerLock.promise, newer]);
+    } finally {
+      resume.resolve();
+      await Promise.all([stale, newer]);
+    }
+    expect(await outbox()).toMatchObject(expected);
+  });
+
+  it("does not end a replacement registered after the timer snapshot", async () => {
+    const captured = signal();
+    const resume = signal();
+    afterActiveRead = async () => {
+      afterActiveRead = undefined;
+      captured.resolve();
+      await resume.promise;
+    };
+    const replacementId = randomUUID();
+    const stale = notifyLiveActivities(session);
+    try {
+      await Promise.race([captured.promise, stale]);
+      await database.query("update time_entries set stopped_at = $1 where id = $2", [new Date(), entryId]);
+      await database.query(
+        `insert into time_entries (id, workspace_id, user_id, source, description, started_at)
+         values ($1, $2, $3, 'manual_app', 'Replacement', $4)`,
+        [replacementId, session.workspaceId, session.userId, new Date()]
+      );
+      await registerLiveActivity(session, {
+        token: randomUUID().replaceAll("-", ""),
+        activityId: "replacement-activity",
+        activeEntryId: replacementId,
+        environment: "development"
+      });
+    } finally {
+      resume.resolve();
+      await stale;
+    }
+    expect(await outbox()).toMatchObject({ event: "update", revision: "1" });
+
+    await notifyLiveActivities(session);
+    const { rows } = await database.query(
+      `select t.activity_id, o.event, o.revision::int
+       from live_activity_delivery_outbox o join live_activity_push_tokens t on t.id = o.token_id
+       where o.workspace_id = $1 and o.user_id = $2 order by t.activity_id`,
+      [session.workspaceId, session.userId]
+    );
+    expect(rows).toEqual([
+      { activity_id: "qa-live-activity", event: "end", revision: 2 },
+      { activity_id: "replacement-activity", event: "update", revision: 1 }
+    ]);
+  });
+
+  it("keeps processing other owners and drains due rows while the first owner is busy", async () => {
+    const other = { ...session, userId: randomUUID() };
+    const holder = await database.connect();
+    try {
+      await registerRunningTimer(other, randomUUID(), "Another owner's timer");
+      await database.query(
+        "update live_activity_push_tokens set last_registered_at = now() + interval '1 minute' where user_id = $1",
+        [session.userId]
+      );
+      await database.query("update time_entries set description = 'Busy edit' where id = $1", [entryId]);
+      await holder.query("begin");
+      await holder.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`live-activity-outbox:${session.workspaceId}:${session.userId}`]);
+
+      const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+      vi.stubEnv("APNS_KEY_ID", "test");
+      vi.stubEnv("APNS_TEAM_ID", "test");
+      vi.stubEnv("APNS_PRIVATE_KEY", privateKey.export({ format: "pem", type: "pkcs8" }).toString());
+      vi.stubEnv("APNS_BUNDLE_ID", "com.layereight.dayframe.test");
+
+      // Both due pushes enter the drain and use the mocked network failure.
+      const result = await reconcileLiveActivityDesiredState();
+      expect(result).toMatchObject({ claimed: 2, retryScheduled: 2 });
+      expect(await outbox()).toMatchObject({ revision: "1", attempt_count: 1 });
+      expect(await outbox(other)).toMatchObject({ event: "update", revision: "1", attempt_count: 1 });
+    } finally {
+      try {
+        await holder.query("rollback");
+      } finally {
+        holder.release();
+      }
+      await database.query("delete from users where id = $1", [other.userId]);
+    }
+  });
+
+  it("updates the current timer and ends all older valid registrations", async () => {
+    await database.query(
+      `insert into live_activity_push_tokens (workspace_id, user_id, token, activity_id, invalidated_at)
+       select $1, $2, gen_random_uuid()::text, 'old-' || n,
+              case when n = 150 then now() else null end
+       from generate_series(1, 150) n`,
+      [session.workspaceId, session.userId]
+    );
+    await notifyLiveActivities(session);
+
+    const { rows } = await database.query(
+      `select o.event, count(*)::int as count,
+              bool_and((t.active_entry_id = $3) is true) as is_current
+       from live_activity_delivery_outbox o
+       join live_activity_push_tokens t on t.id = o.token_id
+       where o.workspace_id = $1 and o.user_id = $2
+       group by o.event order by o.event`,
+      [session.workspaceId, session.userId, entryId]
+    );
+    expect(rows).toEqual([
+      { event: "end", count: 149, is_current: false },
+      { event: "update", count: 1, is_current: true }
+    ]);
   });
 
   it.each([
