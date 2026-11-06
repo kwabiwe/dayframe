@@ -15,6 +15,8 @@ PODS:
     - ExpoModulesCore
   - DayframeTimeWheel (0.1.0):
     - ExpoModulesCore
+  - DayframeTodayRing (0.1.0):
+    - ExpoModulesCore
   - DayframeTrackingNotice (0.1.0):
     - ExpoModulesCore
   - EXApplication (56.0.3):
@@ -2416,6 +2418,7 @@ DEPENDENCIES:
   - DayframeMotionActivity (from `../modules/dayframe-motion-activity/ios`)
   - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
   - DayframeTimeWheel (from `../modules/dayframe-time-wheel/ios`)
+  - DayframeTodayRing (from `../modules/dayframe-today-ring/ios`)
   - DayframeTrackingNotice (from `../modules/dayframe-tracking-notice/ios`)
   - EXApplication (from `../../../node_modules/expo-application/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
@@ -2551,6 +2554,8 @@ EXTERNAL SOURCES:
     :path: "../modules/dayframe-place-search/ios"
   DayframeTimeWheel:
     :path: "../modules/dayframe-time-wheel/ios"
+  DayframeTodayRing:
+    :path: "../modules/dayframe-today-ring/ios"
   DayframeTrackingNotice:
     :path: "../modules/dayframe-tracking-notice/ios"
   EXApplication:
@@ -2794,6 +2799,7 @@ SPEC CHECKSUMS:
   DayframeMotionActivity: d10a88e8894cb8c6a37bc317fb306c73bed8d9eb
   DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
   DayframeTimeWheel: dcf0054913139c6039e0100f8c0cba0dc0e8e93f
+  DayframeTodayRing: a7c889d0ca0bf7d52770b88260c023b7e1e5de6d
   DayframeTrackingNotice: f0ea88e59512a0ca307292918c4577206bce5780
   EXApplication: e6040c92edc5522accd62852342e6b14742d42c0
   EXConstants: 6bcea1db4d1215969dc3409dfe33d94a5bfe50ca
