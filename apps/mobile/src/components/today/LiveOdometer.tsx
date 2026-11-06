@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { memo, useMemo, useState } from "react";
+import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useAppForegroundState } from "../../lib/appForeground";
-import { BLOCKS_SPRING } from "../../lib/blocksMotion";
+import { LiveDigitStrip } from "./LiveDigitStrip";
 import { MOBILE_DISPLAY_FONT, MOBILE_TEXT_CAP } from "../../lib/mobileTypography";
 
 // Cell sizes in em, from the prototype's odometer (design/blocks/assets/blocks.css .odo-*).
@@ -130,10 +130,6 @@ export function LiveOdometer({
   );
 }
 
-function stripOffset(digit: number, cellHeight: number) {
-  return digit === 0 ? 0 : -digit * cellHeight;
-}
-
 const OdometerDigit = memo(function OdometerDigit({
   cellHeight,
   color,
@@ -147,47 +143,23 @@ const OdometerDigit = memo(function OdometerDigit({
   reduceMotion: boolean;
   size: number;
 }) {
-  // React Native's native driver moves the strip on the UI thread, with no per-frame JS and no view-tree
-  // commit (Reanimated committed the whole tree on every frame of a roll: iPhone 17, 13 Oct).
-  const [offset] = useState(() => new Animated.Value(stripOffset(digit, cellHeight)));
-  const placed = useRef({ cellHeight, digit, reduceMotion });
-
-  useEffect(() => {
-    const previous = placed.current;
-    if (previous.digit === digit && previous.cellHeight === cellHeight && previous.reduceMotion === reduceMotion) return;
-    placed.current = { cellHeight, digit, reduceMotion };
-    const target = stripOffset(digit, cellHeight);
-    // Reduce Motion (or a covered Today) sets the strip at rest, a roll still running from the tick
-    // before included; a new cell size (Dynamic Type, a narrower card) re-places it. Neither rolls.
-    if (reduceMotion || previous.cellHeight !== cellHeight) {
-      offset.stopAnimation();
-      offset.setValue(target);
-      return;
-    }
-    // Motion coming back alone leaves the strip where it rests.
-    if (previous.digit === digit) return;
-    // Keep the spring's visible trajectory and stop the native driver within 0.08 pt of the target
-    // at 0.5 pt/s or slower. The final snap is subpixel. A retarget starts at the strip's current
-    // position without the earlier roll's speed (Codex r1 on #392).
-    Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();
-  }, [cellHeight, digit, offset, reduceMotion]);
-
-  useEffect(() => () => offset.stopAnimation(), [offset]);
-
-  const lineHeight = size * FONT_LINE_EM;
-  const textStyle = [styles.digit, { color, fontSize: size, height: lineHeight, lineHeight, top: (cellHeight - lineHeight) / 2 }];
+  const glyphs = useMemo(() => {
+    const lineHeight = size * FONT_LINE_EM;
+    const textStyle = [styles.digit, { color, fontSize: size, height: lineHeight, lineHeight, top: (cellHeight - lineHeight) / 2 }];
+    return DIGITS.map((value) => (
+      <View key={value} style={{ height: cellHeight }}>
+        <Text allowFontScaling={false} style={textStyle}>
+          {value}
+        </Text>
+      </View>
+    ));
+  }, [cellHeight, color, size]);
 
   return (
     <View style={[styles.digitCell, { height: cellHeight, width: size * ODOMETER_EM.digitWidth }]}>
-      <Animated.View style={[styles.strip, { transform: [{ translateY: offset }] }]}>
-        {DIGITS.map((value) => (
-          <View key={value} style={{ height: cellHeight }}>
-            <Text allowFontScaling={false} style={textStyle}>
-              {value}
-            </Text>
-          </View>
-        ))}
-      </Animated.View>
+      <LiveDigitStrip cellHeight={cellHeight} digit={digit} reduceMotion={reduceMotion} style={styles.strip}>
+        {glyphs}
+      </LiveDigitStrip>
     </View>
   );
 });
