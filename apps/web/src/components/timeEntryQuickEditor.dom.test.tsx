@@ -72,6 +72,20 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
   });
 
+  it("does not dismiss the editor after a nested surface has handled Escape", async () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, withSuggestions: false });
+    const input = await screen.findByLabelText("Description");
+    const consumedEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    consumedEscape.preventDefault();
+    fireEvent(input, consumedEscape);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("time-entry-quick-editor")).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
   it("splits a finished block at a line moved a minute at a time, and duplicates it (card G)", async () => {
     const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
     const onDuplicate = vi.fn(async () => ({ ok: true as const }));
