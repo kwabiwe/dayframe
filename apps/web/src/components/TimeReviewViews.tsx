@@ -291,9 +291,16 @@ export function TimeReviewViews({
     setListRefresh((current) => ({ token: current.token + 1, affected }));
     // These reads already invalidate the loaded weeks. Recognise the exact shell snapshot for
     // this mutation so its arrival doesn't overtake its own nearby-week read.
-    await refresh({ onCommit: (snapshot) => { listEditBootstraps.add(snapshot); } });
+    let shellRefreshed = false;
+    await refresh({ onCommit: (snapshot) => {
+      listEditBootstraps.add(snapshot);
+      shellRefreshed = true;
+    } });
+    return shellRefreshed;
   }, [listEditBootstraps, refresh]);
-  const refreshDeleted = useCallback((entryIds: readonly string[]) => refreshList({ entryIds }), [refreshList]);
+  const refreshDeleted = useCallback(async (entryIds: readonly string[]) => {
+    await refreshList({ entryIds });
+  }, [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
