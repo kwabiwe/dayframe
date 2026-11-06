@@ -354,6 +354,7 @@ export function EntriesTable({
   const {
     clearTimerError,
     createCategory,
+    isDateLoading,
     isTimerBusy,
     shellData,
     startEntryAgain,
@@ -405,7 +406,10 @@ export function EntriesTable({
   // Where focus goes if a saved correction (Logs as, Save this place, a fix) removes the row that opened its
   // dialog: the next "?" down the List from that row, else the chip, else the List (Codex r4 on #609).
   const correctionFocus = useRef<{ nextKey: string | null; saved: boolean } | null>(null);
+  const [pendingCheckDialog, setPendingCheckDialog] = useState<{ id: string; focusRequest: string | null; link: string | null } | null>(null);
+  const cancelPendingCheckDialog = () => setPendingCheckDialog(null);
   const openCorrection = (next: LocationCorrectionTarget) => {
+    cancelPendingCheckDialog();
     settleTimelineRegroup();
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const following = opener ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")]
@@ -735,6 +739,8 @@ export function EntriesTable({
     const nextId = checkOf(next)!.id;
     const opensModal = opensDialog(next);
     settleTimelineRegroup();
+    // A check can be listed before its place or trip. Keep the selection through that first read.
+    setPendingCheckDialog(opensModal ? null : { id: nextId, focusRequest, link: checkParam });
     if (opensModal) {
       setFocusedCheck(nextId);
     } else {
@@ -770,6 +776,7 @@ export function EntriesTable({
     if (!askingOrder.length) return null;
     // A rapid press can arrive before the previous inline question has painted.
     const previous = pendingInlineCheck.current ?? focusedCheck;
+    cancelPendingCheckDialog();
     settleTimelineRegroup();
     const at = askingOrder.findIndex((check) => check.id === previous);
     const next = askingOrder[(at + 1) % askingOrder.length];
@@ -861,8 +868,10 @@ export function EntriesTable({
     const item = checkOf(row);
     const expanded = Boolean(item) && focusedCheck === item?.id;
     // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
-    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id)) }
-      : undefined;
+    const check = item ? { expanded, onToggle: () => {
+      cancelPendingCheckDialog();
+      applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id));
+    } } : undefined;
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
@@ -880,6 +889,7 @@ export function EntriesTable({
         {item && expanded && row.kind === "check" && !row.trip && !row.place ? (
           <CheckQuestionRow clock={clock} item={item}
             onAnswer={(kind) => {
+              cancelPendingCheckDialog();
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
               const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
               applyTimelineRegroup(() => {
@@ -914,6 +924,7 @@ export function EntriesTable({
    * else the chip, else the List, as there (Codex r1 on #609: the row that opened the dialog is gone).
    */
   const answerFromDialog = (checkId: string, yes: boolean) => {
+    cancelPendingCheckDialog();
     const at = checkRows.findIndex((other) => checkOf(other)?.id === checkId);
     const following = at < 0 ? undefined : checkRows.slice(at + 1).find((other) => other.key !== checkRows[at].key);
     applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip"));
@@ -958,15 +969,11 @@ export function EntriesTable({
   // A link to a block's "?" opens its block's editor once the block is listed.
   const linkedBlock = checkParam && !openFirstCheck && !linkedCheckRow ? blockOfCheck(checkParam) : undefined;
   const openedFromLink = useRef<string | null>(null);
-  // A link can open its "?" before that day's places are read: it opens under its own row then. When the place or
-  // trip arrives and the question is still open, its dialog opens in its place, once (Codex r1 on #609).
-  const linkedOpen = useRef<{ id: string; dialog: boolean; seen?: boolean } | null>(null);
   // A link leaving the URL ends that visit: coming back to it on purpose opens its "?" again, while a refresh
   // with the link still there never does (Codex r2 on #609).
   useEffect(() => {
     if (checkParam) return;
     openedFromLink.current = null;
-    linkedOpen.current = null;
     // Leaving a link also ends any chip step's claim on it: only the navigation pending then is suppressed.
     chipSteps.current.links.clear();
   }, [checkParam]);
@@ -991,25 +998,30 @@ export function EntriesTable({
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
-        const row = checkRows.find((other) => checkOf(other)?.id === opened);
-        linkedOpen.current = row ? { id: opened, dialog: opensDialog(row) } : null;
       }
     });
     return () => cancelAnimationFrame(frame);
   });
   useEffect(() => {
-    const linked = linkedOpen.current;
-    if (!linked || linked.dialog) return;
-    if (focusedCheck !== linked.id) {
-      // Closed, or another "?" opened, once it had opened: nothing to bring back.
-      if (linked.seen) linkedOpen.current = null;
+    const pending = pendingCheckDialog;
+    if (!pending) return;
+    if (isDateLoading || pending.focusRequest !== focusRequest || pending.link !== checkParam ||
+      (focusedCheck !== pending.id && pendingInlineCheck.current !== pending.id) ||
+      !askingOrder.some((check) => check.id === pending.id)) {
+      cancelPendingCheckDialog();
       return;
     }
-    linked.seen = true;
-    const row = checkRows.find((other) => checkOf(other)?.id === linked.id);
+    const row = checkRows.find((other) => checkOf(other)?.id === pending.id);
     if (!row || !opensDialog(row)) return;
-    linkedOpen.current = { id: linked.id, dialog: true };
-    openCheckRow(row);
+    const frame = requestAnimationFrame(() => {
+      // The person may have opened a date picker while the location read was pending.
+      if (document.activeElement?.closest('dialog[open], [role="dialog"]')) {
+        cancelPendingCheckDialog();
+        return;
+      }
+      openCheckRow(row);
+    });
+    return () => cancelAnimationFrame(frame);
   });
   useEffect(() => {
     const pending = correctionFocus.current;
@@ -1198,6 +1210,7 @@ export function EntriesTable({
     const current = inlineEditorRef.current;
     if (current?.entryId === entry.id && current.field === field) return;
     if (isPending || current?.isSaving || (isTimerBusy && !entry.stoppedAt)) return;
+    cancelPendingCheckDialog();
     const next: TimelineInlineEditorState = {
       ...createTimelineInlineEditDraft(entry, field, displayInterval),
       entryId: entry.id,
@@ -1220,6 +1233,7 @@ export function EntriesTable({
   }
 
   function openFullEditor(entry: TimeEntryRow) {
+    cancelPendingCheckDialog();
     settleTimelineRegroup();
     setOpenInlineDatePickerKey(null);
     inlineEditorRef.current = null;
