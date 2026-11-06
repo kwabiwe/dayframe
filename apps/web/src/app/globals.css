@@ -15904,8 +15904,8 @@ button.timeline-location-hit:focus-visible {
   padding: 6px 2px;
 }
 
-/* The list holds the height it opened with (up to five rows, set inline), so typing moves nothing; More options may grow
-   the dialog, and on phones it scrolls inside the viewport (owner, 31 Oct 2026). */
+/* Evidence and search settle inside their opening slots. More options can grow the dialog,
+   which scrolls inside the viewport at phone widths. */
 :root .location-correction.is-next .location-correction-map.is-loading {
   box-sizing: border-box;
   height: 160px;
@@ -15913,8 +15913,8 @@ button.timeline-location-hit:focus-visible {
 }
 
 /* An unknown place's readings line comes with its map: its frame holds that line's room while it loads. */
-:root .location-correction.is-next .location-correction-map.is-loading.is-unknown {
-  height: 189px;
+:root .location-correction.is-next .location-correction-map.is-unknown {
+  min-height: 189px;
 }
 
 :root .location-correction-results {

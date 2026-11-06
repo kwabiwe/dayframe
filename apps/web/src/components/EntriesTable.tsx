@@ -84,10 +84,6 @@ type TimelineInlineEditTarget = {
   kind: "entry" | "group";
 };
 
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => void) => unknown;
-};
-
 type OptimisticDescription = {
   description: string | null;
   sourceDescription: string | null;
@@ -117,14 +113,40 @@ async function saveGroupedTimeEntryDescription(entryIds: string[], description: 
   }
 }
 
+let finishTimelineRegroup: (() => void) | undefined;
+
+function settleTimelineRegroup() {
+  const finish = finishTimelineRegroup;
+  finishTimelineRegroup = undefined;
+  finish?.();
+}
+
 function applyTimelineRegroup(update: () => void) {
-  const documentWithTransitions = document as ViewTransitionDocument;
+  settleTimelineRegroup();
   if (typeof window.matchMedia !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
-    !documentWithTransitions.startViewTransition) {
+    typeof document.startViewTransition !== "function" || document.querySelector("dialog[open]")) {
     update();
     return;
   }
-  documentWithTransitions.startViewTransition(() => flushSync(update));
+  // A skipped snapshot still runs its update callback. Apply it once before a later modal's focus update.
+  let applied = false;
+  const apply = () => {
+    if (applied) return;
+    applied = true;
+    update();
+  };
+  const transition = document.startViewTransition(() => flushSync(apply));
+  const finish = () => {
+    transition?.skipTransition();
+    apply();
+  };
+  finishTimelineRegroup = finish;
+  const clear = () => {
+    if (finishTimelineRegroup === finish) finishTimelineRegroup = undefined;
+  };
+  // Skipping before the animation starts rejects ready even when its update succeeds.
+  void transition?.ready?.catch(() => undefined);
+  void transition?.finished?.then(clear, clear);
 }
 
 function TimelineInlineTimeControl({
@@ -384,6 +406,7 @@ export function EntriesTable({
   // dialog: the next "?" down the List from that row, else the chip, else the List (Codex r4 on #609).
   const correctionFocus = useRef<{ nextKey: string | null; saved: boolean } | null>(null);
   const openCorrection = (next: LocationCorrectionTarget) => {
+    settleTimelineRegroup();
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const following = opener ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")]
       .find((element) => element !== opener && Boolean(opener.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) : undefined;
@@ -429,6 +452,7 @@ export function EntriesTable({
   // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setOpenCheck] = useState<string | null>(null);
   const setFocusedCheck = setOpenCheck;
+  const pendingInlineCheck = useRef<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   // One timeline per shown day: the day's location read, or (without it) an empty day so its checks still
   // show on rows of their own (Codex r1 on #568).
@@ -709,7 +733,17 @@ export function EntriesTable({
   const openCheckRow = (next: LocationListRow) => {
     if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     const nextId = checkOf(next)!.id;
-    applyTimelineRegroup(() => setFocusedCheck(nextId));
+    const opensModal = opensDialog(next);
+    settleTimelineRegroup();
+    if (opensModal) {
+      setFocusedCheck(nextId);
+    } else {
+      pendingInlineCheck.current = nextId;
+      applyTimelineRegroup(() => {
+        pendingInlineCheck.current = null;
+        setFocusedCheck(nextId);
+      });
+    }
     // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
     if (next.kind === "place") openPlaceDialog(next.place, next.checkIds[0] ?? null);
     else if (next.kind === "check" && next.place) openPlaceDialog(next.place, next.checkId);
@@ -717,7 +751,7 @@ export function EntriesTable({
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
       .find((element) => element.dataset.locationRow === anchor)
-      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+      ?.scrollIntoView({ block: "center", behavior: opensModal || prefersReducedMotion() ? "instant" : "smooth" }));
     return nextId;
   };
   const openColumnCheck = (checkId: string) => {
@@ -734,7 +768,10 @@ export function EntriesTable({
   const nextAskingCheck = (fromChip = false) => {
     if (fromChip) chipSteps.current.latest += 1;
     if (!askingOrder.length) return null;
-    const at = askingOrder.findIndex((check) => check.id === focusedCheck);
+    // A rapid press can arrive before the previous inline question has painted.
+    const previous = pendingInlineCheck.current ?? focusedCheck;
+    settleTimelineRegroup();
+    const at = askingOrder.findIndex((check) => check.id === previous);
     const next = askingOrder[(at + 1) % askingOrder.length];
     const row = checkRows.find((other) => checkOf(other)?.id === next.id);
     if (row) return openCheckRow(row);
@@ -774,12 +811,13 @@ export function EntriesTable({
    */
   const openBlockCheck = (entry: TimeEntryRow, checkId: string) => {
     if (continuous?.focusEmptyDay) endFocusOnUserScroll();
-    applyTimelineRegroup(() => setFocusedCheck(checkId));
+    settleTimelineRegroup();
+    setFocusedCheck(checkId);
     // A block inside a group of repeats shows with its group opened.
     setRevealedEntryId(entry.id);
     openFullEditor(entry);
     requestAnimationFrame(() => document.getElementById(`timeline-entry-${entry.id}`)
-      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+      ?.scrollIntoView({ block: "center", behavior: "instant" }));
     return checkId;
   };
   /** A block's "?" answered from its editor: held for Undo like any answer; the editor closes, focus moves on. */
@@ -1182,6 +1220,7 @@ export function EntriesTable({
   }
 
   function openFullEditor(entry: TimeEntryRow) {
+    settleTimelineRegroup();
     setOpenInlineDatePickerKey(null);
     inlineEditorRef.current = null;
     setInlineEditor(null);

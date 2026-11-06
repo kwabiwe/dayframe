@@ -128,6 +128,26 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText(question.text)));
   });
 
+  it("reserves the same map and results space when sparse place evidence settles", async () => {
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={[]}
+      target={{ kind: "place", place: place(), label: "Unknown place" }} />);
+    const dialog = screen.getByRole("dialog");
+    const pane = dialog.querySelector<HTMLElement>(".location-correction-results")!;
+    expect(pane.style.height).toBe("240px");
+    expect(dialog.querySelector('[data-section="map"]')?.classList.contains("is-unknown")).toBe(true);
+    await waitFor(() => expect(dialog.textContent).toContain("The map isn’t available right now."));
+    expect(pane.style.height).toBe("240px");
+    expect(dialog.querySelector('[data-section="map"]')?.classList.contains("is-unknown")).toBe(true);
+  });
+
+  it("shows the visit’s actual date from the first frame, including both sides of midnight", () => {
+    const startedAt = new Date(2026, 11, 31, 23, 40).toISOString();
+    const stoppedAt = new Date(2027, 0, 1, 0, 10).toISOString();
+    render(<LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={[]}
+      target={{ kind: "place", place: place({ startedAt, stoppedAt }), label: "Unknown place" }} />);
+    expect(screen.getByRole("dialog").textContent).toContain("Thu, 31 Dec 2026 23:40 – Fri, 1 Jan 2027 00:10");
+  });
+
   it("sets an unknown place's place and times, event-first through the corrections API", async () => {
     const onCorrected = vi.fn();
     const onClose = vi.fn();

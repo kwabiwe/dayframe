@@ -356,6 +356,35 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
+  it("lets the dialog own its entrance when the chip moves from an inline question", async () => {
+    let rejectReady!: (error: DOMException) => void;
+    const ready = new Promise<void>((_, reject) => { rejectReady = reject; });
+    const skipTransition = vi.fn(() => rejectReady(new DOMException("Transition was skipped", "AbortError")));
+    const startViewTransition = vi.fn((_update: () => void) => ({
+      skipTransition, ready, finished: new Promise(() => undefined)
+    }));
+    Object.assign(document, { startViewTransition });
+    window.matchMedia = vi.fn(() => ({ matches: false }) as MediaQueryList);
+    try {
+      renderList();
+      fireEvent.click(await screen.findByRole("button", { name: "3 to check, oldest first" }));
+      expect(screen.queryByRole("group", { name: /^Sleep, / })).toBeNull();
+      expect(startViewTransition).toHaveBeenCalledTimes(1);
+      fireEvent.click(chip(3));
+      expect(placeAsk("Visited Office?")).toBeTruthy();
+      expect(startViewTransition).toHaveBeenCalledTimes(1);
+      expect(skipTransition).toHaveBeenCalledTimes(1);
+
+      // Chrome still calls the skipped transition's update, after the modal has opened.
+      await act(async () => { startViewTransition.mock.calls[0][0](); });
+      expect(screen.queryByRole("group", { name: /^Sleep, / })).toBeNull();
+      expect(placeAsk("Visited Office?")).toBeTruthy();
+    } finally {
+      delete (document as { startViewTransition?: unknown }).startViewTransition;
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
+  });
+
   it("steps across days: a \"?\" on a day the List hasn't loaded opens that day at it (owner concern 4)", async () => {
     const earlier = suggestion("00000000-0000-4000-8000-0000000000c1", { title: "Sleep", eventSource: "health_sleep",
       eventType: "health_sleep_import_suggestion", suggestedStartedAt: new Date(Date.UTC(2026, 7, 9, 12)).toISOString(),
