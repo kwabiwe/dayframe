@@ -10,6 +10,10 @@ public final class DayframeTodayRingModule: Module {
       Prop("strokeColor") { (view, color: UIColor) in view.ring.borderColor = color.cgColor }
       Prop("cornerRadius") { (view, radius: Double) in view.ring.cornerRadius = CGFloat(radius) }
     }
+
+    View(DayframeTodayDigitStrip.self) {
+      Prop("model") { (view, model: TodayDigitStripModel) in view.update(model) }
+    }
   }
 }
 

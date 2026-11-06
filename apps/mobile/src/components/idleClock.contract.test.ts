@@ -52,10 +52,17 @@ describe("idle and background clock work", () => {
     // Coming back reads the time in that same render.
     expect(clock).toMatch(/if \(inFront !== wasInFront\) \{\s*setWasInFront\(inFront\);\s*if \(inFront\) setNow\(Date\.now\(\)\);/);
   });
-  it("keeps the odometer on the native driver and the iPhone ring on its own Core Animation layer", () => {
+  it("composites the iPhone odometer and ring on their own layers", () => {
     const odometer = readFileSync("src/components/today/LiveOdometer.tsx", "utf8");
     expect(odometer).not.toContain("react-native-reanimated");
-    expect(odometer).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
+    const strip = readFileSync("src/components/today/LiveDigitStrip.ios.tsx", "utf8");
+    const fallback = readFileSync("src/components/today/LiveDigitStrip.tsx", "utf8");
+    const nativeStrip = readFileSync("modules/dayframe-today-ring/ios/DayframeTodayDigitStrip.swift", "utf8");
+    expect(odometer).toContain("<LiveDigitStrip");
+    expect(strip).not.toContain("Animated.spring");
+    expect(nativeStrip).toContain('CASpringAnimation(keyPath: "transform.translation.y")');
+    expect(nativeStrip).toContain("layer.presentation()?.transform.m42");
+    expect(fallback).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
     expect(motion).toContain("restDisplacementThreshold: 0.08, restSpeedThreshold: 0.5");
     expect(motion).toMatch(/export function useBreathingRing[\s\S]*?useNativeDriver: true[\s\S]*?resetBeforeIteration: false/);
     expect(liveBlock).toContain("<TodayLiveRing");

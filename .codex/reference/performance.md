@@ -55,7 +55,7 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 | --- | --- |
 | The Dashboard re-renders whole seconds only while they are on screen; the live block keeps its own clock | `idleClock.contract.test.ts`, `LiveTimerResume.render.test.tsx` (#384, #390) |
 | No clock ticks while backgrounded; the first foreground frame shows the right time | `LiveTimerResume.render.test.tsx` (#377, #384) |
-| The iPhone ring uses Core Animation and the rolling digits use the native driver | `idleClock.contract.test.ts`, `blocksMotion.test.tsx` (#392) |
+| The iPhone ring and rolling digits use Core Animation | `idleClock.contract.test.ts`, `blocksMotion.test.tsx` (#392) |
 | Per-sample location retention uses indexes | `store.sqlite.test.ts` query-plan test (#398) |
 | A recovery pass's own location evidence never queues another pass | `connectivityRecovery.test.ts` (#383) |
 | Location writes do not refresh durable work in the background | `durableLocationRefreshGate.test.ts` (#399) |
