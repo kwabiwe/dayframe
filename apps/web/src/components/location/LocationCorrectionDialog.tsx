@@ -22,7 +22,7 @@ import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { blockStyle } from "@/lib/block-style";
 import { Button, ModalDialog } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { formatDuration, formatTime } from "@/lib/format";
+import { formatDate, formatDuration, formatTime } from "@/lib/format";
 import { useMapProvider } from "@/components/location/PlaceSheetMap";
 import { TimeField } from "@/components/ui/TimeField";
 
@@ -133,16 +133,30 @@ function EvidenceMap({ evidence, knownPlace, leg = null }: {
     const shown = legStartedAt && legStoppedAt ? legEvidence(evidence, { startedAt: legStartedAt, stoppedAt: legStoppedAt }) : evidence;
     return { ...shown, reviewItemId: shown.reviewItemId ?? "", eventId: shown.eventId ?? "" };
   }, [evidence, legStartedAt, legStoppedAt]);
-  const loadingClass = `location-correction-map is-loading${knownPlace ? "" : " is-unknown"}`;
+  const mapClass = `location-correction-map${knownPlace ? "" : " is-unknown"}`;
+  const loadingClass = `${mapClass} is-loading`;
   if (evidence === null) return <p className={loadingClass} data-section="map">Loading the map…</p>;
   if (!mapEvidence) return <p className={loadingClass} data-section="map">The map isn’t available right now.</p>;
   // The map reads only the segment and its geometry; a timeline item may have no Review item or event. Only the
   // visit's own area (or the trip's route), and one plain line at most: never the silences (owner, 29 Oct 2026).
   return (
-    <div className="location-correction-map" data-section="map">
+    <div className={mapClass} data-section="map">
       <PlaceSheetMap caption={evidenceSheetCaption(mapEvidence, { knownPlace })} evidence={mapEvidence} />
     </div>
   );
+}
+
+/** The item's own dates in the viewer's zone, independent of the Calendar day behind it. */
+function correctionSpan(startedAt: string, stoppedAt: string | null, clock: ClockFormat) {
+  const start = new Date(startedAt);
+  const startTime = formatTime(start, clock);
+  if (!stoppedAt) return `${formatDate(start)} · Since ${startTime}`;
+  const end = new Date(stoppedAt);
+  const endTime = formatTime(end, clock);
+  if (start.toDateString() === end.toDateString()) return `${formatDate(start)} · ${startTime}–${endTime}`;
+  const formatDay = start.getFullYear() === end.getFullYear() ? formatDate : (date: Date) =>
+    new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
+  return `${formatDay(start)} ${startTime} – ${formatDay(end)} ${endTime}`;
 }
 
 export type CorrectionPlace = { id: string; name: string; role: string | null };
@@ -331,9 +345,6 @@ export function LocationCorrectionDialog({
   const [query, setQuery] = useState("");
   const [moreOptions, setMoreOptions] = useState(false);
   const [searching, setSearching] = useState(false);
-  // How many of Apple's places came back, and the list's height from then on (owner, 31 Oct 2026).
-  const [nearbyCount, setNearbyCount] = useState<number | null>(null);
-  const [heldRows, setHeldRows] = useState<number | null>(null);
   const [allActivities, setAllActivities] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
@@ -570,7 +581,7 @@ export function LocationCorrectionDialog({
   if (target.kind === "trip") {
     const { trip } = target;
     return (
-      <ModalDialog busy={busy} description={`${formatTime(trip.startedAt, clock)}–${formatTime(trip.stoppedAt, clock)}`} initialFocusRef={questionFocusRef}
+      <ModalDialog busy={busy} description={correctionSpan(trip.startedAt, trip.stoppedAt, clock)} initialFocusRef={questionFocusRef}
         footer={<Button disabled={busy} onClick={onClose}>Done</Button>} onClose={onClose} size="compact" title={target.route}>
         <div className="location-correction">
           {questionCard}
@@ -617,7 +628,7 @@ export function LocationCorrectionDialog({
     const { leg } = target;
     const minutes = Math.max(0, Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000));
     return (
-      <ModalDialog busy={busy} description={`Leg ${target.index + 1} of ${target.count} · ${formatTime(leg.startedAt, clock)}–${formatTime(leg.stoppedAt, clock)}`}
+      <ModalDialog busy={busy} description={`Leg ${target.index + 1} of ${target.count} · ${correctionSpan(leg.startedAt, leg.stoppedAt, clock)}`}
         initialFocusRef={questionFocusRef}
         footer={footer} onClose={onClose} size="compact" title={`${LEG_MODE_LABEL[mode]} · ${formatDuration(minutes)}`}>
         <div className="location-correction">
@@ -670,13 +681,7 @@ export function LocationCorrectionDialog({
   ];
   // Also for a wrongly matched saved place, logged or not: a block follows its visit to the new place.
   const canSaveNew = Boolean(centre);
-  // The list opens at its rows (up to five) and holds that height while searching, with room for a search's answer and
-  // its "Save “X” as a place" slot where a new place can be saved.
   const showsNearby = canSaveNew && mapProvider === "mapkit";
-  const nearbySettled = evidence !== null && (!canSaveNew || (mapProvider !== "probing" && (!showsNearby || nearbyCount !== null)));
-  if (heldRows === null && nearbySettled && !needle) {
-    setHeldRows(Math.min(5, Math.max(canSaveNew ? 3 : 2, rows.length + (showsNearby ? nearbyCount ?? 0 : 0))));
-  }
   const placeList = (items: typeof rows, label: string) => items.length ? (
     <ul aria-label={label} className="location-correction-options">
       {items.map((row) => (
@@ -707,8 +712,7 @@ export function LocationCorrectionDialog({
     </>
   );
   return (
-    <ModalDialog busy={busy} className="location-correction-dialog is-next" description={open ? `Since ${formatTime(place.startedAt, clock)}`
-      : `${formatTime(place.startedAt, clock)}–${formatTime(place.stoppedAt!, clock)}`}
+    <ModalDialog busy={busy} className="location-correction-dialog is-next" description={correctionSpan(place.startedAt, open ? null : place.stoppedAt, clock)}
       footer={footerNext} initialFocusRef={questionFocusRef} onClose={onClose} size="compact" title={target.label}>
       <div className="location-correction is-next">
         {question && question.text !== "Where were you?" ? (
@@ -724,7 +728,7 @@ export function LocationCorrectionDialog({
           </label>
           {/* A fixed area of five rows: it scrolls inside, stays blank below fewer, and "Save “X” as a place" has a
               pinned slot at its foot, so the map, search, More options and footer never move (owner, 30 Oct 2026). */}
-          <div className="location-correction-results" style={{ height: (heldRows ?? 5) * 48 }}>
+          <div className="location-correction-results" style={{ height: 5 * 48 }}>
             <div className="location-correction-results-list">
               {/* Searching: every saved place that matches first, then Apple's, nearest first. */}
               {placeList(rows.slice(0, leadingRows), "This place")}
@@ -734,7 +738,6 @@ export function LocationCorrectionDialog({
                 <NearbyPlaces
                   centre={{ latitude: centre.coordinates[1], longitude: centre.coordinates[0] }}
                   disabled={busy}
-                  onNearbyCount={setNearbyCount}
                   onPick={(name) => void saveThisPlace(name)}
                   onSearching={setSearching}
                   onUnavailable={() => setMapProvider("maplibre")}
