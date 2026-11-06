@@ -367,11 +367,14 @@ private struct DayframeCalendarNowMarker: View {
     // Light: the deeper danger text red under white; dark: the bright danger red under the canvas colour.
     let red = Color(dayframeCSS: light ? theme.dangerText : theme.danger)
     let ink = Color(dayframeCSS: light ? "#FFFFFF" : theme.background)
+    let pillTrailing = max(0, min(width, hourLabelWidth - 6))
+    // Overlap the capsule edge by a point so its antialiased edge cannot leave a seam.
+    let lineStart = max(0, pillTrailing - 1)
     ZStack(alignment: .leading) {
       Rectangle()
         .fill(red)
-        .frame(width: max(0, width - hourLabelWidth), height: 2)
-        .offset(x: hourLabelWidth)
+        .frame(width: max(0, width - lineStart), height: 2)
+        .offset(x: lineStart)
       Text(label)
         .font(.system(size: 11, weight: .bold))
         .monospacedDigit()
@@ -381,7 +384,7 @@ private struct DayframeCalendarNowMarker: View {
         .padding(.horizontal, 6)
         .frame(height: CGFloat(DayframeCalendarNowPillMath.pillHeight))
         .background(Capsule(style: .continuous).fill(red))
-        .frame(width: max(0, hourLabelWidth - 6), alignment: .trailing)
+        .frame(width: pillTrailing, alignment: .trailing)
     }
     .frame(width: width, height: 18, alignment: .leading)
   }
