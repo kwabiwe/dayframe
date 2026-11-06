@@ -497,7 +497,6 @@ export function CalendarListView({
     else next.add(id);
     return next;
   });
-
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -521,6 +520,8 @@ export function CalendarListView({
           {formatLocaleDate(new Date(dayStartMs), { weekday: "short", day: "numeric", month: "short" })}
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.dayMeta, { color: theme.textSecondary }]}>{loggedLabel} logged</Text>
+      </View>
+      <View style={styles.filterSlot} testID="calendar-list-filter-slot">
         {onNextCheck && checkTotal ? (
           // Owner, 28 Oct 2026 (concern 4): every "?" from the last 7 days, oldest first, across days.
           <Pressable accessibilityHint="Opens the next one, oldest first" accessibilityLabel={`${checkTotal} to check in the last 7 days`}
@@ -534,8 +535,6 @@ export function CalendarListView({
             <Text {...mobileTextProps("control")} style={[styles.checksChipText, { color: theme.textPrimary }]}>{checkTotal} to check</Text>
           </Pressable>
         ) : null}
-      </View>
-      <View style={styles.filterSlot} testID="calendar-list-filter-slot">
         {hasLocationPlaces(timeline) ? (
           // Owner item H (28 Oct 2026): a quiet filter by the day's header, not a filled pill under the List.
           <Pressable accessibilityHint="Shows or hides places you didn't need to check" accessibilityRole="button" accessibilityState={{ selected: showAll }}
@@ -968,11 +967,13 @@ function emptyTimeline(dayStartMs: number, dayEndMs: number): LocationTimeline {
   return { date: "", timeZone: "", dayStart: new Date(dayStartMs).toISOString(), dayEnd: new Date(dayEndMs).toISOString(), gaps: [], openTrip: null, items: [] };
 }
 
+const listActionsHeight = 36;
+
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: 140 },
   contentInner: { gap: 12 },
-  dayLine: { flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 4 },
-  dayTitle: { fontSize: 20, fontWeight: "800" },
+  dayLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 4 },
+  dayTitle: { flexShrink: 1, fontSize: 20, fontWeight: "800" },
   dayMeta: { fontSize: 13, fontWeight: "600" },
   card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
   empty: { padding: 20, fontSize: 15 },
@@ -995,8 +996,8 @@ const styles = StyleSheet.create({
   legs: { gap: 6, paddingHorizontal: 14, paddingBottom: 12, paddingLeft: 62 },
   leg: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, minHeight: 44 },
   legTitle: { fontSize: 15, fontWeight: "700" },
-  checksChip: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 12 },
-  checksChipText: { fontSize: 13, fontWeight: "700" },
+  checksChip: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: listActionsHeight, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 12 },
+  checksChipText: { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
   // Owner, 28 Oct 2026: the one amber dot on a row's mark (and on the chip), ringed in the card's surface.
   dot: { position: "absolute", top: -3, right: -3, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   chipDot: { width: 8, height: 8, borderRadius: 4 },
@@ -1004,9 +1005,10 @@ const styles = StyleSheet.create({
   rowTile: { width: ROW_BLOCK.width, height: 36 },
   stackedModes: { gap: 2 },
   legsToggle: { alignSelf: "flex-start", minHeight: 28, justifyContent: "center" },
-  filterSlot: { minHeight: 32, alignItems: "flex-end" },
+  // The check count and places read settle independently. Neither owns the height of the actions row.
+  filterSlot: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: listActionsHeight },
   loadingLine: { height: 12, width: "42%", borderRadius: 6 },
-  filter: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", minHeight: 32, paddingHorizontal: 4 },
+  filter: { flexDirection: "row", alignItems: "center", gap: 4, marginLeft: "auto", minHeight: 32, paddingHorizontal: 4 },
   filterText: { fontSize: 13, fontWeight: "600" },
   // The compact pill (owner, 28 Oct 2026) is compactPillStyles.pill; COMPACT_PILL_HIT_SLOP keeps 44 points.
   yesPillGap: { marginTop: 6 },

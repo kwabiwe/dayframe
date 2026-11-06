@@ -685,6 +685,37 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(textOf(tree)).not.toContain("\" to check\"");
   });
 
+  it("keeps the actions row and places filter at zero without a check control", () => {
+    const onNextCheck = vi.fn();
+    const chipId = "calendar-list-checks-chip";
+    const slotId = "calendar-list-filter-slot";
+    const scene = (checkTotal: number) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="0h"
+        checkTotal={checkTotal} onNextCheck={onNextCheck} nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()}
+        reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} />
+    );
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(scene(1)); });
+    const active = tree.root.findByProps({ testID: chipId });
+    const activeStyle = flat(active.props.style({ pressed: false }));
+    const slot = tree.root.findByProps({ testID: slotId });
+    expect(active.parent).toBe(slot);
+    expect(slot.props.style.minHeight).toBe(activeStyle.minHeight);
+    expect(labels(tree)).toContain("1 to check in the last 7 days");
+
+    act(() => { tree.update(scene(0)); });
+    expect(tree.root.findAllByProps({ testID: chipId })).toHaveLength(0);
+    expect(tree.root.findByProps({ testID: slotId })).toBe(slot);
+    expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).parent).toBe(slot);
+    expect(labels(tree)).not.toContain("0 to check in the last 7 days");
+
+    act(() => { tree.update(scene(10)); });
+    expect(tree.root.findByProps({ testID: chipId }).parent).toBe(slot);
+    expect(labels(tree)).toContain("10 to check in the last 7 days");
+    act(() => { tree.root.findByProps({ testID: chipId }).props.onPress(); });
+    expect(onNextCheck).toHaveBeenCalledOnce();
+  });
+
   it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
     const { AccessibilityInfo } = await import("react-native");
     vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
