@@ -6,6 +6,7 @@ import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_LEG_MODE_ICONS,
   LEG_MODE_LABEL,
+  REVIEW_DESCRIPTION_MAX_LENGTH,
   evidenceSheetCaption,
   type ClockFormat,
   type TimelineCorrectionRequest,
@@ -302,6 +303,7 @@ export function LocationCorrectionDialog({
     return onCorrected();
   };
   const [logAs, setLogAs] = useState<string | null>(null);
+  const [logDescription, setLogDescription] = useState("");
   // The Logs as chips, so "Don't log" (which goes as it clears the pick) hands focus to the chip it cleared (Codex r5 on #620).
   const logAsChips = useRef(new Map<string, HTMLButtonElement>());
   // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
@@ -412,7 +414,11 @@ export function LocationCorrectionDialog({
     }
     // "Logs as" fills the place's time your blocks don't cover with that activity, after any other change, so it
     // reads the corrected place; the server closes the place's open "?" with it.
-    if (logAs) out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs });
+    if (logAs) {
+      const description = logDescription.trim();
+      out.push({ kind: "log_place", subject: "place", itemId: place.id, categoryId: logAs,
+        ...(description ? { description } : {}) });
+    }
     return out;
   }
 
@@ -774,7 +780,16 @@ export function LocationCorrectionDialog({
                     </button>
                   ) : null}
                 </div>
-                {logAs ? <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p> : null}
+                {logAs ? (
+                  <>
+                    <label className="location-correction-section">
+                      <span className="location-correction-label">Description (optional)</span>
+                      <input className="ui-control" disabled={busy} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
+                        onChange={(event) => setLogDescription(event.target.value)} type="text" value={logDescription} />
+                    </label>
+                    <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p>
+                  </>
+                ) : null}
               </div>
             ) : null}
             {open || place.blockIds.length ? null : (

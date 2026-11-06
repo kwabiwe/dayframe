@@ -660,10 +660,13 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const { rerender } = render(<EntriesTable {...baseProps()} categories={[errands]} onChanged={onChanged} reviewItems={reviewItems} />);
     fireEvent.click(officeRow()!);
     pickErrands();
+    fireEvent.change(within(dialog()!).getByRole("textbox", { name: "Description (optional)" }), {
+      target: { value: "  Picked up supplies  " }
+    });
     await act(async () => { fireEvent.click(within(dialog()!).getByRole("button", { name: "Save" })); });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(clientFetch.mock.calls.map(([url]) => url)).toEqual(["/api/timeline/corrections"]);
-    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands",
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body)).toEqual({ kind: "log_place", subject: "place", itemId: "seg-office", categoryId: "cat-errands", description: "Picked up supplies",
       clientCorrectionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
     expect(onChanged).toHaveBeenCalled();
     // The refresh no longer lists the closed "?": its row and count go.

@@ -388,14 +388,14 @@ export function useLocationCorrections({
   // `generation`: the account lifetime of the tap that began it, captured before its first await and carried here
   // (Codex r16 and r17 on #610): any account change since, even back to this one, makes it stale.
   const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string, title: string,
-    newIds: readonly string[], generation: number) => {
+    newIds: readonly string[], generation: number, description?: string) => {
     if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current || generation !== currentMobileAccountEpoch()) {
       throw new Error("The account changed.");
     }
     const owner = { userId, workspaceId };
     // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
-    const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId } });
+    const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId, ...(description ? { description } : {}) } });
     if (!record) return null;
     return {
       // The one completion path (Codex r14 on #610): another account withdraws it, the place sheets gone or Dayframe
@@ -408,7 +408,7 @@ export function useLocationCorrections({
           start: () => {
             logTokens.current += 1;
             return holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
-              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId }, afterCorrections: id, recordOwner: owner });
+              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId, ...(description ? { description } : {}) }, afterCorrections: id, recordOwner: owner });
           }
         });
       },
@@ -469,13 +469,13 @@ export function useLocationCorrections({
         // from an earlier Done (a sheet reopened before they were sent) — and goes as `log_place` only once the server
         // has acknowledged every one; a refused one logs nothing (Codex r4 and r5 on #610). With none waiting, it is
         // held for Undo and queued at once, as before.
-        onLog: (categoryId) => {
+        onLog: (categoryId, description) => {
           const sheetOwner = open.ownerKey;
           const placeItemId = shown.place.id;
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = `${shown.label} as ${name}`;
           const generation = currentMobileAccountEpoch();
-          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation).then((waiting) => {
+          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation, description).then((waiting) => {
             // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
               waiting.start();
@@ -486,14 +486,14 @@ export function useLocationCorrections({
             if (currentOwner.current !== sheetOwner || generation !== currentMobileAccountEpoch()) return;
             logTokens.current += 1;
             const log = { token: logTokens.current, ownerKey: sheetOwner, title,
-              request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId } };
+              request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId, ...(description ? { description } : {}) } };
             if (!mounted.current || !appInFront()) commitLogRef.current(log, false);
             else holdLog(log);
           }, () => sayForLog(sheetOwner, "That place wasn't logged. Try again."));
         },
-        onLogAfter: async (categoryId, ids, generation) => {
+        onLogAfter: async (categoryId, ids, generation, description) => {
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
-          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids, generation);
+          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids, generation, description);
           if (!waiting) throw new Error("Nothing to wait for.");
           return waiting;
         }

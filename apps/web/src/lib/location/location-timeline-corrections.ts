@@ -817,22 +817,23 @@ async function logPlace(
     resolvedReviewItemIds.push(question.id);
   }
   outingTrips.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime() || a.clientSegmentId.localeCompare(b.clientSegmentId));
+  const description = request.description?.trim() || null;
   const event = await client.query<{ id: string }>(
     `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status, client_event_id)
      values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
      returning id`,
     [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId,
-      resolvedReviewItemIds, ...(outingTrips.length ? { tripClientSegmentIds: outingTrips.map((trip) => trip.clientSegmentId) } : {}) }),
+      ...(description ? { description } : {}), resolvedReviewItemIds, ...(outingTrips.length ? { tripClientSegmentIds: outingTrips.map((trip) => trip.clientSegmentId) } : {}) }),
       clientEventId]);
   const entryIds: string[] = [];
   for (const span of free) {
     const entry = await client.query<{ id: string }>(
       `insert into time_entries (workspace_id, user_id, category_id, place_id, source, confidence, review_status, started_at, stopped_at,
-         created_from_event_id)
-       values ($1, $2, $3, $4, 'location_learning', 'high', 'confirmed', $5, $6, $7)
+         created_from_event_id, description)
+       values ($1, $2, $3, $4, 'location_learning', 'high', 'confirmed', $5, $6, $7, $8)
        returning id`,
       [session.workspaceId, session.userId, request.categoryId, place.rows[0]?.placeId ?? null,
-        new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id]);
+        new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id, description]);
     entryIds.push(entry.rows[0].id);
   }
   await client.query(
