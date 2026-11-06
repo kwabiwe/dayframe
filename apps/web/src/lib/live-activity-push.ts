@@ -388,8 +388,9 @@ async function enqueueLatestLiveActivityState(
        last_apns_id = null,
        updated_at = now()
      where live_activity_delivery_outbox.event is distinct from excluded.event
-        or live_activity_delivery_outbox.payload #> '{aps,content-state}'
-           is distinct from excluded.payload #> '{aps,content-state}'`,
+        -- A running ActivityKit clock already advances from startedAt. Wall time alone is not a new revision.
+        or ((live_activity_delivery_outbox.payload #> '{aps,content-state}') - 'elapsedSeconds')
+           is distinct from ((excluded.payload #> '{aps,content-state}') - 'elapsedSeconds')`,
       [
         token.id,
         session.workspaceId,
