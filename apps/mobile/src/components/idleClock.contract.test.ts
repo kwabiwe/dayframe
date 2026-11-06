@@ -56,6 +56,7 @@ describe("idle and background clock work", () => {
     const odometer = readFileSync("src/components/today/LiveOdometer.tsx", "utf8");
     expect(odometer).not.toContain("react-native-reanimated");
     expect(odometer).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
+    expect(motion).toContain("restDisplacementThreshold: 0.08, restSpeedThreshold: 0.5");
     expect(motion).toMatch(/export function useBreathingRing[\s\S]*?useNativeDriver: true[\s\S]*?resetBeforeIteration: false/);
     expect(liveBlock).toContain("<TodayLiveRing");
     expect(ring).not.toContain("useBreathingRing");
