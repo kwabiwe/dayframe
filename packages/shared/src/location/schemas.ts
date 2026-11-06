@@ -202,11 +202,13 @@ export const SEMANTIC_CHANGE_COUNT_REQUEST_HEADER = "x-dayframe-semantic-change-
  */
 export const ApplePlaceIdSchema = z.string().trim().min(1).max(200).regex(/^[\x21-\x7e]+$/);
 
+export const REVIEW_DESCRIPTION_MAX_LENGTH = 500;
+
 export const ReviewEntryEditSchema = z
   .object({
     categoryId: z.string().uuid().nullable().optional(),
     placeId: z.string().uuid().nullable().optional(),
-    description: z.string().trim().max(500).optional(),
+    description: z.string().trim().max(REVIEW_DESCRIPTION_MAX_LENGTH).optional(),
     /**
      * The person typed this description themselves (sent by apps whose Move editors start empty,
      * PRD D19). Without it, a Move description equal to a Dayframe title is treated as an older app's

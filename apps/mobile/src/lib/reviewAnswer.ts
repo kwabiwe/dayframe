@@ -26,6 +26,7 @@ export function reviewAnswerMutation(
     edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null;
     /** Yes to a guessed venue with an activity picked under Logs as (Codex r1 on #620): recorded there once, as that activity. */
     logAsCategoryId?: string | null;
+    logAsDescription?: string;
   } = {}
 ): ReviewMutation {
   // "A block ran into your trip" (location v4 design §7): End it accepts the proposal as it was shown (its hash), so
@@ -37,19 +38,23 @@ export function reviewAnswerMutation(
     return { action: "accept", expectedProposalHash: hash };
   }
   const edit = logged ? options.edit ?? null : null;
+  const logAsEdit = options.logAsCategoryId ? {
+    categoryId: options.logAsCategoryId,
+    ...(options.logAsDescription ? { description: options.logAsDescription } : {})
+  } : null;
   if (options.outingMemberIds?.length) {
     // Yes to "Visited {Apple place}?" on an outing: the stay is recorded there once, its trips logged with it (#642).
     // Only with an Apple Place ID (`keepableVenue`); Not now never carries one.
     const applePlaceId = logged ? options.venue?.applePlaceId : null;
     const venue = options.venue && applePlaceId ? { name: options.venue.name, applePlaceId } : null;
     return reviewDeckOutingMutation(options.outingMemberIds, logged,
-      edit ?? (venue && options.logAsCategoryId ? { categoryId: options.logAsCategoryId } : null), venue);
+      edit ?? (venue ? logAsEdit : null), venue);
   }
   // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
   // a one-time place, never a saved place or a rule (card B part 2).
   if (logged && options.venue && hasV2LocationEvidence(item)) {
     return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}),
-      ...(options.logAsCategoryId ? { edit: { categoryId: options.logAsCategoryId } } : {}) };
+      ...(logAsEdit ? { edit: logAsEdit } : {}) };
   }
   if (edit) return { action: "edit_and_confirm", edit };
   if (logged) return hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" };

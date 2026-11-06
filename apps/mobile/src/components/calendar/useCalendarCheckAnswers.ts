@@ -22,6 +22,7 @@ type HeldAnswer = ReviewDeckHeldDecision & {
   venue?: ReviewAnswerVenue | null;
   /** With `venue`: the activity picked under Logs as, recorded with it (Codex r1 on #620). */
   logAsCategoryId?: string | null;
+  logAsDescription?: string;
   /**
    * Answered from its sheet with changes of its own (Codex r2 on #610): its record waits, on the phone, for those
    * corrections (`reviewAnswersAfterCorrections`); the end of Undo lets it go once they are acknowledged.
@@ -303,7 +304,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       mutation: reviewAnswerMutation(item, decision.logged, {
         outingMemberIds: members.length ? ids.slice(1) : undefined,
         venue: (decision as HeldAnswer).venue ?? null,
-        logAsCategoryId: (decision as HeldAnswer).logAsCategoryId ?? null
+        logAsCategoryId: (decision as HeldAnswer).logAsCategoryId ?? null,
+        logAsDescription: (decision as HeldAnswer).logAsDescription
       }),
       clientMutationId: createReviewClientMutationId(),
       ...(members.length ? { affectedItems: affected } : {})
@@ -391,7 +393,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // registered changes): the lifecycle is read here, so an answer settling while the app is away or the List is gone
   // is saved at once, with no Undo hold, no haptic and nothing said, through its save too.
   const holdAnswer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean; recordOwner?: MobileAccountOwner; logAsCategoryId?: string | null } = {}): boolean => {
+    options: { afterCorrections?: string; expected?: AnswerSet; outing?: boolean; recordOwner?: MobileAccountOwner; logAsCategoryId?: string | null; logAsDescription?: string } = {}): boolean => {
     // No account to answer for (Codex r8 on #582): nothing is held or saved.
     if (!ownerRef.current) return false;
     const quiet = !alive.current || !inFront.current;
@@ -452,7 +454,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       seconds: 0,
       proposal: options.expected?.proposal ?? reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
-      ...(logged && venue ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {}) } : {}),
+      ...(logged && venue ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {}) } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
       ...(options.recordOwner ? { recordOwner: options.recordOwner } : {}),
       ...(quiet ? { quiet: true } : {}),
@@ -539,7 +541,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * sheet's own changes). Whether it was taken now; a gated one is taken once its registration answers.
    */
   const answer = useCallback((itemId: string, logged: boolean, venue?: ReviewAnswerVenue | null,
-    options: { afterCorrections?: string; logAsCategoryId?: string | null } = {}): boolean => {
+    options: { afterCorrections?: string; logAsCategoryId?: string | null; logAsDescription?: string } = {}): boolean => {
     if (options.afterCorrections) {
       const recordOwner = accountOf(shownRef.current);
       return recordOwner
@@ -548,7 +550,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
-    const logAs = venue && options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId } : {};
+    const logAs = venue && options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {};
     if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue, logAs);
     // The answer set as tapped (its proposal, an outing's members and theirs): held against it, never against what a
     // refresh brings meanwhile (Codex r8 and r9 on #610).
@@ -649,7 +651,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * corrections reshape it. `generation`: the tap's account lifetime, from before its first await (Codex r17 on #610).
    */
   const answerAfterCorrections = async (input: { itemId: string; segmentId: string; logged: boolean; newIds: readonly string[]; generation: number;
-    venue: ReviewAnswerVenue | null; logAsCategoryId: string | null; owner: MobileAccountOwner; ownerKey: string }) => {
+    venue: ReviewAnswerVenue | null; logAsCategoryId: string | null; logAsDescription?: string; owner: MobileAccountOwner; ownerKey: string }) => {
     const { itemId, logged, generation, venue, owner, ownerKey } = input;
     if (generation !== currentMobileAccountEpoch()) throw new Error("The account changed.");
     // Not answerable here now (no complete window, a rejected change of its own): refused, so the sheet keeps its
@@ -668,7 +670,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const record = await waitForItemCorrections(owner, { id, itemId: input.segmentId, newIds: input.newIds,
       ...(memberItemIds.length ? { memberItemIds } : {}),
       // A guessed venue (and a Logs as pick with it) stays with the answer (Codex r1 on #620).
-      action: { kind: "answer", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId } : {}),
+      action: { kind: "answer", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId, logAsDescription: input.logAsDescription } : {}),
         ...(memberIds.length ? { outingMemberIds: memberIds } : {}) } });
     if (!record) throw new Error("Nothing to wait for.");
     return {

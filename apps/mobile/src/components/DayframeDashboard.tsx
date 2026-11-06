@@ -2384,17 +2384,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         // never a question already titled with a name, Codex r5 on #620).
         guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null),
         outing: calendarCheckBase.outings.has(check.id),
-        onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
-          logAsCategoryId ? { logAsCategoryId } : {}),
+        onAnswer: (yes, venue, logAsCategoryId, logAsDescription) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
+          logAsCategoryId ? { logAsCategoryId, logAsDescription } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
         // to the Review outbox only once the server has every one of them. A guessed venue goes with it (Codex r1 on
         // #620); otherwise the corrections say where it was.
         // `generation`: the tap's account lifetime, carried from before its first await (Codex r17 on #610).
-        answerAfter: (yes, ids, generation, venue, logAsCategoryId) => {
+        answerAfter: (yes, ids, generation, venue, logAsCategoryId, logAsDescription) => {
           if (!correctionOwner || !check.segmentId || !scopedOwnerKey) throw new Error("No account.");
           return checkAnswers.answerAfterCorrections({ itemId: check.id, segmentId: check.segmentId, logged: yes, newIds: ids, generation,
-            venue: venue ?? null, logAsCategoryId: logAsCategoryId ?? null, owner: correctionOwner, ownerKey: scopedOwnerKey });
+            venue: venue ?? null, logAsCategoryId: logAsCategoryId ?? null, logAsDescription, owner: correctionOwner, ownerKey: scopedOwnerKey });
         }
       };
     },

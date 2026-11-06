@@ -240,12 +240,12 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
         store.enqueueReviewMutation.mockClear();
         const { result } = mount(items);
-        await act(async () => { result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1" }); });
+        await act(async () => { result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1", logAsDescription: "Picked up supplies" }); });
         expect(result.current.held?.itemId).toBe("stay");
         await act(async () => { vi.advanceTimersByTime(10_000); });
         expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
         expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: ["there", "back"],
-          edit: { categoryId: "cat-1" }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } });
+          edit: { categoryId: "cat-1", description: "Picked up supplies" }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } });
         store.enqueueReviewMutation.mockClear();
         const no = mount(items);
         await act(async () => { no.result.current.answer("stay", false, venue); });

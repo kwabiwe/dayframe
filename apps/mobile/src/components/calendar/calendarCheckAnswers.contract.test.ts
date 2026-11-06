@@ -59,13 +59,13 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(answers).toContain("const record = await waitForItemCorrections(owner, { id, itemId: input.segmentId, newIds: input.newIds,");
     // Without new changes, through checkAnswers.answer, which is itself gated (Codex r7 on #610).
     // Yes to a near guess carries its venue (PRD D23); otherwise the List's own guess, as before.
-    expect(dashboard).toContain("onAnswer: (yes, venue, logAsCategoryId) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
+    expect(dashboard).toContain("onAnswer: (yes, venue, logAsCategoryId, logAsDescription) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),");
     // An answer after the sheet's changes keeps its guessed venue, and a Logs as pick with it (Codex r1 on #620).
-    expect(answers).toContain("action: { kind: \"answer\", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId } : {}),");
+    expect(answers).toContain("action: { kind: \"answer\", reviewItemId: itemId, logged, ...(venue ? { venue, logAsCategoryId: input.logAsCategoryId, logAsDescription: input.logAsDescription } : {}),");
     expect(dashboard).not.toContain("holdAnswerAfterCorrections(");
     // And every Logs as path in the place sheets.
     const corrections = source("./useLocationCorrections.tsx");
-    expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId } });");
+    expect(corrections).toContain("await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: \"log\", categoryId, ...(description ? { description } : {}) } });");
     expect(corrections).not.toContain("holdAnswerAfterCorrections(");
     // Started through the store's one completion path (Codex r14 on #610).
     expect(answers).toContain("start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },");

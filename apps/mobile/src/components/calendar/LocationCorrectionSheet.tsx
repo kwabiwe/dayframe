@@ -6,6 +6,7 @@ import {
   DAYFRAME_BLOCKS,
   DAYFRAME_LEG_MODE_ICONS,
   LEG_MODE_LABEL,
+  REVIEW_DESCRIPTION_MAX_LENGTH,
   evidenceSheetCaption,
   formatClockTime,
   formatDuration,
@@ -153,14 +154,14 @@ export function LocationCorrectionSheet({
      * `venue`: Yes to a guess, recorded there once (`record_poi_once`); `logAsCategoryId`: the activity picked under
      * Logs as with it, recorded as that activity (Codex r1 on #620).
      */
-    onAnswer: (yes: boolean, venue?: ReviewAnswerVenue | null, logAsCategoryId?: string | null) => boolean | void;
+    onAnswer: (yes: boolean, venue?: ReviewAnswerVenue | null, logAsCategoryId?: string | null, logAsDescription?: string) => boolean | void;
     /**
      * Answers after the sheet's own changes (Codex r2 on #610): kept on the phone first, waiting for the corrections
      * with these ids to be acknowledged by the server; `start` begins its Undo once they are queued, `cancel`
      * removes it if they can't be.
      */
     answerAfter?: (yes: boolean, ids: readonly string[], generation: number, venue?: ReviewAnswerVenue | null,
-      logAsCategoryId?: string | null) => ReturnType<LocationCorrectionBeforeEnqueue>;
+      logAsCategoryId?: string | null, logAsDescription?: string) => ReturnType<LocationCorrectionBeforeEnqueue>;
   } | null;
   /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
   evidence: TimelineItemEvidenceDto | "unavailable" | null;
@@ -189,12 +190,12 @@ export function LocationCorrectionSheet({
     /** Every activity, for "All activities", when there are more than `activities`. */
     allActivities?: ReadonlyArray<{ id: string; name: string; color?: string | null; icon?: string | null }>;
     /** Logs the place now (held for Undo): the sheet has no corrections of its own to go first. */
-    onLog: (categoryId: string) => void;
+    onLog: (categoryId: string, description?: string) => void;
     /**
      * Logs it after the sheet's corrections (Codex r4 on #610): kept on the phone before they are queued, and sent as
      * `log_place` only once the server has acknowledged every one; a refused one means nothing is logged.
      */
-    onLogAfter?: (categoryId: string, ids: readonly string[], generation: number) => ReturnType<LocationCorrectionBeforeEnqueue>;
+    onLogAfter?: (categoryId: string, ids: readonly string[], generation: number, description?: string) => ReturnType<LocationCorrectionBeforeEnqueue>;
   };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
@@ -351,7 +352,7 @@ export function LocationCorrectionSheet({
       ? placeCorrections(target.place, { choice: picked, times }, places, allowLoggedPlaceChange)
       : tripCorrections(target.trip, { times });
     // Logs as is held for Undo and sent after the place's own changes, which it then logs.
-    const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId) : null;
+    const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId, description) : null;
     if (!corrections.length) {
       log?.();
       return true;
@@ -360,7 +361,7 @@ export function LocationCorrectionSheet({
     if (logAfter && logCategoryId) {
       // Logs as waits for these corrections to be acknowledged, never merely kept on the phone (Codex r4 on #610).
       const categoryId = logCategoryId;
-      keep(corrections, "close", (ids, generation) => logAfter(categoryId, ids, generation));
+      keep(corrections, "close", (ids, generation) => logAfter(categoryId, ids, generation, description));
       return false;
     }
     pendingLog.current = log;
@@ -394,6 +395,8 @@ export function LocationCorrectionSheet({
   const [nearbyGuess, setNearbyGuess] = useState<{ venue: ReviewAnswerVenue | null; proposal: string } | null>(null);
   // The activity picked under Logs as; none is "Don't log", as the place is now.
   const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
+  const [logDescription, setLogDescription] = useState("");
+  const description = logDescription.trim() || undefined;
   const [allActivities, setAllActivities] = useState(false);
   const [moreOptions, setMoreOptions] = useState(false);
   const moreRow = useRef<View | null>(null);
@@ -447,11 +450,11 @@ export function LocationCorrectionSheet({
     // "?" stays (Codex r4 on #610). Without `onLogAfter` it logs once they are kept, as before.
     const categoryId = logCategoryId;
     const logAfter = logAs?.onLogAfter && categoryId ? logAs.onLogAfter : null;
-    const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId) : null;
+    const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId, description) : null;
     if (chosenName !== undefined) setAttempted({ name, applePlaceId });
     setSaving(true);
     setSaveError(null);
-    onSavePlace(name, rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation) : undefined,
+    onSavePlace(name, rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation, description) : undefined,
       applePlaceId).then(() => {
       setSaving(false);
       kept.current = true;
@@ -484,6 +487,7 @@ export function LocationCorrectionSheet({
       return;
     }
     const logAsCategoryId = yes && venue && logCategoryId ? logCategoryId : null;
+    const answerDescription = logAsCategoryId ? description : undefined;
     if (!yes && logCategoryId) setLogCategoryId(null);
     if (confirming) {
       setSaveError("Finish the change above first, then answer.");
@@ -501,7 +505,7 @@ export function LocationCorrectionSheet({
       : tripCorrections(target.trip, { times });
     if (!corrections.length) {
       // Refused (it can't be answered here now): the sheet stays open with its question; nothing is taken as done.
-      if ((venue ? question.onAnswer(yes, venue, logAsCategoryId) : question.onAnswer(yes)) === false) {
+      if ((venue ? question.onAnswer(yes, venue, logAsCategoryId, answerDescription) : question.onAnswer(yes)) === false) {
         setSaveError("This can't be answered here right now.");
         return;
       }
@@ -515,7 +519,7 @@ export function LocationCorrectionSheet({
       return;
     }
     keep(corrections, "close", (ids, generation) => venue
-      ? answerAfter(yes, ids, generation, venue, logAsCategoryId) : answerAfter(yes, ids, generation));
+      ? answerAfter(yes, ids, generation, venue, logAsCategoryId, answerDescription) : answerAfter(yes, ids, generation));
   }
   function confirmJoin(join: Join) {
     if (frozen()) return;
@@ -744,6 +748,14 @@ export function LocationCorrectionSheet({
                     <ShapeAction label="All activities" onPress={() => setAllActivities(true)} testID="location-correction-log-all" theme={theme} />
                   ) : null}
                 </View>
+                {logCategoryId ? (
+                  <TextInput accessibilityLabel={logDescription.length > 0 ? "Description (optional)" : undefined}
+                    editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
+                    onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
+                    placeholder="Description (optional)" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+                    style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+                    testID="location-correction-log-description" value={logDescription} />
+                ) : null}
                 {logCategoryId ? (
                   <View style={styles.logFoot}>
                     <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.logHint, { color: theme.textSecondary }]}>Fills only the time your own blocks don't cover.</Text>

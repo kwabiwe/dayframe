@@ -73,7 +73,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
         // A Logs as (Codex r4 on #610): its corrections are acknowledged, so `log_place` goes now, under the record's
         // own id (a repeat after a crash is answered once, #597); the server closes the place's "?" with it (#609).
         await enqueueTimelineCorrections(who, [{ request: { kind: "log_place", subject: "place", itemId: record.log.itemId,
-          categoryId: record.log.categoryId, clientCorrectionId: record.id } }]);
+          categoryId: record.log.categoryId, ...(record.log.description ? { description: record.log.description } : {}),
+          clientCorrectionId: record.id } }]);
         void synchroniseTimelineCorrections({ owner: who, force: true, isForeground: () => AppState.currentState === "active" }).catch(() => undefined);
         return "released";
       }
@@ -91,7 +92,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       await enqueueReviewMutation({ bootstrap, item, clientMutationId: record.id,
         mutation: reviewAnswerMutation(item, record.logged, {
           ...(record.outingMemberIds?.length ? { outingMemberIds: record.outingMemberIds } : {}),
-          ...(venueAnswer ? { venue: record.venue, logAsCategoryId: record.log?.categoryId ?? null } : {})
+          ...(venueAnswer ? { venue: record.venue, logAsCategoryId: record.log?.categoryId ?? null, logAsDescription: record.log?.description } : {})
         }),
         ...(members.length ? { affectedItems: [item, ...members.map((member) => member!)] } : {}) });
       void synchroniseReviewMutations().catch(() => undefined);

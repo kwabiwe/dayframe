@@ -402,7 +402,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     expect(onLog).not.toHaveBeenCalled();
     await sheet.settle();
     expect(sheet.onQueue).toHaveBeenCalledTimes(1);
-    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onLog).toHaveBeenCalledWith("cat-errands", undefined);
   });
 
   // Codex r1 on #606.
@@ -416,7 +416,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     sheet.press("location-correction-confirm-save-place");
     await sheet.settle();
     expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined, null);
-    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onLog).toHaveBeenCalledWith("cat-errands", undefined);
     expect(sheet.onDismissed).toHaveBeenCalledWith(1);
   });
 
@@ -590,7 +590,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     tap(done, "location-correction-log-cat-errands");
     tap(done, "location-correction-sheet-action");
     await settle();
-    expect(onLog).toHaveBeenCalledWith("cat-errands");
+    expect(onLog).toHaveBeenCalledWith("cat-errands", undefined);
     expect(onAnswer).not.toHaveBeenCalled();
     expect(answerAfter).not.toHaveBeenCalled();
   });
@@ -841,12 +841,12 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const nearby = tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
     expect(nearby.props.guess).toEqual(venue);
     tap(tree, "location-correction-sheet-action");
-    expect(onAnswer).toHaveBeenCalledWith(true, venue, null);
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null, undefined);
     // The ticked row is the same Yes.
     const again = vi.fn();
     const row = sheetWith({ question: { ...ask, guess: venue, onAnswer: again } });
     act(() => { row.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onGuessPick(); });
-    expect(again).toHaveBeenCalledWith(true, venue, null);
+    expect(again).toHaveBeenCalledWith(true, venue, null, undefined);
     // A name of the person's own is a Save.
     const named = sheetWith({ onSavePlace: vi.fn(async () => undefined), question: { ...ask, guess: venue, onAnswer: vi.fn() } });
     openMore(named);
@@ -864,7 +864,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     onQueue.mockClear();
     act(() => { tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onGuessPick(); });
     expect(onQueue).not.toHaveBeenCalled();
-    expect(onAnswer).toHaveBeenCalledWith(true, venue, null);
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null, undefined);
   });
 
   it("mounts the map after the sheet's spring, and an early close leaves nothing running", () => {
@@ -942,15 +942,20 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     act(() => { timed.root.findByProps({ testID: "location-correction-start" }).props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
     tap(timed, "location-correction-sheet-action");
     await settle();
-    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, null);
+    expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, null, undefined);
     expect(onAnswer).not.toHaveBeenCalled();
     // (b) Logs as picked, nothing else changed: one answer with the venue and the activity, never log_place.
     const onLog = vi.fn();
     const picked = sheetWith({ logAs: { activities: logs.activities, onLog }, question: { ...ask, guess: venue, onAnswer } });
     tap(picked, "location-correction-log-cat-errands");
+    const description = () => picked.root.findByProps({ testID: "location-correction-log-description" });
+    expect(description().props.placeholder).toBe("Description (optional)");
+    expect(description().props.accessibilityLabel).toBeUndefined();
+    act(() => { description().props.onChangeText("  Picked up supplies  "); });
+    expect(description().props.accessibilityLabel).toBe("Description (optional)");
     tap(picked, "location-correction-sheet-action");
     await settle();
-    expect(onAnswer).toHaveBeenCalledWith(true, venue, "cat-errands");
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, "cat-errands", "Picked up supplies");
     expect(onLog).not.toHaveBeenCalled();
     // (b) Logs as picked with a time change: the answer waits for it, venue and activity with it; no Logs as of its own.
     const answerAfterToo = vi.fn(async () => waiting());
@@ -962,7 +967,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     tap(both, "location-correction-log-cat-errands");
     tap(both, "location-correction-sheet-action");
     await settle();
-    expect(answerAfterToo).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, "cat-errands");
+    expect(answerAfterToo).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, "cat-errands", undefined);
     expect(onLogAfter).not.toHaveBeenCalled();
     expect(onLog).not.toHaveBeenCalled();
   });

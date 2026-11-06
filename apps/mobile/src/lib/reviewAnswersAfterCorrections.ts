@@ -36,7 +36,7 @@ export type AnswerAfterCorrections = MobileAccountOwner & {
    * A Logs as instead of an answer (Codex r4 on #610): `log_place` for this place with this activity, queued only
    * once the sheet's corrections are acknowledged; its `id` is the log's own `clientCorrectionId`.
    */
-  log?: { itemId: string; categoryId: string };
+  log?: { itemId: string; categoryId: string; description?: string };
   /** An outing's trips answered with its stay (`confirm_outing` / `ignore_outing`; Codex r10 on #610). */
   outingMemberIds?: string[];
   /**
@@ -96,9 +96,10 @@ function parse(value: unknown): AnswerAfterCorrections | null {
     ? item.venue as ReviewAnswerVenue : null;
   const held = item.held && typeof item.held === "object" && typeof (item.held as { run?: unknown }).run === "string"
     ? { run: (item.held as { run: string }).run } : undefined;
-  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown } | undefined;
+  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown; description?: unknown } | undefined;
   const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && typeof rawLog.categoryId === "string"
-    ? { itemId: rawLog.itemId, categoryId: rawLog.categoryId } : undefined;
+    ? { itemId: rawLog.itemId, categoryId: rawLog.categoryId,
+      ...(typeof rawLog.description === "string" ? { description: rawLog.description } : {}) } : undefined;
   const outingMemberIds = strings(item.outingMemberIds);
   const backendId = typeof item.backendId === "string" ? item.backendId : undefined;
   return {
@@ -148,7 +149,7 @@ export async function readAnswersAfterCorrections(owner: MobileAccountOwner) {
  * acknowledgement always finds it.
  */
 export async function holdAnswerAfterCorrections(owner: MobileAccountOwner,
-  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: { itemId: string; categoryId: string };
+  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: AnswerAfterCorrections["log"];
     waitsFor: readonly string[] }, now = new Date()) {
   if (!answer.waitsFor.length) throw new Error("An answer after corrections needs its corrections.");
   const record: AnswerAfterCorrections = {
@@ -176,7 +177,7 @@ export type AfterCorrectionsQueue = {
  * and then finds it. Held for Undo. Null when there is nothing to wait for (answer or log at once).
  */
 export async function registerAfterCorrections(owner: MobileAccountOwner,
-  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: { itemId: string; categoryId: string };
+  answer: { id: string; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; log?: AnswerAfterCorrections["log"];
     outingMemberIds?: readonly string[]; newIds: readonly string[]; itemIds: readonly string[] },
   queue: AfterCorrectionsQueue, now = new Date()) {
   const record = await serialised(async () => {

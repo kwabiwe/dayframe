@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mergeSameModeLegs } from "./legs";
+import { ReviewEntryEditSchema } from "./schemas";
 import type { CommuteSegment, LocationSegment, StaySegment, TripLeg, TripLegMode } from "./types";
 
 /**
@@ -73,7 +74,10 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
   // "Logs as" (step 12 part 4): a place with no block, logged with this activity for the time the person's own
   // blocks don't cover; its open questions close as their "Not now" does (Codex r2 on #609). Blocks, not a stored
   // correction: replay never applies it again.
-  z.object({ kind: z.literal("log_place"), subject: z.literal("place"), itemId, clientCorrectionId, categoryId: z.string().uuid() }),
+  z.object({
+    kind: z.literal("log_place"), subject: z.literal("place"), itemId, clientCorrectionId,
+    categoryId: z.string().uuid(), description: ReviewEntryEditSchema.shape.description
+  }),
   z.object({
     kind: z.literal("leg_mode"),
     subject: z.literal("leg"),

@@ -459,15 +459,19 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await expect(correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId: homeId }, session))
       .rejects.toMatchObject({ status: 422 });
     const id = "66000000-0000-4000-8000-0000000000d1";
-    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, clientCorrectionId: id }, session);
+    const logged = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, description: "Picked up supplies", clientCorrectionId: id }, session);
     expect(logged.logged?.entryIds).toHaveLength(2);
-    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt", category_id as "categoryId", source
+    const blocks = await db.query(`select started_at as "startedAt", stopped_at as "stoppedAt", category_id as "categoryId", source, description
         from time_entries where id = any($1::uuid[]) order by started_at`, [logged.logged!.entryIds]);
     expect(blocks.rows.map((row) => [new Date(row.startedAt).toISOString(), new Date(row.stoppedAt).toISOString()]))
       .toEqual([[at(base), at(base + 10)], [at(base + 20), at(base + 60)]]);
     expect(blocks.rows.every((row) => row.categoryId === categoryId && row.source === "location_learning")).toBe(true);
+    expect(blocks.rows.map((row) => row.description)).toEqual(["Picked up supplies", "Picked up supplies"]);
+    const original = await db.query(`select description from time_entries where workspace_id = $1 and source = 'manual_app' and started_at = $2`,
+      [workspaceId, at(base + 10)]);
+    expect(original.rows).toEqual([{ description: null }]);
     // The retry after a lost reply gets the same blocks; a second Logs as is refused, the place being in a block now.
-    expect(await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, clientCorrectionId: id }, session))
+    expect(await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId, description: "Picked up supplies", clientCorrectionId: id }, session))
       .toEqual(logged);
     await expect(correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "l-place", categoryId }, session))
       .rejects.toMatchObject({ status: 409 });

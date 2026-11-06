@@ -27,9 +27,9 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
    * `logAsCategoryId`: Yes to a guessed venue with an activity picked (Codex r1 on #620); kept as the record's `log`
    * beside its `venue`, and released as one `record_poi_once` with that activity, never as `log_place`.
    */
-  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; logAsCategoryId?: string | null;
+  action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; logAsCategoryId?: string | null; logAsDescription?: string;
     outingMemberIds?: readonly string[] }
-    | { kind: "log"; categoryId: string };
+    | { kind: "log"; categoryId: string; description?: string };
 }) {
   return registerAfterCorrections(owner, {
     id: input.id,
@@ -37,8 +37,10 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
     logged: input.action.kind === "answer" ? input.action.logged : true,
     ...(input.action.kind === "answer" && input.action.venue ? { venue: input.action.venue } : {}),
     ...(input.action.kind === "answer" && input.action.venue && input.action.logged && input.action.logAsCategoryId
-      ? { log: { itemId: input.itemId, categoryId: input.action.logAsCategoryId } } : {}),
-    ...(input.action.kind === "log" ? { log: { itemId: input.itemId, categoryId: input.action.categoryId } } : {}),
+      ? { log: { itemId: input.itemId, categoryId: input.action.logAsCategoryId,
+        ...(input.action.logAsDescription ? { description: input.action.logAsDescription } : {}) } } : {}),
+    ...(input.action.kind === "log" ? { log: { itemId: input.itemId, categoryId: input.action.categoryId,
+      ...(input.action.description ? { description: input.action.description } : {}) } } : {}),
     ...(input.action.kind === "answer" && input.action.outingMemberIds?.length ? { outingMemberIds: input.action.outingMemberIds } : {}),
     newIds: input.newIds,
     itemIds: [input.itemId, ...(input.memberItemIds ?? [])]
