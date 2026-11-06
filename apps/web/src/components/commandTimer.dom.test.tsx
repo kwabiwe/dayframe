@@ -234,6 +234,46 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
   });
 });
 
+describe("Switch activity from the running block menu", () => {
+  it("searches an unpinned activity and starts a fresh block through Quick Start", async () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }), description: "Plan launch" });
+    render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+
+    expect(screen.getByRole("dialog", { name: "Switch activity" })).not.toBeNull();
+    expect(screen.queryByRole("option", { name: "Focus" })).toBeNull();
+    const search = screen.getByRole("combobox", { name: "Search activities" });
+    fireEvent.change(search, { target: { value: "learn" } });
+    expect(screen.getByRole("option", { name: "Learning" })).not.toBeNull();
+    expect(runtime.startTimer).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.keyDown(search, { key: "Enter" }); });
+
+    expect(runtime.startTimer).toHaveBeenCalledExactlyOnceWith(
+      { categoryId: "learn", description: "", tagNames: [] },
+      { dedupeRunning: true, guard: expect.any(Function) }
+    );
+    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+  });
+
+  it("does not switch a replacement block that arrived before the choice", () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
+    render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+
+    (runtime.readShellData as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...(runtime.shellData as BootstrapData),
+      activeEntry: timeEntry({ id: "replacement" })
+    });
+    fireEvent.click(screen.getByRole("option", { name: "Learning" }));
+
+    expect(runtime.startTimer).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(screen.getByText("The running block changed. Open Switch activity again.")).not.toBeNull();
+  });
+});
+
 describe("Split for the running block (owner 28 Oct 2026)", () => {
   it("sits beside Discard and splits at the chosen minute, then offers Undo while the second part runs", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -242,7 +282,7 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     render(<PersistentTimerBar />);
     const items = screen.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent?.trim());
-    expect(items).toEqual(["Split", "Discard running block"]);
+    expect(items).toEqual(["Switch activity", "Split", "Discard running block"]);
     await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
     const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
     // From its start to now: the line starts in the middle, on a minute, and moves in whole minutes.
@@ -342,13 +382,15 @@ function runtimeFixture(overrides: {
     activeEntry,
     categories: [
       { id: "focus", name: "Focus", color: "mint", isPinned: true },
-      { id: "write", name: "Writing", color: "blue", isPinned: true }
+      { id: "write", name: "Writing", color: "blue", isPinned: true },
+      { id: "learn", name: "Learning", color: "violet", isPinned: false }
     ],
     categoryUsage: [],
     dateRange: { selectedDate: "2026-08-14" },
     entries: activeEntry ? [activeEntry] : [],
     tags: [{ id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 2 }],
-    taskSuggestions: []
+    taskSuggestions: [],
+    workspace: { id: "workspace", name: "Personal" }
   } as unknown as BootstrapData;
   return {
     clearTimerError: vi.fn(),

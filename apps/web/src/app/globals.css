@@ -4646,7 +4646,7 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-muted);
 }
 
-/* The running block's menu: Split is an ordinary action beside Discard's danger one. */
+/* The running block's menu uses the neutral text colour for ordinary actions. */
 .swiss-timer-actions-menu button:not(.is-danger) {
   color: var(--text-primary);
 }

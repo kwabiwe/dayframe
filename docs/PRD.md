@@ -49,6 +49,7 @@ Key needs and pain points:
 Core Functionality:
 
 - ✅ Web and mobile manual timer start/stop/switch with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch. Already-started durable timer saves receive best-effort finite iOS background time, while offline, expiry and force-quit continue through the same durable recovery path.
+- On the web, More block actions › Switch activity searches the workspace activities and starts the next block at the switch time. The Activity field edits the current block.
 - ✅ Description, category, place, source, confidence, and review status on time entries.
 - ✅ Calendar and List review views (Timesheet removed 11 Oct 2026, owner decision: Reports covers weekly totals and the CSV export).
 - ✅ Ambiguous geofence/health/location suggestions are asked as a "?" where they sit in Calendar › List (D23); there is no Review page or screen (location v4 step 15).

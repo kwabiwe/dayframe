@@ -15,7 +15,7 @@ import { focusQuietly } from "@/components/blocks/TooltipHost";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
-import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
+import { FLOATING_LIST_HINTS, type FloatingListActivity } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
@@ -24,6 +24,7 @@ import { IconButton } from "@/components/ui/Primitives";
 import type { CalendarEntryCompactCreatePlan } from "@/lib/calendar-entry-compact-editor";
 import { TimeEntryQuickCreateModal } from "@/components/TimeEntryQuickEditor";
 import { RunningSplitDialog } from "@/components/RunningSplitDialog";
+import { SwitchActivityDialog } from "@/components/SwitchActivityDialog";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
@@ -43,6 +44,8 @@ import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
+const SWITCH_BLOCK_CHANGED = "The running block changed. Open Switch activity again.";
+const SWITCH_ACTIVITY_UNAVAILABLE = "That activity is no longer available.";
 
 type TimerNotice = {
   /**
@@ -106,6 +109,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [switchScope, setSwitchScope] = useState<string | null>(null);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -411,7 +415,10 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
     setTimerDraft((current) => ({ ...current, categoryId, description }));
   }
 
-  function startQuickAction(action: QuickAction) {
+  function startQuickAction(
+    action: Pick<QuickAction, "categoryId" | "color" | "label">,
+    guard?: (snapshot: BootstrapData) => string | null
+  ) {
     const draft = quickActionTimerDraft(action.categoryId);
     // The Activities list is not closed here: a press on a quick start is a press outside it (which
     // closes it unless a Create is saving), and the new block's scope closes it the same way, so a
@@ -422,10 +429,17 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
     // exactly the running block changes nothing and says so; a switch names the block it actually
     // replaced, timed to the switch. A Start superseded by a later one announces nothing. It is
     // asked for before the bar shows its draft, so the runtime keeps the outgoing block's edits.
-    const started = startTimer(draft, { dedupeRunning: true });
-    setTimerDraft(draft);
+    const started = startTimer(draft, { dedupeRunning: true, ...(guard ? { guard } : {}) });
+    // The guarded picker waits for the runtime to accept the switch before changing the draft.
+    if (!guard) setTimerDraft(draft);
     void started.then((outcome) => {
-      if (!outcome.ok || !outcome.own) return;
+      if (!outcome.ok) {
+        if (guard && (outcome.error === SWITCH_BLOCK_CHANGED || outcome.error === SWITCH_ACTIVITY_UNAVAILABLE)) {
+          setCommandNotice(outcome.error);
+        }
+        return;
+      }
+      if (!outcome.own) return;
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
       } else if (outcome.replaced) {
@@ -433,6 +447,31 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
         announce(copy.message, swatch, copy.detail);
       }
     });
+  }
+
+  function switchActivity(activity: FloatingListActivity | null) {
+    setSwitchScope(null);
+    if (isTimerBusy || !data || !active) return;
+    const guard = (snapshot: BootstrapData) => {
+      if (snapshot.workspace.id !== data.workspace.id || snapshot.activeEntry?.id !== active.id) {
+        return SWITCH_BLOCK_CHANGED;
+      }
+      if (activity && !snapshot.categories.some(({ id }) => id === activity.id)) {
+        return SWITCH_ACTIVITY_UNAVAILABLE;
+      }
+      return null;
+    };
+    const latest = readShellData();
+    const refusal = latest ? guard(latest) : SWITCH_BLOCK_CHANGED;
+    if (refusal) {
+      setCommandNotice(refusal);
+      return;
+    }
+    startQuickAction({
+      categoryId: activity?.id ?? null,
+      color: activity?.color ?? null,
+      label: activity?.name ?? "No activity"
+    }, guard);
   }
 
   // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
@@ -958,6 +997,19 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                 inert={!timerActionsOpen}
                 role="menu"
               >
+                <button
+                  onClick={() => {
+                    focusQuietly(timerActionsTriggerRef.current);
+                    setTimerActionsOpen(false);
+                    setSwitchScope(completionScope);
+                  }}
+                  ref={timerActionsFirstItemRef}
+                  role="menuitem"
+                  type="button"
+                >
+                  <DayframeIcon glyph="refresh-cw" size={16} />
+                  Switch activity
+                </button>
                 {/* Split beside Discard (owner 28 Oct 2026): the running block's split dialog. A block under two
                     minutes has nowhere to split yet. */}
                 <button
@@ -967,7 +1019,6 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                     setTimerActionsOpen(false);
                     setSplitDialogOpen(true);
                   }}
-                  ref={timerActionsFirstItemRef}
                   role="menuitem"
                   title={runningSplitBounds(active, Date.now()) ? undefined : "Split needs a block of two minutes or more"}
                   type="button"
@@ -1060,6 +1111,15 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
           message={notice.label}
           onAction={notice.action && Boolean(active) === Boolean(notice.action.whileRunning) ? notice.action.onAction : undefined}
           swatchStyle={notice.swatch}
+        />
+      ) : null}
+
+      {active && switchScope === completionScope ? (
+        <SwitchActivityDialog
+          activities={data.categories}
+          currentId={active.categoryId}
+          onClose={() => setSwitchScope(null)}
+          onSwitch={switchActivity}
         />
       ) : null}
 
