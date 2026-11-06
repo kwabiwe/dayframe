@@ -140,8 +140,8 @@ When a PR adds or changes a local Expo native module, run CocoaPods installation
 
 The preflight checks the failure points that have disrupted recent Dayframe releases:
 
-- full Xcode is installed
-- release commands should pin `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools
+- the Xcode selected for the archive provides a working `xcodebuild` and can resolve the project's release build settings
+- set the same `DEVELOPER_DIR` for preflight and archive when using a specific Xcode installation. A selection that only provides Command Line Tools fails preflight
 - `apps/mobile/ios/Podfile.lock` matches `apps/mobile/ios/Pods/Manifest.lock`
 - Dayframe has an App Store provisioning profile for team `65M773ZG6M`
 - Keychain has an **Apple Distribution** or **iPhone Distribution** signing identity with its private key
