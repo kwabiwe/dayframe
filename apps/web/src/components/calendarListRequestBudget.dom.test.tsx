@@ -115,6 +115,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", `/timeline?${navigation.search}`);
   listed.continuous = null;
   listed.onChanged = null;
+  runtime.refresh = vi.fn(async () => ({ ok: true }));
   clientFetch.mockReset();
   clientFetch.mockImplementation(async (url: string) => respond(url));
 });
@@ -738,5 +739,52 @@ describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #
     }
     await seconds(60);
     expect(weekReads()).toBe(2);
+  });
+});
+
+describe("Calendar › List bootstrap after a local edit", () => {
+  it.each([false, true])("only retries a held nearby week if an independent bootstrap lands (independent: %s)", async (independentRefresh) => {
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null}
+      initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    let releaseShell: () => void = () => { throw new Error("Shell refresh did not start"); };
+    runtime.refresh = (options?: { onCommit?: (data: BootstrapData) => void }) =>
+      new Promise<BootstrapData>((resolve) => {
+        releaseShell = () => {
+          const committed = bootstrap();
+          options?.onCommit?.(committed);
+          view.rerender(page(committed));
+          resolve(committed);
+        };
+      });
+    const view = render(page(bootstrap()));
+    await flush();
+    act(() => listed.continuous!.onLoad("earlier"));
+    await flush();
+
+    const nearby = "/api/bootstrap?date=2026-10-19";
+    const weekReads = () => clientFetch.mock.calls.filter(([url]) => url === nearby).length;
+    const initially = weekReads();
+    expect(initially).toBe(1);
+    let releaseWeek: () => void = () => { throw new Error("Nearby week read did not start"); };
+    clientFetch.mockImplementation((url: string) => {
+      if (url !== nearby || weekReads() !== initially + 1) return Promise.resolve(respond(url));
+      return new Promise((resolve) => {
+        releaseWeek = () => resolve(respond(url));
+      });
+    });
+
+    let edited!: Promise<void>;
+    act(() => { edited = listed.onChanged!(); });
+    await flush();
+    expect(weekReads()).toBe(initially + 1);
+    await act(async () => { releaseShell(); await edited; });
+    if (independentRefresh) {
+      view.rerender(page(bootstrap()));
+      await flush();
+    }
+    await act(async () => { releaseWeek(); await vi.advanceTimersByTimeAsync(0); });
+    await flush();
+    expect(weekReads()).toBe(initially + (independentRefresh ? 2 : 1));
   });
 });

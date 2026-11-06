@@ -273,6 +273,10 @@ export function TimeReviewViews({
   // and the changed blocks' own days at once (their days before the change, from the blocks shown, and after it).
   const [listRefresh, setListRefresh] = useState<{ token: number; affected: readonly string[] }>({ token: 0, affected: [] });
   const listRefreshToken = listRefresh.token;
+  const [listEditBootstraps] = useState(() => new WeakSet<object>());
+  const consumeEditBootstrap = useCallback((snapshot: unknown) => {
+    return typeof snapshot === "object" && snapshot !== null && listEditBootstraps.delete(snapshot);
+  }, [listEditBootstraps]);
   const shownEntriesRef = useRef<readonly TimeEntryRow[]>([]);
   const refreshList = useCallback(async (change?: ListChange) => {
     const entryIds = change?.entryIds ?? [];
@@ -284,8 +288,10 @@ export function TimeReviewViews({
       return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
     }))];
     setListRefresh((current) => ({ token: current.token + 1, affected }));
-    await refresh();
-  }, [refresh]);
+    // These reads already invalidate the loaded weeks. Recognise the exact shell snapshot for
+    // this mutation so its arrival doesn't overtake its own nearby-week read.
+    await refresh({ onCommit: (snapshot) => { listEditBootstraps.add(snapshot); } });
+  }, [listEditBootstraps, refresh]);
   const refreshDeleted = useCallback((entryIds: readonly string[]) => refreshList({ entryIds }), [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
@@ -485,7 +491,8 @@ export function TimeReviewViews({
     focusDate: listFocusDate,
     owner: listOwner,
     refreshToken: listRefreshToken,
-    staleKey: data
+    staleKey: data,
+    consumeEditBootstrap
   });
   // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.
   useLayoutEffect(() => {
