@@ -12,7 +12,7 @@ Use this before saying a mobile/API fix is present or absent in production.
 
 The staging alias does not move automatically. Before merging an implementation PR, confirm its Preview is Ready, apply migrations to staging, promote that deployment to the stable alias, and complete the relevant hands-on checks. Production credentials and data are not a PR test lane.
 
-Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. Always confirm the visible `STAGING` badge and baked API base before testing.
+Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. For a local signed Preview build, set `EXPO_PUBLIC_DAYFRAME_API_BASE=https://dayframe-staging.vercel.app` and `EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL=preview` before bundling. Verify the compiled API resolver defaults to the staging URL and confirm the visible `STAGING` badge on the device before submitting fixture credentials.
 
 App Group selection must use the same `DAYFRAME_APP_GROUP` setting in the host/extension entitlements and `DayframeSharedAppGroupIdentifier` Info.plist key. Run `npm run check:ios-config`, `bash scripts/validate-ios-shared-storage.sh`, then `npm run check:ios-config -- --built-app <Dayframe.app>` after building. Before device acceptance, run `npm run check:ios-config -- --signed-app <Dayframe.app>` to compare both products' signed App Groups with their baked identities. Missing/unresolved or cross-lane native configuration must fail closed, never fall back to production. Unsigned Simulator products prove configuration/compilation only; verify shared Shortcut queue/catalog and Live Activity Stop hand-off on the signed staging app with both app identities installed.
 
@@ -39,16 +39,18 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (140)` (2026-11-05)
+- Last repository-recorded verified build: `0.1.0 (141)` (2026-11-06)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `34633fbc-6ee3-478c-b3e7-d78286e393d8`
-- Archived commit: `99f1a6c73b41e13e57ad33df8e4d0746d2040d7b`, built in a detached worktree pinned to that SHA
-- The signed staging release gate on the wired iPhone 17 Pro ran on a fresh launch with Today in front and a block running. After warm-up it measured 5.03% of one core and +0.36 MB/min over 306.8 s, within the 10% and +2 MB/min limits. The installed production build repeated the same scene at 5.47% and +0.54 MB/min over 306.7 s.
+- Delivery/build ID: `de2d00ca-e2c2-4d9c-b880-9bc85b45e43b`
+- Archived commit: `bb2440ec1bb18ed6c6f48e4252ade640f71aeb98`, built in a detached worktree pinned to that SHA
+- Upload recorded by App Store Connect at 10:21:58 GMT on 6 Nov 2026. Apple accepted the signed production package with no uploader errors.
+- The signed staging gate on the wired iPhone 17 Pro ran on a fresh launch with Today in front and a disposable block running. After warm-up it measured 5.26% of one core and +1.56 MB/min over 308.3 s, within the 10% and +2 MB/min limits. The 140 staging baseline was 5.03% and +0.36 MB/min.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. The signed production package used `https://dayframe-web.vercel.app`, the production App Group and Apple Distribution signing. Installed 141 passed Calendar List day-strip switching and Reports Week → Month → Week on the wired iPhone 17 Pro. Its production Today performance repeat passed on the same wired iPhone 17 Pro after warm-up at 6.74% of one core and −0.003 MB/min over 307.2 s. Today and the running timer were confirmed at both endpoints.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-App Store Connect reverified build 140 on 6 Nov as `VALID` and `IN_BETA_TESTING` in `Internal Health Debug` only, with en-GB notes and export compliance. The signed archive and export used the production API, production App Group and Apple Distribution signing. Installed 140 passed Calendar day-strip switching, Reports range switching and the Today performance repeat. The installed web-to-iPhone timer refresh repeat remains open.
+Build 140 came from `99f1a6c7` and remains verified in Internal Health Debug. Installed 140 passed Calendar day-strip switching, Reports range switching and the Today performance repeat at 5.47% of one core and +0.54 MB/min over 306.7 s. The installed web-to-iPhone timer refresh repeat remains open.
 
 Build 139 came from `3cf432dd` and is also verified in `Internal Health Debug`. The exact staging gate on the wired iPhone 11 measured 15.37% and 15.50% of one core with +0.44 and +1.32 MB/min. The owner accepted the CPU overage for build 139 only. Installed build 139 still needs its own smoke. Earlier release history is in Git history and dated investigations.
 
