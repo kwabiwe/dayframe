@@ -536,14 +536,14 @@ export function LocationCorrectionSheet({
   const spanStart = new Date(leg?.startedAt ?? item.startedAt);
   const stoppedAt = leg?.stoppedAt ?? item.stoppedAt;
   const spanEnd = stoppedAt ? new Date(stoppedAt) : null;
-  const dateOptions = { weekday: "short", day: "numeric", month: "short" } as const;
+  const crossesYear = spanEnd && spanStart.getFullYear() !== spanEnd.getFullYear();
+  const dateOptions = { weekday: "short", day: "numeric", month: "short", year: crossesYear ? "numeric" : undefined } as const;
   const startDay = formatLocaleDate(spanStart, dateOptions);
-  const endDay = spanEnd ? formatLocaleDate(spanEnd, dateOptions) : startDay;
   const startTime = time(spanStart.getTime());
   const endTime = spanEnd ? time(spanEnd.getTime()) : "now";
-  const span = startDay === endDay
-    ? `${startDay} · ${startTime}–${endTime}`
-    : `${startDay} ${startTime} – ${endDay} ${endTime}`;
+  const span = spanEnd && spanStart.toDateString() !== spanEnd.toDateString()
+    ? `${startDay} ${startTime} – ${formatLocaleDate(spanEnd, dateOptions)} ${endTime}`
+    : `${startDay} · ${startTime}–${endTime}`;
   const subtitle = leg && trip
     ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${span}`
     : trip?.route ? `${span} · ${trip.route}` : span;

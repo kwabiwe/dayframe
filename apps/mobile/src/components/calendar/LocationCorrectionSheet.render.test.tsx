@@ -141,6 +141,16 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     tripSheet.press("location-correction-leg-1");
     expect(text(tripSheet)).toContain(shortDate(end));
     expect(text(tripSheet)).not.toContain(shortDate(start));
+    act(() => tripSheet.tree.unmount());
+
+    const longStay = {
+      ...place,
+      startedAt: new Date(2018, 0, 1, 8).toISOString(),
+      stoppedAt: new Date(2024, 0, 1, 9).toISOString()
+    };
+    const longStaySheet = mount({ kind: "place", place: longStay, label: "Unknown place" });
+    expect(text(longStaySheet)).toContain("2018");
+    expect(text(longStaySheet)).toContain("2024");
   });
   it("puts the item's map first, holding its frame while it loads and saying so when it can't be read (owner feedback, 27 Oct 2026)", () => {
     let loading!: ReturnType<typeof create>;
