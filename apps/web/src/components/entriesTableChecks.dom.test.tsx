@@ -360,9 +360,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     let rejectReady!: (error: DOMException) => void;
     const ready = new Promise<void>((_, reject) => { rejectReady = reject; });
     const skipTransition = vi.fn(() => rejectReady(new DOMException("Transition was skipped", "AbortError")));
-    const startViewTransition = vi.fn((_update: () => void) => ({
-      skipTransition, ready, finished: new Promise(() => undefined)
-    }));
+    const transition = { skipTransition, ready, finished: new Promise(() => undefined) };
+    const startViewTransition = vi.fn<(update: () => void) => typeof transition>(() => transition);
     Object.assign(document, { startViewTransition });
     window.matchMedia = vi.fn(() => ({ matches: false }) as MediaQueryList);
     try {
