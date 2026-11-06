@@ -238,6 +238,8 @@ export function LocationCorrectionDialog({
   places: readonly CorrectionPlace[];
   target: LocationCorrectionTarget;
 }) {
+  // Stable across the trip and leg views so changing views never restarts the modal's focus lifetime.
+  const questionFocusRef = useRef<HTMLElement | null>(null);
   // A trip's leg opens inside its dialog, with a way back (the iPhone sheet's push, as a swap here).
   // The leg is kept by its span, so a refresh that changes the trip's legs finds it again, or (gone, or the legs
   // merged or split around it) goes back to the trip (Codex r3 on #609).
@@ -526,7 +528,7 @@ export function LocationCorrectionDialog({
 
   const questionCard = question && legOfTrip === null ? (
     <div className="location-correction-question" data-section="question" role="group" aria-label={question.text}>
-      <b>{question.text}</b>
+      <b ref={questionFocusRef} tabIndex={-1}>{question.text}</b>
       <div className="location-correction-question-answers">
         {question.yesLabel ? (
           // Card D item 9: the answer is the neutral dark pill; coral stays for Play/Stop and live recording.
@@ -553,7 +555,7 @@ export function LocationCorrectionDialog({
   if (target.kind === "trip") {
     const { trip } = target;
     return (
-      <ModalDialog busy={busy} description={`${formatTime(trip.startedAt, clock)}–${formatTime(trip.stoppedAt, clock)}`}
+      <ModalDialog busy={busy} description={`${formatTime(trip.startedAt, clock)}–${formatTime(trip.stoppedAt, clock)}`} initialFocusRef={questionFocusRef}
         footer={<Button disabled={busy} onClick={onClose}>Done</Button>} onClose={onClose} size="compact" title={target.route}>
         <div className="location-correction">
           {questionCard}
@@ -601,6 +603,7 @@ export function LocationCorrectionDialog({
     const minutes = Math.max(0, Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000));
     return (
       <ModalDialog busy={busy} description={`Leg ${target.index + 1} of ${target.count} · ${formatTime(leg.startedAt, clock)}–${formatTime(leg.stoppedAt, clock)}`}
+        initialFocusRef={questionFocusRef}
         footer={footer} onClose={onClose} size="compact" title={`${LEG_MODE_LABEL[mode]} · ${formatDuration(minutes)}`}>
         <div className="location-correction">
           {legOfTrip !== null ? (
@@ -691,9 +694,11 @@ export function LocationCorrectionDialog({
   return (
     <ModalDialog busy={busy} className="location-correction-dialog is-next" description={open ? `Since ${formatTime(place.startedAt, clock)}`
       : `${formatTime(place.startedAt, clock)}–${formatTime(place.stoppedAt!, clock)}`}
-      footer={footerNext} onClose={onClose} size="compact" title={target.label}>
+      footer={footerNext} initialFocusRef={questionFocusRef} onClose={onClose} size="compact" title={target.label}>
       <div className="location-correction is-next">
-        {question && question.text !== "Where were you?" ? <p className="location-correction-ask">{question.text}</p> : null}
+        {question && question.text !== "Where were you?" ? (
+          <p className="location-correction-ask" ref={(element) => { questionFocusRef.current = element; }} tabIndex={-1}>{question.text}</p>
+        ) : null}
         <EvidenceMap evidence={evidence} knownPlace={Boolean(place.placeId || place.learnedPlaceId)} />
         <div className="location-correction-section" data-section="where">
           <label className="ui-compound-control df-flist-search location-correction-search">

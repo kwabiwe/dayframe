@@ -4,7 +4,7 @@
 const originalTimeZone = process.env.TZ;
 process.env.TZ = "Europe/London";
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TripLeg } from "@dayframe/shared";
 
@@ -78,6 +78,45 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
   afterAll(() => {
     if (originalTimeZone === undefined) delete process.env.TZ;
     else process.env.TZ = originalTimeZone;
+  });
+
+  it("focuses the trip question on open and returns focus to the Calendar control", async () => {
+    const question = { text: "Was this a trip?", yesLabel: "Yes", noLabel: "Not now", onAnswer: vi.fn() };
+    const trip = { kind: "trip" as const, id: "trip-1", status: "finalised" as const, startedAt: at(8, 12), stoppedAt: at(8, 40),
+      fromId: "seg-home", toId: "seg-cafe", legs: [leg], blockIds: [] };
+    const scene = (open: boolean) => <>
+      <button type="button">Open trip</button>
+      {open ? <LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places} question={question}
+        target={{ kind: "trip", trip: trip as never, route: "Home → Corner café" }} /> : null}
+    </>;
+    const { rerender } = render(scene(false));
+    const opener = screen.getByRole("button", { name: "Open trip" });
+    opener.focus();
+    rerender(scene(true));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText(question.text)));
+    const openLeg = screen.getByRole("button", { name: /Underground\?/ });
+    openLeg.focus();
+    fireEvent.click(openLeg);
+    expect(screen.getByRole("button", { name: "All legs" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "All legs" }));
+    rerender(scene(false));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("focuses a visible place question only when the dialog opens", async () => {
+    const question = { text: "Visited Corner café?", yesLabel: "Yes", noLabel: "Don't log", onAnswer: vi.fn() };
+    const scene = (text: string) => <LocationCorrectionDialog clock="24h" onClose={vi.fn()} onCorrected={vi.fn()} places={places}
+      question={{ ...question, text }} target={{ kind: "place", place: place(), label: "Unknown place" }} />;
+    const { rerender, unmount } = render(scene("Where were you?"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close Unknown place" })));
+    const search = screen.getByRole("textbox", { name: "Search places" });
+    search.focus();
+    rerender(scene(question.text));
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(document.activeElement).toBe(search);
+    unmount();
+    render(scene(question.text));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText(question.text)));
   });
 
   it("sets an unknown place's place and times, event-first through the corrections API", async () => {
