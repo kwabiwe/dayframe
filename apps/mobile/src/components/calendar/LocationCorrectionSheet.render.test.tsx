@@ -119,6 +119,39 @@ function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async ()
 }
 
 describe("the iPhone correction sheets (location v4 step 12)", () => {
+
+  it("shows the item's local date on place, trip and leg headers", () => {
+    const shortDate = (stamp: string) => new Date(stamp).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    const text = (sheet: ReturnType<typeof mount>) =>
+      sheet.tree.root.findAll((node) => node.type === ("Text" as never)).map((node) => node.props.children).join(" ");
+    const placeSheet = mount({ kind: "place", place, label: "Unknown place" });
+    expect(text(placeSheet)).toContain(shortDate(place.startedAt));
+    act(() => placeSheet.tree.unmount());
+
+    const start = new Date(2026, 10, 5, 23, 55).toISOString();
+    const midnight = new Date(2026, 10, 6, 0, 0).toISOString();
+    const end = new Date(2026, 10, 6, 0, 12).toISOString();
+    const overnight = { ...trip, startedAt: start, stoppedAt: end, legs: [
+      { ...trip.legs[0], startedAt: start, stoppedAt: midnight },
+      { ...trip.legs[1], startedAt: midnight, stoppedAt: end }
+    ] };
+    const tripSheet = mount({ kind: "trip", trip: overnight, legIndex: null });
+    expect(text(tripSheet)).toContain(shortDate(start));
+    expect(text(tripSheet)).toContain(shortDate(end));
+    tripSheet.press("location-correction-leg-1");
+    expect(text(tripSheet)).toContain(shortDate(end));
+    expect(text(tripSheet)).not.toContain(shortDate(start));
+    act(() => tripSheet.tree.unmount());
+
+    const longStay = {
+      ...place,
+      startedAt: new Date(2018, 0, 1, 8).toISOString(),
+      stoppedAt: new Date(2024, 0, 1, 9).toISOString()
+    };
+    const longStaySheet = mount({ kind: "place", place: longStay, label: "Unknown place" });
+    expect(text(longStaySheet)).toContain("2018");
+    expect(text(longStaySheet)).toContain("2024");
+  });
   it("puts the item's map first, holding its frame while it loads and saying so when it can't be read (owner feedback, 27 Oct 2026)", () => {
     let loading!: ReturnType<typeof create>;
     act(() => {

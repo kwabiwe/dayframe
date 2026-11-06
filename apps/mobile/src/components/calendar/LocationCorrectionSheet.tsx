@@ -23,6 +23,7 @@ import { TimeWheelPanel } from "../TimeWheelPanel";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { LocationEvidenceMap } from "../location/LocationEvidenceMap";
 import { playHaptic } from "../../lib/haptics";
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import { formatPlaceDistance } from "../../lib/placeCategories";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -256,7 +257,6 @@ export function LocationCorrectionSheet({
     if (closeKept) commitRef.current?.();
   }, [closeKept]);
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
-  const span = `${time(Date.parse(item.startedAt))}–${item.stoppedAt ? time(Date.parse(item.stoppedAt)) : "now"}`;
   const problem = correctable(item) ? timesProblem(item, times) : null;
   const trip = target.kind === "trip" ? target.trip : null;
   const legIndex = trip && legKey ? trip.legs.findIndex((each) => each.startedAt === legKey.startedAt && each.stoppedAt === legKey.stoppedAt) : -1;
@@ -533,9 +533,20 @@ export function LocationCorrectionSheet({
     : leg
       ? `${LEG_MODE_LABEL[legMode ?? leg.mode]} · ${formatDuration(Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000))}`
       : target.trip.legs.length === 1 ? LEG_MODE_LABEL[target.trip.legs[0].mode] : "Trip";
+  const spanStart = new Date(leg?.startedAt ?? item.startedAt);
+  const stoppedAt = leg?.stoppedAt ?? item.stoppedAt;
+  const spanEnd = stoppedAt ? new Date(stoppedAt) : null;
+  const crossesYear = spanEnd && spanStart.getFullYear() !== spanEnd.getFullYear();
+  const dateOptions = { weekday: "short", day: "numeric", month: "short", year: crossesYear ? "numeric" : undefined } as const;
+  const startDay = formatLocaleDate(spanStart, dateOptions);
+  const startTime = time(spanStart.getTime());
+  const endTime = spanEnd ? time(spanEnd.getTime()) : "now";
+  const span = spanEnd && spanStart.toDateString() !== spanEnd.toDateString()
+    ? `${startDay} ${startTime} – ${formatLocaleDate(spanEnd, dateOptions)} ${endTime}`
+    : `${startDay} · ${startTime}–${endTime}`;
   const subtitle = leg && trip
-    ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${time(Date.parse(leg.startedAt))}–${time(Date.parse(leg.stoppedAt))}`
-    : trip?.route ? `${trip.route} · ${span}` : span;
+    ? `Leg ${legIndex! + 1} of ${trip.legs.length} · ${span}`
+    : trip?.route ? `${span} · ${trip.route}` : span;
 
   const placeCanSave = target.kind === "place" && (!target.place.placeId || allowLoggedPlaceChange) && Boolean(onSavePlace) && !stale;
   // Apple's nearby places for a visit that can be saved, from the visit's centre.
