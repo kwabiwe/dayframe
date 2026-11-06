@@ -44,6 +44,10 @@ vi.mock("@/lib/event-service", () => ({
       this.name = "TimerReplacementWindowError";
     }
   },
+  TimerSwitchConflictError: class TimerSwitchConflictError extends Error {
+    code = "timer_switch_conflict";
+    status = 409;
+  },
   TimerMutationBusyError: class TimerMutationBusyError extends Error {
     code = "timer_busy";
     status = 503;
@@ -90,6 +94,22 @@ describe("POST /api/time-entries", () => {
       }),
       session
     );
+  });
+
+  it("requires an exact running block for an explicit switch and reports a conflict", async () => {
+    const { TimerSwitchConflictError } = await import("@/lib/event-service");
+    const expectedRunningEntryId = "11111111-1111-4111-8111-111111111111";
+    mocks.processActivityEvent.mockRejectedValueOnce(new TimerSwitchConflictError());
+    const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), expectedRunningEntryId }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("timer_switch_conflict");
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "timer_start" }),
+      session,
+      { expectedRunningEntryId }
+    );
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
   });
 
   it("splits or duplicates a finished block by id, fenced and with its command id, and keeps a bare split for the timer (card G)", async () => {

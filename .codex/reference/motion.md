@@ -296,6 +296,8 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Interruption: a digit that changes again mid-roll retargets from where it is.
 - Accessibility: Reduce Motion removes the roll, the press scale and the number fade (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
 
+The running block's menu opens Switch activity in the shared modal. The modal owns its presence, reduced motion and focus return. Search filters the activity rows in place. Escape, Close, or replacement of the running block dismisses the modal. A choice closes it and uses Quick Start's existing optimistic switch, toast and rollback. The timer bar keeps its height throughout.
+
 ## Web date sheet at phone width (date-picker audit D1/D6, 14 Oct 2026)
 
 - Trigger: a date trigger (Calendar period, quick editor dates, List edges) at ≤560 px; Done, ✕, Escape or a press on the scrim.
