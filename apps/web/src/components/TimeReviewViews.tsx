@@ -206,6 +206,7 @@ export function TimeReviewViews({
 }) {
   const data = useRuntimePageData(initialData);
   const {
+    canonicalShellData,
     clearDateLoadError,
     dateLoadError,
     isDateLoading,
@@ -273,6 +274,10 @@ export function TimeReviewViews({
   // and the changed blocks' own days at once (their days before the change, from the blocks shown, and after it).
   const [listRefresh, setListRefresh] = useState<{ token: number; affected: readonly string[] }>({ token: 0, affected: [] });
   const listRefreshToken = listRefresh.token;
+  const [listEditBootstraps] = useState(() => new WeakSet<object>());
+  const consumeEditBootstrap = useCallback((snapshot: unknown) => {
+    return typeof snapshot === "object" && snapshot !== null && listEditBootstraps.delete(snapshot);
+  }, [listEditBootstraps]);
   const shownEntriesRef = useRef<readonly TimeEntryRow[]>([]);
   const refreshList = useCallback(async (change?: ListChange) => {
     const entryIds = change?.entryIds ?? [];
@@ -284,9 +289,18 @@ export function TimeReviewViews({
       return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
     }))];
     setListRefresh((current) => ({ token: current.token + 1, affected }));
-    await refresh();
-  }, [refresh]);
-  const refreshDeleted = useCallback((entryIds: readonly string[]) => refreshList({ entryIds }), [refreshList]);
+    // These reads already invalidate the loaded weeks. Recognise the exact shell snapshot for
+    // this mutation so its arrival doesn't overtake its own nearby-week read.
+    let shellRefreshed = false;
+    await refresh({ onCommit: (snapshot) => {
+      listEditBootstraps.add(snapshot);
+      shellRefreshed = true;
+    } });
+    return shellRefreshed;
+  }, [listEditBootstraps, refresh]);
+  const refreshDeleted = useCallback(async (entryIds: readonly string[]) => {
+    await refreshList({ entryIds });
+  }, [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
@@ -477,6 +491,11 @@ export function TimeReviewViews({
   if (!isList && listTop !== null) setListTop(null);
   // An edit re-reads only the weeks and days near the List's top day; the rest are read again as the List nears them.
   const listFocusDate = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  // End it may change the displayed copy. Persisted weeks follow the canonical snapshot for this owner and date.
+  const listWeekBootstrap = canonicalShellData?.workspace?.id === data.workspace.id &&
+    canonicalShellData.user.id === data.user.id &&
+    canonicalShellData.dateRange.selectedDate === data.dateRange.selectedDate
+    ? canonicalShellData : data;
   const listWeeks = useCalendarListWeeks({
     anchorWeekStart: ranges.week.start,
     currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
@@ -485,7 +504,8 @@ export function TimeReviewViews({
     focusDate: listFocusDate,
     owner: listOwner,
     refreshToken: listRefreshToken,
-    staleKey: data
+    staleKey: listWeekBootstrap,
+    consumeEditBootstrap
   });
   // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.
   useLayoutEffect(() => {

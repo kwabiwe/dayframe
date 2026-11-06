@@ -291,8 +291,8 @@ export function EntriesTable({
   tags?: TagRow[];
   groupByDay?: boolean;
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
-  /** After a save here: which blocks changed and their new times, so the List reads their own days again at once. */
-  onChanged?: (change?: ListChange) => Promise<void>;
+  /** Reload the changed blocks' days. Returns true when the shell published its fresh snapshot. */
+  onChanged?: (change?: ListChange) => Promise<boolean | void>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   displayRange?: DateRange;
@@ -1311,9 +1311,9 @@ export function EntriesTable({
         }
       });
       setInlineStatus(`Updated ${current.target.entryIds.length} grouped blocks.`);
-      await onChanged?.({ entryIds: current.target.entryIds });
+      const shellRefreshed = await onChanged?.({ entryIds: current.target.entryIds });
       if (nextGroupKey) focusGroupedDescription(nextGroupKey);
-      startTransition(() => router.refresh());
+      refreshRouteIfNeeded(shellRefreshed);
       return;
     }
 
@@ -1321,8 +1321,11 @@ export function EntriesTable({
       inlineEditorRef.current = null;
       setInlineEditor(null);
     }
-    await onChanged?.({ entryIds: [entry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] });
-    startTransition(() => router.refresh());
+    refreshRouteIfNeeded(await onChanged?.({ entryIds: [entry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] }));
+  }
+
+  function refreshRouteIfNeeded(shellRefreshed: boolean | void) {
+    if (!shellRefreshed) startTransition(() => router.refresh());
   }
 
   function focusGroupedDescription(groupKey: string) {
@@ -1933,8 +1936,7 @@ export function EntriesTable({
               ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
               : await updateActiveEntryFromCalendar({ plan });
             if (outcome.ok) {
-              await onChanged?.({ entryIds: [editingEntry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] });
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] }));
             }
             return outcome;
           }}
@@ -1943,8 +1945,7 @@ export function EntriesTable({
             const outcome = await splitTimeEntry(clientFetch, editingEntry, atMs);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.({ entryIds: [editingEntry.id] });
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id] }));
             }
             return outcome;
           }}
@@ -1952,8 +1953,7 @@ export function EntriesTable({
             const outcome = await duplicateTimeEntry(clientFetch, editingEntry);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.({ entryIds: [editingEntry.id] });
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id] }));
             }
             return outcome;
           }}

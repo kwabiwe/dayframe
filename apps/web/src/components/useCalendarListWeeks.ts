@@ -86,7 +86,8 @@ export function useCalendarListWeeks({
   focusDate = null,
   owner,
   refreshToken,
-  staleKey
+  staleKey,
+  consumeEditBootstrap
 }: {
   anchorWeekStart: Date;
   /** The viewer's current week, or null before hydration (no later weeks then). */
@@ -98,8 +99,10 @@ export function useCalendarListWeeks({
   focusDate?: string | null;
   owner: string;
   refreshToken: number;
-  /** Changes with each bootstrap refresh: every loaded week becomes stale (read again when visited). */
+  /** Changes with each independent bootstrap refresh: every loaded week becomes stale (read again when visited). */
   staleKey?: unknown;
+  /** Identifies the exact shell commit of a mutation already covered by refreshToken. */
+  consumeEditBootstrap?: (snapshot: unknown) => boolean;
 }): CalendarListWeeks {
   const anchorKey = toTimelineDateKey(anchorWeekStart);
   const scopeKey = `${owner}|${anchorKey}|${enabled ? "on" : "off"}`;
@@ -312,17 +315,19 @@ export function useCalendarListWeeks({
     // The window and the edited days are read from this render; the effect runs only for a new edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, readWeek, refreshToken, replaceWeek]);
-  // A bootstrap refresh (another device's change may be anywhere): every loaded week is stale, read when visited.
+  // An independent bootstrap refresh (another device's change may be anywhere) marks all loaded weeks stale.
+  // The same mutation's shell commit is already covered by the refresh token.
   const lastStaleKeyRef = useRef(staleKey);
   useEffect(() => {
     if (lastStaleKeyRef.current === staleKey) return;
     lastStaleKeyRef.current = staleKey;
+    if (consumeEditBootstrap?.(staleKey)) return;
     invalidationRef.current += 1;
     const current = storedRef.current;
     if (!enabled || !current || current.generation !== generation) return;
     markStale(generation, [...current.earlier, ...current.later]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, generation, staleKey]);
+  }, [consumeEditBootstrap, enabled, generation, staleKey]);
   // The stale weeks of the window the List's top day has come to (at most the three weeks that overlap it), and of the
   // stale empty weeks it passed over on the way, at most LIST_GAP_WEEKS_READ_ON_SCROLL nearest the destination: an empty
   // week has no heading, so the top day can never be in it, and a block added to it elsewhere would otherwise never show

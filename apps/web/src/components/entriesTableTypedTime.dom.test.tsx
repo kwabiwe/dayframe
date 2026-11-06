@@ -35,6 +35,7 @@ describe("EntriesTable typed times in 12-hour mode (Codex r2 on #446)", () => {
   beforeEach(() => {
     window.localStorage.setItem("dayframe.clockFormat", "12h");
     mocks.clientFetch.mockReset().mockResolvedValue(okResponse());
+    mocks.refresh.mockReset();
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
@@ -77,6 +78,19 @@ describe("EntriesTable typed times in 12-hour mode (Codex r2 on #446)", () => {
     for (let index = 0; index < 12; index += 1) await user.keyboard("{Backspace}");
     expect(finish.value).toBe("");
   });
+
+  it.each([true, false])("only refreshes the route if the Calendar shell did not refresh (shell: %s)", async (shellRefreshed) => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn(async () => shellRefreshed);
+    renderTable({ entries: [entry("entry-a", "Planning")], onChanged });
+    const description = screen.getByRole("textbox", { name: /^Planning description\./ });
+    await user.click(description);
+    await user.clear(description);
+    await user.type(description, "Updated plan");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(mocks.refresh).toHaveBeenCalledTimes(shellRefreshed ? 0 : 1);
+  });
 });
 
 function renderTable({
@@ -84,7 +98,7 @@ function renderTable({
   onChanged = vi.fn().mockResolvedValue(undefined)
 }: {
   entries: TimeEntryRow[];
-  onChanged?: () => Promise<void>;
+  onChanged?: () => Promise<boolean | void>;
 }) {
   return render(
     <EntriesTable

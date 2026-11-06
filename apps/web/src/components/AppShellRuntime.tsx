@@ -101,7 +101,8 @@ type RuntimeContext = {
   isStopPending: boolean;
   loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
-  refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
+  /** onCommit sees the exact reconciled snapshot just before the runtime publishes it. */
+  refresh: (options?: { force?: boolean; onCommit?: (snapshot: BootstrapData) => void }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
@@ -273,7 +274,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return () => gate.dispose();
   }, []);
 
-  const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource) => {
+  const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource, onCommit?: (snapshot: BootstrapData) => void) => {
     const nextData = incoming
       ? reconcileTimerBootstrap(dataRef.current, incoming, source, {
           keepCurrentActiveOnTie: detailsSavesInFlightRef.current > 0
@@ -318,6 +319,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         dateDataCacheRef.current.delete(oldestDate);
       }
     }
+    if (nextData) onCommit?.(nextData);
     setData(nextData);
   }, []);
 
@@ -376,7 +378,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!timerDraftsEqual(reconciled.draft, draftRef.current)) setTimerDraft(reconciled.draft);
   }, [data?.activeEntry, setTimerDraft, setTimerDraftBase]);
 
-  const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+  const refresh = useCallback<RuntimeContext["refresh"]>(async ({ force = false, onCommit } = {}) => {
     if (!force && mutationGateRef.current.isActive()) return dataRef.current;
     const requestId = ++refreshRequestRef.current;
     const date = selectedDateRef.current;
@@ -392,7 +394,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         date !== selectedDateRef.current ||
         generation !== workspaceGenerationRef.current
       ) return dataRef.current;
-      commitData(payload, "canonical");
+      commitData(payload, "canonical", onCommit);
       return payload;
     } catch {
       return dataRef.current;
