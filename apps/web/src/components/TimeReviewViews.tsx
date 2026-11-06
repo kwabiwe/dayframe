@@ -206,6 +206,7 @@ export function TimeReviewViews({
 }) {
   const data = useRuntimePageData(initialData);
   const {
+    canonicalShellData,
     clearDateLoadError,
     dateLoadError,
     isDateLoading,
@@ -483,6 +484,11 @@ export function TimeReviewViews({
   if (!isList && listTop !== null) setListTop(null);
   // An edit re-reads only the weeks and days near the List's top day; the rest are read again as the List nears them.
   const listFocusDate = listTopDayMs !== null ? toTimelineDateKey(new Date(listTopDayMs)) : state.date;
+  // End it may change the displayed copy. Persisted weeks follow the canonical snapshot for this owner and date.
+  const listWeekBootstrap = canonicalShellData?.workspace.id === data.workspace.id &&
+    canonicalShellData.user.id === data.user.id &&
+    canonicalShellData.dateRange.selectedDate === data.dateRange.selectedDate
+    ? canonicalShellData : data;
   const listWeeks = useCalendarListWeeks({
     anchorWeekStart: ranges.week.start,
     currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
@@ -491,7 +497,7 @@ export function TimeReviewViews({
     focusDate: listFocusDate,
     owner: listOwner,
     refreshToken: listRefreshToken,
-    staleKey: data,
+    staleKey: listWeekBootstrap,
     consumeEditBootstrap
   });
   // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.

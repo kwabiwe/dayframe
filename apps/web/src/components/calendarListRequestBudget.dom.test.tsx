@@ -3,6 +3,7 @@
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import type { LocationTimeline } from "@dayframe/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { projectBlockEnds } from "@/lib/block-end-projection";
 import type { BootstrapData, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 import type { ContinuousListProps } from "./EntriesTable";
 
@@ -115,6 +116,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", `/timeline?${navigation.search}`);
   listed.continuous = null;
   listed.onChanged = null;
+  runtime.canonicalShellData = null;
   runtime.refresh = vi.fn(async () => ({ ok: true }));
   clientFetch.mockReset();
   clientFetch.mockImplementation(async (url: string) => respond(url));
@@ -743,10 +745,19 @@ describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #
 });
 
 describe("Calendar › List bootstrap after a local edit", () => {
-  it.each([false, true])("only retries a held nearby week if an independent bootstrap lands (independent: %s)", async (independentRefresh) => {
+  it.each([
+    { independentRefresh: false, projected: false },
+    { independentRefresh: true, projected: false },
+    { independentRefresh: false, projected: true },
+    { independentRefresh: true, projected: true }
+  ])("only retries a held nearby week for an independent bootstrap ($independentRefresh, End it projection: $projected)", async ({ independentRefresh, projected }) => {
     const { TimeReviewViews } = await import("./TimeReviewViews");
-    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null}
-      initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    const ends = new Map(projected ? [[RUNNING.id, local(10, 30, 11).toISOString()]] : []);
+    const page = (data: BootstrapData) => {
+      runtime.canonicalShellData = data;
+      return <TimeReviewViews initialData={projectBlockEnds(data, ends)!} initialPreference={null}
+        initialTodayKey="2026-10-30" renderedAt={local(10, 30, 12).toISOString()} />;
+    };
     let releaseShell: () => void = () => { throw new Error("Shell refresh did not start"); };
     runtime.refresh = (options?: { onCommit?: (data: BootstrapData) => void }) =>
       new Promise<BootstrapData>((resolve) => {

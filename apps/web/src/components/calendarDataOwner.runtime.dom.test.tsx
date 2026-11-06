@@ -136,6 +136,23 @@ const shown = () => screen.getByTestId("shown").textContent;
 const bootstrapRequests = () => server.requests.filter((request) => request.startsWith("GET /api/bootstrap"));
 
 describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
+  it("reports the reconciled shell snapshot for the refresh while End it projects a display copy", async () => {
+    vi.useFakeTimers();
+    page = "page";
+    render(tree());
+    await settle();
+    await act(async () => {
+      probe.runtime!.setProjectedEnds?.(new Map([["block-1", "2026-08-17T12:00:00.000Z"]]));
+    });
+    const onCommit = vi.fn();
+    server.revision = 2;
+    await act(async () => { await probe.runtime!.refresh({ onCommit }); });
+    expect(shown()).toBe("workspace-A@2026-08-17#r2");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit.mock.calls[0][0]).toBe(probe.runtime!.canonicalShellData);
+    expect(onCommit.mock.calls[0][0]).not.toBe(probe.runtime!.data);
+  });
+
   it("a Delete committed after a period change reloads the period shown, not the first one (WEB-UI-3)", async () => {
     vi.useFakeTimers();
     const view = render(tree());
