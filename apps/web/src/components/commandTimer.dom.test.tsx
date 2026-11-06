@@ -270,6 +270,23 @@ describe("Switch activity from the running block menu", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add time manually" }));
   });
 
+  it("closes for a new running block before its draft scope updates", () => {
+    runtime = { ...runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) }), timerDraftScope: "old-scope" };
+    const { rerender } = render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    expect(screen.getByRole("dialog", { name: "Switch activity" })).not.toBeNull();
+
+    runtime.shellData = {
+      ...(runtime.shellData as BootstrapData),
+      activeEntry: timeEntry({ id: "replacement" })
+    };
+    rerender(<PersistentTimerBar />);
+
+    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(runtime.startTimer).not.toHaveBeenCalled();
+  });
+
   it("does not switch a replacement block that arrived before the choice", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     render(<PersistentTimerBar />);

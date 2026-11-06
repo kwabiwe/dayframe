@@ -109,7 +109,11 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
-  const [switchScope, setSwitchScope] = useState<string | null>(null);
+  const [switchSource, setSwitchSource] = useState<{
+    entryId: string;
+    workspaceId: string;
+    scope: string;
+  } | null>(null);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -450,10 +454,11 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
   }
 
   function switchActivity(activity: FloatingListActivity | null) {
-    setSwitchScope(null);
-    if (isTimerBusy || !data || !active) return;
+    setSwitchSource(null);
+    if (isTimerBusy || !switchSource) return;
+    const { entryId, workspaceId } = switchSource;
     const guard = (snapshot: BootstrapData) => {
-      if (snapshot.workspace.id !== data.workspace.id || snapshot.activeEntry?.id !== active.id) {
+      if (snapshot.workspace.id !== workspaceId || snapshot.activeEntry?.id !== entryId) {
         return SWITCH_BLOCK_CHANGED;
       }
       if (activity && !snapshot.categories.some(({ id }) => id === activity.id)) {
@@ -471,7 +476,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
       categoryId: activity?.id ?? null,
       color: activity?.color ?? null,
       label: activity?.name ?? "No activity"
-    }, { expectedRunningEntryId: active.id, guard });
+    }, { expectedRunningEntryId: entryId, guard });
   }
 
   // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
@@ -1001,7 +1006,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                   onClick={() => {
                     focusQuietly(timerActionsTriggerRef.current);
                     setTimerActionsOpen(false);
-                    setSwitchScope(completionScope);
+                    setSwitchSource({ entryId: active.id, workspaceId: data.workspace.id, scope: completionScope });
                   }}
                   ref={timerActionsFirstItemRef}
                   role="menuitem"
@@ -1114,12 +1119,13 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
         />
       ) : null}
 
-      {active && switchScope === completionScope ? (
+      {active && switchSource?.entryId === active.id &&
+        switchSource.workspaceId === data.workspace.id && switchSource.scope === completionScope ? (
         <SwitchActivityDialog
           activities={data.categories}
           currentId={active.categoryId}
           fallbackFocus={() => timerActionsTriggerRef.current ?? addTimeButtonRef.current ?? descriptionInputRef.current}
-          onClose={() => setSwitchScope(null)}
+          onClose={() => setSwitchSource(null)}
           onSwitch={switchActivity}
         />
       ) : null}
