@@ -175,7 +175,8 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
     <View style={styles.wrap} testID="location-correction-nearby">
       <View style={[styles.search, { backgroundColor: theme.surfaceMuted }]}>
         <DayframeIcon color={theme.textSecondary} glyph="search" size={16} />
-        <TextInput accessibilityLabel="Search places" editable={!disabled} onChangeText={(next) => {
+        {/* VoiceOver already reads the placeholder when the field is empty. */}
+        <TextInput accessibilityLabel={query.length > 0 ? "Search places" : undefined} editable={!disabled} onChangeText={(next) => {
           setQuery(next);
           searchController?.updateQuery(next, latitude !== null && longitude !== null
             ? { latitude, longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : null);
