@@ -2,6 +2,7 @@ import {createOwnerSyncCoalescer} from "../ownerSyncCoalescer";
 import {MobileHttpResponseError, isMobileTransportFailure} from "../mobile-network";
 import type {SyncLaneOutcome} from "../syncLane";
 import * as SQLite from "expo-sqlite";
+import * as Location from "expo-location";
 import {
   parseLocationSyncAttempt,
   parseLocationSyncDiagnostics,
@@ -124,9 +125,11 @@ export type LocationCaptureSnapshot = {
 // Authentication still belongs exclusively to mobileAccount/secure-session.
 let captureRevision = 0;
 let captureAdmissionSuspended = false;
+let activeLocationSync: { capture: LocationCaptureSnapshot; controller: AbortController } | undefined;
 export function invalidateLocationCaptureOwnership() {
   captureAdmissionSuspended = true;
   const revision = ++captureRevision;
+  activeLocationSync?.controller.abort();
   // The accuracy trial (card K): a burst whose capture this ends is stopped at once, storage or not (Codex r28 on #619).
   armLocationAdmissionGuard();
   return revision;
@@ -961,7 +964,31 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
   };
 }
 
-export type LocationSyncOptions = { forceReplay?: boolean; forceUploadRetry?: boolean; signal?: AbortSignal; deadlineAt?: number };
+export type LocationSyncOptions = {
+  forceReplay?: boolean;
+  forceUploadRetry?: boolean;
+  foregroundReplay?: boolean;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+};
+type PermittedLocationSync = LocationSyncOptions & { capture: LocationCaptureSnapshot };
+let lastSuccessfulReplay: { revision: number; mode: LocationRolloutMode; at: number } | undefined;
+
+export async function locationSyncAllowed(capture: LocationCaptureSnapshot) {
+  if (!capture.context || !isLocationCaptureSnapshotCurrent(capture)) return false;
+  try {
+    if (!await readLocationCaptureConsent(capture.context) || !isLocationCaptureSnapshotCurrent(capture)) return false;
+    const [foreground, background] = await Promise.all([
+      Location.getForegroundPermissionsAsync(),
+      Location.getBackgroundPermissionsAsync()
+    ]);
+    return foreground.status === "granted" && background.status === "granted" &&
+      isLocationCaptureSnapshotCurrent(capture);
+  } catch {
+    // Permission or consent could not be read. Leave the durable queue untouched.
+    return false;
+  }
+}
 export type LocationSyncResult = { synced: boolean; reason?: string; message?: string; outcome?: SyncLaneOutcome;
   acknowledgedCount?: number; uploadedBatchCount?: number; replayed?: boolean; finalisedSegmentCount?: number; semanticSegmentCount?: number; semanticChangeCount?: number;
   remainingEvidenceCount?:number|null; remainingBatchCount?:number|null; remainingPendingEvidence?: number|null; remainingBatches?: number|null; rejectedEvidenceCount?: number; nextRetryAt?: string|null; warnings?: string[] };
@@ -970,27 +997,58 @@ const locationCoalescer=createOwnerSyncCoalescer<LocationSyncResult>();
 export { locationSyncChangedDashboard } from "./locationSyncChange";
 
 export async function syncLocationEvidence(options: LocationSyncOptions = {}): Promise<LocationSyncResult> {
-  const owner=await getActiveLocationAccountIdentity();
-  if(!owner)return {synced:false,reason:"no_session",outcome:"authentication_required"};
-  return locationCoalescer.run(accountKey(owner),Boolean(options.forceReplay||options.forceUploadRetry),async()=>{
-    if(!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(),owner))return {synced:false,reason:"session_changed",outcome:"cancelled"};
-    const bounded={...options,deadlineAt:Math.min(options.deadlineAt??Infinity,Date.now()+45_000)};
-    const result=await synchroniseLocationEvidenceUnsafe(owner,bounded);
-    if(!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(),owner))return {...result,synced:false,reason:"session_changed",outcome:"cancelled"};
-    const db=await database();
-    const counts=await db.getFirstAsync<{pending:number;rejected:number}>(`select count(*) filter(where upload_state in ('pending','batched')) as pending,
-      count(*) filter(where upload_state='rejected') as rejected from location_evidence_journal where account_key=?`,accountKey(owner));
-    const batches=await db.getFirstAsync<{pending:number;nextRetryAt:string|null}>(`select count(*) as pending,min(next_attempt_at) as nextRetryAt
-      from location_upload_outbox where account_key=? and state='pending'`,accountKey(owner));
-    const remaining=counts?.pending??0;
-    const outcome:SyncLaneOutcome=result.outcome??(!result.synced?"server_busy":counts?.rejected?"needs_attention":remaining>0?
-      batches?.nextRetryAt&&Date.parse(batches.nextRetryAt)>Date.now()?"backoff":"partial":result.warnings?.length?"partial":"complete");
-    return {...result,synced:outcome==="complete",outcome,remainingEvidenceCount:remaining,remainingBatchCount:batches?.pending??0,remainingPendingEvidence:remaining,remainingBatches:batches?.pending??0,
-      rejectedEvidenceCount:counts?.rejected??0,nextRetryAt:batches?.nextRetryAt??null};
-  },async()=>{});
+  const capture = await captureLocationOwnership();
+  const owner = capture.context;
+  if (!owner) return { synced: false, reason: "no_session", outcome: "authentication_required" };
+  if (!await locationSyncAllowed(capture)) {
+    if (lastSuccessfulReplay?.revision === capture.revision) lastSuccessfulReplay = undefined;
+    if (activeLocationSync?.capture.revision === capture.revision &&
+        mobileAccountOwnersEqual(activeLocationSync.capture.context, owner)) {
+      activeLocationSync.controller.abort();
+    }
+    return { synced: true, reason: "location_paused", outcome: "complete" };
+  }
+  return locationCoalescer.run(accountKey(owner), Boolean(options.forceReplay || options.forceUploadRetry), async () => {
+    if (!isLocationCaptureSnapshotCurrent(capture)) return { synced: true, reason: "location_paused", outcome: "complete" };
+    if (!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(), owner)) {
+      return { synced: false, reason: "session_changed", outcome: "cancelled" };
+    }
+    const controller = new AbortController();
+    const active = { capture, controller };
+    activeLocationSync = active;
+    const cancel = () => controller.abort();
+    if (options.signal?.aborted) cancel();
+    else options.signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const bounded = { ...options, capture, signal: controller.signal, deadlineAt: Math.min(options.deadlineAt ?? Infinity, Date.now() + 45_000) };
+      return await runPermittedLocationSync(owner, bounded);
+    } finally {
+      options.signal?.removeEventListener("abort", cancel);
+      if (activeLocationSync === active) activeLocationSync = undefined;
+    }
+  }, async () => {});
 }
 
-async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, options:LocationSyncOptions): Promise<LocationSyncResult> {
+async function runPermittedLocationSync(owner: MobileAccountOwner, options: PermittedLocationSync): Promise<LocationSyncResult> {
+  const result = await synchroniseLocationEvidenceUnsafe(owner, options);
+  if (result.reason === "location_paused") return result;
+  if (!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(), owner)) {
+    return { ...result, synced: false, reason: "session_changed", outcome: "cancelled" };
+  }
+  const db = await database();
+  const counts = await db.getFirstAsync<{pending:number;rejected:number}>(`select count(*) filter(where upload_state in ('pending','batched')) as pending,
+    count(*) filter(where upload_state='rejected') as rejected from location_evidence_journal where account_key=?`, accountKey(owner));
+  const batches = await db.getFirstAsync<{pending:number;nextRetryAt:string|null}>(`select count(*) as pending,min(next_attempt_at) as nextRetryAt
+    from location_upload_outbox where account_key=? and state='pending'`, accountKey(owner));
+  const remaining = counts?.pending ?? 0;
+  const outcome: SyncLaneOutcome = result.outcome ?? (!result.synced ? "server_busy" : counts?.rejected ? "needs_attention" : remaining > 0 ?
+    batches?.nextRetryAt && Date.parse(batches.nextRetryAt) > Date.now() ? "backoff" : "partial" : result.warnings?.length ? "partial" : "complete");
+  return { ...result, synced: outcome === "complete", outcome, remainingEvidenceCount: remaining, remainingBatchCount: batches?.pending ?? 0,
+    remainingPendingEvidence: remaining, remainingBatches: batches?.pending ?? 0, rejectedEvidenceCount: counts?.rejected ?? 0, nextRetryAt: batches?.nextRetryAt ?? null };
+}
+
+async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, options:PermittedLocationSync): Promise<LocationSyncResult> {
+  if (!await locationSyncAllowed(options.capture)) return { synced: true, reason: "location_paused", outcome: "complete" };
   let sessionRead: Awaited<ReturnType<typeof readOwnedAuthenticatedSessionSnapshot>>;
   try {
     sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -1037,11 +1095,15 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
       warnings.push(...(attempt.warnings??[]));
       acknowledgedCount += attempt.acknowledgedCount;
       uploadedBatchCount += 1;
+      lastSuccessfulReplay = undefined;
       continue;
     }
     if (attempt.status === "rejected") {
       rejectedBatchCount += 1;
       continue;
+    }
+    if (attempt.reason === "location_paused") {
+      return { synced: true, reason: "location_paused", outcome: "complete", acknowledgedCount, uploadedBatchCount };
     }
     if (attempt.reason === "session_changed") {
       return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
@@ -1060,13 +1122,17 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
 
   const now = Date.now();
   const replayState = await serialiseOwnedLocationMutation(owner, session, async () => ({
-    lastAttemptAt: await metadata("last_server_replay_attempt_at")
+    lastAttemptAt: await metadata("last_server_replay_attempt_at"),
+    mode: await getLocationRolloutMode()
   }));
   if (!replayState) {
     return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
   }
   const shouldReplay = shouldRequestLocationReplay({
     force: Boolean(options.forceReplay),
+    foreground: options.foregroundReplay,
+    lastSuccessAt: lastSuccessfulReplay?.revision === options.capture.revision && lastSuccessfulReplay.mode === replayState.mode
+      ? lastSuccessfulReplay.at : undefined,
     uploadedBatchCount,
     lastAttemptAt: replayState.lastAttemptAt,
     now
@@ -1084,7 +1150,10 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
   if (!await isLocationSyncOwnershipCurrent(owner, session)) {
     return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
   }
-  const replay = await requestServerLocationReplay(owner, session, now,options);
+  const replay = await requestServerLocationReplay(owner, session, now, options);
+  if (!replay.ok && "reason" in replay && replay.reason === "location_paused") {
+    return { synced: true, reason: "location_paused", outcome: "complete", acknowledgedCount, uploadedBatchCount };
+  }
   return {
     synced: replay.ok && rejectedBatchCount === 0,
     warnings:[...new Set([...warnings,...(replay.ok?replay.warnings??[]:[])])],
@@ -1150,13 +1219,13 @@ async function uploadLocationEvidenceBatch(
   owner: MobileAccountOwner,
   session: AuthenticatedSessionSnapshot,
   db: SQLite.SQLiteDatabase,
-  batch: OutboxRow, options:LocationSyncOptions
+  batch: OutboxRow, options:PermittedLocationSync
 ): Promise<
   | { status: "success"; acknowledgedCount: number; warnings?:string[] }
   | { status: "rejected" }
   | {
       status: "stopped";
-      reason: "payload_too_large" | "request_failed" | "session_changed" | "cancelled" | "authentication_required";
+      reason: "payload_too_large" | "request_failed" | "session_changed" | "cancelled" | "authentication_required" | "location_paused";
       outcome?:SyncLaneOutcome;
       message?: string;
     }
@@ -1173,20 +1242,25 @@ async function uploadLocationEvidenceBatch(
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
-      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          "Content-Type": "application/json",
-          // The reply's Review count counts cards, an outing once (PR 12c).
-          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
-        },
-        body: batch.body_json,signal:options.signal
-      },Math.max(1,Math.min(15_000,(options.deadlineAt??Date.now()+15_000)-Date.now())),()=>isLocationSyncOwnershipCurrent(owner,session))
+      request: async () => {
+        if (!await locationSyncAllowed(options.capture) || options.signal?.aborted) return null;
+        return fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.token}`,
+            "Content-Type": "application/json",
+            // The reply's Review count counts cards, an outing once (PR 12c).
+            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
+          },
+          body: batch.body_json,signal:options.signal
+        }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
+          () => !options.signal?.aborted && isLocationSyncOwnershipCurrent(owner, session));
+      }
     });
     if (request.status === "session_changed") {
       return { status: "stopped", reason: "session_changed" };
     }
+    if (!request.response) return { status: "stopped", reason: "location_paused" };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1322,7 +1396,7 @@ async function uploadLocationEvidenceBatch(
 async function requestServerLocationReplay(
   owner: MobileAccountOwner,
   session: AuthenticatedSessionSnapshot,
-  now: number, options:LocationSyncOptions
+  now: number, options:PermittedLocationSync
 ) {
   if(options.signal?.aborted||Date.now()>=(options.deadlineAt??Infinity))return {ok:false as const,reason:"cancelled" as const,outcome:"cancelled" as const,message:"Location pass ended."};
   const prepared = await serialiseOwnedLocationMutation(owner, session, async () => {
@@ -1340,32 +1414,37 @@ async function requestServerLocationReplay(
       message: "Location account changed before replay."
     };
   }
+  lastSuccessfulReplay = undefined;
   const attemptStartedAt = Date.now();
   let attemptDetails: LocationSyncDiagnostics | undefined;
   let attemptOutcome: LocationSyncAttempt["outcome"] = "failed";
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
-      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          "Content-Type": "application/json",
-          // The reply then carries the Review count for the evening reminder, and what the replay changed.
-          // Counted in cards, an outing once (PR 12c).
-          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
-          [SEMANTIC_CHANGE_COUNT_REQUEST_HEADER]: "1"
-        },
-        signal:options.signal,
-        body: JSON.stringify({
-          deviceId: prepared.current.context.deviceId,
-          algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-          rolloutMode: prepared.requestedMode,
-          ...(prepared.semanticModeAcknowledgedAt
-            ? { semanticModeAcknowledgedAt: prepared.semanticModeAcknowledgedAt }
-            : {})
-        })
-      },Math.max(1,Math.min(15_000,(options.deadlineAt??Date.now()+15_000)-Date.now())),()=>isLocationSyncOwnershipCurrent(owner,session))
+      request: async () => {
+        if (!await locationSyncAllowed(options.capture) || options.signal?.aborted) return null;
+        return fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.token}`,
+            "Content-Type": "application/json",
+            // The reply then carries the Review count for the evening reminder, and what the replay changed.
+            // Counted in cards, an outing once (PR 12c).
+            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
+            [SEMANTIC_CHANGE_COUNT_REQUEST_HEADER]: "1"
+          },
+          signal:options.signal,
+          body: JSON.stringify({
+            deviceId: prepared.current.context.deviceId,
+            algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+            rolloutMode: prepared.requestedMode,
+            ...(prepared.semanticModeAcknowledgedAt
+              ? { semanticModeAcknowledgedAt: prepared.semanticModeAcknowledgedAt }
+              : {})
+          })
+        }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
+          () => !options.signal?.aborted && isLocationSyncOwnershipCurrent(owner, session));
+      }
     });
     if (request.status === "session_changed") {
       return {
@@ -1374,6 +1453,7 @@ async function requestServerLocationReplay(
         message: "Location account changed while replay was running."
       };
     }
+    if (!request.response) return { ok: false as const, reason: "location_paused" as const };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1410,6 +1490,10 @@ async function requestServerLocationReplay(
         reason: "session_changed" as const,
         message: "Location account changed before replay was accepted."
       };
+    }
+    if (!options.signal?.aborted && isLocationCaptureSnapshotCurrent(options.capture) &&
+        payload.clientAcknowledgedMode && payload.rolloutMode === prepared.requestedMode) {
+      lastSuccessfulReplay = { revision: options.capture.revision, mode: payload.rolloutMode, at: Date.parse(completedAt) };
     }
     attemptOutcome = "success";
     return {

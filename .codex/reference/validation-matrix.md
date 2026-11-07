@@ -738,3 +738,9 @@ Archive exact base `packages/shared/src` outside the worktree and run `npx tsx s
 ## Owner-only event and entry writes (hosted RLS, 17 Oct 2026)
 
 - `DATABASE_URL=<local *_test> npm run validate:event-entry-rls` after `scripts/setup-validation-db.ts base` and `ordered` (CI runs both): applies the hosted base RLS, `202610170003` and `202610170004`, then as Supabase's `authenticated` role checks that a member reads the workspace's events and entries, writes only their own (no change, delete, hand-over to another user, move into a workspace they are not in, or insert for someone else; a move between their own workspaces is allowed), that an outsider and `anon` see nothing, that entry tags follow their entry (read across the workspace, added or removed only by the entry's user, hidden from another workspace), and that both migrations are re-runnable. Without either migration its checks fail (a member deletes another member's row or entry tags).
+
+
+### Location replay and permission
+
+- On a signed staging iPhone build, verify no automatic Location evidence upload or server replay with Never, While Using, or Dayframe opt-out, including Sync now. Restore Always and the opt-in and verify previously queued samples sync without duplicates. Check an opt-out during a request separately from a request that already committed.
+- Compare two foreground/recovery passes within 30 seconds on staging, with no new Location upload. Expect one successful replay, then no duplicate. Confirm a new evidence upload, a due replay, and explicit Sync now still replay. Measure database response bytes separately from iPhone HTTP response bytes.

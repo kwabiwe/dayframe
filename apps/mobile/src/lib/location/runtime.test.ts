@@ -54,6 +54,7 @@ vi.mock("./store", () => ({
   endLocationOwnership: async () => { state.binding = null; state.context = null; return true; },
   invalidateLocationCaptureOwnership: () => ++state.revision,
   locationCaptureRevision: () => state.revision,
+  locationSyncAllowed: async () => Boolean(state.binding?.enabled && state.context),
   isLocationCaptureSnapshotCurrent: () => Boolean(state.binding?.enabled && state.context),
   isLocationCaptureAdmissionSuspended: () => false,
   getLocationRolloutMode: async () => state.mode,
@@ -232,11 +233,11 @@ describe("location runtime binding and drain", () => {
     expect(mocks.recordMotionCaptureFailure).toHaveBeenCalledOnce();
   });
 
-  it("forces the server replay on foreground without new signals, and never runs the local journal replay", async () => {
+  it("uses foreground server replay policy without new signals, and never runs the local journal replay", async () => {
     await configureLocationIntelligence(bootstrap()); vi.clearAllMocks();
     await syncLocationIntelligenceOnForeground();
     expect(mocks.refreshLocalJournalReplayIfDue).not.toHaveBeenCalled();
-    expect(mocks.syncLocationEvidence).toHaveBeenCalledWith({ forceReplay: true });
+    expect(mocks.syncLocationEvidence).toHaveBeenCalledWith({ foregroundReplay: true });
   });
   it("a failing local journal replay never blocks bootstrap or foreground sync (stability audit location-4)", async () => {
     mocks.refreshLocalJournalReplayIfDue.mockRejectedValue(new Error("synthetic replay failure"));
@@ -244,7 +245,7 @@ describe("location runtime binding and drain", () => {
       await expect(configureLocationIntelligence(bootstrap())).resolves.toBeUndefined();
       expect(mocks.syncLocationEvidence).toHaveBeenCalledOnce();
       await expect(syncLocationIntelligenceOnForeground()).resolves.toMatchObject({ synced: true });
-      expect(mocks.syncLocationEvidence).toHaveBeenLastCalledWith({ forceReplay: true });
+      expect(mocks.syncLocationEvidence).toHaveBeenLastCalledWith({ foregroundReplay: true });
     } finally { mocks.refreshLocalJournalReplayIfDue.mockResolvedValue([]); }
   });
   it("runs the local journal replay only for the diagnostics export, labelled location-replay", async () => {
