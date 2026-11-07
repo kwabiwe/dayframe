@@ -183,14 +183,14 @@ describe("answers that wait for the sheet's corrections (Codex r2 on #610)", () 
       readAcknowledged: () => []
     };
     await answers.registerAfterCorrections(OWNER_A, { id: "log-1", reviewItemId: "", logged: true,
-      log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1", description: "Picked up supplies" }, newIds: [], itemIds: ["seg-a"] }, queue);
+      log: { itemId: "seg-a", description: "Visiting a friend", visitOnly: true }, newIds: [], itemIds: ["seg-a"] }, queue);
     await acknowledging;
     expect((await answers.readAnswersAfterCorrections(OWNER_A))[0].acknowledged).toEqual([C1]);
     await answers.commitAnswerAfterCorrections(OWNER_A, "log-1");
     // C1 has left the queue: acknowledged, so the log goes.
     const release = vi.fn(async (): Promise<Outcome> => "released");
     await answers.releaseAnswersAfterCorrections({ owner: OWNER_A, readPending: async () => [], release });
-    expect(release).toHaveBeenCalledWith(expect.objectContaining({ id: "log-1", log: { itemId: "seg-a", categoryId: "6f000000-0000-4000-8000-0000000000c1", description: "Picked up supplies" } }));
+    expect(release).toHaveBeenCalledWith(expect.objectContaining({ id: "log-1", log: { itemId: "seg-a", description: "Visiting a friend", visitOnly: true } }));
     // Already acknowledged in the queue's memory when registering (still in its stored copy): recorded as such at once.
     const remembered = await answers.registerAfterCorrections(OWNER_A, { id: "log-2", reviewItemId: "", logged: true, newIds: [], itemIds: ["seg-b"] },
       { readPending: async () => [{ clientCorrectionId: C2, request: { kind: "times", itemId: "seg-b" } }], readAcknowledged: () => [{ clientCorrectionId: C2 }] });

@@ -454,7 +454,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       seconds: 0,
       proposal: options.expected?.proposal ?? reviewDeckProposalSignature(listed),
       owner: ownerRef.current,
-      ...(logged && venue ? { venue, ...(options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {}) } : {}),
+      ...(logged && venue ? { venue, ...(options.logAsCategoryId || options.logAsDescription
+        ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {}) } : {}),
       ...(options.afterCorrections ? { afterCorrections: options.afterCorrections } : {}),
       ...(options.recordOwner ? { recordOwner: options.recordOwner } : {}),
       ...(quiet ? { quiet: true } : {}),
@@ -550,7 +551,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const data = shownRef.current;
     const listed = data?.reviewItems?.find((candidate) => candidate.id === itemId);
     const segmentId = typeof listed?.rawPayload?.clientSegmentId === "string" ? listed.rawPayload.clientSegmentId : null;
-    const logAs = venue && options.logAsCategoryId ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {};
+    const logAs = venue && (options.logAsCategoryId || options.logAsDescription)
+      ? { logAsCategoryId: options.logAsCategoryId, logAsDescription: options.logAsDescription } : {};
     if (!data?.user?.id || !data.workspace?.id || !listed || !segmentId || !ownerRef.current) return holdAnswer(itemId, logged, venue, logAs);
     // The answer set as tapped (its proposal, an outing's members and theirs): held against it, never against what a
     // refresh brings meanwhile (Codex r8 and r9 on #610).

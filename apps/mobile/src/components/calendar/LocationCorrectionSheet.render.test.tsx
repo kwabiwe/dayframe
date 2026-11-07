@@ -51,11 +51,14 @@ const chain = vi.hoisted(() => () => {
 });
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
+  Easing: { out: (easing: unknown) => easing, cubic: "cubic" },
   FadeIn: chain(),
   FadeOut: chain(),
-  ReduceMotion: { Never: "never" }
+  ReduceMotion: { Never: "never" },
+  useAnimatedStyle: (style: () => unknown) => style(),
+  withTiming: (value: number) => value
 }));
-vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
+vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140, sheet: 260 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
 vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: "TimeWheelPanel" }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon", ActivityIcon: "ActivityIcon" }));
 vi.mock("../location/LocationEvidenceMap", () => ({ LocationEvidenceMap: "LocationEvidenceMap" }));
@@ -89,6 +92,11 @@ const nearSaved = {
 function tap(tree: ReturnType<typeof create>, testID: string) {
   const find = () => tree.root.findAll((node) => node.props.testID === testID && typeof node.props.onPress === "function");
   if (!find().length) {
+    const toggleId = /^location-correction-place-[0-9a-f-]+$/.test(testID) ? "location-correction-place-picker" : null;
+    const toggle = tree.root.findAll((node) => node.props.testID === toggleId && typeof node.props.onPress === "function")[0];
+    if (toggle && !toggle.props.accessibilityState.expanded) act(() => { toggle.props.onPress(); });
+  }
+  if (!find().length) {
     const more = tree.root.findAll((node) => node.props.testID === "location-correction-more" && typeof node.props.onPress === "function")[0];
     if (more && !more.props.accessibilityState.expanded) act(() => { more.props.onPress(); });
   }
@@ -101,7 +109,7 @@ function openMore(tree: ReturnType<typeof create>) {
 
 type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
 function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string, rest: unknown[]) => Promise<void>,
-  logAs?: { activities: Array<{ id: string; name: string }>; onLog: (categoryId: string) => void }) {
+  logAs?: { activities: Array<{ id: string; name: string }>; onLog: (categoryId: string | undefined, description?: string) => void }) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
@@ -385,21 +393,18 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const onLog = vi.fn();
     const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
     const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
-    openMore(plain.tree);
-    // Nothing picked is "don't log": no selected "Don't log" pill, and no activity checked.
-    expect(plain.has("location-correction-log-none")).toBe(false);
     expect(plain.tree.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.selected).toBe(false);
-    // Picked, "Don't log" is a quiet way back.
     plain.press("location-correction-log-cat-errands");
-    plain.press("location-correction-log-none");
-    expect(plain.has("location-correction-log-none")).toBe(false);
-    plain.press("location-correction-sheet-action");
+    plain.press("location-correction-log-cat-errands");
+    expect(plain.tree.root.findByProps({ testID: "location-correction-sheet-action" }).props.disabled).toBe(true);
     expect(onLog).not.toHaveBeenCalled();
 
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
     sheet.press("location-correction-log-cat-errands");
     sheet.press(`location-correction-place-${SAVED}`);
     expect(onLog).not.toHaveBeenCalled();
+    expect(sheet.onQueue).not.toHaveBeenCalled();
+    sheet.press("location-correction-sheet-action");
     await sheet.settle();
     expect(sheet.onQueue).toHaveBeenCalledTimes(1);
     expect(onLog).toHaveBeenCalledWith("cat-errands", undefined);
@@ -412,8 +417,10 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace,
       { activities: [{ id: "cat-errands", name: "Errands" }], onLog });
     sheet.press("location-correction-log-cat-errands");
-    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
-    sheet.press("location-correction-confirm-save-place");
+    sheet.press("location-correction-place-picker");
+    act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
+    expect(onSavePlace).not.toHaveBeenCalled();
+    sheet.press("location-correction-sheet-action");
     await sheet.settle();
     expect(onSavePlace).toHaveBeenCalledWith("Exampleton Bakery", [], undefined, null);
     expect(onLog).toHaveBeenCalledWith("cat-errands", undefined);
@@ -423,7 +430,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
   it("saves a place with a Logs as that waits for the server to accept its corrections, never logging at once (Codex r4 on #610)", async () => {
     const order: string[] = [];
     const start = vi.fn(() => { order.push("start"); });
-    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+    const onLogAfter = vi.fn(async (categoryId: string | undefined, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
       return { start, cancel: vi.fn(async () => undefined) }; });
     // The List's save: the place on the server, then the waiting log with the corrections' ids, then the corrections.
     const onSavePlace = vi.fn(async (_name: string, _rest: unknown[], beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }>) => {
@@ -436,8 +443,10 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace as never,
       { activities: [{ id: "cat-errands", name: "Errands" }], onLog, onLogAfter } as never);
     sheet.press("location-correction-log-cat-errands");
-    act(() => { sheet.tree.root.findByProps({ testID: "location-correction-place-name" }).props.onChangeText("Exampleton Bakery"); });
-    sheet.press("location-correction-confirm-save-place");
+    sheet.press("location-correction-place-picker");
+    act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
+    expect(order).toEqual([]);
+    sheet.press("location-correction-sheet-action");
     await sheet.settle();
     expect(order).toEqual(["place created", "hold cat-errands cid-1", "queued", "start"]);
     expect(onLog).not.toHaveBeenCalled();
@@ -606,7 +615,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     // the server has acknowledged the change, Codex r4 on #610; #609 then closes the "?").
     const order: string[] = [];
     const start = vi.fn(() => { order.push("start"); });
-    const onLogAfter = vi.fn(async (categoryId: string, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
+    const onLogAfter = vi.fn(async (categoryId: string | undefined, ids: readonly string[]) => { order.push(`hold ${categoryId} ${ids.join(",")}`);
       return { start, cancel: vi.fn(async () => undefined) }; });
     const onQueue = vi.fn(async (_corrections: unknown[], options: { beforeEnqueue?: (ids: readonly string[]) => Promise<{ start: () => void }> }) => {
       const waiting = await options.beforeEnqueue?.(["cid-1"]);
@@ -617,6 +626,8 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const yes = sheetWith({ logAs: { ...logAs, onLogAfter }, question, onQueue: onQueue as never, onDismissed });
     tap(yes, "location-correction-log-cat-errands");
     tap(yes, `location-correction-place-${SAVED}`);
+    expect(order).toEqual([]);
+    tap(yes, "location-correction-sheet-action");
     await settle();
     expect(order).toEqual(["hold cat-errands cid-1", "queue", "start"]);
     // Never logged straight away.
@@ -689,6 +700,33 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     // A search finds any saved place by name.
     const nearby = tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
     expect(nearby.props.savedRows("far").map((row: { title: string }) => row.title)).toEqual(["Far Gym"]);
+  });
+
+  it("opens the existing block editor without a More options panel for just saving the place", async () => {
+    const onEditBlock = vi.fn(async (_id: string, dismiss: () => void) => {
+      dismiss();
+      return true;
+    });
+    const onDismissStart = vi.fn();
+    const onDismissed = vi.fn();
+    const onQueue = vi.fn(async () => undefined);
+    const tree = sheetWith({ allowLoggedPlaceChange: true, onEditBlock, onDismissStart, onDismissed, onQueue,
+      onSavePlace: vi.fn(async () => undefined), editBlocks: [{ id: "block-1", title: "Existing block" }],
+      target: { kind: "place", place: { ...place, blockIds: ["block-1"] }, label: "Existing visit" } });
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-more")).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.props.testID === "location-correction-search")).toHaveLength(0);
+    expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")).toHaveLength(1);
+    tap(tree, "location-correction-edit-block-block-1");
+    expect(onEditBlock).toHaveBeenCalledWith("block-1", expect.any(Function));
+    expect(onDismissed).not.toHaveBeenCalled();
+    await act(async () => {});
+    expect(onDismissStart).toHaveBeenCalledWith(1);
+    const modal = tree.root.findByType("Modal" as never);
+    expect(modal.props.visible).toBe(false);
+    expect(onDismissed).not.toHaveBeenCalled();
+    act(() => { modal.props.onDismiss(); });
+    expect(onDismissed).toHaveBeenCalledWith(1);
+    expect(onQueue).not.toHaveBeenCalled();
   });
 
   it("leads with the place itself on a saved sheet, with no Leave as unknown (owner, 31 Oct 2026)", () => {
@@ -792,10 +830,13 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
   }) as never;
 
   it("puts the sections in the same order for an unknown place, a saved place and a trip", () => {
-    const unknown = order(sheetWith({ question: { ...ask, guess: { name: "Pret", street: null, applePlaceId: null } }, logAs: logs, onSavePlace: vi.fn(async () => undefined), target: { kind: "place", place, label: "Unknown place", notHere: true } }));
+    const unknownSheet = sheetWith({ question: { ...ask, guess: { name: "Pret", street: null, applePlaceId: null } }, logAs: logs, onSavePlace: vi.fn(async () => undefined), target: { kind: "place", place, label: "Unknown place", notHere: true } });
+    expect(unknownSheet.root.findAll((node) => node.props.testID === "location-correction-map")).toHaveLength(0);
+    tap(unknownSheet, "location-correction-place-picker");
+    const unknown = order(unknownSheet);
     const home = order(sheetWith({ logAs: logs, target: { kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" } as TimelinePlace, label: "Home" } }));
     const tripSheet = order(sheetWith({ question: { ...ask, text: "Getting around?", yesLabel: "Yes" }, target: { kind: "trip", trip, legIndex: null } }));
-    expect(unknown).toEqual(everyOrder.filter((id) => id !== "location-correction-legs"));
+    expect(unknown).toEqual(everyOrder.filter((id) => id !== "location-correction-legs" && id !== "location-correction-logs-as"));
     for (const seen of [unknown, home, tripSheet]) expect(seen).toEqual(inOrder(seen));
     expect(home).toEqual(["location-correction-map", "location-correction-where", "location-correction-more", "location-correction-logs-as", "location-correction-times", "location-correction-corrections"]);
     expect(tripSheet).toEqual(["location-correction-map", "location-correction-legs", "location-correction-more", "location-correction-times", "location-correction-corrections"]);
@@ -813,9 +854,8 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tripMap.root.findAllByType("LocationEvidenceMap" as never)[0].props.caption).toBeNull();
   });
 
-  it("uses the compact activity chips under Logs as, none selected and no filled Don't log by default", () => {
+  it("uses compact activity chips under the optional Activity control", () => {
     const tree = sheetWith({ logAs: logs });
-    openMore(tree);
     const chip = tree.root.findByProps({ testID: "location-correction-log-cat-errands" });
     expect(chip.props).toMatchObject({ compact: true, role: "radio", selected: false });
     expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-none")).toHaveLength(0);
@@ -823,6 +863,18 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const titles = tree.root.findAll((node) => node.props.accessibilityRole === "header" && node.type === ("Text" as never));
     for (const title of titles) expect(flat(title.props.style).textTransform).toBeUndefined();
     expect(JSON.stringify(tree.toJSON())).not.toMatch(/Fix the shape|More places/);
+  });
+
+  it("uses one keyboard inset for the unnamed visit and preserves the standard scroll inset for named visits", () => {
+    const unnamed = sheetWith({ logAs: logs });
+    const named = sheetWith({ logAs: logs, target: {
+      kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" }, label: "Home"
+    } });
+    const scrollInsets = (tree: ReturnType<typeof create>) => tree.root.findByProps({
+      testID: "location-correction-sheet-scroll"
+    }).props.automaticallyAdjustKeyboardInsets;
+    expect(scrollInsets(unnamed)).toBe(false);
+    expect(scrollInsets(named)).toBe(true);
   });
 
   it("asks a near guess in the title's fixed line, its row ticked and the primary reading Yes (PRD D23; owner, 31 Oct 2026)", () => {
@@ -882,21 +934,61 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     }
   });
 
+  it("waits for the picker height to settle before mounting MapKit and discards a closed reveal", () => {
+    vi.useFakeTimers();
+    try {
+      const tree = sheetWith({ reduceMotion: false, evidence: nearSaved, logAs: logs });
+      const picker = () => tree.root.find((node) => node.type === ("AnimatedView" as never)
+        && node.props.testID === "location-correction-inline-picker");
+      const measure = (height: number) => act(() => {
+        picker().find((node) => typeof node.props.onLayout === "function").props.onLayout({ nativeEvent: { layout: { height } } });
+      });
+      const nativeMap = () => tree.root.findAllByType("LocationEvidenceMap" as never);
+      tap(tree, "location-correction-place-picker");
+      measure(240);
+      act(() => { vi.advanceTimersByTime(250); });
+      measure(350);
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(nativeMap()).toHaveLength(0);
+      tap(tree, "location-correction-place-picker");
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(nativeMap()).toHaveLength(0);
+      tap(tree, "location-correction-place-picker");
+      measure(240);
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(nativeMap()).toHaveLength(1);
+      act(() => tree.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tells the list it is waiting for a centre while an unknown place's evidence loads, with no save callback yet", () => {
     const tree = sheetWith({ evidence: null, onSavePlace: undefined });
     expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.awaitingCentre).toBe(true);
   });
 
-  it("offers All activities only when there are more, and clears a pick with Clear beside the footer's Don't log", () => {
-    const every = [...logs.activities, { id: "cat-gym", name: "Gym", color: "teal", icon: null }];
-    const tree = sheetWith({ logAs: { ...logs, allActivities: every } });
-    openMore(tree);
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-cat-gym")).toHaveLength(0);
+  it("keeps the same three choices and shows the selected activity in the heading when the full list closes", () => {
+    const activities = [
+      ...logs.activities,
+      { id: "cat-work", name: "Work", color: "teal", icon: null },
+      { id: "cat-lunch", name: "Lunch", color: "teal", icon: null },
+      { id: "cat-gym", name: "Gym", color: "teal", icon: null },
+      { id: "cat-walk", name: "Walk", color: "teal", icon: null }
+    ];
+    const tree = sheetWith({ logAs: { ...logs, activities } });
+    const chips = () => tree.root.findAll((node) => node.type === ("Pressable" as never)
+      && node.props.testID?.startsWith("location-correction-log-cat-"));
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
+    expect(chips().every((chip) => !chip.props.accessibilityState.checked)).toBe(true);
+    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Optional");
     tap(tree, "location-correction-log-all");
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-cat-gym").length).toBeGreaterThan(0);
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch", "Gym", "Walk"]);
+    tap(tree, "location-correction-log-cat-gym");
+    tap(tree, "location-correction-log-all");
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
+    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Gym");
     const few = sheetWith({ logAs: { ...logs, allActivities: logs.activities } });
-    openMore(few);
     expect(few.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
   });
 
@@ -944,31 +1036,40 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     await settle();
     expect(answerAfter).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, null, undefined);
     expect(onAnswer).not.toHaveBeenCalled();
-    // (b) Logs as picked, nothing else changed: one answer with the venue and the activity, never log_place.
+    // The suggestion is available in the optional picker. Logging a description without opening
+    // that picker leaves the visit unnamed and never sends a Yes to the suggestion.
     const onLog = vi.fn();
-    const picked = sheetWith({ logAs: { activities: logs.activities, onLog }, question: { ...ask, guess: venue, onAnswer } });
-    tap(picked, "location-correction-log-cat-errands");
-    const description = () => picked.root.findByProps({ testID: "location-correction-log-description" });
-    expect(description().props.placeholder).toBe("Description (optional)");
-    expect(description().props.accessibilityLabel).toBeUndefined();
-    act(() => { description().props.onChangeText("  Picked up supplies  "); });
-    expect(description().props.accessibilityLabel).toBe("Description (optional)");
+    const onSavePlace = vi.fn(async () => undefined);
+    const picked = sheetWith({ logAs: { activities: logs.activities, onLog }, onSavePlace, question: { ...ask, guess: venue, onAnswer } });
+    expect(action(picked).props.accessibilityLabel).toBe("Log activity");
+    expect(action(picked).props.disabled).toBe(true);
+    const description = picked.root.findByProps({ testID: "location-correction-log-description" });
+    expect(description.props.accessibilityLabel).toBe("What did you do?");
+    act(() => { description.props.onChangeText("  Visiting a friend  "); });
     tap(picked, "location-correction-sheet-action");
     await settle();
-    expect(onAnswer).toHaveBeenCalledWith(true, venue, "cat-errands", "Picked up supplies");
-    expect(onLog).not.toHaveBeenCalled();
-    // (b) Logs as picked with a time change: the answer waits for it, venue and activity with it; no Logs as of its own.
-    const answerAfterToo = vi.fn(async () => waiting());
-    const onLogAfter = vi.fn();
-    const both = sheetWith({ onQueue: queued as never, logAs: { activities: logs.activities, onLog, onLogAfter },
-      question: { ...ask, guess: venue, onAnswer: vi.fn(), answerAfter: answerAfterToo } });
-    openMore(both);
-    act(() => { both.root.findByProps({ testID: "location-correction-start" }).props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
-    tap(both, "location-correction-log-cat-errands");
-    tap(both, "location-correction-sheet-action");
-    await settle();
-    expect(answerAfterToo).toHaveBeenCalledWith(true, ["cid-1"], 1, venue, "cat-errands", undefined);
-    expect(onLogAfter).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith(undefined, "Visiting a friend");
+    expect(onSavePlace).not.toHaveBeenCalled();
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("keeps a one-time suggestion distinct from the optional saved-place action", async () => {
+    const venue = { name: "Exampleton Bakery", street: null, applePlaceId: "IBAKERY" };
+    const onAnswer = vi.fn();
+    const onSavePlace = vi.fn(async () => undefined);
+    const onLog = vi.fn();
+    const tree = sheetWith({ logAs: { activities: logs.activities, onLog }, onSavePlace, question: { ...ask, guess: venue, onAnswer } });
+    tap(tree, "location-correction-place-picker");
+    const picker = () => tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
+    act(() => { picker().props.onPick("A typed place", null); });
+    expect(action(tree).props).toMatchObject({ accessibilityLabel: "Save place", disabled: false });
+    tap(tree, "location-correction-clear-place");
+    expect(action(tree).props).toMatchObject({ accessibilityLabel: "Log activity", disabled: true });
+    const input = tree.root.findByProps({ testID: "location-correction-log-description" });
+    act(() => { input.props.onChangeText("Read a book"); });
+    await act(async () => { picker().props.onGuessPick(); });
+    expect(onAnswer).toHaveBeenCalledWith(true, venue, null, "Read a book");
+    expect(onSavePlace).not.toHaveBeenCalled();
     expect(onLog).not.toHaveBeenCalled();
   });
 

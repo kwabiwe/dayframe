@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Reanimated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
+import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
@@ -21,6 +21,7 @@ import {
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { BottomSheetShell, type BottomSheetScroller } from "../sheets/BottomSheetShell";
 import { TimeWheelPanel } from "../TimeWheelPanel";
+import { InsetDivider } from "../InsetDivider";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { LocationEvidenceMap } from "../location/LocationEvidenceMap";
 import { playHaptic } from "../../lib/haptics";
@@ -87,6 +88,7 @@ export const SHEET_MAP_HEIGHT = 160;
 export const SHEET_MAP_DELAY_MS = 320;
 /** More options closes once the scroll back has run. */
 const SHEET_SCROLL_BACK_MS = 240;
+const SHEET_ACTIVITY_PREVIEW_COUNT = 3;
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
 /** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
@@ -115,10 +117,13 @@ export function LocationCorrectionSheet({
   clockFormat,
   evidence,
   onDismissed,
+  onDismissStart,
   onQueue,
   onSavePlace,
   allowLoggedPlaceChange = false,
+  editBlocks = [],
   logAs,
+  onEditBlock,
   places,
   presentationId,
   question,
@@ -181,6 +186,9 @@ export function LocationCorrectionSheet({
    */
   onSavePlace?: (name: string, rest: QueuedCorrection[], beforeEnqueue?: LocationCorrectionBeforeEnqueue, applePlaceId?: string | null) => Promise<void>;
   allowLoggedPlaceChange?: boolean;
+  editBlocks?: ReadonlyArray<{ id: string; title: string }>;
+  onEditBlock?: (id: string, dismiss: () => void) => Promise<boolean> | boolean;
+  onDismissStart?: (presentationId: number) => void;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
@@ -190,12 +198,12 @@ export function LocationCorrectionSheet({
     /** Every activity, for "All activities", when there are more than `activities`. */
     allActivities?: ReadonlyArray<{ id: string; name: string; color?: string | null; icon?: string | null }>;
     /** Logs the place now (held for Undo): the sheet has no corrections of its own to go first. */
-    onLog: (categoryId: string, description?: string) => void;
+    onLog: (categoryId: string | undefined, description?: string) => void;
     /**
      * Logs it after the sheet's corrections (Codex r4 on #610): kept on the phone before they are queued, and sent as
      * `log_place` only once the server has acknowledged every one; a refused one means nothing is logged.
      */
-    onLogAfter?: (categoryId: string, ids: readonly string[], generation: number, description?: string) => ReturnType<LocationCorrectionBeforeEnqueue>;
+    onLogAfter?: (categoryId: string | undefined, ids: readonly string[], generation: number, description?: string) => ReturnType<LocationCorrectionBeforeEnqueue>;
   };
   /** The saved places, for "Where were you?". */
   places: readonly CorrectionPlaceOption[];
@@ -352,15 +360,15 @@ export function LocationCorrectionSheet({
       ? placeCorrections(target.place, { choice: picked, times }, places, allowLoggedPlaceChange)
       : tripCorrections(target.trip, { times });
     // Logs as is held for Undo and sent after the place's own changes, which it then logs.
-    const log = target.kind === "place" && logAs && logCategoryId ? () => logAs.onLog(logCategoryId, description) : null;
+    const log = logAs && hasLogDraft ? () => logAs.onLog(logCategoryId ?? undefined, description) : null;
     if (!corrections.length) {
       log?.();
       return true;
     }
-    const logAfter = target.kind === "place" && logAs?.onLogAfter && logCategoryId ? logAs.onLogAfter : null;
-    if (logAfter && logCategoryId) {
+    const logAfter = hasLogDraft ? logAs?.onLogAfter : undefined;
+    if (logAfter) {
       // Logs as waits for these corrections to be acknowledged, never merely kept on the phone (Codex r4 on #610).
-      const categoryId = logCategoryId;
+      const categoryId = logCategoryId ?? undefined;
       keep(corrections, "close", (ids, generation) => logAfter(categoryId, ids, generation, description));
       return false;
     }
@@ -378,6 +386,7 @@ export function LocationCorrectionSheet({
     }
     setAttempted(null);
     setChoice(next);
+    if (activityFirst) return;
     pickedNow.current = next;
     commitRef.current?.();
     pickedNow.current = null;
@@ -397,20 +406,43 @@ export function LocationCorrectionSheet({
   const [logCategoryId, setLogCategoryId] = useState<string | null>(null);
   const [logDescription, setLogDescription] = useState("");
   const description = logDescription.trim() || undefined;
+  const activityFirst = Boolean(logAs && target.kind === "place" && !target.place.placeId && !target.place.learnedPlaceId);
+  const hasLogDraft = Boolean(logCategoryId || (activityFirst && description));
+  const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [allActivities, setAllActivities] = useState(false);
   const [moreOptions, setMoreOptions] = useState(false);
   const moreRow = useRef<View | null>(null);
   // Opened and not yet scrolled to: its first layout does it.
   const revealMore = useRef(false);
   const closingMore = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function chooseInlinePlace(name: string, applePlaceId: string | null = null) {
+    if (frozen() || stale) return;
+    if (!onSavePlace) {
+      setSaveError("That place isn't available for this visit.");
+      return;
+    }
+    setChoice({ kind: "keep" });
+    setAttempted({ name, applePlaceId });
+  }
   useEffect(() => () => { if (closingMore.current) clearTimeout(closingMore.current); }, []);
   // The map waits for the sheet's spring; with Reduce Motion there is none.
-  const [mapReady, setMapReady] = useState(reduceMotion);
+  const [mapReady, setMapReady] = useState(false);
+  const [inlinePlaceHeight, setInlinePlaceHeight] = useState(0);
   useEffect(() => {
+    if (activityFirst && !placePickerOpen) {
+      setMapReady(false);
+      setInlinePlaceHeight(0);
+      return;
+    }
     if (mapReady) return;
+    if (reduceMotion) {
+      setMapReady(true);
+      return;
+    }
+    if (activityFirst && !inlinePlaceHeight) return;
     const timer = setTimeout(() => setMapReady(true), SHEET_MAP_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [mapReady]);
+  }, [activityFirst, inlinePlaceHeight, mapReady, placePickerOpen, reduceMotion]);
   /** Opens with the row scrolled to the sheet's top; closes by scrolling back first, so nothing snaps. */
   function toggleMore() {
     const closing = moreOptions && !closingMore.current;
@@ -448,13 +480,13 @@ export function LocationCorrectionSheet({
     // With a Logs as picked, the log waits on the phone until the server has the place's corrections (the place
     // itself is created on the server first), never merely their keeping here; a refused one logs nothing and the
     // "?" stays (Codex r4 on #610). Without `onLogAfter` it logs once they are kept, as before.
-    const categoryId = logCategoryId;
-    const logAfter = logAs?.onLogAfter && categoryId ? logAs.onLogAfter : null;
-    const log = !logAfter && logAs && categoryId ? () => logAs.onLog(categoryId, description) : null;
+    const categoryId = logCategoryId ?? undefined;
+    const logAfter = hasLogDraft ? logAs?.onLogAfter : undefined;
+    const log = !logAfter && logAs && hasLogDraft ? () => logAs.onLog(categoryId, description) : null;
     if (chosenName !== undefined) setAttempted({ name, applePlaceId });
     setSaving(true);
     setSaveError(null);
-    onSavePlace(name, rest, logAfter && categoryId ? (ids, generation) => logAfter(categoryId, ids, generation, description) : undefined,
+    onSavePlace(name, rest, logAfter ? (ids, generation) => logAfter(categoryId, ids, generation, description) : undefined,
       applePlaceId).then(() => {
       setSaving(false);
       kept.current = true;
@@ -487,7 +519,7 @@ export function LocationCorrectionSheet({
       return;
     }
     const logAsCategoryId = yes && venue && logCategoryId ? logCategoryId : null;
-    const answerDescription = logAsCategoryId ? description : undefined;
+    const answerDescription = yes && venue && hasLogDraft ? description : undefined;
     if (!yes && logCategoryId) setLogCategoryId(null);
     if (confirming) {
       setSaveError("Finish the change above first, then answer.");
@@ -498,7 +530,7 @@ export function LocationCorrectionSheet({
       return;
     }
     // Yes to a guess replaces a place picked before it (one that failed to keep); times and Logs as stay.
-    const answerChoice: PlaceChoice = venue ? { kind: "keep" } : choice;
+    const answerChoice: PlaceChoice = venue || (!yes && activityFirst) ? { kind: "keep" } : choice;
     if (venue) setChoice(answerChoice);
     const corrections = target.kind === "place"
       ? placeCorrections(target.place, { choice: answerChoice, times }, places, allowLoggedPlaceChange)
@@ -602,26 +634,114 @@ export function LocationCorrectionSheet({
   };
   const placeSection = target.kind === "place" && !stale && (correctable(target.place) || allowLoggedPlaceChange);
   const hasMore = !leg && (target.kind === "place"
-    ? !stale && (Boolean(logAs) || (correctable(item) && Boolean(item.stoppedAt)) || placeCanSave || Boolean(target.notHere))
+    ? !stale && ((Boolean(logAs) && !activityFirst) || (correctable(item) && Boolean(item.stoppedAt))
+      || (placeCanSave && !activityFirst && !allowLoggedPlaceChange) || Boolean(target.notHere))
     : correctable(item));
   const sheetChanged = Boolean(confirming) || Boolean(logCategoryId) || Boolean(legMode) || Boolean(placeName.trim()) || Boolean(attempted) || (!problem && (target.kind === "place"
     ? placeCorrections(target.place, { choice, times }, places, allowLoggedPlaceChange).length > 0
     : tripCorrections(target.trip, { times }).length > 0));
   // The footer: a question with a Yes shows its Yes until something changes (the web's rule). A guess keeps its Yes
   // through edits to the times or Logs as, which go with the answer; a name or a place of the person's own is a Save.
-  footerGuess = guess && !leg && !confirming && !placeName.trim() && !attempted && choice.kind === "keep" ? guess : null;
-  footerYes = Boolean(question?.yesLabel && !guess && !leg && !sheetChanged);
+  footerGuess = !activityFirst && guess && !leg && !confirming && !placeName.trim() && !attempted && choice.kind === "keep" ? guess : null;
+  footerYes = Boolean(!activityFirst && question?.yesLabel && !guess && !leg && !sheetChanged);
   const notNow = question?.noLabel && !leg ? question.noLabel : null;
+  const editingActivityTimes = activityFirst && !hasLogDraft && (Boolean(confirming)
+    || edited.startMs !== undefined || edited.stopMs !== undefined);
+  const activeCategory = logAs?.allActivities?.find((category) => category.id === logCategoryId)
+    ?? logAs?.activities.find((category) => category.id === logCategoryId);
+  const chosenPlace = attempted?.name ?? (choice.kind === "saved" ? places.find((place) => place.id === choice.id)?.name : undefined);
+  const savingOnlyPlace = activityFirst && !hasLogDraft && Boolean(chosenPlace);
+  const map = (
+    <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
+      {evidence && evidence !== "unavailable" ? mapReady || reduceMotion ? (
+        <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
+          <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
+            caption={evidenceSheetCaption(evidence, { knownPlace: placeIsNamed })}
+            dangerColor={theme.danger} evidence={evidence} height={SHEET_MAP_HEIGHT} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
+            textColor={theme.textSecondary} visitOnly />
+        </Reanimated.View>
+      ) : null : evidence === "unavailable" ? (
+        <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>The map isn't available right now.</Text>
+      ) : null}
+    </View>
+  );
+  const placeSearch = placeSection && target.kind === "place" ? (
+    <View style={styles.section} testID="location-correction-where">
+      <SheetNearbySearch awaitingCentre={evidence === null && (allowLoggedPlaceChange || (!target.place.placeId && correctable(item)))}
+        centre={nearbyCentre} compactInitialResults={activityFirst} disabled={saving}
+        evidence={evidence && evidence !== "unavailable" ? evidence : null}
+        excludeSavedMatches={allowLoggedPlaceChange}
+        guess={guess} selectedPlace={activityFirst ? attempted : undefined}
+        onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })}
+        onGuessPick={() => answerFromSheet(true, guess)}
+        onPick={activityFirst ? chooseInlinePlace : savePlace}
+        onSaveTyped={placeCanSave ? (activityFirst ? chooseInlinePlace : savePlace) : undefined}
+        reduceMotion={reduceMotion} savedRows={savedRows} theme={theme} />
+    </View>
+  ) : null;
+  type SheetActivity = NonNullable<typeof logAs>["activities"][number];
+  function activityChip(activity: SheetActivity) {
+    return (
+      <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
+        onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
+        testID={`location-correction-log-${activity.id}`} theme={theme} />
+    );
+  }
+  const suggestedActivities = logAs?.activities ?? [];
+  const availableActivities = logAs?.allActivities ?? suggestedActivities;
+  const recommendedActivities = suggestedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT);
+  const remainingActivities = availableActivities.filter((activity) => !recommendedActivities.some(({ id }) => id === activity.id));
+  const activityChips = logAs && (
+    <View accessibilityLabel={activityFirst ? "Activity" : "Logs as"} accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
+      {(allActivities ? availableActivities : suggestedActivities).map(activityChip)}
+      {!allActivities && (logAs.allActivities?.length ?? 0) > logAs.activities.length ? (
+        <ShapeAction label="All activities" onPress={() => setAllActivities(true)} testID="location-correction-log-all" theme={theme} />
+      ) : null}
+    </View>
+  );
+  const editBlockActions = !leg && editBlocks.length > 0 && onEditBlock ? (
+    <View style={styles.activityFirst}>
+      {editBlocks.map((block) => (
+        <Pressable accessibilityRole="button" key={block.id} disabled={saving}
+          onPress={async () => {
+            if (frozen() || stale) return;
+            setSaving(true);
+            setSaveError(null);
+            try {
+              if (!await onEditBlock(block.id, () => discardRef.current?.())) {
+                setSaveError("Couldn't open this block. Try again.");
+              }
+            } catch {
+              setSaveError("Couldn't open this block. Try again.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+          style={styles.inlineChoice} testID={`location-correction-edit-block-${block.id}`}>
+          <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.edit} size={18} />
+          <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>
+            {editBlocks.length === 1 ? "Edit block" : `Edit ${block.title}`}
+          </Text>
+          <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+          <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={28} />
+        </Pressable>
+      ))}
+    </View>
+  ) : null;
   return (
     <BottomSheetShell
-      action={footerGuess ? "Yes" : footerYes ? question!.yesLabel! : "Save"}
+      action={savingOnlyPlace ? "Save place" : activityFirst && !editingActivityTimes ? "Log activity"
+        : footerGuess ? "Yes" : footerYes ? question!.yesLabel! : "Save"}
+      automaticallyAdjustKeyboardInsets={!activityFirst}
       calendarLayout={false}
       commitRef={commitRef}
       discardRef={discardRef}
       // A removal or join needs no valid times; nothing changes while a change is being kept, or once the item
       // left. A kept change always closes.
-      disabled={!closeKept && (stale || saving || (!leg && !confirming && Boolean(problem)))}
+      disabled={!closeKept && (stale || saving || (!leg && !confirming && Boolean(problem))
+        || (activityFirst && !hasLogDraft && !editingActivityTimes && !savingOnlyPlace))}
       onApply={apply}
+      onDismissStart={onDismissStart}
       onDismissed={onDismissed}
       presentationId={presentationId}
       reduceMotion={reduceMotion}
@@ -643,26 +763,86 @@ export function LocationCorrectionSheet({
         <View style={styles.headText}>
           <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
-          {asks ? <Text {...mobileTextProps("body")} numberOfLines={target.kind === "place" ? 1 : undefined} style={[styles.ask, { color: theme.textPrimary }]} testID="location-correction-ask">{asks}</Text> : null}
+          {asks && !activityFirst ? <Text {...mobileTextProps("body")} numberOfLines={target.kind === "place" ? 1 : undefined} style={[styles.ask, { color: theme.textPrimary }]} testID="location-correction-ask">{asks}</Text> : null}
         </View>
         <Pressable accessibilityLabel="Close" accessibilityRole="button" hitSlop={6} onPress={() => discardRef.current?.()}
           style={[styles.round, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-close">
           <DayframeIcon color={theme.textPrimary} glyph="x" size={18} />
         </Pressable>
       </View>
-      {/* The map: the visit's own area, or the trip's route; it stays put as a leg pushes and pops. */}
-      <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
-        {evidence && evidence !== "unavailable" ? mapReady ? (
-          <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
-          <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
-            caption={evidenceSheetCaption(evidence, { knownPlace: placeIsNamed })}
-            dangerColor={theme.danger} evidence={evidence} height={SHEET_MAP_HEIGHT} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
-            textColor={theme.textSecondary} visitOnly />
-          </Reanimated.View>
-        ) : null : evidence === "unavailable" ? (
-          <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>The map isn't available right now.</Text>
-        ) : null}
-      </View>
+      {editBlockActions}
+      {activityFirst ? (
+        <View style={styles.activityFirst}>
+          <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary }}>What did you do?</Text>
+          <TextInput accessibilityLabel="What did you do?" editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
+            onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
+            placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+            style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+            testID="location-correction-log-description" value={logDescription} />
+          {availableActivities.length ? (
+            <View style={styles.activityFirst}>
+              <View style={styles.activityHeading}>
+                <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
+                <Text {...mobileTextProps("metadata")} numberOfLines={1}
+                  style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
+                  testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
+              </View>
+              <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={[activityChipStyles.compactWrap, styles.activityPreview]}>
+                {recommendedActivities.map(activityChip)}
+              </View>
+              {remainingActivities.length ? (
+                <View>
+                  <ShapeAction expanded={allActivities} label={allActivities ? "Fewer activities" : "All activities"}
+                    onPress={() => setAllActivities((open) => !open)} testID="location-correction-log-all" theme={theme} />
+                  <InlineReveal open={allActivities} reduceMotion={reduceMotion}>
+                    <View accessibilityLabel="More activities" accessibilityRole="radiogroup"
+                      style={[activityChipStyles.compactWrap, styles.moreActivities]}>
+                      {remainingActivities.map(activityChip)}
+                    </View>
+                  </InlineReveal>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {placeSection ? (
+            <View>
+              <View style={styles.inlineChoice}>
+                <Pressable accessibilityRole="button" accessibilityState={{ expanded: placePickerOpen }}
+                  onPress={() => setPlacePickerOpen((open) => !open)}
+                  style={styles.inlineDisclosure} testID="location-correction-place-picker">
+                  <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={19} />
+                  <Text {...mobileTextProps("control")} numberOfLines={1}
+                    style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Choose a place</Text>
+                  {chosenPlace ? <Text {...mobileTextProps("metadata")} numberOfLines={1}
+                    style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}>{chosenPlace}</Text> : null}
+                  <View style={{ transform: [{ rotate: placePickerOpen ? "-90deg" : "90deg" }] }}>
+                    <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+                  </View>
+                </Pressable>
+                {chosenPlace ? (
+                  <Pressable accessibilityLabel="Clear place" accessibilityRole="button" disabled={saving}
+                    onPress={() => {
+                      if (frozen()) return;
+                      setChoice({ kind: "keep" });
+                      setAttempted(null);
+                    }} style={styles.inlineClear} testID="location-correction-clear-place">
+                    <DayframeIcon color={theme.textSecondary} glyph="x" size={16} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <InlineReveal onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
+                testID="location-correction-inline-picker">
+                <View style={styles.view}>
+                  {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
+                    style={{ color: theme.textPrimary }} testID="location-correction-ask">{asks}</Text> : null}
+                  {map}
+                  {placeSearch}
+                </View>
+              </InlineReveal>
+            </View>
+          ) : null}
+        </View>
+      ) : map}
       {/* The view inside the sheet: the leg pushes in from the right and pops back from the left. */}
       <Reanimated.View
         key={leg ? `leg-${leg.startedAt}-${leg.stoppedAt}` : "main"}
@@ -671,17 +851,7 @@ export function LocationCorrectionSheet({
         exiting={FadeOut.duration(reduceMotion ? 70 : 120).reduceMotion(ReduceMotion.Never)}
         style={styles.view}
       >
-        {placeSection ? (
-          <View style={styles.section} testID="location-correction-where">
-            <SheetNearbySearch awaitingCentre={evidence === null && (allowLoggedPlaceChange || (!target.place.placeId && correctable(item)))}
-              centre={nearbyCentre} disabled={saving} evidence={evidence && evidence !== "unavailable" ? evidence : null}
-              excludeSavedMatches={allowLoggedPlaceChange}
-              guess={guess} onGuess={(venue, proposal) => setNearbyGuess({ venue, proposal })} onGuessPick={() => answerFromSheet(true, guess)}
-              onPick={(name, applePlaceId) => savePlace(name, applePlaceId)}
-              onSaveTyped={placeCanSave ? (name) => savePlace(name) : undefined}
-              reduceMotion={reduceMotion} savedRows={savedRows} theme={theme} />
-          </View>
-        ) : null}
+        {!activityFirst ? placeSearch : null}
         {trip && leg ? (
           <LegModes mode={legMode ?? leg.mode} onPick={(mode) => { if (!frozen()) setLegMode(mode); }} theme={theme} />
         ) : null}
@@ -711,7 +881,7 @@ export function LocationCorrectionSheet({
               </View>
           </Section>
         ) : null}
-        {!leg && !correctable(item) ? (
+        {!editBlockActions && !leg && !correctable(item) ? (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}>
             {target.kind === "trip" ? "This trip is in a block: its times are the block's."
               : allowLoggedPlaceChange ? "Edit the block to change its times." : "This place is in a block. Edit the block instead."}
@@ -735,19 +905,10 @@ export function LocationCorrectionSheet({
               scroller.current?.reveal(moreRow.current, "top");
             }}
             style={styles.view} testID="location-correction-more-options">
-            {target.kind === "place" && logAs && !stale ? (
+            {target.kind === "place" && logAs && !activityFirst && !stale ? (
               // Compact activity chips; none picked logs nothing, so Clear is only a quiet way back once one is picked.
               <Section label="Logs as" testID="location-correction-logs-as" theme={theme}>
-                <View accessibilityLabel="Logs as" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-                  {(allActivities && logAs.allActivities ? logAs.allActivities : logAs.activities).map((activity) => (
-                    <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
-                      onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
-                      testID={`location-correction-log-${activity.id}`} theme={theme} />
-                  ))}
-                  {!allActivities && (logAs.allActivities?.length ?? 0) > logAs.activities.length ? (
-                    <ShapeAction label="All activities" onPress={() => setAllActivities(true)} testID="location-correction-log-all" theme={theme} />
-                  ) : null}
-                </View>
+                {activityChips}
                 {logCategoryId ? (
                   <TextInput accessibilityLabel={logDescription.length > 0 ? "Description (optional)" : undefined}
                     editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
@@ -772,7 +933,7 @@ export function LocationCorrectionSheet({
             ) : null}
             {target.kind === "place" ? (
               <View style={styles.corrections} testID="location-correction-corrections">
-                {placeCanSave ? (
+                {placeCanSave && !activityFirst && !allowLoggedPlaceChange ? (
                   <View style={styles.saveRow} testID="location-correction-save-form">
                     <TextInput accessibilityLabel="Name for this place" onChangeText={(text) => { if (frozen()) return; setAttempted(null); setPlaceName(text); }} onSubmitEditing={() => savePlace()}
                       placeholder="Save this place as…" placeholderTextColor={theme.textSecondary} returnKeyType="done"
@@ -831,13 +992,44 @@ export function LocationCorrectionSheet({
   );
 }
 
+/** Let the body's normal layout follow the measured reveal, including results that arrive after opening. */
+function InlineReveal({ children, onHeightChange, open, reduceMotion, testID }: {
+  children: ReactNode; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
+}) {
+  const [contentHeight, setContentHeight] = useState(0);
+  useEffect(() => { if (!open) setContentHeight(0); }, [open]);
+  const size = useAnimatedStyle(() => ({
+    height: reduceMotion ? undefined : withTiming(open ? contentHeight : 0, {
+      duration: MOBILE_MOTION.sheet,
+      easing: Easing.out(Easing.cubic)
+    })
+  }));
+  return (
+    <Reanimated.View style={[styles.inlineClip, size]} testID={testID}>
+      {open ? (
+        <Reanimated.View collapsable={false} exiting={reduceMotion ? undefined : localPresenceExiting(false)}
+          style={reduceMotion ? undefined : styles.inlineMeasure}
+          onLayout={({ nativeEvent }) => {
+            const height = nativeEvent.layout.height;
+            setContentHeight(height);
+            onHeightChange?.(height);
+          }}>
+          {children}
+        </Reanimated.View>
+      ) : null}
+    </Reanimated.View>
+  );
+}
+
 /** A correction's compact pill: neutral, or in the danger colour for one that takes something off the day. */
-function ShapeAction({ danger = false, label, onPress, testID, theme }: {
-  danger?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
+function ShapeAction({ danger = false, expanded, label, onPress, testID, theme }: {
+  danger?: boolean; expanded?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
 }) {
   return (
-    <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
-      style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
+    <Pressable accessibilityRole="button" accessibilityState={expanded === undefined ? undefined : { expanded }}
+      hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
+      style={({ pressed }) => [compactPillStyles.pill, expanded !== undefined && styles.activityDisclosure,
+        { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
       <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: danger ? theme.dangerText : theme.textPrimary }]}>{label}</Text>
     </Pressable>
   );
@@ -989,6 +1181,19 @@ function TimesSection({ clockFormat, onChange, onReveal, problem, reduceMotion, 
 }
 
 const styles = StyleSheet.create({
+  activityFirst: { gap: 8 },
+  activityHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  activityPreview: { paddingVertical: 6 },
+  activityDisclosure: { minHeight: 44 },
+  moreActivities: { paddingTop: 12, paddingBottom: 6 },
+  inlineClip: { overflow: "hidden" },
+  inlineMeasure: { position: "absolute", left: 0, right: 0, top: 0 },
+  inlineChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
+  inlineDisclosure: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
+  inlineClear: { width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  inlineChoiceTitle: { flexGrow: 1 },
+  inlineChoiceValue: { maxWidth: "42%" },
+
   ask: { fontSize: 15, lineHeight: 20 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 8 },
   headText: { flex: 1, gap: 2 },

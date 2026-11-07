@@ -29,18 +29,20 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
    */
   action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; logAsCategoryId?: string | null; logAsDescription?: string;
     outingMemberIds?: readonly string[] }
-    | { kind: "log"; categoryId: string; description?: string };
+    | { kind: "log"; categoryId?: string; description?: string; visitOnly?: true };
 }) {
   return registerAfterCorrections(owner, {
     id: input.id,
     reviewItemId: input.action.kind === "answer" ? input.action.reviewItemId : "",
     logged: input.action.kind === "answer" ? input.action.logged : true,
     ...(input.action.kind === "answer" && input.action.venue ? { venue: input.action.venue } : {}),
-    ...(input.action.kind === "answer" && input.action.venue && input.action.logged && input.action.logAsCategoryId
-      ? { log: { itemId: input.itemId, categoryId: input.action.logAsCategoryId,
+    ...(input.action.kind === "answer" && input.action.venue && input.action.logged && (input.action.logAsCategoryId || input.action.logAsDescription)
+      ? { log: { itemId: input.itemId, ...(input.action.logAsCategoryId ? { categoryId: input.action.logAsCategoryId } : {}),
         ...(input.action.logAsDescription ? { description: input.action.logAsDescription } : {}) } } : {}),
-    ...(input.action.kind === "log" ? { log: { itemId: input.itemId, categoryId: input.action.categoryId,
-      ...(input.action.description ? { description: input.action.description } : {}) } } : {}),
+    ...(input.action.kind === "log" ? { log: { itemId: input.itemId,
+      ...(input.action.categoryId ? { categoryId: input.action.categoryId } : {}),
+      ...(input.action.description ? { description: input.action.description } : {}),
+      ...(input.action.visitOnly ? { visitOnly: true } : {}) } } : {}),
     ...(input.action.kind === "answer" && input.action.outingMemberIds?.length ? { outingMemberIds: input.action.outingMemberIds } : {}),
     newIds: input.newIds,
     itemIds: [input.itemId, ...(input.memberItemIds ?? [])]

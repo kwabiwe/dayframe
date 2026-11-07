@@ -49,6 +49,7 @@ export function useLocationCorrections({
   pending,
   questionFor,
   reduceMotion,
+  resolveEditBlock,
   showNotice,
   theme,
   timeline
@@ -59,6 +60,7 @@ export function useLocationCorrections({
   acknowledged?: readonly AcknowledgedTimelineCorrection[];
   clockFormat: ClockFormat;
   data: Pick<MobileBootstrap, "categories" | "places" | "user" | "workspace" | "serverBuild"> | null;
+  resolveEditBlock?: (id: string) => { title: string | null; prepare: () => Promise<() => void> } | null;
   /** A correction that can change the day's blocks reached the server. */
   onLogged?: () => void;
   /** The queue as the List shows it (useTimelineCorrectionQueue). */
@@ -70,6 +72,8 @@ export function useLocationCorrections({
   timeline: LocationTimeline | null;
 }) {
   const [opened, setOpen] = useState<Open | null>(null);
+  const editAfterExit = useRef<{ presentationId: number; generation: number; openBlock: () => void } | null>(null);
+  const exitingPresentationId = useRef<number | null>(null);
   const presentations = useRef(0);
   const userId = data?.user.id ?? null;
   const workspaceId = data?.workspace.id ?? null;
@@ -77,6 +81,8 @@ export function useLocationCorrections({
   const ownerKey = userId && workspaceId ? `${workspaceId}:${userId}` : null;
   // Another account (or none) closes the sheet at once: its item, map and draft are never shown to it.
   const open = opened && opened.ownerKey === ownerKey ? opened : null;
+  const activePresentationId = useRef<number | null>(null);
+  activePresentationId.current = open?.id ?? null;
   if (opened && !open) setOpen(null);
   // The last target shown, by presentation: the sheet closes as it was when its item leaves the List.
   const [held, setHeld] = useState<{ id: number; target: LocationCorrectionTarget } | null>(null);
@@ -387,15 +393,17 @@ export function useLocationCorrections({
   // queued) and every one still queued for the place. Null when there is nothing to wait for (Codex r5 on #610).
   // `generation`: the account lifetime of the tap that began it, captured before its first await and carried here
   // (Codex r16 and r17 on #610): any account change since, even back to this one, makes it stale.
-  const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string, title: string,
-    newIds: readonly string[], generation: number, description?: string) => {
+  const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string | undefined, title: string,
+    newIds: readonly string[], generation: number, description?: string, visitOnly?: true) => {
     if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current || generation !== currentMobileAccountEpoch()) {
       throw new Error("The account changed.");
     }
     const owner = { userId, workspaceId };
     // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
-    const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: { kind: "log", categoryId, ...(description ? { description } : {}) } });
+    const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: {
+      kind: "log", categoryId, ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {})
+    } });
     if (!record) return null;
     return {
       // The one completion path (Codex r14 on #610): another account withdraws it, the place sheets gone or Dayframe
@@ -408,7 +416,9 @@ export function useLocationCorrections({
           start: () => {
             logTokens.current += 1;
             return holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
-              request: { kind: "log_place", subject: "place", itemId: placeItemId, categoryId, ...(description ? { description } : {}) }, afterCorrections: id, recordOwner: owner });
+              request: { kind: "log_place", subject: "place", itemId: placeItemId,
+                ...(categoryId ? { categoryId } : {}), ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {})
+              }, afterCorrections: id, recordOwner: owner });
           }
         });
       },
@@ -455,14 +465,43 @@ export function useLocationCorrections({
   }, [refusedKey, removalRetry]);
 
   const allowLoggedPlaceChange = supportsLoggedPlaceChange && shown?.kind === "place" && shown.place.blockIds.length > 0;
+  const visitOnly = shown?.kind === "place" && !shown.place.placeId && !shown.place.learnedPlaceId ? true as const : undefined;
+  const editBlocks = shown?.kind === "place" && !stale && resolveEditBlock ? shown.place.blockIds.flatMap((id, index) => {
+    const block = resolveEditBlock(id);
+    return block ? [{ id, title: block.title ?? `block ${index + 1}` }] : [];
+  }) : [];
   const sheet = open && shown ? (
     <LocationCorrectionSheet
       key={`location-correction-${open.id}`}
       clockFormat={clockFormat}
       evidence={shownEvidence}
-      onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
+      onDismissStart={(id) => { exitingPresentationId.current = id; }}
+      onDismissed={(id) => {
+        const wasActive = activePresentationId.current === id;
+        setOpen((current) => current?.id === id ? null : current);
+        const edit = editAfterExit.current;
+        if (edit?.presentationId !== id) return;
+        editAfterExit.current = null;
+        if (wasActive && open.ownerKey === currentOwner.current
+          && edit.generation === currentMobileAccountEpoch()) {
+          edit.openBlock();
+        }
+      }}
+      editBlocks={editBlocks}
+      onEditBlock={async (blockId, dismiss) => {
+        const block = editBlocks.some((item) => item.id === blockId) ? resolveEditBlock?.(blockId) : null;
+        if (!block) return false;
+        const generation = currentMobileAccountEpoch();
+        const openBlock = await block.prepare();
+        if (open.ownerKey !== currentOwner.current || generation !== currentMobileAccountEpoch()
+          || activePresentationId.current !== open.id || exitingPresentationId.current === open.id) return false;
+        editAfterExit.current = { presentationId: open.id, generation, openBlock };
+        dismiss();
+        return true;
+      }}
       onQueue={(corrections, options) => queue(open.id, open.ownerKey, corrections, options.closing, options.beforeEnqueue)}
-      logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && activities.length && !stale ? {
+      logAs={shown.kind === "place" && !shown.place.blockIds.length && shown.place.stoppedAt && !stale
+        && (activities.length || visitOnly) ? {
         activities,
         allActivities,
         // Every Logs as waits for all of the place's corrections still on the phone — this sheet's new ones and any
@@ -473,9 +512,9 @@ export function useLocationCorrections({
           const sheetOwner = open.ownerKey;
           const placeItemId = shown.place.id;
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
-          const title = `${shown.label} as ${name}`;
+          const title = categoryId ? `${shown.label} as ${name}` : description ?? shown.label;
           const generation = currentMobileAccountEpoch();
-          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation, description).then((waiting) => {
+          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation, description, visitOnly).then((waiting) => {
             // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
               waiting.start();
@@ -486,14 +525,16 @@ export function useLocationCorrections({
             if (currentOwner.current !== sheetOwner || generation !== currentMobileAccountEpoch()) return;
             logTokens.current += 1;
             const log = { token: logTokens.current, ownerKey: sheetOwner, title,
-              request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId, categoryId, ...(description ? { description } : {}) } };
+              request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId,
+                ...(categoryId ? { categoryId } : {}), ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {}) } };
             if (!mounted.current || !appInFront()) commitLogRef.current(log, false);
             else holdLog(log);
           }, () => sayForLog(sheetOwner, "That place wasn't logged. Try again."));
         },
         onLogAfter: async (categoryId, ids, generation, description) => {
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
-          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, `${shown.label} as ${name}`, ids, generation, description);
+          const title = categoryId ? `${shown.label} as ${name}` : description ?? shown.label;
+          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, title, ids, generation, description, visitOnly);
           if (!waiting) throw new Error("Nothing to wait for.");
           return waiting;
         }

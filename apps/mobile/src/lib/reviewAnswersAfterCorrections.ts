@@ -36,7 +36,7 @@ export type AnswerAfterCorrections = MobileAccountOwner & {
    * A Logs as instead of an answer (Codex r4 on #610): `log_place` for this place with this activity, queued only
    * once the sheet's corrections are acknowledged; its `id` is the log's own `clientCorrectionId`.
    */
-  log?: { itemId: string; categoryId: string; description?: string };
+  log?: { itemId: string; categoryId?: string; description?: string; visitOnly?: true };
   /** An outing's trips answered with its stay (`confirm_outing` / `ignore_outing`; Codex r10 on #610). */
   outingMemberIds?: string[];
   /**
@@ -96,10 +96,13 @@ function parse(value: unknown): AnswerAfterCorrections | null {
     ? item.venue as ReviewAnswerVenue : null;
   const held = item.held && typeof item.held === "object" && typeof (item.held as { run?: unknown }).run === "string"
     ? { run: (item.held as { run: string }).run } : undefined;
-  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown; description?: unknown } | undefined;
-  const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && typeof rawLog.categoryId === "string"
-    ? { itemId: rawLog.itemId, categoryId: rawLog.categoryId,
-      ...(typeof rawLog.description === "string" ? { description: rawLog.description } : {}) } : undefined;
+  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown; description?: unknown; visitOnly?: unknown } | undefined;
+  const logCategoryId = typeof rawLog?.categoryId === "string" ? rawLog.categoryId : undefined;
+  const logDescription = typeof rawLog?.description === "string" ? rawLog.description : undefined;
+  const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && (logCategoryId || logDescription?.trim())
+    ? { itemId: rawLog.itemId, ...(logCategoryId ? { categoryId: logCategoryId } : {}),
+      ...(logDescription !== undefined ? { description: logDescription } : {}),
+      ...(rawLog.visitOnly === true ? { visitOnly: true as const } : {}) } : undefined;
   const outingMemberIds = strings(item.outingMemberIds);
   const backendId = typeof item.backendId === "string" ? item.backendId : undefined;
   return {

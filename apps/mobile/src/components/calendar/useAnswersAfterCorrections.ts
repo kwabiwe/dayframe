@@ -73,7 +73,9 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
         // A Logs as (Codex r4 on #610): its corrections are acknowledged, so `log_place` goes now, under the record's
         // own id (a repeat after a crash is answered once, #597); the server closes the place's "?" with it (#609).
         await enqueueTimelineCorrections(who, [{ request: { kind: "log_place", subject: "place", itemId: record.log.itemId,
-          categoryId: record.log.categoryId, ...(record.log.description ? { description: record.log.description } : {}),
+          ...(record.log.categoryId ? { categoryId: record.log.categoryId } : {}),
+          ...(record.log.description ? { description: record.log.description } : {}),
+          ...(record.log.visitOnly ? { visitOnly: true } : {}),
           clientCorrectionId: record.id } }]);
         void synchroniseTimelineCorrections({ owner: who, force: true, isForeground: () => AppState.currentState === "active" }).catch(() => undefined);
         return "released";

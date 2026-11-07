@@ -38,15 +38,17 @@ export type SheetSavedRow = { key: string; title: string; detail: string; glyph:
  * most two within about 1 km; a search lists the saved places it finds first, then Apple's). A tap answers: a saved place
  * sets the visit to it; an Apple place, or "Save “X” as a place" in its pinned slot, saves that name and sets the visit
  * to it, so a name is a rule only once it is saved. The near guess is ticked and a tap on it is Yes. Placeholder rows
- * hold the Nearby slots while Apple answers. Results scroll inside a viewport sized at presentation; the old rows stay until new ones
+ * hold the Nearby slots while Apple answers. The standalone results scroll inside a fixed viewport; the old rows stay until new ones
  * arrive, with a quiet spinner in the field. The visit's centre goes to MapKit only, on this iPhone; it is never logged or kept. Ranked with the visit itself
  * (`stay`: its times, accuracy, spread and past picks), as the "?"'s guess is, so the list and the guess agree (PRD D23).
  */
-export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = false, evidence = null, excludeSavedMatches = false, guess = null, onGuess, onGuessPick, onPick, onSaveTyped, reduceMotion = false, savedRows = () => [], theme }: {
+export function SheetNearbySearch({ awaitingCentre = false, centre, compactInitialResults = false, disabled = false, evidence = null, excludeSavedMatches = false, guess = null, onGuess, onGuessPick, onPick, onSaveTyped, reduceMotion = false, savedRows = () => [], selectedPlace, theme }: {
   /** The visit's centre is still loading, and Apple will be asked once it arrives. */
   awaitingCentre?: boolean;
   /** The visit's centre, for Apple's places; null keeps this to the saved places. */
   centre: { latitude: number; longitude: number } | null;
+  /** The inline picker reveals only real rows, together, after Nearby and the map evidence settle. */
+  compactInitialResults?: boolean;
   disabled?: boolean;
   /** Skip duplicate Apple and typed rows when the visit already offers the same saved place. */
   excludeSavedMatches?: boolean;
@@ -70,6 +72,8 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   reduceMotion?: boolean;
   /** The saved places for this text (empty for none typed). */
   savedRows?: (text: string) => readonly SheetSavedRow[];
+  /** A selection made explicitly in the inline picker. A suggestion alone is unselected there. */
+  selectedPlace?: { name: string; applePlaceId: string | null } | null;
   theme: MobileTheme;
 }) {
   // Read when the list loads, so a new render never restarts the search.
@@ -154,29 +158,57 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
   if (settled) held.current = settled;
   // Ticked by the guess as of now: a held row's own flag could answer for a place it no longer stands for.
   const appleRows = (settled ?? held.current).filter((row) => !alreadySaved(row.title)).map((row) => ({ ...row, guessed: isGuess(row) }));
-  const loading = !typed && (awaitingCentre || (Boolean(nearbyProvider) && (!nearby || nearby.status === "loading")));
-  const note = appleRows.length || loading ? null
+  const initialLoading = awaitingCentre || (Boolean(nearbyProvider) && (!nearby || nearby.status === "loading"));
+  const loading = !typed && initialLoading;
+  const note = appleRows.length || loading || (compactInitialResults && saved.length > 0) ? null
     : typed ? (saved.length || searching ? null : "No places match.")
-      : !hasCentre ? (reserveNearby ? "Nearby places are unavailable." : null)
+      : !hasCentre ? (reserveNearby || compactInitialResults ? "Nearby places are unavailable." : null)
         : !nearbyProvider ? "Nearby places need Apple Maps on this iPhone."
           : nearby?.status === "error" ? "Nearby places couldn't load." : "No places nearby.";
-  const placeholders = loading ? Math.max(0, SHEET_APPLE_ROWS - appleRows.length) : 0;
-  const appleList = appleRows.map((row, index) => (
-    <ResultRow accessibilityHint={row.guessed ? "Says yes to this place" : "Saves it as a place and sets this visit to it"} checked={row.guessed} detail={row.detail}
+  const placeholders = !compactInitialResults && loading ? Math.max(0, SHEET_APPLE_ROWS - appleRows.length) : 0;
+  const typedSave = typed && onSaveTyped && !alreadySaved(text);
+  const resultLimit = SHEET_RESULT_ROWS - (typedSave ? 1 : 0);
+  const displayedApple = compactInitialResults && typed ? appleRows.slice(0, Math.max(0, resultLimit - saved.length)) : appleRows;
+  const displayedSaved = compactInitialResults
+    ? saved.slice(0, Math.max(0, resultLimit - (typed ? 0 : displayedApple.length))) : saved;
+  const loadingLine = compactInitialResults && loading;
+  const appleList = displayedApple.map((row, index) => (
+    <ResultRow accessibilityHint={compactInitialResults ? (row.guessed ? "Logs the visit at this place once" : "Selects this place to save")
+      : row.guessed ? "Says yes to this place" : "Saves it as a place and sets this visit to it"}
+      checked={compactInitialResults ? Boolean(selectedPlace && (selectedPlace.applePlaceId
+        ? row.placeId === selectedPlace.applePlaceId : row.title === selectedPlace.name)) : row.guessed}
+      detail={compactInitialResults && row.guessed ? ["Use once", row.detail].filter(Boolean).join(" · ") : row.detail}
       disabled={disabled} divided={index > 0 || (typed && saved.length > 0)} glyph={DAYFRAME_APP_ICONS.places} key={row.key}
       onPress={() => row.guessed && onGuessPick ? onGuessPick() : onPick(row.title, row.placeId)} testID={`location-correction-nearby-${row.key}`}
       rowHeight={rowHeight} theme={theme} title={row.title} />
   ));
-  const savedList = saved.map((row, index) => (
+  const savedList = displayedSaved.map((row, index) => (
     <ResultRow checked={row.checked} detail={row.detail} disabled={disabled} divided={index > 0 || (!typed && appleRows.length > 0)} glyph={row.glyph} key={row.key}
       onPress={row.onPress} rowHeight={rowHeight} testID={`location-correction-place-${row.key}`} theme={theme} title={row.title} />
   ));
+  const saveTypedRow = typedSave ? (
+    <ResultRow disabled={disabled} divided={!compactInitialResults || displayedSaved.length + displayedApple.length > 0}
+      glyph="plus" onPress={() => onSaveTyped(text)} rowHeight={rowHeight} testID="location-correction-save-typed" theme={theme}
+      title={`Save “${text}” as a place`} />
+  ) : null;
+  const results = (
+    <>
+      {typed ? savedList : null}
+      <View style={!compactInitialResults && !typed && reserveNearby ? { minHeight: SHEET_APPLE_ROWS * rowHeight } : undefined}
+        testID="location-correction-apple-results">
+        {note ? <Text {...mobileTextProps("metadata")} style={[styles.note, { color: theme.textSecondary }]}>{note}</Text> : null}
+        {appleList}
+        {Array.from({ length: placeholders }, (_, index) => <PlaceholderRow key={index} rowHeight={rowHeight} theme={theme} />)}
+      </View>
+      {!typed ? savedList : null}
+    </>
+  );
   return (
     <View style={styles.wrap} testID="location-correction-nearby">
       <View style={[styles.search, { backgroundColor: theme.surfaceMuted }]}>
         <DayframeIcon color={theme.textSecondary} glyph="search" size={16} />
         {/* VoiceOver already reads the placeholder when the field is empty. */}
-        <TextInput accessibilityLabel={query.length > 0 ? "Search places" : undefined} editable={!disabled} onChangeText={(next) => {
+        <TextInput accessibilityLabel={query.length > 0 ? "Search places" : undefined} editable={!disabled && !loadingLine} onChangeText={(next) => {
           setQuery(next);
           searchController?.updateQuery(next, latitude !== null && longitude !== null
             ? { latitude, longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : null);
@@ -187,22 +219,20 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, disabled = f
             testID="location-correction-search-spinner" />
         ) : null}
       </View>
-      <View style={{ height: viewportRows * rowHeight }} testID="location-correction-results">
-        <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.list}>
-          {typed ? savedList : null}
-          <View style={!typed && reserveNearby ? { minHeight: SHEET_APPLE_ROWS * rowHeight } : undefined}
-            testID="location-correction-apple-results">
-            {note ? <Text {...mobileTextProps("metadata")} style={[styles.note, { color: theme.textSecondary }]}>{note}</Text> : null}
-            {appleList}
-            {Array.from({ length: placeholders }, (_, index) => <PlaceholderRow key={index} rowHeight={rowHeight} theme={theme} />)}
-          </View>
-          {!typed ? savedList : null}
-        </ScrollView>
-        {typed && onSaveTyped && !alreadySaved(text) ? (
-          <ResultRow disabled={disabled} divided glyph="plus" onPress={() => onSaveTyped(text)} rowHeight={rowHeight} testID="location-correction-save-typed" theme={theme}
-            title={`Save “${text}” as a place`} />
-        ) : null}
-      </View>
+      {loadingLine ? (
+        <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[styles.note, { color: theme.textSecondary }]}
+          testID="location-correction-initial-loading">Finding nearby places…</Text>
+      ) : compactInitialResults ? (
+        // The sheet already scrolls. A second viewport could hide several returned rows behind a single visible row.
+        <View testID="location-correction-results">{results}{saveTypedRow}</View>
+      ) : (
+        <View style={{ height: viewportRows * rowHeight }} testID="location-correction-results">
+          <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.list}>
+            {results}
+          </ScrollView>
+          {saveTypedRow}
+        </View>
+      )}
     </View>
   );
 }
