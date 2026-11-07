@@ -233,12 +233,12 @@ describe("compact answer pills", () => {
     expect(Number(gaps[1])).toBeGreaterThanOrEqual(left + right);
   });
 
-  it("uses the shared pill and its hit slop for every inline and sheet answer", () => {
+  it("uses the shared hit slop for inline answers and the compact activity disclosure", () => {
     for (const path of ["src/components/calendar/CalendarListView.tsx", "src/components/calendar/LocationCorrectionSheet.tsx"]) {
       const text = read(path);
       expect(text, path).toMatch(/from "\.\.\/compactPill"/);
       expect(text, path).not.toMatch(/const COMPACT_PILL_HIT_SLOP/);
-      const pills = text.match(/\[compactPillStyles\.pill\b/g)?.length ?? 0;
+      const pills = text.match(/\[(?:compactPillStyles\.pill|activityChipStyles\.compact)\b/g)?.length ?? 0;
       expect(pills, path).toBeGreaterThan(0);
       expect(text.match(/hitSlop=\{COMPACT_PILL_HIT_SLOP\}/g)?.length, path).toBe(pills);
     }

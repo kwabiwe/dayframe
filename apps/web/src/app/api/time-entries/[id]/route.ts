@@ -14,6 +14,21 @@ import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-respo
 import { getTimeEntryById } from "@/lib/queries";
 import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
 
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await resolveRequestSession(request, { requiredScopes: ["app:read"] });
+    const id = z.string().uuid().safeParse((await context.params).id);
+    if (!id.success) return NextResponse.json({ error: "Invalid block ID." }, { status: 400 });
+    const entry = await getTimeEntryById(session, id.data);
+    return entry ? NextResponse.json({ entry }, { headers: { "Cache-Control": "no-store" } })
+      : NextResponse.json({ error: "Block not found." }, { status: 404 });
+  } catch (error) {
+    const response = authErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+}
+
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   let session: Awaited<ReturnType<typeof resolveRequestSession>> | null = null;
   let id = "";

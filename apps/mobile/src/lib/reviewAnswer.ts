@@ -38,8 +38,8 @@ export function reviewAnswerMutation(
     return { action: "accept", expectedProposalHash: hash };
   }
   const edit = logged ? options.edit ?? null : null;
-  const logAsEdit = options.logAsCategoryId ? {
-    categoryId: options.logAsCategoryId,
+  const logAsEdit = options.logAsCategoryId || options.logAsDescription ? {
+    categoryId: options.logAsCategoryId ?? null,
     ...(options.logAsDescription ? { description: options.logAsDescription } : {})
   } : null;
   if (options.outingMemberIds?.length) {

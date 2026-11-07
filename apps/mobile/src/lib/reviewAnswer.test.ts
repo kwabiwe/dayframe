@@ -81,6 +81,8 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     // With a Logs as pick (Codex r1 on #620): recorded there once, as that activity.
     expect(reviewAnswerMutation(unnamed, true, { venue, logAsCategoryId: "cat-1" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
       applePlaceId: "I1234567890ABCDEF", edit: { categoryId: "cat-1" } });
+    expect(reviewAnswerMutation(unnamed, true, { venue, logAsDescription: "Read a book" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
+      applePlaceId: "I1234567890ABCDEF", edit: { categoryId: null, description: "Read a book" } });
     // Not now leaves it, as ever.
     expect(reviewAnswerMutation(unnamed, false, { venue })).toEqual({ action: "ignore_once_location" });
   });

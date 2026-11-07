@@ -127,6 +127,7 @@ import {
   enqueueEvent,
   fetchBootstrap,
   fetchLocationTimeline,
+  fetchOwnedTimeEntry,
   fetchTimerState,
   isQueuedTimerMutationEvent,
   login,
@@ -2358,6 +2359,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
+    resolveEditBlock: (id) => {
+      if (!correctionOwner) return null;
+      const block = mobileTimeEntryById(shownCalendarData, id) ?? mobileTimeEntryById(latestData.current, id);
+      return {
+        title: block ? block.description?.trim() || block.categoryName || formatClockTime(new Date(block.startedAt), clockFormat) : null,
+        prepare: async () => {
+          const entry = block ?? await fetchOwnedTimeEntry(id, correctionOwner);
+          return () => {
+            if (entry.stoppedAt) presentCompletedEntry({ ...entry, isActive: false });
+            else if (latestData.current?.activeEntry?.id === entry.id) presentActiveEditor("existing_active_timer");
+          };
+        }
+      };
+    },
     // A place logged with Logs as: its blocks, and on an outing's stay its trips' (#612), come with this one read of
     // the day, once the server acknowledged it; none is projected before (the Undo window shows none).
     onLogged: () => { void load(); },
@@ -2385,7 +2400,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null),
         outing: calendarCheckBase.outings.has(check.id),
         onAnswer: (yes, venue, logAsCategoryId, logAsDescription) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
-          logAsCategoryId ? { logAsCategoryId, logAsDescription } : {}),
+          logAsCategoryId || logAsDescription ? { logAsCategoryId, logAsDescription } : {}),
         // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
         // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
         // to the Review outbox only once the server has every one of them. A guessed venue goes with it (Codex r1 on
