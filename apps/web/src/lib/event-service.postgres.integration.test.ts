@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "./db";
 import { createManualEntry, deleteTimeEntry, processActivityEvent, updateTimeEntry } from "./event-service";
 import { getCompletedEntryRevision, getTimerState } from "./timer-state";
+import { attachTagToTimeEntry, deleteTag, detachTagFromTimeEntry, renameTag } from "./tag-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -94,6 +95,25 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
         edit.release();
         rename.release();
       }
+      const beforeDetach = await getCompletedEntryRevision(owner);
+      await detachTagFromTimeEntry(second.id, tagId, owner);
+      const detached = await getCompletedEntryRevision(owner);
+      expect(detached).not.toBe(beforeDetach);
+      await detachTagFromTimeEntry(second.id, tagId, owner);
+      expect(await getCompletedEntryRevision(owner)).toBe(detached);
+      await attachTagToTimeEntry(second.id, tagId, owner);
+      const attached = await getCompletedEntryRevision(owner);
+      expect(attached).not.toBe(detached);
+      await attachTagToTimeEntry(second.id, tagId, owner);
+      expect(await getCompletedEntryRevision(owner)).toBe(attached);
+      await pool.query("update time_entries set description = null where id = $1", [second.id]);
+      const beforeRename = await getCompletedEntryRevision(owner);
+      await renameTag(tagId, { name: "Renamed again" }, owner);
+      const renamed = await getCompletedEntryRevision(owner);
+      expect(renamed).not.toBe(beforeRename);
+      expect((await pool.query("select description from time_entries where id = $1", [second.id])).rows[0].description).toBeNull();
+      await deleteTag(tagId, owner);
+      expect(await getCompletedEntryRevision(owner)).not.toBe(renamed);
       const beforeDelete = await getCompletedEntryRevision(owner);
       await deleteTimeEntry(block.id, owner);
       expect(await getCompletedEntryRevision(owner)).not.toBe(beforeDelete);

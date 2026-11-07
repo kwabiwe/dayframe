@@ -112,8 +112,7 @@ export async function renameTag(
        where tet.time_entry_id = entry.id
          and tet.workspace_id = entry.workspace_id
          and tet.workspace_id = $1
-         and tet.tag_id = $2
-         and entry.description is not null`,
+         and tet.tag_id = $2`,
       [
         session.workspaceId,
         id,

@@ -28,6 +28,7 @@ set search_path = pg_catalog, pg_temp
 as $$
 declare
   owners text;
+  links text;
 begin
   if tg_table_name = 'workspace_members' then
     if tg_op = 'DELETE' then
@@ -38,6 +39,25 @@ begin
         except select workspace_id, user_id from new_members
       $owners$;
     end if;
+  elsif tg_table_name = 'time_entry_tags' then
+    if tg_op = 'INSERT' then
+      links := 'select workspace_id, time_entry_id from new_links';
+    elsif tg_op = 'DELETE' then
+      links := 'select workspace_id, time_entry_id from old_links';
+    else
+      links := $links$
+        select workspace_id, time_entry_id
+        from new_links n full join old_links o using (workspace_id, time_entry_id, tag_id)
+        where n.tag_id is null or o.tag_id is null
+      $links$;
+    end if;
+    owners := format($owners$
+      select entry.workspace_id, entry.user_id
+      from (%s) affected_links
+      join public.time_entries entry
+        on entry.workspace_id = affected_links.workspace_id and entry.id = affected_links.time_entry_id
+      where entry.stopped_at is not null
+    $owners$, links);
   elsif tg_op = 'INSERT' then
     owners := 'select workspace_id, user_id from new_entries where stopped_at is not null';
   elsif tg_op = 'DELETE' then
@@ -119,6 +139,19 @@ drop trigger if exists completed_entry_revision_delete on public.time_entries;
 create trigger completed_entry_revision_delete after delete on public.time_entries
 referencing old table as old_entries for each statement execute function dayframe_sync.queue_completed_entry_owners();
 
+
+drop trigger if exists completed_entry_revision_tag_insert on public.time_entry_tags;
+create trigger completed_entry_revision_tag_insert after insert on public.time_entry_tags
+referencing new table as new_links for each statement execute function dayframe_sync.queue_completed_entry_owners();
+
+drop trigger if exists completed_entry_revision_tag_update on public.time_entry_tags;
+create trigger completed_entry_revision_tag_update after update on public.time_entry_tags
+referencing old table as old_links new table as new_links
+for each statement execute function dayframe_sync.queue_completed_entry_owners();
+
+drop trigger if exists completed_entry_revision_tag_delete on public.time_entry_tags;
+create trigger completed_entry_revision_tag_delete after delete on public.time_entry_tags
+referencing old table as old_links for each statement execute function dayframe_sync.queue_completed_entry_owners();
 
 drop trigger if exists completed_entry_revision_member_delete on public.workspace_members;
 create trigger completed_entry_revision_member_delete after delete on public.workspace_members
