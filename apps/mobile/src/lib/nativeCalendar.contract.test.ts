@@ -110,10 +110,13 @@ describe("native Calendar production contract", () => {
     const changed = pinch.slice(pinch.indexOf("case .changed:"), pinch.indexOf("case .ended,"));
 
     expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = false");
+    expect(pinch).toContain("horizontalPanGesture.isEnabled = false");
     expect(changed).toMatch(/guard let midpointY = pairedViewportMidpointY[\s\S]+hasOriginalPair = false\n\s+return[\s\S]+DayframeCalendarZoomMath.update/);
     expect(coordinator).toContain("guard gesture.numberOfTouches == 2 else { return nil }");
-    expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled");
-    expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(in: scrollView\)\n\s+synchronize\(\)/);
+    expect(pinch).toContain("scrollView?.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled");
+    expect(pinch).toContain("horizontalPanGesture.isEnabled = pinchSession.horizontalPanWasEnabled");
+    expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(\)\n\s+synchronize\(\)/);
+    expect(coordinator).toMatch(/func detach\(\)[\s\S]+finishPinch\(preservePendingOffset: false\)\n\s+guard let scrollView/);
   });
 
   it("marks now with a red line on the minute and the time in a red pill in the gutter (Calendar v3)", () => {

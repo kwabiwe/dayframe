@@ -73,6 +73,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private struct PinchSession {
       let start: DayframeCalendarPinchStart
       let scrollPanWasEnabled: Bool
+      let horizontalPanWasEnabled: Bool
       var hasOriginalPair = true
     }
 
@@ -166,9 +167,9 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         return
       }
 
+      finishPinch(preservePendingOffset: false)
       if let previous = scrollView {
         cancelLongPressRecognition()
-        finishPinch(in: previous)
         previous.removeGestureRecognizer(pinchGesture)
         previous.removeGestureRecognizer(horizontalPanGesture)
         previous.removeGestureRecognizer(longPressGesture)
@@ -196,12 +197,12 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       stopButtonZoom()
       scrollToNowGate.cancel()
       scrollToNowLayoutObservation = nil
+      finishPinch(preservePendingOffset: false)
       guard let scrollView else {
         cancelCreationInteraction()
         return
       }
       cancelLongPressRecognition()
-      finishPinch(in: scrollView)
       scrollView.removeGestureRecognizer(pinchGesture)
       scrollView.removeGestureRecognizer(horizontalPanGesture)
       scrollView.removeGestureRecognizer(longPressGesture)
@@ -313,15 +314,14 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     @objc private func handleApplicationWillResignActive() {
       cancelLongPressRecognition()
-      if let scrollView { finishPinch(in: scrollView) }
+      finishPinch()
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-      guard creationDragState.session == nil, let model, let scrollView else { return }
-
       switch gesture.state {
       case .began:
-        guard pinchSession == nil, let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else { return }
+        guard creationDragState.session == nil, pinchSession == nil, let model, let scrollView,
+              let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else { return }
         // A pinch takes over from a button zoom at the geometry already shown.
         stopButtonZoom()
         pinchSession = PinchSession(
@@ -330,12 +330,14 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
             hourHeight: Double(model.hourHeight),
             midpointY: midpointY
           ),
-          scrollPanWasEnabled: scrollView.panGestureRecognizer.isEnabled
+          scrollPanWasEnabled: scrollView.panGestureRecognizer.isEnabled,
+          horizontalPanWasEnabled: horizontalPanGesture.isEnabled
         )
-        // Cancel an already-recognised pan so UIKit cannot replace the pinch offset or decelerate on release.
+        // Cancel any recognised pan so it cannot replace the pinch offset or navigate to a different day.
         scrollView.panGestureRecognizer.isEnabled = false
+        horizontalPanGesture.isEnabled = false
       case .changed:
-        guard let pinchSession, pinchSession.hasOriginalPair else { return }
+        guard let pinchSession, pinchSession.hasOriginalPair, let model, let scrollView else { return }
         guard let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else {
           // UIKit can keep reporting changed after one finger lifts. Its remaining point is not the pair's anchor.
           self.pinchSession?.hasOriginalPair = false
@@ -355,17 +357,19 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         )
       case .ended, .cancelled, .failed:
         // The last paired geometry is final. There is intentionally no release normalization.
-        finishPinch(in: scrollView)
+        finishPinch()
         synchronize()
       default:
         break
       }
     }
 
-    private func finishPinch(in scrollView: UIScrollView) {
+    private func finishPinch(preservePendingOffset: Bool = true) {
       guard let pinchSession else { return }
       self.pinchSession = nil
-      scrollView.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled
+      if !preservePendingOffset || scrollView == nil { pendingContentOffsetY = nil }
+      scrollView?.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled
+      horizontalPanGesture.isEnabled = pinchSession.horizontalPanWasEnabled
     }
 
     @objc private func handleHorizontalPan(_ gesture: UIPanGestureRecognizer) {
