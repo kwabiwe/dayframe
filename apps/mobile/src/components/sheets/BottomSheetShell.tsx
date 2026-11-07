@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type KeyboardEvent,
   useWindowDimensions,
@@ -71,6 +72,7 @@ export function BottomSheetShell({
   inline = false,
   title,
   calendarLayout = false,
+  automaticallyAdjustKeyboardInsets = true,
   presentationId,
   theme,
   reduceMotion,
@@ -96,6 +98,8 @@ export function BottomSheetShell({
   inline?: boolean;
   title: string;
   calendarLayout?: boolean;
+  /** When the shell alone lifts for the keyboard, reveal the focused field within its resized scroll viewport. */
+  automaticallyAdjustKeyboardInsets?: boolean;
   presentationId: number;
   theme: MobileTheme;
   reduceMotion: boolean;
@@ -202,6 +206,12 @@ export function BottomSheetShell({
       didHide?.remove();
     };
   }, [windowHeight]);
+
+  useEffect(() => {
+    if (automaticallyAdjustKeyboardInsets || !keyboardInset) return;
+    const focusedField = TextInput.State.currentlyFocusedInput();
+    if (focusedField) scrollerRef?.current?.reveal(focusedField, "whole");
+  }, [automaticallyAdjustKeyboardInsets, keyboardInset, scrollerRef]);
 
   const claimDiscard = useCallback(() => {
     if (outcome.current?.presentationId !== presentationId)
@@ -364,7 +374,7 @@ export function BottomSheetShell({
               onScroll={(event) => { scrollMetrics.current.offset = event.nativeEvent.contentOffset.y; }}
               scrollEventThrottle={32}
               keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets
+              automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
               contentContainerStyle={s.body}
               showsVerticalScrollIndicator={false}
               style={s.scroll}

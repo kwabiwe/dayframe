@@ -732,6 +732,7 @@ export function LocationCorrectionSheet({
     <BottomSheetShell
       action={savingOnlyPlace ? "Save place" : activityFirst && !editingActivityTimes ? "Log activity"
         : footerGuess ? "Yes" : footerYes ? question!.yesLabel! : "Save"}
+      automaticallyAdjustKeyboardInsets={!activityFirst}
       calendarLayout={false}
       commitRef={commitRef}
       discardRef={discardRef}

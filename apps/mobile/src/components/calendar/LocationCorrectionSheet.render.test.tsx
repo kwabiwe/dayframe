@@ -865,6 +865,18 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(JSON.stringify(tree.toJSON())).not.toMatch(/Fix the shape|More places/);
   });
 
+  it("uses one keyboard inset for the unnamed visit and preserves the standard scroll inset for named visits", () => {
+    const unnamed = sheetWith({ logAs: logs });
+    const named = sheetWith({ logAs: logs, target: {
+      kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" }, label: "Home"
+    } });
+    const scrollInsets = (tree: ReturnType<typeof create>) => tree.root.findByProps({
+      testID: "location-correction-sheet-scroll"
+    }).props.automaticallyAdjustKeyboardInsets;
+    expect(scrollInsets(unnamed)).toBe(false);
+    expect(scrollInsets(named)).toBe(true);
+  });
+
   it("asks a near guess in the title's fixed line, its row ticked and the primary reading Yes (PRD D23; owner, 31 Oct 2026)", () => {
     const onAnswer = vi.fn();
     const venue = { name: "Holland & Barrett", street: "12 High Street", applePlaceId: "I.hb" };
