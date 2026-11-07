@@ -737,8 +737,8 @@ export function freeSpans(fromMs: number, toMs: number, taken: ReadonlyArray<{ f
 }
 
 /**
- * "Logs as" (step 12 part 4, orchestrator 28 Oct 2026): a finished place with no block becomes blocks with the
- * picked activity, for the time the person's own blocks don't cover. Event-first: a `location_place_logged`
+ * A finished place with no block becomes blocks for the time the person's own blocks don't cover.
+ * The person can enter a description, choose an activity, or do both. A `location_place_logged`
  * event naming the place's segment, then its blocks, then the place kept as decided, as a confirmed suggestion
  * is, so replay never replaces it. A place that still has open questions (asking or expired on the device) has
  * each closed in the same transaction exactly as its own "Not now" closes it (`ignore_once_location`, with its
@@ -749,9 +749,11 @@ async function logPlace(
   clientEventId: string | null
 ) {
   if (!row.stoppedAt) throw new TimelineCorrectionError("This place hasn't ended yet. Log it once you've left.", 422);
-  const category = await client.query(
-    `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
-  if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
+  if (request.categoryId) {
+    const category = await client.query(
+      `select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false`, [request.categoryId, session.workspaceId]);
+    if (!category.rowCount) throw new TimelineCorrectionError("That activity isn't one of yours.", 422);
+  }
   const place = await client.query<{ placeId: string | null; learnedPlaceId: string | null }>(
     `select place_id as "placeId", learned_place_id as "learnedPlaceId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
     [row.id, session.workspaceId, session.userId]);
@@ -781,7 +783,7 @@ async function logPlace(
   // no owner lock) logs as Getting around, made like a Move's if missing. It is ensured whenever an outing's trips
   // will be logged, before any Review, event or block row is locked, as every producer orders its locks (Codex r1
   // on #612).
-  const keys = [...new Set(asked.rows.flatMap((question) => question.outingKey ? [question.outingKey] : []))];
+  const keys = request.visitOnly ? [] : [...new Set(asked.rows.flatMap((question) => question.outingKey ? [question.outingKey] : []))];
   const hasTrips = keys.length ? Boolean((await client.query(
     `select 1 from review_items ri
        join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -794,7 +796,7 @@ async function logPlace(
   const outingTrips: OutingTrip[] = [];
   for (const question of asked.rows) {
     if (resolvedReviewItemIds.includes(question.id)) continue;
-    if (question.outingKey) {
+    if (question.outingKey && !request.visitOnly) {
       const members = (await client.query<OutingTrip & { isTrip: boolean }>(
         `select ri.id as "reviewItemId", ri.suggested_category_id as "categoryId", cs.client_segment_id as "clientSegmentId",
                 cs.started_at as "startedAt", cs.stopped_at as "stoppedAt", cs.id is not null as "isTrip"
@@ -823,7 +825,8 @@ async function logPlace(
      values ($1, $2, 'manual_app', 'location_place_logged', now(), 'high', $3::jsonb, 'confirmed', $4)
      returning id`,
     [session.workspaceId, session.userId, JSON.stringify({ kind: "log_place", clientSegmentId: request.itemId, categoryId: request.categoryId,
-      ...(description ? { description } : {}), resolvedReviewItemIds, ...(outingTrips.length ? { tripClientSegmentIds: outingTrips.map((trip) => trip.clientSegmentId) } : {}) }),
+      ...(description ? { description } : {}), ...(request.visitOnly ? { visitOnly: true } : {}), resolvedReviewItemIds,
+      ...(outingTrips.length ? { tripClientSegmentIds: outingTrips.map((trip) => trip.clientSegmentId) } : {}) }),
       clientEventId]);
   const entryIds: string[] = [];
   for (const span of free) {
@@ -832,7 +835,7 @@ async function logPlace(
          created_from_event_id, description)
        values ($1, $2, $3, $4, 'location_learning', 'high', 'confirmed', $5, $6, $7, $8)
        returning id`,
-      [session.workspaceId, session.userId, request.categoryId, place.rows[0]?.placeId ?? null,
+      [session.workspaceId, session.userId, request.categoryId ?? null, place.rows[0]?.placeId ?? null,
         new Date(span.fromMs).toISOString(), new Date(span.toMs).toISOString(), event.rows[0].id, description]);
     entryIds.push(entry.rows[0].id);
   }

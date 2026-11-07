@@ -91,6 +91,38 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
   const saved = (text: string) => (text ? [] : [{ key: "s1", title: "Library", detail: "Saved place · 120 m away", glyph: "map-pin", checked: false, onPress: vi.fn() }, { key: "s2", title: "Gym", detail: "Saved place", glyph: "map-pin", checked: false, onPress: vi.fn() }]) as never[];
   const type = (tree: ReturnType<typeof create>, text: string) => act(() => { tree.root.findByProps({ testID: "location-correction-search" }).props.onChangeText(text); });
 
+  it("shows one compact loading line, reveals real rows together, and holds their viewport while typing", async () => {
+    mocks.fontScale = 1;
+    mocks.searchAvailable = true;
+    let finish!: () => void;
+    mocks.search.mockImplementation(({ requestId }: { requestId: string }) => new Promise((resolve) => {
+      finish = () => resolve({ requestId, areasOfInterest: [], places: [
+        { id: "a", requestId, title: "Place a", subtitle: null, distanceMeters: 40, category: "Store",
+          offsetEastMeters: 40, offsetNorthMeters: 0, source: "nearby" }
+      ] });
+    }));
+    try {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<SheetNearbySearch centre={centre} compactInitialResults
+        evidence={evidence(25)} onPick={vi.fn()} savedRows={saved} theme={theme} />); });
+      expect(tree.root.findByProps({ testID: "location-correction-initial-loading" })).toBeTruthy();
+      expect(ids(tree, "location-correction-place-")).toEqual([]);
+      expect(tree.root.findAllByProps({ testID: "location-correction-placeholder" })).toHaveLength(0);
+      await act(async () => { finish(); });
+      expect(ids(tree, "location-correction-nearby-")).toEqual(["a"]);
+      expect(ids(tree, "location-correction-place-")).toEqual(["s1", "s2"]);
+      const viewport = () => tree.root.findByProps({ testID: "location-correction-results" }).props.style.height;
+      expect(viewport()).toBe(3 * 52);
+      type(tree, "Library");
+      expect(viewport()).toBe(3 * 52);
+      await act(async () => { mocks.emit?.({ requestId: "r", query: "Library", status: "results", suggestions: [] }); });
+      expect(viewport()).toBe(3 * 52);
+      expect(tree.root.findAllByProps({ testID: "location-correction-placeholder" })).toHaveLength(0);
+    } finally {
+      mocks.searchAvailable = false;
+    }
+  });
+
   it("lists Apple's three nearest, then the sheet's saved rows, in the same row with the same distance wording", async () => {
     mocks.search.mockImplementation(nearbyAnswer);
     let tree!: ReturnType<typeof create>;
@@ -101,6 +133,18 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     const label = (testID: string) => tree.root.findAll((node) => typeof node.type === "string" && node.props.testID === testID)[0].props.accessibilityLabel;
     expect(label("location-correction-nearby-a")).toBe("Place a, 40 m away");
     expect(label("location-correction-place-s1")).toBe("Library, Saved place · 120 m away");
+  });
+
+  it("holds the compact viewport while typing when the visit has no map centre", async () => {
+    mocks.fontScale = 1;
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<SheetNearbySearch centre={null} compactInitialResults onPick={vi.fn()} theme={theme} />); });
+    const height = () => tree.root.findByProps({ testID: "location-correction-results" }).props.style.height;
+    expect(JSON.stringify(tree.toJSON())).toContain("Nearby places are unavailable.");
+    expect(height()).toBe(52);
+    type(tree, "Library");
+    expect(JSON.stringify(tree.toJSON())).toContain("No places match.");
+    expect(height()).toBe(52);
   });
 
   it.each([

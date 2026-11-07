@@ -75,6 +75,7 @@ export function BottomSheetShell({
   theme,
   reduceMotion,
   onApply,
+  onDismissStart,
   onDismissed,
   action,
   disabled = false,
@@ -99,6 +100,8 @@ export function BottomSheetShell({
   theme: MobileTheme;
   reduceMotion: boolean;
   onApply: () => boolean | void;
+  /** Signals exit before work can hand off. When supplied, an iOS Modal completes after native dismissal. */
+  onDismissStart?: (presentationId: number) => void;
   onDismissed: (presentationId: number) => void;
   action: string;
   disabled?: boolean;
@@ -150,6 +153,7 @@ export function BottomSheetShell({
     value: BottomSheetOutcome;
   } | null>(null);
   const [closing, setClosing] = useState(false);
+  const [nativeExitId, setNativeExitId] = useState<number | null>(null);
   const neutralAction = (actionTone ?? (calendarLayout ? "neutral" : "accent")) === "neutral";
   const [keyboardInset, setKeyboardInset] = useState(0);
   const bottomGeometry = bottomSheetGeometry({
@@ -299,13 +303,17 @@ export function BottomSheetShell({
         keyboardInset={keyboardInset}
         onDismiss={(dismissedPresentationId) => {
           if (dismissedPresentationId !== presentationId) return;
-          onDismissed(dismissedPresentationId);
+          if (onDismissStart && !inline && !rootHosted && Platform.OS === "ios") {
+            setNativeExitId(dismissedPresentationId);
+          } else {
+            onDismissed(dismissedPresentationId);
+          }
         }}
         onDismissStart={(dismissedPresentationId) => {
           if (dismissedPresentationId !== presentationId) return false;
-          return outcome.current?.presentationId === presentationId
-            ? true
-            : claimDiscard();
+          if (outcome.current?.presentationId !== presentationId && !claimDiscard()) return false;
+          onDismissStart?.(dismissedPresentationId);
+          return true;
         }}
         onGestureStart={() => Keyboard.dismiss()}
         presentationId={presentationId}
@@ -406,10 +414,13 @@ export function BottomSheetShell({
     <Modal
       transparent
       animationType="none"
+      onDismiss={() => {
+        if (nativeExitId === presentationId) onDismissed(presentationId);
+      }}
       onRequestClose={requestDiscard}
       presentationStyle="overFullScreen"
       statusBarTranslucent
-      visible
+      visible={nativeExitId !== presentationId}
     >
       {overlay}
     </Modal>

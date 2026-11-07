@@ -83,9 +83,9 @@ const account = (userId: string) => ({ categories: [{ id: "cat-errands", name: "
   user: { id: userId }, workspace: { id: "w" } }) as never;
 let api: ReturnType<typeof useLocationCorrections> | null = null;
 function Probe(props: { data: ReturnType<typeof account> | null; pending?: never[]; showNotice?: (message: string) => void; timeline?: LocationTimeline | null;
-  onLogged?: () => void; acknowledged?: never[] }) {
+  onLogged?: () => void; acknowledged?: never[]; resolveEditBlock?: Parameters<typeof useLocationCorrections>[0]["resolveEditBlock"] }) {
   api = useLocationCorrections({ acknowledged: props.acknowledged, clockFormat: "24h", data: props.data, onLogged: props.onLogged,
-    pending: props.pending ?? [], reduceMotion: false,
+    pending: props.pending ?? [], reduceMotion: false, resolveEditBlock: props.resolveEditBlock,
     showNotice: props.showNotice ?? (() => undefined), theme: {} as never, timeline: props.timeline === undefined ? timeline : props.timeline });
   return api.sheet;
 }
@@ -94,6 +94,47 @@ const sheetOf = (tree: ReturnType<typeof create>) => tree.root.findAll((node) =>
 
 describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)", () => {
   afterEach(() => vi.clearAllMocks());
+
+  it("opens an uncached linked block only after its visit sheet dismisses", async () => {
+    const visit = { ...place, blockIds: ["linked-block"] };
+    const visitTimeline = { items: [visit] } as unknown as LocationTimeline;
+    const open = vi.fn();
+    const prepare = vi.fn(async () => open);
+    const resolveEditBlock = vi.fn(() => ({ title: null, prepare }));
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} timeline={visitTimeline} resolveEditBlock={resolveEditBlock} />); });
+    act(() => { api!.openPlace(visit, "Existing visit"); });
+    const sheet = sheetOf(tree)!;
+    expect(sheet.props.editBlocks).toEqual([{ id: "linked-block", title: "block 1" }]);
+    const dismiss = vi.fn();
+    await expect(sheet.props.onEditBlock("linked-block", dismiss)).resolves.toBe(true);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(dismiss).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+    act(() => { sheet.props.onDismissed(sheet.props.presentationId); });
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it("drops a linked-block reply after the user begins closing the visit sheet", async () => {
+    const visit = { ...place, blockIds: ["linked-block"] };
+    const visitTimeline = { items: [visit] } as unknown as LocationTimeline;
+    const open = vi.fn();
+    let resolveLoad!: (openBlock: () => void) => void;
+    const prepare = () => new Promise<() => void>((resolve) => { resolveLoad = resolve; });
+    const resolveEditBlock = () => ({ title: null, prepare });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<Probe data={account("a")} timeline={visitTimeline} resolveEditBlock={resolveEditBlock} />); });
+    act(() => { api!.openPlace(visit, "Existing visit"); });
+    const sheet = sheetOf(tree)!;
+    const dismiss = vi.fn();
+    const pending = sheet.props.onEditBlock("linked-block", dismiss);
+    act(() => { sheet.props.onDismissStart(sheet.props.presentationId); });
+    resolveLoad(open);
+    await expect(pending).resolves.toBe(false);
+    act(() => { sheet.props.onDismissed(sheet.props.presentationId); });
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
 
   it("closes the sheet, its map and its draft when another account signs in", async () => {
     let tree!: ReturnType<typeof create>;
@@ -336,7 +377,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
       // Only the server's acknowledgement reads the day again; leaving the queue (a refusal) does not (Codex r1 on #606).
       await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[]} />); });
       expect(onLogged).not.toHaveBeenCalled();
@@ -350,7 +391,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
   it("reads the day once for an outing's acknowledged Logs as, its trips' blocks with it, however often it is listed (#612)", async () => {
     const onLogged = vi.fn();
     const log = (clientCorrectionId: string, resolvedReviewItemIds: string[]) => ({ clientCorrectionId, acknowledgedAt: 1,
-      request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", clientCorrectionId }, resolvedReviewItemIds });
+      request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true, clientCorrectionId }, resolvedReviewItemIds });
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe data={account("a")} onLogged={onLogged} />); });
     // Held for Undo or queued, nothing reads the day: no block, the place's or a trip's, comes before the server has it.
@@ -383,7 +424,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let handle!: { start: () => void; cancel: () => Promise<void> };
       await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
       const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       act(() => { handle.start(); });
       expect(api!.heldLog?.title).toBe("Unknown place as Errands");
@@ -420,7 +461,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { logAs.onLog("cat-errands"); });
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["earlier-1"] });
       expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands" } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
       const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       expect(api!.heldLog?.afterCorrections).toBe(recordId);
       await act(async () => { vi.advanceTimersByTime(4_800); });
@@ -433,7 +474,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toBeNull();
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
     } finally {
       mocks.queued = [];
       vi.useRealTimers();
@@ -450,7 +491,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<unknown> };
       await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands" } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["new-1", "earlier-1"] });
     } finally {
       mocks.queued = [];
@@ -519,7 +560,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { plain.onLog("cat-errands"); });
       await act(async () => { tree.unmount(); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
       expect(mocks.synchronise).not.toHaveBeenCalled();
     } finally {
       waiting.settleOutcome = "committed";
@@ -696,7 +737,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     const sends = mocks.synchronise.mock.calls.length;
     await act(async () => { logAs.onLog("cat-errands"); });
     expect(mocks.enqueue).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-      [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands" } }]);
+      [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
     expect(mocks.synchronise.mock.calls.length).toBe(sends);
     expect(api!.heldLog).toBeNull();
     mocks.appState = "active";
