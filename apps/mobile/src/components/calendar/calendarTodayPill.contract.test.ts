@@ -69,7 +69,7 @@ describe("the Calendar Today pill", () => {
   it("leaves the Grid's scroll to Swift: one request, one owner, never replayed, jumping under Reduce Motion", () => {
     expect(coordinator).toContain("DayframeCalendarScrollToNowGate(baseline: model.presentation.scrollToNowRequest)");
     expect(coordinator).toContain("animated: !presentation.reduceMotion");
-    expect(coordinator).toContain("fingerOnTimeline: scrollView.isTracking || pinchStart != nil || creationDragState.session != nil");
+    expect(coordinator).toContain("fingerOnTimeline: scrollView.isTracking || pinchSession != nil || creationDragState.session != nil");
     // Received before the scroll-view guard and only run with a viewport, so a request made during layout isn't lost.
     const sync = between(coordinator, "func synchronize() {", "@objc private func handleRefresh()");
     expect(sync.indexOf("scrollToNowGate.receive(")).toBeLessThan(sync.indexOf("guard let scrollView"));

@@ -104,6 +104,22 @@ describe("native Calendar production contract", () => {
     expect(coordinator.match(/transition\.shouldTriggerHaptic, model\.presentation\.hapticsEnabled/g)).toHaveLength(2);
   });
 
+  it("holds the last paired pinch geometry until release and returns control to scroll", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const pinch = coordinator.slice(coordinator.indexOf("@objc private func handlePinch"), coordinator.indexOf("@objc private func handleHorizontalPan"));
+    const changed = pinch.slice(pinch.indexOf("case .changed:"), pinch.indexOf("case .ended,"));
+
+    expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = false");
+    expect(pinch).toContain("horizontalPanGesture.isEnabled = false");
+    expect(changed).toMatch(/guard let midpointY = pairedViewportMidpointY[\s\S]+hasOriginalPair = false\n\s+return[\s\S]+DayframeCalendarZoomMath.update/);
+    expect(coordinator).toContain("guard gesture.numberOfTouches == 2 else { return nil }");
+    expect(pinch).toContain("scrollView?.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled");
+    expect(pinch).toContain("horizontalPanGesture.isEnabled = pinchSession.horizontalPanWasEnabled");
+    expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(\)\n\s+synchronize\(\)/);
+    expect(pinch).toMatch(/if !preservePendingOffset \|\| scrollView == nil \{ pendingContentOffsetY = nil \}\n\s+guard let pinchSession/);
+    expect(coordinator).toMatch(/func detach\(\)[\s\S]+finishPinch\(preservePendingOffset: false\)\n\s+guard let scrollView/);
+  });
+
   it("marks now with a red line on the minute and the time in a red pill in the gutter (Calendar v3)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const marker = rootView.slice(rootView.indexOf("private struct DayframeCalendarNowMarker"), rootView.indexOf("private struct DayframeCalendarCreationPreviewLayer"));
