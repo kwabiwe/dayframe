@@ -3,9 +3,9 @@ import { isUndefinedTableError, missingRequiredColumnError, query } from "@/lib/
 import type { RequestSession } from "@/lib/session";
 
 const completedEntryRevisionSql = `coalesce((
-  select revision from dayframe_sync.completed_entry_revisions
+  select revision::text from dayframe_sync.completed_entry_revisions
   where workspace_id = $1 and user_id = $2
-), 0)::text as "completedEntryRevision"`;
+), '0') as "completedEntryRevision"`;
 
 export async function getCompletedEntryRevision(session: RequestSession): Promise<string> {
   try {

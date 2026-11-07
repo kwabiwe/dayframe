@@ -42,24 +42,93 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
       const block = await createManualEntry({
         description: "Completed", startedAt: "2026-07-06T10:00:00Z", stoppedAt: "2026-07-06T10:15:00Z"
       }, owner);
-      expect(await getTimerState(owner)).toMatchObject({ activeEntryId: null, completedEntryRevision: "1" });
+      const added = await getTimerState(owner);
+      expect(added.activeEntryId).toBeNull();
+      expect(added.completedEntryRevision).toMatch(/^[0-9a-f-]{36}$/);
       await updateTimeEntry(block.id, { description: "Changed", tagNames: ["revision fixture"] }, owner);
-      expect(await getCompletedEntryRevision(owner)).toBe("2");
+      const edited = await getCompletedEntryRevision(owner);
+      expect(edited).not.toBe(added.completedEntryRevision);
       expect(await getCompletedEntryRevision(other)).toBe("0");
 
       const writer = await pool.connect();
       try {
         await writer.query("begin");
         await writer.query("update time_entries set description = 'Rolled back' where id = $1", [block.id]);
-        expect(await getCompletedEntryRevision(owner)).toBe("2");
+        expect(await getCompletedEntryRevision(owner)).toBe(edited);
       } finally {
         await writer.query("rollback");
         writer.release();
       }
       await pool.query("update time_entries set description = description where id = $1", [block.id]);
-      expect(await getCompletedEntryRevision(owner)).toBe("2");
+      expect(await getCompletedEntryRevision(owner)).toBe(edited);
+      const second = await createManualEntry({
+        description: "Second", startedAt: "2026-07-06T11:00:00Z", stoppedAt: "2026-07-06T11:15:00Z"
+      }, owner);
+      const tag = await pool.query<{ tag_id: string }>(
+        "select tag_id from time_entry_tags where workspace_id = $1 and time_entry_id = $2", [workspaceId, block.id]
+      );
+      expect(tag.rows).toHaveLength(1);
+      const tagId = tag.rows[0].tag_id;
+      const edit = await pool.connect();
+      const rename = await pool.connect();
+      try {
+        await edit.query("begin");
+        await rename.query("begin");
+        await rename.query("set local statement_timeout = '2s'");
+        await rename.query("select id from tags where id = $1 for update", [tagId]);
+        await rename.query("update tags set name = 'Renamed', normalized_name = 'renamed' where id = $1", [tagId]);
+        await edit.query("update time_entries set description = 'First edit' where id = $1", [second.id]);
+        // A synchronous revision update held by edit would block this write on a different block.
+        await rename.query("update time_entries set description = 'Renamed tag' where id = $1", [block.id]);
+        await rename.query("commit");
+        const renamed = await getCompletedEntryRevision(owner);
+        await edit.query(
+          "insert into time_entry_tags (workspace_id,time_entry_id,tag_id,created_by_user_id) values ($1,$2,$3,$4)",
+          [workspaceId, second.id, tagId, userId]
+        );
+        await edit.query("commit");
+        expect(await getCompletedEntryRevision(owner)).not.toBe(renamed);
+      } finally {
+        await edit.query("rollback");
+        await rename.query("rollback");
+        edit.release();
+        rename.release();
+      }
+      const beforeDelete = await getCompletedEntryRevision(owner);
       await deleteTimeEntry(block.id, owner);
-      expect(await getCompletedEntryRevision(owner)).toBe("3");
+      expect(await getCompletedEntryRevision(owner)).not.toBe(beforeDelete);
+      expect(await getCompletedEntryRevision(other)).toBe("0");
+
+      const otherBlock = await createManualEntry({
+        description: "Other workspace", startedAt: "2026-07-06T12:00:00Z", stoppedAt: "2026-07-06T12:15:00Z"
+      }, other);
+      const beforeBatch = await Promise.all([getCompletedEntryRevision(owner), getCompletedEntryRevision(other)]);
+      await pool.query("update time_entries set description = 'Batch' where id in ($1,$2)", [second.id, otherBlock.id]);
+      const afterBatch = await Promise.all([getCompletedEntryRevision(owner), getCompletedEntryRevision(other)]);
+      expect(afterBatch[0]).not.toBe(beforeBatch[0]);
+      expect(afterBatch[1]).not.toBe(beforeBatch[1]);
+      expect((await pool.query("select 1 from dayframe_sync.pending_completed_entry_owners where user_id = $1", [userId])).rowCount).toBe(0);
+
+      const editor = await pool.connect();
+      const removal = await pool.connect();
+      try {
+        await editor.query("begin");
+        await removal.query("begin");
+        await editor.query("set local statement_timeout = '3s'");
+        await removal.query("set local statement_timeout = '3s'");
+        await editor.query("update time_entries set description = 'Finishing edit' where id = $1", [otherBlock.id]);
+        await removal.query("delete from workspace_members where workspace_id = $1 and user_id = $2", [otherWorkspaceId, userId]);
+        // Workspace removal needs the edited row. Finishing the edit must not wait on membership cleanup.
+        await Promise.all([
+          removal.query("delete from workspaces where id = $1", [otherWorkspaceId]).then(() => removal.query("commit")),
+          editor.query("commit")
+        ]);
+      } finally {
+        await editor.query("rollback");
+        await removal.query("rollback");
+        editor.release();
+        removal.release();
+      }
       expect(await getCompletedEntryRevision(other)).toBe("0");
     } finally {
       await pool.query("delete from workspaces where id in ($1,$2)", [workspaceId, otherWorkspaceId]);

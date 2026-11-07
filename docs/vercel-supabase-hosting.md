@@ -182,7 +182,7 @@ Auth email delivery (owner decision, 12 Oct 2026: deferred). Both projects still
 
 Apply `supabase/migrations/202611070001_completed_entry_revisions.sql` to staging before promoting its Preview and to production before deploying the matching server. The ordered local equivalent is `packages/db/migrations/024_completed_entry_revisions.sql`. The migration is additive, does not backfill historical entries and works with the previous server and installed clients. Existing owners start at revision zero.
 
-Verify the revision table's composite key and all three statement triggers. Confirm browser and iPhone sessions read the same marker for the same disposable workspace and user, and a different owner stays at zero after an edit. Keep the `dayframe_sync` schema outside the hosted public API. The app database role needs access to read the counter. Browser and mobile app sessions only receive their own marker through the server.
+Verify the revision table's composite key, the three entry triggers, the membership cleanup triggers and the deferred commit trigger. Confirm browser and iPhone sessions read the same marker for the same disposable workspace and user, and a different owner stays at zero after an edit. Keep the `dayframe_sync` schema outside the hosted public API. The app database role needs access to read the marker. Browser and mobile app sessions only receive their own marker through the server.
 
 ## Personal Beta Defaults
 
