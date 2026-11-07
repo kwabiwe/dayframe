@@ -51,12 +51,13 @@ begin
         where n.tag_id is null or o.tag_id is null
       $links$;
     end if;
+    -- A concurrent Stop may commit before this link becomes visible. Queue
+    -- the owner even if the entry still looks running in this statement.
     owners := format($owners$
       select entry.workspace_id, entry.user_id
       from (%s) affected_links
       join public.time_entries entry
         on entry.workspace_id = affected_links.workspace_id and entry.id = affected_links.time_entry_id
-      where entry.stopped_at is not null
     $owners$, links);
   elsif tg_op = 'INSERT' then
     owners := 'select workspace_id, user_id from new_entries where stopped_at is not null';

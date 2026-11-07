@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "./db";
 import { createManualEntry, deleteTimeEntry, processActivityEvent, updateTimeEntry } from "./event-service";
 import { getCompletedEntryRevision, getTimerState } from "./timer-state";
-import { attachTagToTimeEntry, deleteTag, detachTagFromTimeEntry, renameTag } from "./tag-service";
+import { attachTagToTimeEntry, createTag, deleteTag, detachTagFromTimeEntry, renameTag } from "./tag-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -118,6 +118,38 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
       await deleteTimeEntry(block.id, owner);
       expect(await getCompletedEntryRevision(owner)).not.toBe(beforeDelete);
       expect(await getCompletedEntryRevision(other)).toBe("0");
+
+      // The attach can see a running block, then commit after the Stop and a
+      // client read. The later tag still needs a new marker.
+      const raceTag = await createTag({ name: "Stop race tag" }, owner);
+      const running = await pool.query<{ id: string }>(
+        "insert into time_entries (workspace_id,user_id,description,started_at) values ($1,$2,'Stop race',now()-interval '20 minutes') returning id",
+        [workspaceId, userId]
+      );
+      const runningId = running.rows[0].id;
+      const stop = await pool.connect();
+      const attach = await pool.connect();
+      try {
+        await stop.query("begin");
+        await attach.query("begin");
+        await attach.query("set local statement_timeout = '3s'");
+        await stop.query("update time_entries set stopped_at = now() where id = $1", [runningId]);
+        await attach.query(
+          "insert into time_entry_tags (workspace_id,time_entry_id,tag_id,created_by_user_id) values ($1,$2,$3,$4)",
+          [workspaceId, runningId, raceTag.id, userId]
+        );
+        await stop.query("commit");
+        const stoppedRevision = await getCompletedEntryRevision(owner);
+        expect((await pool.query("select 1 from time_entry_tags where time_entry_id = $1", [runningId])).rowCount).toBe(0);
+        await attach.query("commit");
+        expect(await getCompletedEntryRevision(owner)).not.toBe(stoppedRevision);
+        expect((await pool.query("select 1 from time_entry_tags where time_entry_id = $1", [runningId])).rowCount).toBe(1);
+      } finally {
+        await stop.query("rollback");
+        await attach.query("rollback");
+        stop.release();
+        attach.release();
+      }
 
       const otherBlock = await createManualEntry({
         description: "Other workspace", startedAt: "2026-07-06T12:00:00Z", stoppedAt: "2026-07-06T12:15:00Z"
