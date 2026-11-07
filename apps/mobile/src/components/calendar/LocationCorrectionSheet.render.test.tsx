@@ -51,11 +51,14 @@ const chain = vi.hoisted(() => () => {
 });
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
+  Easing: { out: (easing: unknown) => easing, cubic: "cubic" },
   FadeIn: chain(),
   FadeOut: chain(),
-  ReduceMotion: { Never: "never" }
+  ReduceMotion: { Never: "never" },
+  useAnimatedStyle: (style: () => unknown) => style(),
+  withTiming: (value: number) => value
 }));
-vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140 }, localPresenceEntering: () => ({}), localLayoutTransition: () => ({}), localPresenceExiting: () => ({}) }));
+vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140, sheet: 260 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
 vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: "TimeWheelPanel" }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon", ActivityIcon: "ActivityIcon" }));
 vi.mock("../location/LocationEvidenceMap", () => ({ LocationEvidenceMap: "LocationEvidenceMap" }));
@@ -89,8 +92,7 @@ const nearSaved = {
 function tap(tree: ReturnType<typeof create>, testID: string) {
   const find = () => tree.root.findAll((node) => node.props.testID === testID && typeof node.props.onPress === "function");
   if (!find().length) {
-    const toggleId = testID.startsWith("location-correction-log-") ? "location-correction-category"
-      : /^location-correction-place-[0-9a-f-]+$/.test(testID) ? "location-correction-place-picker" : null;
+    const toggleId = /^location-correction-place-[0-9a-f-]+$/.test(testID) ? "location-correction-place-picker" : null;
     const toggle = tree.root.findAll((node) => node.props.testID === toggleId && typeof node.props.onPress === "function")[0];
     if (toggle && !toggle.props.accessibilityState.expanded) act(() => { toggle.props.onPress(); });
   }
@@ -391,7 +393,6 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const onLog = vi.fn();
     const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
     const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
-    plain.press("location-correction-category");
     expect(plain.tree.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.selected).toBe(false);
     plain.press("location-correction-log-cat-errands");
     plain.press("location-correction-log-cat-errands");
@@ -855,7 +856,6 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
 
   it("uses compact activity chips under the optional Activity control", () => {
     const tree = sheetWith({ logAs: logs });
-    tap(tree, "location-correction-category");
     const chip = tree.root.findByProps({ testID: "location-correction-log-cat-errands" });
     expect(chip.props).toMatchObject({ compact: true, role: "radio", selected: false });
     expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-none")).toHaveLength(0);
@@ -927,16 +927,26 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.awaitingCentre).toBe(true);
   });
 
-  it("offers All activities only when there are more, and clears a pick with Clear beside the footer's Don't log", () => {
-    const every = [...logs.activities, { id: "cat-gym", name: "Gym", color: "teal", icon: null }];
-    const tree = sheetWith({ logAs: { ...logs, allActivities: every } });
-    tap(tree, "location-correction-category");
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-cat-gym")).toHaveLength(0);
+  it("shows three optional choices and keeps a selected extra activity visible after collapsing the full list", () => {
+    const activities = [
+      ...logs.activities,
+      { id: "cat-work", name: "Work", color: "teal", icon: null },
+      { id: "cat-lunch", name: "Lunch", color: "teal", icon: null },
+      { id: "cat-gym", name: "Gym", color: "teal", icon: null },
+      { id: "cat-walk", name: "Walk", color: "teal", icon: null }
+    ];
+    const tree = sheetWith({ logAs: { ...logs, activities } });
+    const chips = () => tree.root.findAll((node) => node.type === ("Pressable" as never)
+      && node.props.testID?.startsWith("location-correction-log-cat-"));
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
+    expect(chips().every((chip) => !chip.props.accessibilityState.checked)).toBe(true);
     tap(tree, "location-correction-log-all");
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-cat-gym").length).toBeGreaterThan(0);
-    expect(tree.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch", "Gym", "Walk"]);
+    tap(tree, "location-correction-log-cat-gym");
+    tap(tree, "location-correction-log-all");
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Gym"]);
+    expect(chips()[2].props.accessibilityState.checked).toBe(true);
     const few = sheetWith({ logAs: { ...logs, allActivities: logs.activities } });
-    tap(few, "location-correction-category");
     expect(few.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
   });
 

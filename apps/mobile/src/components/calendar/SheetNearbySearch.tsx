@@ -38,7 +38,7 @@ export type SheetSavedRow = { key: string; title: string; detail: string; glyph:
  * most two within about 1 km; a search lists the saved places it finds first, then Apple's). A tap answers: a saved place
  * sets the visit to it; an Apple place, or "Save “X” as a place" in its pinned slot, saves that name and sets the visit
  * to it, so a name is a rule only once it is saved. The near guess is ticked and a tap on it is Yes. Placeholder rows
- * hold the Nearby slots while Apple answers. Results scroll inside a viewport sized at presentation; the old rows stay until new ones
+ * hold the Nearby slots while Apple answers. The standalone results scroll inside a fixed viewport; the old rows stay until new ones
  * arrive, with a quiet spinner in the field. The visit's centre goes to MapKit only, on this iPhone; it is never logged or kept. Ranked with the visit itself
  * (`stay`: its times, accuracy, spread and past picks), as the "?"'s guess is, so the list and the guess agree (PRD D23).
  */
@@ -171,14 +171,7 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, compactIniti
   const displayedApple = compactInitialResults && typed ? appleRows.slice(0, Math.max(0, resultLimit - saved.length)) : appleRows;
   const displayedSaved = compactInitialResults
     ? saved.slice(0, Math.max(0, resultLimit - (typed ? 0 : displayedApple.length))) : saved;
-  const settledRows = useRef<number | null>(null);
-  if (compactInitialResults && !typed && !initialLoading) {
-    settledRows.current = Math.min(SHEET_RESULT_ROWS, displayedApple.length + displayedSaved.length);
-  }
   const loadingLine = compactInitialResults && loading;
-  const resultsHeight = compactInitialResults
-    ? Math.max(1, settledRows.current ?? 0) * rowHeight
-    : viewportRows * rowHeight;
   const appleList = displayedApple.map((row, index) => (
     <ResultRow accessibilityHint={compactInitialResults ? (row.guessed ? "Logs the visit at this place once" : "Selects this place to save")
       : row.guessed ? "Says yes to this place" : "Saves it as a place and sets this visit to it"}
@@ -194,9 +187,22 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, compactIniti
       onPress={row.onPress} rowHeight={rowHeight} testID={`location-correction-place-${row.key}`} theme={theme} title={row.title} />
   ));
   const saveTypedRow = typedSave ? (
-    <ResultRow disabled={disabled} divided glyph="plus" onPress={() => onSaveTyped(text)} rowHeight={rowHeight} testID="location-correction-save-typed" theme={theme}
+    <ResultRow disabled={disabled} divided={!compactInitialResults || displayedSaved.length + displayedApple.length > 0}
+      glyph="plus" onPress={() => onSaveTyped(text)} rowHeight={rowHeight} testID="location-correction-save-typed" theme={theme}
       title={`Save “${text}” as a place`} />
   ) : null;
+  const results = (
+    <>
+      {typed ? savedList : null}
+      <View style={!compactInitialResults && !typed && reserveNearby ? { minHeight: SHEET_APPLE_ROWS * rowHeight } : undefined}
+        testID="location-correction-apple-results">
+        {note ? <Text {...mobileTextProps("metadata")} style={[styles.note, { color: theme.textSecondary }]}>{note}</Text> : null}
+        {appleList}
+        {Array.from({ length: placeholders }, (_, index) => <PlaceholderRow key={index} rowHeight={rowHeight} theme={theme} />)}
+      </View>
+      {!typed ? savedList : null}
+    </>
+  );
   return (
     <View style={styles.wrap} testID="location-correction-nearby">
       <View style={[styles.search, { backgroundColor: theme.surfaceMuted }]}>
@@ -216,20 +222,15 @@ export function SheetNearbySearch({ awaitingCentre = false, centre, compactIniti
       {loadingLine ? (
         <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[styles.note, { color: theme.textSecondary }]}
           testID="location-correction-initial-loading">Finding nearby places…</Text>
+      ) : compactInitialResults ? (
+        // The sheet already scrolls. A second viewport could hide several returned rows behind a single visible row.
+        <View testID="location-correction-results">{results}{saveTypedRow}</View>
       ) : (
-        <View style={{ height: resultsHeight }} testID="location-correction-results">
+        <View style={{ height: viewportRows * rowHeight }} testID="location-correction-results">
           <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.list}>
-            {typed ? savedList : null}
-            <View style={!compactInitialResults && !typed && reserveNearby ? { minHeight: SHEET_APPLE_ROWS * rowHeight } : undefined}
-              testID="location-correction-apple-results">
-              {note ? <Text {...mobileTextProps("metadata")} style={[styles.note, { color: theme.textSecondary }]}>{note}</Text> : null}
-              {appleList}
-              {Array.from({ length: placeholders }, (_, index) => <PlaceholderRow key={index} rowHeight={rowHeight} theme={theme} />)}
-            </View>
-            {!typed ? savedList : null}
-            {compactInitialResults ? saveTypedRow : null}
+            {results}
           </ScrollView>
-          {!compactInitialResults ? saveTypedRow : null}
+          {saveTypedRow}
         </View>
       )}
     </View>
