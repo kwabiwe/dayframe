@@ -1,6 +1,6 @@
 import type { TimerStateFingerprint } from "@dayframe/shared";
-import { isUndefinedTableError, missingRequiredColumnError, query } from "@/lib/db";
-import type { RequestSession } from "@/lib/session";
+import { isUndefinedTableError, missingRequiredColumnError, query } from "./db";
+import type { RequestSession } from "./session";
 
 const completedEntryRevisionSql = `coalesce((
   select revision::text from dayframe_sync.completed_entry_revisions
