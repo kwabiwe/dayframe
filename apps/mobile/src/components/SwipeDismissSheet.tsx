@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  type ComponentProps,
   type MutableRefObject,
   type ReactNode
 } from "react";
@@ -115,7 +116,7 @@ type SwipeDismissSheetProps = {
   onStaleCallback?: (presentationId: number) => void;
   presentationId?: number;
   reduceMotion: boolean;
-  style: StyleProp<ViewStyle>;
+  style: ComponentProps<typeof Reanimated.View>["style"];
   testID?: string;
   translateYOffset?: ReactNativeAnimated.Value | ReactNativeAnimated.AnimatedInterpolation<number> | number;
   visible: boolean;

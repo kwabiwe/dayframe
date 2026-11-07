@@ -88,6 +88,19 @@ function finishTiming(index = timings.length - 1) {
 }
 
 describe("content-sized sheet keyboard (Apple Health type sheet; Codex r1–r2 on #355)", () => {
+  it("ignores keyboard frames and pending reveals once its consumer starts dismissing", () => {
+    const { onReveal, seen, tree } = mount(true);
+    emit("keyboardDidShow", 336, 0);
+    act(() => seen.freezeForDismissal());
+    emit("keyboardWillHide", 0);
+    emit("keyboardDidHide", 0);
+    flushFrames();
+    expect(onReveal).not.toHaveBeenCalled();
+    expect(seen.keyboardInset).toBe(336);
+    expect(seen.keyboardSpace.value).toBe(310);
+    tree.unmount();
+  });
+
   it("engages the sheet's hand-off on the first keyboard frame and reveals Name when the space settles", () => {
     const { onReveal, seen, tree } = mount();
     expect(seen.keyboardInset).toBe(0);
