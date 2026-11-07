@@ -365,9 +365,9 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     private func finishPinch(preservePendingOffset: Bool = true) {
+      if !preservePendingOffset || scrollView == nil { pendingContentOffsetY = nil }
       guard let pinchSession else { return }
       self.pinchSession = nil
-      if !preservePendingOffset || scrollView == nil { pendingContentOffsetY = nil }
       scrollView?.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled
       horizontalPanGesture.isEnabled = pinchSession.horizontalPanWasEnabled
     }

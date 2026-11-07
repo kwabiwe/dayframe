@@ -116,6 +116,7 @@ describe("native Calendar production contract", () => {
     expect(pinch).toContain("scrollView?.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled");
     expect(pinch).toContain("horizontalPanGesture.isEnabled = pinchSession.horizontalPanWasEnabled");
     expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(\)\n\s+synchronize\(\)/);
+    expect(pinch).toMatch(/if !preservePendingOffset \|\| scrollView == nil \{ pendingContentOffsetY = nil \}\n\s+guard let pinchSession/);
     expect(coordinator).toMatch(/func detach\(\)[\s\S]+finishPinch\(preservePendingOffset: false\)\n\s+guard let scrollView/);
   });
 
