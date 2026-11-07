@@ -2,6 +2,42 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testTapSequenceRejectsBothStaggeredPinchReleasesAndAllowsTheNextTap() {
+    for firstToLift in [1, 2] {
+      var sequence = DayframeCalendarTapSequence<Int>()
+      sequence.begin([1])
+      XCTAssertTrue(sequence.allowsActivation)
+      sequence.begin([2])
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertFalse(sequence.end([firstToLift]))
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertTrue(sequence.end([3 - firstToLift]))
+      sequence.interrupt()
+      XCTAssertFalse(sequence.allowsActivation)
+
+      sequence.begin([3])
+      XCTAssertTrue(sequence.end([3]))
+      XCTAssertTrue(sequence.allowsActivation)
+    }
+  }
+
+  func testTapSequenceRejectsSimultaneousTouchesAndInterruption() {
+    var sequence = DayframeCalendarTapSequence<Int>()
+    sequence.begin([1, 2])
+    XCTAssertFalse(sequence.allowsActivation)
+    XCTAssertFalse(sequence.end([1], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.interrupt()
+    XCTAssertFalse(sequence.allowsActivation)
+
+    sequence.begin([3])
+    XCTAssertTrue(sequence.allowsActivation)
+    XCTAssertTrue(sequence.end([3], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.begin([4])
+    XCTAssertTrue(sequence.allowsActivation)
+  }
+
   func testEmptyStateIsCentredInTimelineAtTwoThirty() throws {
     let metrics = try XCTUnwrap(DayframeCalendarEmptyStateMath.metrics(
       availableWidth: 320,
@@ -659,6 +695,38 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(DayframeCalendarBracketMath.span(
       parts: [], nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar
     ))
+  }
+
+  func testBracketNameFitsBelowTheHourLabelAtEveryZoom() throws {
+    for hourHeight in [48.0, 72, 128] {
+      let hour = 18 * hourHeight
+      let span = DayframeCalendarBracketSpan(top: hour, height: hourHeight / 2)
+      let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+        in: span, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+      ))
+      XCTAssertEqual(placement.offset, 8)
+      XCTAssertGreaterThanOrEqual(placement.maxLines, 1)
+      XCTAssertLessThanOrEqual(
+        placement.offset + Double(placement.maxLines) * DayframeCalendarBracketMath.labelLineHeight,
+        span.height - 2
+      )
+    }
+  }
+
+  func testBracketNameLeavesTheClockReadableEvenWhenNoLineFits() throws {
+    let hourHeight = 48.0
+    let hour = 18 * hourHeight
+    let beforeHour = DayframeCalendarBracketSpan(top: hour - 28, height: 24)
+    let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+      in: beforeHour, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+    ))
+    XCTAssertEqual(placement.offset, 2)
+    XCTAssertEqual(placement.maxLines, 1)
+    XCTAssertNil(DayframeCalendarBracketMath.labelPlacement(
+      in: DayframeCalendarBracketSpan(top: hour - 8, height: 24), hourHeight: hourHeight, hourLabelGlyphHeight: 12
+    ))
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 0, hourHeight: hourHeight), 11)
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 24, hourHeight: hourHeight), 24 * hourHeight - 11)
   }
 
   func testBracketSpansItsPartsWhereAClockChangeDrawsThem() throws {

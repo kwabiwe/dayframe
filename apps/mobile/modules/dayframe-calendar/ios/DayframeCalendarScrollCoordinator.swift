@@ -1,5 +1,33 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
+
+/// Observe the full touch sequence without taking part in gesture recognition.
+final class DayframeCalendarTouchObserver: UIGestureRecognizer {
+  private var sequence = DayframeCalendarTapSequence<ObjectIdentifier>()
+
+  var allowsActivation: Bool { sequence.allowsActivation }
+
+  override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+  override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+    sequence.begin(Set(touches.map(ObjectIdentifier.init)))
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+    if sequence.end(Set(touches.map(ObjectIdentifier.init))) { state = .failed }
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+    if sequence.end(Set(touches.map(ObjectIdentifier.init)), cancelled: true) { state = .failed }
+  }
+
+  override func reset() {
+    super.reset()
+    sequence.interrupt()
+  }
+}
 
 struct DayframeCalendarScrollResolver: UIViewRepresentable {
   @ObservedObject var model: DayframeCalendarViewModel
@@ -80,6 +108,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private weak var model: DayframeCalendarViewModel?
     private let actions: DayframeCalendarActions
     private weak var scrollView: UIScrollView?
+    private let touchObserver: DayframeCalendarTouchObserver
     private let pinchGesture = UIPinchGestureRecognizer()
     private let horizontalPanGesture = UIPanGestureRecognizer()
     private let longPressGesture = UILongPressGestureRecognizer()
@@ -115,6 +144,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     ) {
       self.model = model
       self.actions = actions
+      touchObserver = model.timelineTouches
       self.layout = layout
       handledZoomToken = model.zoomRequest?.token ?? 0
       // A request made before this timeline existed is not replayed when it appears.
@@ -126,6 +156,10 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       pinchGesture.addTarget(self, action: #selector(handlePinch(_:)))
       pinchGesture.delegate = self
       pinchGesture.cancelsTouchesInView = false
+
+      touchObserver.cancelsTouchesInView = false
+      touchObserver.delaysTouchesBegan = false
+      touchObserver.delaysTouchesEnded = false
 
       horizontalPanGesture.addTarget(self, action: #selector(handleHorizontalPan(_:)))
       horizontalPanGesture.delegate = self
@@ -170,6 +204,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       finishPinch(preservePendingOffset: false)
       if let previous = scrollView {
         cancelLongPressRecognition()
+        previous.removeGestureRecognizer(touchObserver)
         previous.removeGestureRecognizer(pinchGesture)
         previous.removeGestureRecognizer(horizontalPanGesture)
         previous.removeGestureRecognizer(longPressGesture)
@@ -187,6 +222,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       nextScrollView.isDirectionalLockEnabled = true
       nextScrollView.panGestureRecognizer.maximumNumberOfTouches = 1
       nextScrollView.refreshControl = refreshControl
+      nextScrollView.addGestureRecognizer(touchObserver)
       nextScrollView.addGestureRecognizer(pinchGesture)
       nextScrollView.addGestureRecognizer(horizontalPanGesture)
       nextScrollView.addGestureRecognizer(longPressGesture)
@@ -203,6 +239,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         return
       }
       cancelLongPressRecognition()
+      scrollView.removeGestureRecognizer(touchObserver)
       scrollView.removeGestureRecognizer(pinchGesture)
       scrollView.removeGestureRecognizer(horizontalPanGesture)
       scrollView.removeGestureRecognizer(longPressGesture)

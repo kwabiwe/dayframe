@@ -109,6 +109,14 @@ describe("native Calendar production contract", () => {
     const pinch = coordinator.slice(coordinator.indexOf("@objc private func handlePinch"), coordinator.indexOf("@objc private func handleHorizontalPan"));
     const changed = pinch.slice(pinch.indexOf("case .changed:"), pinch.indexOf("case .ended,"));
 
+    expect(coordinator).toContain("pinchGesture.cancelsTouchesInView = false");
+    const simultaneous = coordinator.slice(
+      coordinator.indexOf("shouldRecognizeSimultaneouslyWith"),
+      coordinator.indexOf("private func createRequest")
+    );
+    expect(simultaneous).toContain(
+      "return gestureRecognizer === pinchGesture || otherGestureRecognizer === pinchGesture"
+    );
     expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = false");
     expect(pinch).toContain("horizontalPanGesture.isEnabled = false");
     expect(changed).toMatch(/guard let midpointY = pairedViewportMidpointY[\s\S]+hasOriginalPair = false\n\s+return[\s\S]+DayframeCalendarZoomMath.update/);
@@ -120,6 +128,23 @@ describe("native Calendar production contract", () => {
     expect(coordinator).toMatch(/func detach\(\)[\s\S]+finishPinch\(preservePendingOffset: false\)\n\s+guard let scrollView/);
   });
 
+  it("observes multi-touch without competing for zoom and guards all three pointer actions", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const observer = coordinator.slice(
+      coordinator.indexOf("final class DayframeCalendarTouchObserver"),
+      coordinator.indexOf("struct DayframeCalendarScrollResolver")
+    );
+
+    expect(observer).toContain("override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }");
+    expect(observer).toContain("override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }");
+    expect(observer).not.toMatch(/state = \.(began|changed|ended|recognized)/);
+    expect(coordinator).toContain("nextScrollView.addGestureRecognizer(touchObserver)");
+    expect(rootView.match(/guard touchObserver\.allowsActivation else \{ return \}/g)).toHaveLength(3);
+    expect(rootView).toContain(".accessibilityAction { actions.open(entry.actionTarget) }");
+    expect(rootView).toContain(".accessibilityAction { actions.open(moment.entry.actionTarget) }");
+  });
+
   it("marks now with a red line on the minute and the time in a red pill in the gutter (Calendar v3)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const marker = rootView.slice(rootView.indexOf("private struct DayframeCalendarNowMarker"), rootView.indexOf("private struct DayframeCalendarCreationPreviewLayer"));
@@ -129,7 +154,7 @@ describe("native Calendar production contract", () => {
     expect(marker).not.toContain("Circle()");
     // #255: an hour label hides only where the pill actually covers its digits (DayframeCalendarNowPillMath).
     expect(rootView).toContain("DayframeCalendarNowPillMath.coversHourLabel(nowY: Double($0), labelCenterY: Double(labelTop), labelGlyphHeight: Double(labelGlyphHeight))");
-    expect(rootView).toContain("@ScaledMetric(relativeTo: .caption2) private var labelGlyphHeight: CGFloat = 8");
+    expect(rootView).toContain("@ScaledMetric(relativeTo: .caption2) private var hourLabelGlyphHeight: CGFloat = 8");
     expect(rootView).not.toContain("abs($0 - labelTop) < 12");
   });
 
@@ -231,7 +256,10 @@ describe("native Calendar production contract", () => {
     // Drawn in the entries layer (the day's transition, zoom and scroll) with the blocks' own maths.
     expect(entriesLayer).toContain("ForEach(presentation.brackets)");
     // Dense-day rules: the rail at the hour gutter's edge, the name level in the gutter.
-    expect(entriesLayer).toContain("DayframeCalendarBracketView(height: height, name: bracket.name, nameWidth: max(0, hourLabelWidth - 6), theme: presentation.theme)");
+    expect(entriesLayer).toMatch(/DayframeCalendarBracketView\(\s+height: height,\s+name: bracket.name,\s+nameWidth: max\(0, hourLabelWidth - 6\)/);
+    expect(entriesLayer).toContain("labelPlacement: DayframeCalendarBracketMath.labelPlacement(");
+    expect(bracketView).toContain(".padding(.top, CGFloat(labelPlacement.offset))");
+    expect(bracketView).not.toContain(".background(");
     // Its bounds are its parts as drawn, part by part, never the trip measured as one block.
     expect(entriesLayer).toContain("DayframeCalendarBracketMath.span(");
     expect(entriesLayer).toContain("bracket.memberIds.contains($0.entryId)");

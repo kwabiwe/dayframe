@@ -335,6 +335,7 @@ final class DayframeCalendarViewModel: ObservableObject {
   /// The Dynamic Type scale of the block labels, set by the hosting view from its traits, so drawing
   /// and hit testing size the one-line minimum alike (location v4 C6).
   @Published private(set) var labelTextScale: Double = 1
+  let timelineTouches = DayframeCalendarTouchObserver()
   private var nextCreationSessionToken: UInt64 = 0
   private var nextZoomToken: UInt64 = 0
 
