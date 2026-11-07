@@ -10443,132 +10443,111 @@ dialog.ui-dialog.df-palette {
   font-weight: var(--fw-medium);
 }
 
-.df-lib-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
-}
-
-.df-lcard {
+.df-lrow {
+  position: relative;
   display: grid;
   min-width: 0;
-  align-content: start;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 4px;
 }
 
-.df-lswatch {
-  display: flex;
-  height: 92px;
-  align-items: flex-start;
-  justify-content: space-between;
-  border-radius: 14px;
-  padding: 12px;
+.df-lrow + .df-lrow::before {
+  --divider-inset-start: 48px;
+  --divider-inset: 4px;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: var(--divider-inset-start, var(--divider-inset)) var(--divider-inset);
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
+  content: "";
 }
 
-.df-lpin {
+.df-lrow-edit {
   display: grid;
-  width: 44px;
-  height: 44px;
-  margin: -8px -8px 0 0;
-  place-items: center;
+  min-width: 0;
+  min-height: 48px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--on-block) 14%, transparent);
+  border-radius: var(--r-chip);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: start;
+}
+
+.df-lrow-edit:hover:not(:disabled) {
+  background: var(--background);
+}
+
+.df-lnew {
+  grid-column: 1 / -1;
+}
+
+.df-lrow-tile {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--r-block);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.df-lrow-tile.df-block {
+  background: var(--block);
   color: var(--on-block);
 }
 
-.df-lpin[aria-pressed="false"] {
-  background: transparent;
-  opacity: 0.6;
-}
-
-.df-lpin:hover {
-  opacity: 1;
-}
-
-.df-lpin:disabled {
-  cursor: progress;
-}
-
-.df-lcard h3 {
-  margin: 0;
-  /* anywhere (not break-word) also lowers the min-content width, so a long unbroken name can't
-     widen its grid track at phone widths. */
+.df-lrow-name {
   overflow-wrap: anywhere;
-  hyphens: auto;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: var(--fw-strong);
 }
 
-.df-lmeta {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-/* The name block can shrink, so a long unbroken name wraps inside its card. */
-.df-lmeta > div {
-  min-width: 0;
-}
-
-.df-lmeta small {
+.df-lrow-time {
   color: var(--text-secondary);
   font-size: 12px;
 }
 
-.df-spark {
-  display: flex;
-  height: 30px;
-  flex: none;
-  align-items: flex-end;
-  gap: 3px;
+.df-lpin[aria-pressed="true"] {
+  background: var(--surface-muted);
 }
 
-.df-spark i {
-  width: 8px;
-  border-radius: 3px;
-  background: var(--block);
-  opacity: 0.85;
+.df-lpin[aria-pressed="false"] {
+  color: var(--text-secondary);
 }
 
-/* The card's Edit spans the card, as in the prototype (UIA-316). */
-.df-lcard > .df-rbtn {
-  justify-self: stretch;
-  justify-content: center;
-}
-
-.df-lnew {
-  display: grid;
-  min-height: 196px;
-  place-content: center;
-  justify-items: center;
-  gap: 6px;
-  border: 2px dashed var(--border-strong);
-  border-radius: var(--r-card);
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: var(--fw-strong);
-}
-
-.df-lnew small {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: var(--fw-medium);
-}
-
-.df-lnew:hover {
-  background: var(--surface);
-}
-
-.df-lnew:disabled,
-.df-lcard .df-rbtn:disabled {
+.df-lrow-edit:disabled,
+.df-lpin:disabled {
   cursor: progress;
 }
 
-.df-lcard:target {
+.df-lrow:target {
+  border-radius: var(--r-chip);
   box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+@media (max-width: 560px) {
+  .df-lrow-edit {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 2px 12px;
+  }
+
+  .df-lrow-tile {
+    grid-row: span 2;
+  }
+
+  .df-lrow-time {
+    grid-column: 2;
+  }
+
+  .df-lnew .df-lrow-tile {
+    grid-row: auto;
+  }
 }
 
 .df-simple-list {
@@ -10737,27 +10716,10 @@ dialog.ui-dialog.df-palette {
     padding: 12px 12px calc(var(--df-tabbar-space) + 72px);
   }
 
-  .df-lib-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
-  }
-
-  .df-lswatch {
-    height: 72px;
-  }
-
-  .df-lnew {
-    min-height: 150px;
-  }
-
   /* Phone touch targets: 44 px. */
   .df-rbtn--sm,
   .df-seg a {
     min-height: 44px;
-  }
-
-  .df-lmeta {
-    flex-wrap: wrap;
   }
 }
 
@@ -15193,6 +15155,7 @@ button.timeline-location-hit:focus-visible {
   .df-erow + .df-erow-group > .df-erow::before,
   .df-erow-group + .df-erow::before,
   .df-erow-group + .df-erow-group > .df-erow::before,
+  .df-lrow + .df-lrow::before,
   .location-correction-option + .location-correction-option::before,
   .location-correction-leg + .location-correction-leg::before,
   .settings-group .df-set-trips::before,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
-import { activityNameProblem, activityWeeks, formatActivityWeek, libraryGroups, pinLimitReached } from "@/lib/library-activities";
+import { activityNameProblem, activityWeekSeconds, formatActivityWeek, libraryGroups, pinLimitReached } from "@/lib/library-activities";
 
 const activity = (id: string, name: string, overrides: Partial<CategoryRow> = {}): CategoryRow => ({ id, name, color: "mint", isPinned: false, icon: null, ...overrides });
 const DAY = 24 * 3_600_000;
@@ -34,17 +34,16 @@ describe("Library activities", () => {
     expect(activityNameProblem(list, "Reading", "1")).toBeNull();
   });
 
-  it("buckets six rolling weeks, clipping entries and counting each entry once", () => {
-    const series = activityWeeks([
+  it("totals the last seven days, clipping entries and counting each entry once", () => {
+    const seconds = activityWeekSeconds([
       [entry("a", "c1", NOW - 2 * 3_600_000, NOW - 3_600_000)],
       // The same entry in another list counts once.
       [entry("a", "c1", NOW - 2 * 3_600_000, NOW - 3_600_000), entry("b", "c1", NOW - 8 * DAY, NOW - 8 * DAY + 1_800_000)],
-      // Running: up to now. Older than six weeks: ignored. No activity: ignored.
-      [entry("r", "c2", NOW - 600_000, null), entry("old", "c1", NOW - 60 * DAY, NOW - 59 * DAY), entry("n", null, NOW - DAY, NOW - DAY + 60_000)]
+      // Only the 30 minutes inside the window count. Running entries stop at now.
+      [entry("edge", "c1", NOW - 7 * DAY - 1_800_000, NOW - 7 * DAY + 1_800_000), entry("r", "c2", NOW - 600_000, null),
+        entry("n", null, NOW - DAY, NOW - DAY + 60_000)]
     ], NOW);
-    expect(series.get("c1")).toEqual([0, 0, 0, 0, 1_800, 3_600]);
-    expect(series.get("c2")).toEqual([0, 0, 0, 0, 0, 600]);
-    expect(series.has("null")).toBe(false);
+    expect([...seconds]).toEqual([["c1", 5_400], ["c2", 600]]);
   });
 
   it("writes the last 7 days plainly", () => {

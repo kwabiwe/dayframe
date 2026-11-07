@@ -333,6 +333,8 @@ Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Web radius tokens (audi
 
 Across signed-in web and iOS surfaces, icon-only buttons are circular and compact text buttons are pills. Avoid rounded-square button silhouettes. Separate panels from the canvas with `surface`/`surfaceRaised` fill, and use inset fills or hairline dividers for structure inside a panel.
 
+Web Library › Activities uses one fill-led list per group. Each row has a 28 px activity tile, the name and the rolling seven-day time. The name and time share the Edit target. The pin has its own circular 44 px target. A solid glyph distinguishes pinned activities in both themes and in forced colours. At phone widths, the time sits below the name and long names wrap within the row.
+
 ### Borders, elevation and shadows
 
 Borders are not the default grouping mechanism. Prefer canvas/surface contrast, inset fills and light internal dividers; reserve lines for semantic data structure, focus, validation, essential control boundaries, calendar grids and cases where fill cannot communicate state, such as a selected colour swatch. Reserve elevation for sheets, menus and floating navigation:

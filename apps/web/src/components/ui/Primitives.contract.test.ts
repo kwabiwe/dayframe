@@ -26,9 +26,9 @@ describe("web UI foundation contracts", () => {
     expect(rule).not.toMatch(/--accent|--live|--coral/);
   });
 
-  it("lets a long unbroken activity name wrap inside its Library card at phone widths", () => {
-    expect(globalStyles).toMatch(/\.df-lcard \{[^}]*min-width: 0;/);
-    expect(globalStyles).toMatch(/\.df-lcard h3 \{[^}]*overflow-wrap: anywhere;/);
+  it("lets a long unbroken activity name wrap inside its Library row at phone widths", () => {
+    expect(globalStyles).toMatch(/\.df-lrow-edit \{[^}]*min-width: 0;/);
+    expect(globalStyles).toMatch(/\.df-lrow-name \{[^}]*overflow-wrap: anywhere;/);
   });
 
   it("uses one native modal owner with focus entry, cancellation, scroll lock and restoration", () => {

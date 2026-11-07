@@ -22,7 +22,7 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   QUICK_START_PIN_LIMIT,
   activityNameProblem,
-  activityWeeks,
+  activityWeekSeconds,
   formatActivityWeek,
   libraryGroups,
   pinLimitReached
@@ -47,9 +47,9 @@ type Notice = {
 };
 
 /**
- * Library › Activities (Blocks parity step 14a-1): activity cards by group (your own first, then
- * by icon group) with the activity's block and icon, a pin for quick start (six at most), six
- * weeks of time as a sparkline and Edit; New activity; and Archived with Restore. The editor
+ * Library › Activities: compact rows by group (your own first, then by icon group) with an
+ * activity tile, seven days of time and a quick start pin. The row opens the editor, and the
+ * first row adds an activity. Archived has Restore. The editor
  * (name, icon, colour, Archive) is a dialog. Every change goes through the existing
  * /api/categories contract, one at a time, and the shell's data refreshes after it.
  */
@@ -215,10 +215,10 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
   }, [announce, patch, run]);
 
   const nowMs = useClockMs(hydrated);
-  const weeks = useMemo(
+  const weekSeconds = useMemo(
     () => (nowMs === null
-      ? new Map<string, number[]>()
-      : activityWeeks([data.historyEntries, data.weekEntries, data.entries, data.activeEntry ? [data.activeEntry] : []], nowMs)),
+      ? new Map<string, number>()
+      : activityWeekSeconds([data.historyEntries, data.weekEntries, data.entries, data.activeEntry ? [data.activeEntry] : []], nowMs)),
     [data.activeEntry, data.entries, data.historyEntries, data.weekEntries, nowMs]
   );
   const groups = useMemo(() => libraryGroups(activities), [activities]);
@@ -237,26 +237,27 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
             {group.title}
             {group.ownGroup ? <span className="df-faint">Activities you created</span> : null}
           </h2>
-          <div className="df-lib-grid">
-            {/* Adding is the group's first tile, so it never moves as activities are added (UIA-316). */}
+          <ul className="df-card df-simple-list" role="list">
+            {/* Adding stays the first row as activities are added (UIA-316). */}
             {group.ownGroup ? (
-              <button className="df-lnew" disabled={busy} onClick={() => setEditing("new")} type="button">
-                <DayframeIcon glyph="plus" size={26} />
-                New activity
-                <small>Pick a name, icon and colour</small>
-              </button>
+              <li className="df-lrow">
+                <button className="df-lrow-edit df-lnew" disabled={busy} onClick={() => setEditing("new")} type="button">
+                  <span className="df-lrow-tile"><DayframeIcon glyph="plus" size={16} /></span>
+                  <span className="df-lrow-name">New activity</span>
+                </button>
+              </li>
             ) : null}
             {group.activities.map((activity) => (
-              <ActivityCard
+              <ActivityRow
                 activity={activity}
                 busy={busy}
                 key={activity.id}
                 onEdit={() => setEditing(activity)}
                 onTogglePin={() => void togglePin(activity)}
-                weeks={weeks.get(activity.id)}
+                weekSeconds={weekSeconds.get(activity.id) ?? 0}
               />
             ))}
-          </div>
+          </ul>
         </section>
       ))}
 
@@ -283,8 +284,8 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
                   className="df-rbtn df-rbtn--sm"
                   disabled={busy}
                   onClick={async () => {
-                    // The Archived row goes away: focus moves to the restored card's Edit.
-                    if (await restore(activity)) focusCardEdit(activity.id);
+                    // The Archived row goes away: focus moves to the restored activity's Edit.
+                    if (await restore(activity)) focusActivityEdit(activity.id);
                   }}
                   type="button"
                 >
@@ -308,8 +309,8 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
             const savedId = await save(editing === "new" ? null : editing, draft);
             if (savedId === null) return;
             setEditing(null);
-            // The card may have moved group (or is new): focus its Edit once the dialog has closed.
-            focusCardEdit(savedId);
+            // The row may have moved group (or is new): focus its Edit once the dialog has closed.
+            focusActivityEdit(savedId);
           }}
           serverError={error}
           target={editing === "new" ? null : editing}
@@ -337,53 +338,48 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
   );
 }
 
-function ActivityCard({
+function ActivityRow({
   activity,
   busy,
   onEdit,
   onTogglePin,
-  weeks
+  weekSeconds
 }: {
   activity: CategoryRow;
   busy: boolean;
   onEdit: () => void;
   onTogglePin: () => void;
-  weeks: number[] | undefined;
+  weekSeconds: number;
 }) {
   const glyph = resolveActivityIcon({ icon: activity.icon ?? null, name: activity.name }).glyph;
-  const series = weeks ?? [0, 0, 0, 0, 0, 0];
-  const max = Math.max(...series, 1);
+  const timeId = `category-time-${activity.id}`;
   return (
-    <article aria-label={activity.name} className="df-card df-lcard" id={`category-${activity.id}`} style={blockStyle(activity.color, activity.name)}>
-      <div className="df-lswatch df-block">
-        <DayframeIcon glyph={glyph} size={22} />
-        <button
-          aria-label={activity.isPinned ? `Unpin ${activity.name} from quick start` : `Pin ${activity.name} to quick start`}
-          aria-pressed={activity.isPinned}
-          className="df-lpin"
-          disabled={busy}
-          onClick={onTogglePin}
-          type="button"
-        >
-          <DayframeIcon glyph="pin" size={16} />
-        </button>
-      </div>
-      <div className="df-lmeta">
-        <div>
-          <h3>{activity.name}</h3>
-          <small className="df-tnum">
-            {formatActivityWeek(series[series.length - 1])}
-            {activity.isPinned ? " · pinned" : ""}
-          </small>
-        </div>
-        <span className="df-spark" aria-hidden="true">
-          {series.map((seconds, index) => <i key={index} style={{ height: Math.max(3, (seconds / max) * 30) }} />)}
+    <li aria-label={activity.name} className="df-lrow" id={`category-${activity.id}`}>
+      <button
+        aria-describedby={timeId}
+        aria-label={`Edit ${activity.name}`}
+        className="df-lrow-edit"
+        disabled={busy}
+        onClick={onEdit}
+        type="button"
+      >
+        <span className="df-lrow-tile df-block" style={blockStyle(activity.color, activity.name)}>
+          <DayframeIcon glyph={glyph} size={16} />
         </span>
-      </div>
-      <button aria-label={`Edit ${activity.name}`} className="df-rbtn df-rbtn--sm" disabled={busy} onClick={onEdit} type="button">
-        Edit
+        <span className="df-lrow-name">{activity.name}</span>
+        <span className="df-lrow-time df-tnum" id={timeId}>{formatActivityWeek(weekSeconds)}</span>
       </button>
-    </article>
+      <button
+        aria-label={activity.isPinned ? `Unpin ${activity.name} from quick start` : `Pin ${activity.name} to quick start`}
+        aria-pressed={activity.isPinned}
+        className="df-icon-action df-icon-action--44 df-lpin"
+        disabled={busy}
+        onClick={onTogglePin}
+        type="button"
+      >
+        <DayframeIcon fill={activity.isPinned ? "currentColor" : "none"} glyph="pin" size={16} />
+      </button>
+    </li>
   );
 }
 
@@ -562,19 +558,19 @@ function focusLibraryFallback() {
 }
 
 /** After the editor closes (its opener may be gone), focus the activity's Edit, else a fallback. */
-function focusCardEdit(activityId: string) {
+function focusActivityEdit(activityId: string) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
     const edit = activityId
-      ? document.getElementById(`category-${activityId}`)?.querySelector<HTMLButtonElement>('button[aria-label^="Edit "]') ?? null
+      ? document.getElementById(`category-${activityId}`)?.querySelector<HTMLButtonElement>(".df-lrow-edit") ?? null
       : null;
     if (edit && !edit.disabled) edit.focus();
     else focusLibraryFallback();
   }));
 }
 
-/** The browser clock after hydration, each minute (sparklines and "last 7 days"). */
+/** The browser clock after hydration, each minute for the rolling seven-day total. */
 function useClockMs(hydrated: boolean) {
   const [nowMs, setNowMs] = useState<number | null>(null);
   useEffect(() => {
