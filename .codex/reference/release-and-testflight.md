@@ -39,16 +39,18 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (143)` (2026-11-07)
+- Last repository-recorded verified build: `0.1.0 (144)` (2026-11-07)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `c4289197-be8b-48ba-8084-412f2963aca6`
-- Archived commit: `9430cd58bad7c37dbfa0ce7c79cacaf2325189e1`, built in a detached worktree pinned to that SHA
-- Upload recorded by App Store Connect at 15:50:31 GMT on 7 Nov 2026. Apple accepted the signed production package with no uploader errors.
-- The signed Staging app ran on the wired iPhone 11 from a fresh launch with a disposable timer on Today. The warmed 307.425 s window measured 6.851% of one core and +0.3741 MB/min, within the 10% and +2 MB/min limits. The same timer advanced 632 seconds across 632 seconds. The fixture and runner were removed and the previous signed Staging app returned to Log in.
-- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. The signed package used `https://dayframe-web.vercel.app`, the production App Group and Apple Distribution signing. The wired iPhone 11 passed installed 143 Calendar day-strip and Reports range checks. With the same disposable timer visible at both endpoints, the warmed production repeat measured 6.748% of one core and +0.9622 MB/min over 307.53 s. The installed picker follow-up passed on a fresh disposable visit. The hands-on installed pinch remains open.
+- Delivery/build ID: `4e78bd54-34f3-4c05-a7d0-1954a9f09f2d`
+- Archived commit: `847dceb92a3db2929a64d60f0bdbce89b4cca019`, built in a detached worktree pinned to that SHA
+- Upload recorded by App Store Connect at 17:24:16 GMT on 7 Nov 2026. Apple accepted the signed production package with no uploader errors.
+- The signed Staging app ran on the wired iPhone 11 from a fresh launch with a disposable timer on Today. The warmed 307.503 s window measured 6.8912% of one core and +1.0038 MB/min, within the 10% and +2 MB/min limits. The same timer advanced 632 seconds across 632 seconds. The fixture and runner were removed and the prior signed Staging app returned to Log in.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. The signed package used `https://dayframe-web.vercel.app`, the production App Group and Apple Distribution signing. The release contains the Calendar List place-filter fix from #698. Its installed iPhone 11 check remains open.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
+
+Build 143 came from `9430cd58`. The wired iPhone 11 passed the warmed signed Staging gate at 6.851% of one core and +0.3741 MB/min. Installed 143 passed Calendar day-strip, Reports range, the Unknown place picker, description-only logging and the off-day linked editor. The owner confirmed a staggered finger lift held Calendar Day position and ordinary vertical scrolling worked. The warmed installed Today repeat measured 6.748% of one core and +0.9622 MB/min over 307.53 s with the same disposable timer visible at both endpoints.
 
 Build 142 came from `76a7762b`. Its warmed signed staging gate passed at 6.7727% of one core and +0.6428 MB/min. The wired iPhone 11 passed installed Calendar day-strip switching and Reports Week → Month → Week. The warmed production repeat measured 6.5255% of one core and +0.926 MB/min over 385.381 s, using a recaptured end sample from the same process and timer after Instruments timed out.
 
