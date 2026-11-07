@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { act, create } from "react-test-renderer";
 import { reviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileReviewItem } from "../../lib/api";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime, type LocationTimeline } from "@dayframe/shared";
+import { useCalendarPlaceFilter } from "../../lib/calendarPreferences";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -45,9 +46,9 @@ vi.mock("react-native-gesture-handler", () => {
   return { Gesture: { Pan }, GestureDetector: ({ children }: { children: unknown }) => children };
 });
 // "All places" is remembered on this device (owner, 28 Oct 2026, concern 3).
-const storage = vi.hoisted(() => ({ values: new Map<string, string>(), setItem: vi.fn() }));
+const storage = vi.hoisted(() => ({ values: new Map<string, string>(), getItem: vi.fn(), setItem: vi.fn() }));
 vi.mock("@react-native-async-storage/async-storage", () => ({ default: {
-  getItem: async (key: string) => storage.values.get(key) ?? null,
+  getItem: async (key: string) => storage.getItem(key) ?? storage.values.get(key) ?? null,
   setItem: async (key: string, value: string) => { storage.setItem(key, value); storage.values.set(key, value); }
 } }));
 vi.mock("../../lib/motion", () => ({
@@ -56,7 +57,7 @@ vi.mock("../../lib/motion", () => ({
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: (props: { glyph: string }) => `icon:${props.glyph}` }));
 
-import { CalendarListView } from "./CalendarListView";
+import { CalendarListView as List } from "./CalendarListView";
 
 // Location v4 step 9: a synthetic day in Exampleton, made-up names and ids.
 const at = (hour: number, minute = 0) => Date.UTC(2026, 9, 22, hour, minute);
@@ -83,13 +84,26 @@ const timeline: LocationTimeline = {
   ]
 };
 
-function render(props: Partial<Parameters<typeof CalendarListView>[0]> = {}) {
+type ListProps = Omit<Parameters<typeof List>[0], "showAllPlaces" | "onToggleShowAllPlaces">;
+
+function CalendarListView(props: ListProps) {
+  const [showAllPlaces, setShowAllPlaces] = useState(false);
+  return <List {...props} showAllPlaces={showAllPlaces} onToggleShowAllPlaces={() => setShowAllPlaces((current) => !current)} />;
+}
+
+function listProps(onOpenEntry = vi.fn()): ListProps {
+  return {
+    clockFormat: "24h", dayEndMs: at(24), dayStartMs: at(0),
+    entries: [block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)],
+    loggedLabel: "4h", nowMs: at(18), onOpenEntry, onRefresh: vi.fn(), reduceMotion: false, refreshing: false, theme, timeline
+  };
+}
+
+function render(props: Partial<ListProps> = {}) {
   let tree!: ReturnType<typeof create>;
   const onOpenEntry = vi.fn();
   act(() => {
-    tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
-      loggedLabel="4h" nowMs={at(18)} onOpenEntry={onOpenEntry} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
-      theme={theme} timeline={timeline} {...props} />);
+    tree = create(<CalendarListView {...listProps(onOpenEntry)} {...props} />);
   });
   return { tree, onOpenEntry };
 }
@@ -97,7 +111,111 @@ const labels = (tree: ReturnType<typeof create>) => tree.root.findAll((node) => 
   .map((node) => node.props.accessibilityLabel as string);
 const textOf = (tree: ReturnType<typeof create>) => JSON.stringify(tree.toJSON());
 
+function delayStoredPlacesFilter() {
+  let finish!: (value: string | null) => void;
+  const pending = new Promise<string | null>((resolve) => { finish = resolve; });
+  storage.getItem.mockReturnValueOnce(pending);
+  return finish;
+}
+
+function PlaceFilterOwner({ children }: { children: (filter: ReturnType<typeof useCalendarPlaceFilter>) => ReactNode }) {
+  return children(useCalendarPlaceFilter());
+}
+
+function renderPlacesFilter(visible = true, props: Partial<ListProps> = {}) {
+  let tree!: ReturnType<typeof create>;
+  let toggle!: () => void;
+  const defaults = listProps();
+  const screen = (showList: boolean) => (
+    <PlaceFilterOwner>
+      {(filter) => {
+        toggle = filter.onToggleShowAllPlaces;
+        return showList ? <List {...defaults} {...props} {...filter} /> : null;
+      }}
+    </PlaceFilterOwner>
+  );
+  act(() => { tree = create(screen(visible)); });
+  return { tree, setListVisible: (showList: boolean) => act(() => tree.update(screen(showList))), toggle: () => act(() => toggle()) };
+}
+
 describe("CalendarListView (location v4 step 9)", () => {
+  it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {
+    storage.getItem.mockClear();
+    const finish = delayStoredPlacesFilter();
+    const { tree, setListVisible } = renderPlacesFilter(false, { reduceMotion });
+    await act(async () => finish("1"));
+    for (let round = 0; round < 2; round += 1) {
+      setListVisible(true);
+      expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: true });
+      expect(textOf(tree)).toContain("Fewer places");
+      expect(textOf(tree)).toContain('"Home"');
+      expect(textOf(tree).indexOf('"Home"')).toBeLessThan(textOf(tree).indexOf('"Work"'));
+      setListVisible(false);
+    }
+    expect(storage.getItem).toHaveBeenCalledExactlyOnceWith("dayframe.calendar.showAllPlaces");
+    act(() => tree.unmount());
+  });
+
+  it("keeps a new filter choice after a stale saved preference resolves", async () => {
+    storage.values.clear();
+    const finish = delayStoredPlacesFilter();
+    const { tree, toggle } = renderPlacesFilter();
+    const filter = () => tree.root.findByProps({ testID: "calendar-list-show-all" });
+    toggle();
+    expect(filter().props.accessibilityState).toEqual({ selected: true });
+    await act(async () => finish("0"));
+    expect(filter().props.accessibilityState).toEqual({ selected: true });
+    expect(storage.values.get("dayframe.calendar.showAllPlaces")).toBe("1");
+    act(() => tree.unmount());
+  });
+
+  it("keeps the loading body and header on a cold entry until the filter is known", async () => {
+    const finish = delayStoredPlacesFilter();
+    const { tree } = renderPlacesFilter();
+    expect(tree.root.findByProps({ testID: "calendar-list-filter-slot" })).toBeTruthy();
+    expect(tree.root.findByProps({ testID: "calendar-list-loading" })).toBeTruthy();
+    expect(textOf(tree)).not.toContain('"Work"');
+    await act(async () => finish("1"));
+    expect(textOf(tree)).toContain("Fewer places");
+    expect(textOf(tree)).toContain('"Home"');
+    expect(textOf(tree)).toContain('"Work"');
+    act(() => tree.unmount());
+  });
+
+  it("keeps the default All places action available when the device read fails", async () => {
+    storage.getItem.mockRejectedValueOnce(new Error("Storage unavailable"));
+    const { tree } = renderPlacesFilter();
+    await act(async () => undefined);
+    expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: false });
+    expect(textOf(tree)).toContain("All places");
+    expect(textOf(tree)).not.toContain('"Home"');
+    act(() => tree.unmount());
+  });
+
+  it("shows the default after 800 ms and keeps real rows stable when a stalled read arrives", async () => {
+    vi.useFakeTimers();
+    storage.setItem.mockClear();
+    const finish = delayStoredPlacesFilter();
+    const { tree } = renderPlacesFilter();
+    try {
+      act(() => { vi.advanceTimersByTime(799); });
+      expect(tree.root.findByProps({ testID: "calendar-list-loading" })).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(1); });
+      const defaultList = textOf(tree);
+      expect(defaultList).toContain("All places");
+      expect(defaultList).not.toContain('"Home"');
+      await act(async () => finish("1"));
+      expect(textOf(tree)).toBe(defaultList);
+      const filter = tree.root.findByProps({ testID: "calendar-list-show-all" });
+      act(() => filter.props.onPress());
+      expect(textOf(tree)).toContain('"Home"');
+      expect(storage.setItem).toHaveBeenCalledExactlyOnceWith("dayframe.calendar.showAllPlaces", "1");
+    } finally {
+      act(() => tree.unmount());
+      vi.useRealTimers();
+    }
+  });
+
   it("lists the day's blocks oldest first, with an unlogged unknown place between them, and opens a block's editor", () => {
     const { tree, onOpenEntry } = render();
     const order = labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label));
@@ -155,7 +273,8 @@ describe("CalendarListView (location v4 step 9)", () => {
   it("adds Home as a quiet row with \"All places\" by the day's header, and remembers it on this device (concern 3)", async () => {
     storage.values.clear();
     storage.setItem.mockClear();
-    const { tree } = render();
+    const { tree } = renderPlacesFilter();
+    await act(async () => undefined);
     const filter = tree.root.findByProps({ testID: "calendar-list-show-all" });
     expect(JSON.stringify(filter.props.children)).toContain("All places");
     expect(filter.props.accessibilityState).toEqual({ selected: false });
@@ -167,14 +286,12 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(text).not.toContain("Show Home and every place");
     expect(text).not.toContain("Hide Home and logged places");
     expect(storage.setItem).toHaveBeenCalledWith("dayframe.calendar.showAllPlaces", "1");
-    // A List shown later reads it back.
-    let later!: ReturnType<typeof create>;
-    await act(async () => {
-      later = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
-        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} />);
-    });
-    expect(textOf(later)).toContain("\"Home\"");
-    expect(later.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: true });
+    act(() => tree.unmount());
+    const { tree: reopened } = renderPlacesFilter();
+    await act(async () => undefined);
+    expect(textOf(reopened)).toContain('"Home"');
+    expect(reopened.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: true });
+    act(() => reopened.unmount());
   });
 
   it("never lists a place your blocks cover, even with All places (concern 2)", () => {
@@ -216,6 +333,19 @@ describe("CalendarListView (location v4 step 9)", () => {
   const placeCheck = { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
   const sleepCheck = { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) };
   const visited = { question: "Visited Pret?", detail: null, logLabel: "Yes", skipLabel: "Not now" };
+
+  it.each([
+    ["a direct check", { openCheckRequest: { id: placeCheck.id, request: 1 } }],
+    ["Today's first check", { scrollToFirstCheck: 1 }]
+  ] as const)("opens %s once the cold filter and real rows are ready", async (_label, request) => {
+    const finish = delayStoredPlacesFilter();
+    const onOpenPlace = vi.fn();
+    const { tree } = renderPlacesFilter(true, { ...request, checks: [placeCheck], onOpenPlace });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    await act(async () => finish("1"));
+    expect(onOpenPlace).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "seg-unknown" }), "Unknown place");
+    act(() => tree.unmount());
+  });
 
   it("opens a place's sheet from its row, answers Yes from the row's compact pill, and never shows the question under it (owner, 28 Oct 2026)", () => {
     const onAnswerCheck = vi.fn();

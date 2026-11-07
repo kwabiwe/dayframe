@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { runOnJS } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { playDaySwipeTick } from "../../lib/daySwipeHaptic";
-import { SHOW_ALL_PLACES_STORAGE_KEY } from "../../lib/calendarPreferences";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
@@ -93,8 +91,10 @@ export function CalendarListView({
   scrollToNowRequest = 0,
   cancelWaitingTapRequest = 0,
   onRefresh,
+  onToggleShowAllPlaces,
   reduceMotion,
   refreshing,
+  showAllPlaces,
   theme,
   timeline,
   timelineLoading = false
@@ -180,25 +180,15 @@ export function CalendarListView({
   /** A new number scrolls to the row for now (the header's Today pill on today). A List mounting later ignores it. */
   scrollToNowRequest?: number;
   onRefresh: () => void;
+  onToggleShowAllPlaces: () => void;
   reduceMotion: boolean;
   refreshing: boolean;
+  /** Null only while the persistent Calendar owner reads the device preference. */
+  showAllPlaces: boolean | null;
   theme: MobileTheme;
   timeline: LocationTimeline | null;
 }) {
-  const [showAll, setShowAllState] = useState(false);
-  // Owner, 28 Oct 2026 (concern 3): "All places" is remembered on this device.
-  useEffect(() => {
-    let live = true;
-    AsyncStorage.getItem(SHOW_ALL_PLACES_STORAGE_KEY).then((value) => {
-      if (live && value != null) setShowAllState(value === "1");
-    }).catch(() => undefined);
-    return () => { live = false; };
-  }, []);
-  const setShowAll = (update: (current: boolean) => boolean) => setShowAllState((current) => {
-    const next = update(current);
-    void AsyncStorage.setItem(SHOW_ALL_PLACES_STORAGE_KEY, next ? "1" : "0").catch(() => undefined);
-    return next;
-  });
+  const listLoading = timelineLoading || showAllPlaces === null;
   // The one question open under its row, if any (Apple Health's only).
   const [openCheckId, setOpenCheckId] = useState<string | null>(null);
   const [openLegs, setOpenLegs] = useState<ReadonlySet<string>>(() => new Set());
@@ -217,13 +207,13 @@ export function CalendarListView({
     // Without the day's places (not read yet, or the read failed), its checks still show on rows of their own.
     const day = timeline ?? (rowChecks.length ? emptyTimeline(dayStartMs, dayEndMs) : null);
     // A place your blocks cover is never a row (owner, 28 Oct 2026, concern 2).
-    const rows = locationListRows(day, intervals, { nowMs, showAll, checks: rowChecks, hideCovered: true });
+    const rows = locationListRows(day, intervals, { nowMs, showAll: showAllPlaces === true, checks: rowChecks, hideCovered: true });
     // Oldest first, as the mock-up's day reads.
     return [
       ...blocks.map((entry): ListItem => ({ kind: "block", key: `block-${entry.entryId}`, atMs: entry.startedAtMs, entry })),
       ...rows.map((row): ListItem => ({ kind: "location", key: row.key, atMs: row.atMs, row }))
     ].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
-  }, [blocks, rowChecks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
+  }, [blocks, rowChecks, dayEndMs, dayStartMs, nowMs, showAllPlaces, timeline]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
   // What each "?" is about comes from the caller (`checkKinds`, from the suggestion itself; Codex r2 on #610): Apple
@@ -334,7 +324,7 @@ export function CalendarListView({
       deferredNowDay.current = null;
       return;
     }
-    if (timelineLoading) return;
+    if (listLoading) return;
     deferredNowDay.current = null;
     const key = nowRowKey(items.filter((item) => rowViews.current.has(item.key)), nowMs);
     pendingScroll.current = key ? { target: key, dayStartMs } : null;
@@ -342,7 +332,7 @@ export function CalendarListView({
     else scroller.current?.scrollTo({ y: 0, animated: !reduceMotion });
     // Once per request, after the rows for its own day have mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayStartMs, scrollToNowRequest, timelineLoading]);
+  }, [dayStartMs, scrollToNowRequest, listLoading]);
   // A question belongs to the day it was opened on: another day closes it, even for a "?" both days show
   // (overnight sleep), before any request for the new day opens one (Codex r4 on #582).
   const [openDayStartMs, setOpenDayStartMs] = useState(dayStartMs);
@@ -384,7 +374,7 @@ export function CalendarListView({
   const request = liveTap && liveTap.after === (openCheckRequest?.request ?? 0) ? liveTap : liveCheckRequest;
   const readSince = (row: { fallback: boolean }) => !row.fallback || !request || !("at" in request) || request.at == null
     || (timelineReadAt ?? 0) >= request.at;
-  const requestedRow = !timelineLoading && request && request.request !== handledCheckRequest
+  const requestedRow = !listLoading && request && request.request !== handledCheckRequest
     ? checkRows.find((row) => row.id === request.id && row.known && readSince(row)) : undefined;
   if (request && requestedRow) {
     setHandledCheckRequest(request.request);
@@ -405,7 +395,7 @@ export function CalendarListView({
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
   // Only once every "?" here is known, so the first is the real first and opens the right way (Codex r1 on #610).
   const firstCheckRow = checkRows.every((row) => row.known) ? checkRows[0] : undefined;
-  if (!timelineLoading && !clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
+  if (!listLoading && !clearing && scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckRow
     && (firstCheckRow.inline ? onAnswerCheck : firstCheckRow.open)) {
     setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckRow.id });
     if (firstCheckRow.inline) setOpenCheckId(firstCheckRow.id);
@@ -535,18 +525,18 @@ export function CalendarListView({
             <Text {...mobileTextProps("control")} style={[styles.checksChipText, { color: theme.textPrimary }]}>{checkTotal} to check</Text>
           </Pressable>
         ) : null}
-        {hasLocationPlaces(timeline) ? (
+        {showAllPlaces !== null && hasLocationPlaces(timeline) ? (
           // Owner item H (28 Oct 2026): a quiet filter by the day's header, not a filled pill under the List.
-          <Pressable accessibilityHint="Shows or hides places you didn't need to check" accessibilityRole="button" accessibilityState={{ selected: showAll }}
-            hitSlop={8} onPress={() => setShowAll((current) => !current)} style={styles.filter} testID="calendar-list-show-all">
+          <Pressable accessibilityHint="Shows or hides places you didn't need to check" accessibilityRole="button" accessibilityState={{ selected: showAllPlaces }}
+            hitSlop={8} onPress={onToggleShowAllPlaces} style={styles.filter} testID="calendar-list-show-all">
             <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={13} />
-            <Text {...mobileTextProps("control")} style={[styles.filterText, { color: theme.textSecondary }]}>{showAll ? "Fewer places" : "All places"}</Text>
+            <Text {...mobileTextProps("control")} style={[styles.filterText, { color: theme.textSecondary }]}>{showAllPlaces ? "Fewer places" : "All places"}</Text>
           </Pressable>
         ) : null}
       </View>
       <Animated.View layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
         style={[styles.card, { backgroundColor: theme.surface }]}>
-        {timelineLoading ? (
+        {listLoading ? (
           <View accessibilityLabel="Loading calendar day" accessibilityState={{ busy: true }} accessible testID="calendar-list-loading">
             {[0, 1, 2].map((row) => (
               <View key={row} style={styles.rowMain}>
