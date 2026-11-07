@@ -2,6 +2,42 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testTapSequenceRejectsBothStaggeredPinchReleasesAndAllowsTheNextTap() {
+    for firstToLift in [1, 2] {
+      var sequence = DayframeCalendarTapSequence<Int>()
+      sequence.begin([1])
+      XCTAssertTrue(sequence.allowsActivation)
+      sequence.begin([2])
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertFalse(sequence.end([firstToLift]))
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertTrue(sequence.end([3 - firstToLift]))
+      sequence.interrupt()
+      XCTAssertFalse(sequence.allowsActivation)
+
+      sequence.begin([3])
+      XCTAssertTrue(sequence.end([3]))
+      XCTAssertTrue(sequence.allowsActivation)
+    }
+  }
+
+  func testTapSequenceRejectsSimultaneousTouchesAndInterruption() {
+    var sequence = DayframeCalendarTapSequence<Int>()
+    sequence.begin([1, 2])
+    XCTAssertFalse(sequence.allowsActivation)
+    XCTAssertFalse(sequence.end([1], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.interrupt()
+    XCTAssertFalse(sequence.allowsActivation)
+
+    sequence.begin([3])
+    XCTAssertTrue(sequence.allowsActivation)
+    XCTAssertTrue(sequence.end([3], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.begin([4])
+    XCTAssertTrue(sequence.allowsActivation)
+  }
+
   func testEmptyStateIsCentredInTimelineAtTwoThirty() throws {
     let metrics = try XCTUnwrap(DayframeCalendarEmptyStateMath.metrics(
       availableWidth: 320,

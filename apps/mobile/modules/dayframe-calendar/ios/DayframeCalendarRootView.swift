@@ -245,6 +245,7 @@ private struct DayframeCalendarTimelineCanvas: View {
 
         DayframeCalendarEntriesLayer(
           actions: actions,
+          touchObserver: model.timelineTouches,
           availableWidth: geometry.size.width,
           hourHeight: hourHeight,
           hourLabelWidth: hourLabelWidth,
@@ -510,6 +511,7 @@ private struct DayframeCalendarHourGrid: View {
 
 private struct DayframeCalendarEntriesLayer: View {
   let actions: DayframeCalendarActions
+  let touchObserver: DayframeCalendarTouchObserver
   let availableWidth: CGFloat
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
@@ -603,6 +605,7 @@ private struct DayframeCalendarEntriesLayer: View {
           .frame(width: laneWidth, height: hitHeight, alignment: .top)
           .contentShape(Rectangle())
           .gesture(SpatialTapGesture().onEnded { value in
+            guard touchObserver.allowsActivation else { return }
             let point = DayframeCalendarPoint(x: placement.frame.minX + Double(value.location.x), y: placement.frame.minY + Double(value.location.y))
             let index = DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\.span), frames: lane.map(\.frame))
             openLaneItem(index.map { lane[$0].item } ?? item)
@@ -642,6 +645,7 @@ private struct DayframeCalendarEntriesLayer: View {
           let hitHeight = CGFloat(vertical.hitHeight)
 
           Button {
+            guard touchObserver.allowsActivation else { return }
             actions.open(entry.actionTarget)
           } label: {
             DayframeCalendarBlockView(
@@ -688,6 +692,7 @@ private struct DayframeCalendarEntriesLayer: View {
           .accessibilityLabel(entry.accessibilityLabel)
           .accessibilityHint(entry.isReview || entry.asking ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
+          .accessibilityAction { actions.open(entry.actionTarget) }
         }
       }
 
@@ -697,6 +702,7 @@ private struct DayframeCalendarEntriesLayer: View {
       ForEach(moments, id: \.entry.entryId) { moment in
         let frame = moment.frame
         Button {
+          guard touchObserver.allowsActivation else { return }
           actions.open(moment.entry.actionTarget)
         } label: {
           DayframeCalendarMomentTick(color: Color(dayframeCSS: moment.entry.color))
@@ -710,6 +716,7 @@ private struct DayframeCalendarEntriesLayer: View {
         .zIndex(Double(DayframeCalendarDayLayout.momentZIndex))
         .accessibilityLabel(moment.entry.accessibilityLabel)
         .accessibilityHint("Opens entry editor")
+        .accessibilityAction { actions.open(moment.entry.actionTarget) }
       }
     }
     .frame(width: availableWidth, height: 24 * hourHeight, alignment: .topLeading)

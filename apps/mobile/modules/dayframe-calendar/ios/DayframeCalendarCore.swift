@@ -852,6 +852,28 @@ public struct DayframeCalendarScrollToNowGate: Equatable {
   }
 }
 
+struct DayframeCalendarTapSequence<Touch: Hashable> {
+  private var activeTouches: Set<Touch> = []
+  private(set) var allowsActivation = true
+
+  mutating func begin(_ touches: Set<Touch>) {
+    if activeTouches.isEmpty { allowsActivation = true }
+    activeTouches.formUnion(touches)
+    if activeTouches.count > 1 { allowsActivation = false }
+  }
+
+  mutating func end(_ touches: Set<Touch>, cancelled: Bool = false) -> Bool {
+    activeTouches.subtract(touches)
+    if cancelled { allowsActivation = false }
+    return activeTouches.isEmpty
+  }
+
+  mutating func interrupt() {
+    if !activeTouches.isEmpty { allowsActivation = false }
+    activeTouches.removeAll()
+  }
+}
+
 public enum DayframeCalendarZoomMath {
   public static func clampHourHeight(_ value: Double) -> Double {
     min(

@@ -109,13 +109,13 @@ describe("native Calendar production contract", () => {
     const pinch = coordinator.slice(coordinator.indexOf("@objc private func handlePinch"), coordinator.indexOf("@objc private func handleHorizontalPan"));
     const changed = pinch.slice(pinch.indexOf("case .changed:"), pinch.indexOf("case .ended,"));
 
-    expect(coordinator).toContain("pinchGesture.cancelsTouchesInView = true");
+    expect(coordinator).toContain("pinchGesture.cancelsTouchesInView = false");
     const simultaneous = coordinator.slice(
       coordinator.indexOf("shouldRecognizeSimultaneouslyWith"),
       coordinator.indexOf("private func createRequest")
     );
     expect(simultaneous).toContain(
-      "return competingGesture === scrollView?.panGestureRecognizer || competingGesture === horizontalPanGesture"
+      "return gestureRecognizer === pinchGesture || otherGestureRecognizer === pinchGesture"
     );
     expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = false");
     expect(pinch).toContain("horizontalPanGesture.isEnabled = false");
@@ -126,6 +126,23 @@ describe("native Calendar production contract", () => {
     expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(\)\n\s+synchronize\(\)/);
     expect(pinch).toMatch(/if !preservePendingOffset \|\| scrollView == nil \{ pendingContentOffsetY = nil \}\n\s+guard let pinchSession/);
     expect(coordinator).toMatch(/func detach\(\)[\s\S]+finishPinch\(preservePendingOffset: false\)\n\s+guard let scrollView/);
+  });
+
+  it("observes multi-touch without competing for zoom and guards all three pointer actions", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const observer = coordinator.slice(
+      coordinator.indexOf("final class DayframeCalendarTouchObserver"),
+      coordinator.indexOf("struct DayframeCalendarScrollResolver")
+    );
+
+    expect(observer).toContain("override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }");
+    expect(observer).toContain("override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }");
+    expect(observer).not.toMatch(/state = \.(began|changed|ended|recognized)/);
+    expect(coordinator).toContain("nextScrollView.addGestureRecognizer(touchObserver)");
+    expect(rootView.match(/guard touchObserver\.allowsActivation else \{ return \}/g)).toHaveLength(3);
+    expect(rootView).toContain(".accessibilityAction { actions.open(entry.actionTarget) }");
+    expect(rootView).toContain(".accessibilityAction { actions.open(moment.entry.actionTarget) }");
   });
 
   it("marks now with a red line on the minute and the time in a red pill in the gutter (Calendar v3)", () => {

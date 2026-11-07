@@ -671,7 +671,7 @@ Removed in location v4 step 15 (iPhone half): the iPhone Review screen, its card
 - Reduce Motion: the shared opacity path (70 ms in, 70 ms out); focus still follows the fade-in and the keyboard still leaves at the start of the fade-out (its own slide is the system's).
 - Create row icon (Trello D item 11): the row shows the icon the new activity gets (the name's suggestion, else the neutral Other) and "Create" stays one tap. Tapping the icon opens a horizontal row of the shared icons under it (fade in 160 ms, out 120 ms; nothing moves above it, and only the error line below shifts); a pick closes it, and the pick holds while the name changes. Reduce Motion shows and hides the row at once. The web create form's icon button opens the same choices as a scrolling grid inside the popover, with no animation (as its colour menu).
 
-A recognized iPhone Calendar pinch cancels the touches it owns so staggered release leaves the timeline at its final paired geometry. The next deliberate tap or pan is available immediately. The native coordinator permits overlap with its two pans only so it can take them over.
+On the iPhone Calendar, the native pinch and scroll coordinator keeps the existing gesture arbitration and leaves the timeline at its final paired geometry on release. A passive touch observer blocks touch activation of blocks, moments and Places for the whole multi-touch sequence, including staggered lift. A fresh single tap can activate immediately, and explicit accessibility activation has its own action. Scrolling and Reduce Motion use the same direct pinch geometry.
 
 ## Calendar brackets for named patterns (location v3 PR 14b, PRD D19 A9)
 
