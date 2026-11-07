@@ -68,14 +68,15 @@ describe("web contextual category creation contract", () => {
     expect(picker).toContain('className="category-picker-color-trigger"');
     expect(picker).not.toContain('className="category-picker-create-color-field"');
     expect(styles).toContain("grid-template-columns: 44px minmax(0, 1fr)");
-    expect(styles).toContain(".category-picker-create-name-control:focus-within");
+    expect(styles).toContain(".category-picker-create-name-control:has(> input[data-kb-focus])");
   });
 
   it("keeps shared create typography, swatch geometry, and divider anatomy independent of host styles", () => {
     expect(styles).toMatch(/\.category-picker-create-form\s*\{[^}]*font-size:\s*14px;/s);
     expect(styles).toMatch(/\.category-picker-create-form\s*>\s*strong\s*\{[^}]*font-size:\s*14px;[^}]*font-weight:\s*var\(--fw-medium\);/s);
     expect(styles).toMatch(/\.category-picker-create-name-field\s*>\s*label\s*\{[^}]*font-size:\s*12px;[^}]*font-weight:\s*var\(--fw-medium\);/s);
-    expect(styles).toMatch(/\.category-picker-create-form\s+\.category-picker-color-trigger\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+    expect(styles).toMatch(/\.category-picker-create-form\s+\.category-picker-color-trigger\s*\{[^}]*width:\s*44px;[^}]*height:\s*var\(--web-control-height\);/s);
+    expect(styles).toMatch(/\.category-picker-create-form :is\(\.category-picker-color-trigger, \.category-picker-icon-trigger\)::after \{[^}]*inset: calc\(\(100% - 44px\) \/ 2\) 0;/s);
     expect(styles).toMatch(/\.category-picker-color-swatch\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;/s);
     expect(styles).toMatch(/\.category-picker-create-option::before\s*\{[^}]*--divider-inset:\s*12px;[^}]*top:\s*-7px;[^}]*inset-inline:\s*var\(--divider-inset-start, var\(--divider-inset\)\) var\(--divider-inset\);[^}]*height:\s*1px;/s);
     expect(styles).not.toContain(".calendar-compact-category-menu button {");

@@ -95,7 +95,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
         <label className="df-tag-new-field">
           <span className="df-srow-ic" aria-hidden="true"><DayframeIcon glyph="tag" size={17}/></span>
           <span className="sr-only">New tag name</span>
-          <input maxLength={48} name="name" placeholder="New tag, like Planning" required />
+          <input className="ui-control" maxLength={48} name="name" placeholder="New tag, like Planning" required />
         </label>
         <button className="df-rbtn df-rbtn--sm" disabled={isPending} type="submit">
           Create tag
@@ -119,7 +119,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
                 }}
               >
                 <label className="sr-only" htmlFor={`tag-name-${tag.id}`}>Name</label>
-                <input autoFocus defaultValue={tag.name} id={`tag-name-${tag.id}`} maxLength={48} name="name" required />
+                <input autoFocus className="ui-control" defaultValue={tag.name} id={`tag-name-${tag.id}`} maxLength={48} name="name" required />
                 <button className="df-rbtn df-rbtn--sm df-rbtn--live" disabled={isPending} type="submit">Save</button>
                 <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(null)} type="button">Cancel</button>
               </form>

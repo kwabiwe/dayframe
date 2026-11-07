@@ -5333,30 +5333,35 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .category-picker-create-name-control {
+  position: relative;
   display: grid;
   box-sizing: border-box;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
-  border: var(--web-control-border-width) solid var(--control-border);
+  border: 0;
   border-radius: var(--web-radius-control);
+  padding-inline: 2px;
   background: var(--surface-inset);
-  overflow: hidden;
 }
 
-.category-picker-create-name-control:focus-within {
-  border-color: var(--web-focus-border);
-  box-shadow: inset 0 0 0 1px var(--web-focus-border);
+.category-picker-create-name-control:has(> input[data-kb-focus]) {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
-.category-picker-create-name-control:has(input[aria-invalid="true"]):focus-within {
-  border-color: var(--web-focus-border);
-  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+.category-picker-create-name-control:has(> input[aria-invalid="true"])::after {
+  position: absolute;
+  inset-inline: 6px;
+  inset-block-end: 4px;
+  border-block-end: 2px solid var(--danger);
+  content: "";
+  pointer-events: none;
 }
 
 .category-picker-create-form .category-picker-color-trigger {
+  position: relative;
   display: grid;
   width: 44px;
-  height: 44px;
-  min-height: 44px;
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
   grid-column: 1;
   grid-row: 1;
   place-items: center;
@@ -5378,9 +5383,10 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .category-picker-create-form .category-picker-icon-trigger {
+  position: relative;
   display: grid;
   width: 44px;
-  height: 44px;
+  height: var(--web-control-height);
   grid-column: 3;
   grid-row: 1;
   place-items: center;
@@ -5389,6 +5395,13 @@ dialog.ui-dialog.df-range-custom {
   background: transparent;
   padding: 0;
   color: var(--foreground);
+}
+
+/* Both actions keep a 44 px hit area when the field is compact. */
+.category-picker-create-form :is(.category-picker-color-trigger, .category-picker-icon-trigger)::after {
+  position: absolute;
+  inset: calc((100% - 44px) / 2) 0;
+  content: "";
 }
 
 .category-picker-create-form .category-picker-icon-trigger:hover,
@@ -5476,7 +5489,7 @@ dialog.ui-dialog.df-range-custom {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--web-control-height);
   grid-column: 2;
   grid-row: 1;
   border: 0;
@@ -5518,7 +5531,7 @@ dialog.ui-dialog.df-range-custom {
   display: inline-flex;
   width: auto;
   min-width: 64px;
-  min-height: 44px;
+  min-height: var(--web-control-height);
   align-items: center;
   justify-content: center;
   border: 0;
@@ -8585,7 +8598,7 @@ dialog.ui-dialog.df-palette {
   padding: 0;
 }
 
-/* The search is the one field (WUI-017): an inset fill, radius 10, the neutral ring on focus. */
+/* The palette's search owns one inset fill and a keyboard-only ring. */
 .df-palette-input {
   display: flex;
   align-items: center;
@@ -8594,13 +8607,12 @@ dialog.ui-dialog.df-palette {
   border-radius: 10px;
   padding: 0 6px 0 12px;
   background: var(--surface-inset);
-  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--text-muted);
 }
 
 .df-palette-input input {
   min-width: 0;
-  height: 44px;
+  min-height: var(--web-control-height);
   flex: 1 1 auto;
   border: 0;
   outline: 0;
@@ -8609,7 +8621,7 @@ dialog.ui-dialog.df-palette {
   font-size: 17px;
 }
 
-.df-palette-input:focus-within {
+.df-palette-input:has(> input[data-kb-focus]) {
   box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
@@ -10647,12 +10659,6 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-ce-field input {
-  min-height: 44px;
-  border: var(--web-control-border-width) solid var(--control-border);
-  border-radius: 10px;
-  padding: 0 12px;
-  background: var(--surface-inset);
-  color: var(--text-primary);
   font-size: 16px;
 }
 
@@ -10758,14 +10764,7 @@ dialog.ui-dialog.df-palette {
 .df-tag-new-field input,
 .df-tag-rename input {
   min-width: 0;
-  min-height: 44px;
   flex: 1;
-  /* Transparent until focused: the shared neutral focus border then shows. */
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 0 10px;
-  background: var(--surface-muted);
-  color: var(--text-primary);
   font-size: 15px;
 }
 
@@ -12862,22 +12861,17 @@ dialog.ui-dialog.df-palette {
   min-width: 0;
 }
 
-.df-start-date-trigger.timeline-period-trigger,
-.df-start-time-input {
+.df-start-date-trigger.timeline-period-trigger {
   width: 100%;
   min-width: 0;
-  min-height: 44px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--surface-inset);
-  box-shadow: inset 0 0 0 1px var(--control-border);
-  color: var(--foreground);
-}
-
-.df-start-date-trigger.timeline-period-trigger {
+  min-height: var(--web-control-height);
   justify-content: flex-start;
   gap: 8px;
+  border: 0;
+  border-radius: 10px;
   padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--foreground);
 }
 
 .df-start-date-trigger.timeline-period-trigger strong {
@@ -12894,26 +12888,16 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-start-time-input {
-  padding: 0 12px;
+  min-width: 0;
   font: inherit;
   font-size: 15px;
   font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums;
 }
 
-.df-start-date-trigger.timeline-period-trigger:focus-visible,
-.df-start-time-input:focus,
-.df-start-time-input:focus-visible {
+.df-start-date-trigger.timeline-period-trigger:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--web-focus-border);
-}
-
-.df-start-time-input[aria-invalid="true"] {
-  box-shadow: inset 0 0 0 1px var(--control-border), inset 0 -2px 0 var(--danger);
-}
-
-.df-start-time-input[aria-invalid="true"]:focus {
-  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 .df-start-date-panel.timeline-date-picker-panel {
@@ -12921,7 +12905,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-cmd-time .edit-entry-last-stop {
-  min-height: 44px;
+  min-height: var(--web-control-height);
   align-items: center;
   justify-content: flex-start;
   gap: 0.28em;
@@ -16045,6 +16029,41 @@ button.timeline-location-hit:focus-visible {
 :root .ui-control[aria-invalid="true"][data-kb-focus],
 :root .ui-compound-control:has([aria-invalid="true"]):has([data-kb-focus]) {
   box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* Forced colours drop inset shadows and field fills. Keep the boundary, keyboard focus and error visible. */
+@media (forced-colors: active) {
+  :root :is(.df-start-date-trigger, .ui-control:is(.df-start-time-input, .df-ce-field input, .df-tag-new-field input, .df-tag-rename input)) {
+    border: 1px solid CanvasText;
+  }
+
+  :root .df-palette-input {
+    position: relative;
+  }
+
+  :root :is(.df-palette-input, .category-picker-create-name-control)::before {
+    position: absolute;
+    inset: 0;
+    border: 1px solid CanvasText;
+    border-radius: inherit;
+    content: "";
+    pointer-events: none;
+  }
+
+  :root .ui-control:is(.df-start-time-input, .df-ce-field input, .df-tag-new-field input, .df-tag-rename input)[aria-invalid="true"] {
+    border-block-end: 2px dashed CanvasText;
+  }
+
+  :root .category-picker-create-name-control:has(> input[aria-invalid="true"])::after {
+    border-block-end: 2px dashed CanvasText;
+  }
+
+  :root .df-start-date-trigger:focus-visible,
+  :root :is(.df-palette-input, .category-picker-create-name-control):has(> input[data-kb-focus]),
+  :root .ui-control:is(.df-start-time-input, .df-ce-field input, .df-tag-new-field input, .df-tag-rename input)[data-kb-focus] {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
 }
 
 /* The block editor's Start, End and Duration boxes in the time field's look. */

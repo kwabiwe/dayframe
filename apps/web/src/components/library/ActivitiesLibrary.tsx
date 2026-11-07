@@ -471,6 +471,7 @@ function ActivityEditor({
           <span>Name</span>
           <input
             aria-invalid={problem ? true : undefined}
+            className="ui-control"
             maxLength={80}
             onChange={(event) => {
               setName(event.target.value);

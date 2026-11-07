@@ -888,7 +888,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                       aria-describedby={startEditError ? "active-start-time-error" : undefined}
                       aria-invalid={startEditError ? true : undefined}
                       autoComplete="off"
-                      className="df-start-time-input"
+                      className="ui-control df-start-time-input"
                       disabled={isTimerBusy}
                       id="active-start-time"
                       inputMode={clock === "12h" ? "text" : "numeric"}

@@ -14,24 +14,53 @@ function rule(selector: string) {
 }
 
 describe("fields (web UI audit P4)", () => {
-  it("draws every field with an inset fill and one 1 px idle line of at least 3:1 (WUI-017, Codex r1 on #472)", () => {
+  it("keeps the legacy field fallback and reserves space for the Blocks keyboard ring", () => {
     expect(styles).toMatch(/--web-control-border-width: 1px;/);
-    for (const selector of ["input,\nselect,\ntextarea", ".ui-control", ".ui-compound-control", ".df-ce-field input", ".place-search-control"]) {
+    for (const selector of ["input,\nselect,\ntextarea", ".ui-control", ".ui-compound-control", ".place-search-control"]) {
       const body = rule(selector);
       expect(body, selector).not.toBe("");
       expect(body, selector).toMatch(/border: var\(--web-control-border-width\) solid var\(--control-border\);/);
     }
-    // Composites draw the same line as an inset shadow.
-    expect(rule(".df-palette-input")).toMatch(/box-shadow: inset 0 0 0 1px var\(--control-border\);/);
-    // The activity-list search is a compound control: its border is the line (no doubled shadow).
+    // The activity-list search is a compound control with a single focus owner.
     expect(rule(".df-flist-search")).not.toMatch(/box-shadow/);
-    // No field hides its idle line: the Places editor and the activity-create field included.
     expect(styles).not.toMatch(/\.df-pe \.(ui-control|place-search-control)[^{]*\{[^}]*border-color: transparent/);
-    expect(styles).not.toMatch(/\.category-picker-create-name-control \{[^}]*border: 2px solid transparent/);
-    // No field hides its line at rest any more (the sign-in card included).
     expect(styles).not.toMatch(/\.auth-card \.(ui-control|auth-password-field) \{[^}]*border-color: transparent/);
-    expect(rule(".df-ce-field input")).toMatch(/background: var\(--surface-inset\);/);
-    expect(styles).not.toMatch(/\.df-ce-field input \{[^}]*1px solid/);
+  });
+
+  it("uses the shared height and keyboard ring for the resumed web controls", () => {
+    const source = (path: string) => readFileSync(join(process.cwd(), "src/components", path), "utf8");
+    expect(source("PersistentTimerBar.tsx")).toContain('className="ui-control df-start-time-input"');
+    expect(source("library/ActivitiesLibrary.tsx")).toMatch(/<input\s+aria-invalid=\{problem \? true : undefined\}\s+className="ui-control"/);
+    expect(source("TagManager.tsx").match(/<input(?: autoFocus)? className="ui-control"/g)).toHaveLength(2);
+
+    for (const selector of [".df-palette-input input", ".df-start-date-trigger.timeline-period-trigger", ".category-picker-create-form input", ".category-picker-create-form .category-picker-create-actions button"]) {
+      expect(rule(selector), selector).toContain("min-height: var(--web-control-height);");
+    }
+    for (const selector of [".df-start-time-input", ".df-ce-field input", ".df-tag-new-field input,\n.df-tag-rename input"]) {
+      expect(rule(selector), selector).not.toMatch(/min-height|border:|box-shadow:/);
+    }
+
+    expect(rule(".df-palette-input")).not.toMatch(/border:|box-shadow:/);
+    expect(rule(".df-palette-input:focus-within")).toBe("");
+    expect(rule(".df-palette-input:has(> input[data-kb-focus])")).toContain("inset 0 0 0 2px var(--web-focus-border)");
+    expect(rule(".df-start-date-trigger.timeline-period-trigger")).not.toContain("box-shadow");
+    expect(rule(".df-start-date-trigger.timeline-period-trigger:focus-visible")).toContain("inset 0 0 0 2px var(--web-focus-border)");
+    expect(rule(".category-picker-create-name-control:focus-within")).toBe("");
+    expect(rule(".category-picker-create-name-control:has(> input[data-kb-focus])")).toContain("inset 0 0 0 2px var(--web-focus-border)");
+    const createError = rule('.category-picker-create-name-control:has(> input[aria-invalid="true"])::after');
+    expect(createError).toContain("inset-block-end: 4px;");
+    expect(createError).toContain("border-block-end: 2px solid var(--danger);");
+  });
+
+  it("keeps field boundaries, keyboard focus, and invalid cues in forced colours", () => {
+    const forced = styles.match(/@media \(forced-colors: active\) \{\s*:root :is\(\.df-start-date-trigger,[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(forced).toContain("border: 1px solid CanvasText;");
+    expect(forced).toContain("outline: 2px solid Highlight;");
+    expect(forced).toContain("outline-offset: 1px;");
+    expect(forced.match(/border-block-end: 2px dashed CanvasText;/g)).toHaveLength(2);
+    for (const selector of [".df-start-time-input", ".df-ce-field input", ".df-tag-new-field input", ".df-tag-rename input", ".df-palette-input", ".category-picker-create-name-control", ".df-start-date-trigger:focus-visible"]) {
+      expect(forced, selector).toContain(selector);
+    }
   });
 
   it("uses one 10 px field radius at every width", () => {
@@ -48,7 +77,6 @@ describe("fields (web UI audit P4)", () => {
     expect(styles).toMatch(/\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\):has\(input\[aria-invalid="true"\]\) \{\s*box-shadow: inset 0 0 0 1px var\(--focus\), inset 0 -2px 0 var\(--danger\);/);
     // The timer's Description draws nothing on pointer focus (Trello 213).
     expect(rule(".swiss-timer-description-control .ui-compound-control:focus-within")).toMatch(/box-shadow: none;/);
-    expect(rule(".df-palette-input:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
     expect(rule(".timeline-inline-time:has(.timeline-inline-time-input:focus-visible)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
     expect(rule(".timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
   });
