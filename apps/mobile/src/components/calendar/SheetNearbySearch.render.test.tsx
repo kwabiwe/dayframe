@@ -91,7 +91,7 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
   const saved = (text: string) => (text ? [] : [{ key: "s1", title: "Library", detail: "Saved place · 120 m away", glyph: "map-pin", checked: false, onPress: vi.fn() }, { key: "s2", title: "Gym", detail: "Saved place", glyph: "map-pin", checked: false, onPress: vi.fn() }]) as never[];
   const type = (tree: ReturnType<typeof create>, text: string) => act(() => { tree.root.findByProps({ testID: "location-correction-search" }).props.onChangeText(text); });
 
-  it("shows one compact loading line, reveals real rows together, and holds their viewport while typing", async () => {
+  it("replaces one Nearby row with all returned search rows in the sheet's own scroll body", async () => {
     mocks.fontScale = 1;
     mocks.searchAvailable = true;
     let finish!: () => void;
@@ -104,19 +104,22 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     try {
       let tree!: ReturnType<typeof create>;
       await act(async () => { tree = create(<SheetNearbySearch centre={centre} compactInitialResults
-        evidence={evidence(25)} onPick={vi.fn()} savedRows={saved} theme={theme} />); });
+        evidence={evidence(25)} onPick={vi.fn()} theme={theme} />); });
       expect(tree.root.findByProps({ testID: "location-correction-initial-loading" })).toBeTruthy();
       expect(ids(tree, "location-correction-place-")).toEqual([]);
       expect(tree.root.findAllByProps({ testID: "location-correction-placeholder" })).toHaveLength(0);
       await act(async () => { finish(); });
       expect(ids(tree, "location-correction-nearby-")).toEqual(["a"]);
-      expect(ids(tree, "location-correction-place-")).toEqual(["s1", "s2"]);
-      const viewport = () => tree.root.findByProps({ testID: "location-correction-results" }).props.style.height;
-      expect(viewport()).toBe(3 * 52);
       type(tree, "Library");
-      expect(viewport()).toBe(3 * 52);
-      await act(async () => { mocks.emit?.({ requestId: "r", query: "Library", status: "results", suggestions: [] }); });
-      expect(viewport()).toBe(3 * 52);
+      expect(ids(tree, "location-correction-nearby-")).toEqual(["a"]);
+      await act(async () => { mocks.emit?.({ requestId: "r", query: "Library", status: "results", suggestions: [
+        { id: "library-1", title: "Civic Library" }, { id: "library-2", title: "Town Library" },
+        { id: "library-3", title: "Central Library" }
+      ] }); });
+      const results = tree.root.findByProps({ testID: "location-correction-results" });
+      expect(results.props.style).toBeUndefined();
+      expect(results.findAllByType("ScrollView" as never)).toHaveLength(0);
+      expect(ids(tree, "location-correction-nearby-")).toEqual(["library-1", "library-2", "library-3"]);
       expect(tree.root.findAllByProps({ testID: "location-correction-placeholder" })).toHaveLength(0);
     } finally {
       mocks.searchAvailable = false;
@@ -135,16 +138,16 @@ describe("the sheet's Nearby list (PRD D23; Codex r1 on #620)", () => {
     expect(label("location-correction-place-s1")).toBe("Library, Saved place · 120 m away");
   });
 
-  it("holds the compact viewport while typing when the visit has no map centre", async () => {
+  it("explains unavailable or empty results without reserving unused rows", async () => {
     mocks.fontScale = 1;
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<SheetNearbySearch centre={null} compactInitialResults onPick={vi.fn()} theme={theme} />); });
-    const height = () => tree.root.findByProps({ testID: "location-correction-results" }).props.style.height;
+    const resultStyle = () => tree.root.findByProps({ testID: "location-correction-results" }).props.style;
     expect(JSON.stringify(tree.toJSON())).toContain("Nearby places are unavailable.");
-    expect(height()).toBe(52);
+    expect(resultStyle()).toBeUndefined();
     type(tree, "Library");
     expect(JSON.stringify(tree.toJSON())).toContain("No places match.");
-    expect(height()).toBe(52);
+    expect(resultStyle()).toBeUndefined();
   });
 
   it.each([

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Reanimated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
+import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
@@ -26,7 +26,7 @@ import { DayframeIcon } from "../icons/DayframeIcon";
 import { LocationEvidenceMap } from "../location/LocationEvidenceMap";
 import { playHaptic } from "../../lib/haptics";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
-import { MOBILE_MOTION, localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import { formatPlaceDistance } from "../../lib/placeCategories";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
@@ -88,6 +88,7 @@ export const SHEET_MAP_HEIGHT = 160;
 export const SHEET_MAP_DELAY_MS = 320;
 /** More options closes once the scroll back has run. */
 const SHEET_SCROLL_BACK_MS = 240;
+const SHEET_ACTIVITY_PREVIEW_COUNT = 3;
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
 /** Kept before the corrections with `ids` are queued; `start` once they are, `cancel` if they can't be. */
@@ -407,7 +408,6 @@ export function LocationCorrectionSheet({
   const description = logDescription.trim() || undefined;
   const activityFirst = Boolean(logAs && target.kind === "place" && !target.place.placeId && !target.place.learnedPlaceId);
   const hasLogDraft = Boolean(logCategoryId || (activityFirst && description));
-  const [categoryOpen, setCategoryOpen] = useState(false);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [allActivities, setAllActivities] = useState(false);
   const [moreOptions, setMoreOptions] = useState(false);
@@ -426,12 +426,12 @@ export function LocationCorrectionSheet({
   }
   useEffect(() => () => { if (closingMore.current) clearTimeout(closingMore.current); }, []);
   // The map waits for the sheet's spring; with Reduce Motion there is none.
-  const [mapReady, setMapReady] = useState(reduceMotion);
+  const [mapReady, setMapReady] = useState(false);
   useEffect(() => {
-    if (mapReady) return;
+    if (mapReady || reduceMotion || (activityFirst && !placePickerOpen)) return;
     const timer = setTimeout(() => setMapReady(true), SHEET_MAP_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [mapReady]);
+  }, [activityFirst, mapReady, placePickerOpen, reduceMotion]);
   /** Opens with the row scrolled to the sheet's top; closes by scrolling back first, so nothing snaps. */
   function toggleMore() {
     const closing = moreOptions && !closingMore.current;
@@ -642,7 +642,7 @@ export function LocationCorrectionSheet({
   const savingOnlyPlace = activityFirst && !hasLogDraft && Boolean(chosenPlace);
   const map = (
     <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
-      {evidence && evidence !== "unavailable" ? mapReady ? (
+      {evidence && evidence !== "unavailable" ? mapReady || reduceMotion ? (
         <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
           <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
             caption={evidenceSheetCaption(evidence, { knownPlace: placeIsNamed })}
@@ -668,13 +668,23 @@ export function LocationCorrectionSheet({
         reduceMotion={reduceMotion} savedRows={savedRows} theme={theme} />
     </View>
   ) : null;
+  type SheetActivity = NonNullable<typeof logAs>["activities"][number];
+  function activityChip(activity: SheetActivity) {
+    return (
+      <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
+        onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
+        testID={`location-correction-log-${activity.id}`} theme={theme} />
+    );
+  }
+  const suggestedActivities = logAs?.activities ?? [];
+  const availableActivities = logAs?.allActivities ?? suggestedActivities;
+  const recommendedActivities = suggestedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT);
+  const remainingActivities = availableActivities.filter((activity) => !recommendedActivities.some(({ id }) => id === activity.id));
+  const previewActivities = !allActivities && activeCategory && !recommendedActivities.some(({ id }) => id === activeCategory.id)
+    ? [...recommendedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT - 1), activeCategory] : recommendedActivities;
   const activityChips = logAs && (
     <View accessibilityLabel={activityFirst ? "Activity" : "Logs as"} accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-      {(allActivities && logAs.allActivities ? logAs.allActivities : logAs.activities).map((activity) => (
-        <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
-          onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
-          testID={`location-correction-log-${activity.id}`} theme={theme} />
-      ))}
+      {(allActivities ? availableActivities : suggestedActivities).map(activityChip)}
       {!allActivities && (logAs.allActivities?.length ?? 0) > logAs.activities.length ? (
         <ShapeAction label="All activities" onPress={() => setAllActivities(true)} testID="location-correction-log-all" theme={theme} />
       ) : null}
@@ -759,20 +769,34 @@ export function LocationCorrectionSheet({
             placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
             style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
             testID="location-correction-log-description" value={logDescription} />
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.activityFirst}>
-            <Pressable accessibilityRole="button" accessibilityState={{ expanded: categoryOpen, disabled: !logAs?.activities.length }}
-              disabled={!logAs?.activities.length} onPress={() => setCategoryOpen((open) => !open)}
-              style={styles.inlineChoice} testID="location-correction-category">
-              <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
-              <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}>{activeCategory?.name ?? "Optional"}</Text>
-              <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
-              <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" />
-            </Pressable>
-            {categoryOpen ? activityChips : null}
-            {placeSection ? (
+          {availableActivities.length ? (
+            <View style={styles.activityFirst}>
+              <View style={styles.activityHeading}>
+                <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
+                <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>Optional</Text>
+              </View>
+              <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
+                {previewActivities.map(activityChip)}
+              </View>
+              {remainingActivities.length ? (
+                <View>
+                  <ShapeAction expanded={allActivities} label={allActivities ? "Fewer activities" : "All activities"}
+                    onPress={() => setAllActivities((open) => !open)} testID="location-correction-log-all" theme={theme} />
+                  <InlineReveal open={allActivities} reduceMotion={reduceMotion}>
+                    <View accessibilityLabel="More activities" accessibilityRole="radiogroup"
+                      style={[activityChipStyles.compactWrap, styles.moreActivities]}>
+                      {remainingActivities.map(activityChip)}
+                    </View>
+                  </InlineReveal>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {placeSection ? (
+            <View>
               <View style={styles.inlineChoice}>
                 <Pressable accessibilityRole="button" accessibilityState={{ expanded: placePickerOpen }}
-                  onPress={() => setPlacePickerOpen((open) => !open)}
+                  onPress={() => { setMapReady(false); setPlacePickerOpen((open) => !open); }}
                   style={styles.inlineDisclosure} testID="location-correction-place-picker">
                   <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={19} />
                   <Text {...mobileTextProps("control")} numberOfLines={1}
@@ -793,18 +817,17 @@ export function LocationCorrectionSheet({
                     <DayframeIcon color={theme.textSecondary} glyph="x" size={16} />
                   </Pressable>
                 ) : null}
-                <InsetDivider color={theme.border} edge="top" paddedBy="src/components/sheets/BottomSheetShell.tsx:sheet" start={29} />
               </View>
-            ) : null}
-            {placePickerOpen && placeSection ? (
-              <View style={styles.view}>
-                {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
-                  style={{ color: theme.textPrimary }} testID="location-correction-ask">{asks}</Text> : null}
-                {map}
-                {placeSearch}
-              </View>
-            ) : null}
-          </Reanimated.View>
+              <InlineReveal open={placePickerOpen} reduceMotion={reduceMotion}>
+                <View style={styles.view}>
+                  {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
+                    style={{ color: theme.textPrimary }} testID="location-correction-ask">{asks}</Text> : null}
+                  {map}
+                  {placeSearch}
+                </View>
+              </InlineReveal>
+            </View>
+          ) : null}
         </View>
       ) : map}
       {/* The view inside the sheet: the leg pushes in from the right and pops back from the left. */}
@@ -956,12 +979,37 @@ export function LocationCorrectionSheet({
   );
 }
 
+/** Let the body's normal layout follow the measured reveal, including results that arrive after opening. */
+function InlineReveal({ children, open, reduceMotion }: {
+  children: ReactNode; open: boolean; reduceMotion: boolean;
+}) {
+  const [contentHeight, setContentHeight] = useState(0);
+  const size = useAnimatedStyle(() => ({
+    height: reduceMotion ? undefined : withTiming(open ? contentHeight : 0, {
+      duration: MOBILE_MOTION.sheet,
+      easing: Easing.out(Easing.cubic)
+    })
+  }));
+  return (
+    <Reanimated.View style={[styles.inlineClip, size]}>
+      {open ? (
+        <Reanimated.View collapsable={false} exiting={reduceMotion ? undefined : localPresenceExiting(false)}
+          style={reduceMotion ? undefined : styles.inlineMeasure}
+          onLayout={({ nativeEvent }) => setContentHeight(nativeEvent.layout.height)}>
+          {children}
+        </Reanimated.View>
+      ) : null}
+    </Reanimated.View>
+  );
+}
+
 /** A correction's compact pill: neutral, or in the danger colour for one that takes something off the day. */
-function ShapeAction({ danger = false, label, onPress, testID, theme }: {
-  danger?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
+function ShapeAction({ danger = false, expanded, label, onPress, testID, theme }: {
+  danger?: boolean; expanded?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
 }) {
   return (
-    <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
+    <Pressable accessibilityRole="button" accessibilityState={expanded === undefined ? undefined : { expanded }}
+      hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
       style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
       <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: danger ? theme.dangerText : theme.textPrimary }]}>{label}</Text>
     </Pressable>
@@ -1115,6 +1163,10 @@ function TimesSection({ clockFormat, onChange, onReveal, problem, reduceMotion, 
 
 const styles = StyleSheet.create({
   activityFirst: { gap: 8 },
+  activityHeading: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  moreActivities: { paddingTop: 12 },
+  inlineClip: { overflow: "hidden" },
+  inlineMeasure: { position: "absolute", left: 0, right: 0, top: 0 },
   inlineChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
   inlineDisclosure: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
   inlineClear: { width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
