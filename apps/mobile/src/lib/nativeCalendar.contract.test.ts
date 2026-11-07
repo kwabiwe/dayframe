@@ -104,6 +104,18 @@ describe("native Calendar production contract", () => {
     expect(coordinator.match(/transition\.shouldTriggerHaptic, model\.presentation\.hapticsEnabled/g)).toHaveLength(2);
   });
 
+  it("holds the last paired pinch geometry until release and returns control to scroll", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const pinch = coordinator.slice(coordinator.indexOf("@objc private func handlePinch"), coordinator.indexOf("@objc private func handleHorizontalPan"));
+    const changed = pinch.slice(pinch.indexOf("case .changed:"), pinch.indexOf("case .ended,"));
+
+    expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = false");
+    expect(changed).toMatch(/guard let midpointY = pairedViewportMidpointY[\s\S]+hasOriginalPair = false\n\s+return[\s\S]+DayframeCalendarZoomMath.update/);
+    expect(coordinator).toContain("guard gesture.numberOfTouches == 2 else { return nil }");
+    expect(pinch).toContain("scrollView.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled");
+    expect(pinch).toMatch(/case \.ended, \.cancelled, \.failed:[\s\S]+finishPinch\(in: scrollView\)\n\s+synchronize\(\)/);
+  });
+
   it("marks now with a red line on the minute and the time in a red pill in the gutter (Calendar v3)", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const marker = rootView.slice(rootView.indexOf("private struct DayframeCalendarNowMarker"), rootView.indexOf("private struct DayframeCalendarCreationPreviewLayer"));

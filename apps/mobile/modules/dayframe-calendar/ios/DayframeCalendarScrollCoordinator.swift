@@ -70,6 +70,12 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       var startTimestamp: CFTimeInterval?
     }
 
+    private struct PinchSession {
+      let start: DayframeCalendarPinchStart
+      let scrollPanWasEnabled: Bool
+      var hasOriginalPair = true
+    }
+
     private weak var model: DayframeCalendarViewModel?
     private let actions: DayframeCalendarActions
     private weak var scrollView: UIScrollView?
@@ -98,7 +104,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private var edgeAutoscrollVelocity = 0.0
     private var edgeAutoscrollLastTimestamp: CFTimeInterval?
     private var selectedDayKey = ""
-    private var pinchStart: DayframeCalendarPinchStart?
+    private var pinchSession: PinchSession?
     private var pendingContentOffsetY: Double?
 
     init(
@@ -162,6 +168,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
       if let previous = scrollView {
         cancelLongPressRecognition()
+        finishPinch(in: previous)
         previous.removeGestureRecognizer(pinchGesture)
         previous.removeGestureRecognizer(horizontalPanGesture)
         previous.removeGestureRecognizer(longPressGesture)
@@ -194,6 +201,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         return
       }
       cancelLongPressRecognition()
+      finishPinch(in: scrollView)
       scrollView.removeGestureRecognizer(pinchGesture)
       scrollView.removeGestureRecognizer(horizontalPanGesture)
       scrollView.removeGestureRecognizer(longPressGesture)
@@ -252,7 +260,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           animated: false
         )
         self.pendingContentOffsetY = nil
-      } else if pinchStart == nil {
+      } else if pinchSession == nil {
         let clamped = DayframeCalendarZoomMath.clampContentOffset(
           Double(scrollView.contentOffset.y),
           hourHeight: Double(model.hourHeight),
@@ -275,7 +283,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         selectedDayKey: presentation.selectedDayKey,
         todayKey: presentation.todayKey,
         viewportHeight: viewportHeight,
-        fingerOnTimeline: scrollView.isTracking || pinchStart != nil || creationDragState.session != nil
+        fingerOnTimeline: scrollView.isTracking || pinchSession != nil || creationDragState.session != nil
       ))
       if scrollToNowGate.isWaiting {
         guard scrollToNowLayoutObservation == nil else { return }
@@ -305,25 +313,36 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     @objc private func handleApplicationWillResignActive() {
       cancelLongPressRecognition()
+      if let scrollView { finishPinch(in: scrollView) }
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
       guard creationDragState.session == nil, let model, let scrollView else { return }
-      let midpointY = viewportMidpointY(for: gesture, in: scrollView)
 
       switch gesture.state {
       case .began:
+        guard pinchSession == nil, let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else { return }
         // A pinch takes over from a button zoom at the geometry already shown.
         stopButtonZoom()
-        pinchStart = DayframeCalendarPinchStart(
-          contentOffsetY: Double(scrollView.contentOffset.y),
-          hourHeight: Double(model.hourHeight),
-          midpointY: midpointY
+        pinchSession = PinchSession(
+          start: DayframeCalendarPinchStart(
+            contentOffsetY: Double(scrollView.contentOffset.y),
+            hourHeight: Double(model.hourHeight),
+            midpointY: midpointY
+          ),
+          scrollPanWasEnabled: scrollView.panGestureRecognizer.isEnabled
         )
+        // Cancel an already-recognised pan so UIKit cannot replace the pinch offset or decelerate on release.
+        scrollView.panGestureRecognizer.isEnabled = false
       case .changed:
-        guard let pinchStart else { return }
+        guard let pinchSession, pinchSession.hasOriginalPair else { return }
+        guard let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else {
+          // UIKit can keep reporting changed after one finger lifts. Its remaining point is not the pair's anchor.
+          self.pinchSession?.hasOriginalPair = false
+          return
+        }
         let next = DayframeCalendarZoomMath.update(
-          start: pinchStart,
+          start: pinchSession.start,
           absoluteScale: Double(gesture.scale),
           currentMidpointY: midpointY,
           viewportHeight: Double(scrollView.bounds.height)
@@ -335,12 +354,18 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           animated: false
         )
       case .ended, .cancelled, .failed:
-        // The changed-state geometry is final. There is intentionally no release normalization.
-        pinchStart = nil
+        // The last paired geometry is final. There is intentionally no release normalization.
+        finishPinch(in: scrollView)
         synchronize()
       default:
         break
       }
+    }
+
+    private func finishPinch(in scrollView: UIScrollView) {
+      guard let pinchSession else { return }
+      self.pinchSession = nil
+      scrollView.panGestureRecognizer.isEnabled = pinchSession.scrollPanWasEnabled
     }
 
     @objc private func handleHorizontalPan(_ gesture: UIPanGestureRecognizer) {
@@ -788,7 +813,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       model: DayframeCalendarViewModel,
       scrollView: UIScrollView
     ) {
-      guard creationDragState.session == nil, pinchStart == nil else { return }
+      guard creationDragState.session == nil, pinchSession == nil else { return }
       let fromHeight = buttonZoom?.targetHourHeight ?? Double(model.hourHeight)
       let target = DayframeCalendarZoomMath.buttonTarget(hourHeight: fromHeight, direction: direction)
       guard abs(target - Double(model.hourHeight)) > 0.01 else {
@@ -823,7 +848,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         let model,
         let scrollView,
         !scrollView.isDragging,
-        pinchStart == nil,
+        pinchSession == nil,
         creationDragState.session == nil
       else {
         stopButtonZoom()
@@ -875,11 +900,16 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       zoomDisplayLink = nil
     }
 
-    private func viewportMidpointY(
-      for gesture: UIGestureRecognizer,
+    private func pairedViewportMidpointY(
+      for gesture: UIPinchGestureRecognizer,
       in scrollView: UIScrollView
-    ) -> Double {
-      Double(gesture.location(in: scrollView).y - scrollView.bounds.minY)
+    ) -> Double? {
+      guard gesture.numberOfTouches == 2 else { return nil }
+      let first = gesture.location(ofTouch: 0, in: scrollView)
+      let second = gesture.location(ofTouch: 1, in: scrollView)
+      // At release UIKit can report the same position for both contacts before the count drops.
+      guard abs(first.x - second.x) + abs(first.y - second.y) > 1 else { return nil }
+      return Double((first.y + second.y) * 0.5 - scrollView.bounds.minY)
     }
   }
 }
