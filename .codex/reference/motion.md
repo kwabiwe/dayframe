@@ -52,6 +52,7 @@ The unnamed iPhone visit keeps its picker closed at first paint and shows a few 
 - Direct manipulation must track the finger continuously and must not hand off to a separately rebuilt layout with a release-time snap.
 - Animate both presence and consequence: the control or notice entering is not sufficient if the affected row, surrounding list, timeout dismissal, Undo restoration, or failure rollback still jumps.
 - Preserve geometry during async work. Avoid loading UI that moves content when optimistic feedback is the established product contract.
+- On iPhone, the persistent Calendar owner restores the device's All places filter before List paints real rows. A warm List re-entry uses the current choice immediately. An unresolved cold read uses the existing loading body. Once real rows are visible, the filter press owns optional-row reflow through the existing List transition, including its Reduce Motion path. A late preference response never moves those rows.
 - A second rapid action must either replace, queue, or merge with the current transition deterministically. Give timeout/Undo feedback a monotonically increasing token or equivalent stable identity, clear the superseded timer, and verify that stale timers, exits, or completion callbacks cannot dismiss or restore newer state.
 
 ## Dayframe Blocks Springs And Haptics

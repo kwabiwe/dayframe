@@ -5,6 +5,7 @@ import { LocationCorrectionSheet, type LocationCorrectionTarget } from "@/compon
 import { useEffect, useMemo, useState } from "react";
 import { LogBox, ScrollView, View } from "react-native";
 import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
+import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
@@ -249,6 +250,7 @@ export default function CalendarQaRoute() {
   }, [params.cycle]);
   const dense = params.day === "dense";
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
+  const { showAllPlaces, onToggleShowAllPlaces } = useCalendarPlaceFilter();
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
   // The week strip and the Today pill work here, as on the real Calendar, over the fixture's fixed "now".
   const [selectedDay, setSelectedDay] = useState(dense ? DENSE_DAY : DAY);
@@ -334,7 +336,7 @@ export default function CalendarQaRoute() {
               onAnswerCheck={() => undefined} onOpenCheck={(id) => { if (id === "qa-check-trip") setSheet({ name: "trip", asks: true }); }}
               onOpenPlace={(place) => { if (place.id === "qa-unknown") setSheet({ name: "place", asks: true }); }} scrollToFirstCheck={params.check === "1" ? 1 : undefined} scrollToNowRequest={listScrollToNow} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
-              timeline={dense ? null : timeline} />
+              timeline={dense ? null : timeline} showAllPlaces={showAllPlaces} onToggleShowAllPlaces={onToggleShowAllPlaces} />
           </View>
         ) : null}
         {/* Step 12: a correction sheet open over the List, for Simulator screenshots. */}

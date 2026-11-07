@@ -50,6 +50,7 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
+import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
 import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
@@ -405,6 +406,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   // Calendar › Grid or List (location v4 step 9), remembered on this phone.
   const [calendarLayout, setCalendarLayout] = useState<"grid" | "list">("grid");
+  const { showAllPlaces, onToggleShowAllPlaces } = useCalendarPlaceFilter();
   const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
   // The Today pill on today: Swift's scroll owner on the Grid, the List's own ScrollView on the List.
   const [calendarScrollToNow, setCalendarScrollToNow] = useState(0);
@@ -4167,6 +4169,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   checkTotal={askingChecks.length}
                   onNextCheck={openNextCheck}
                   onSwipeDay={shiftSelectedCalendarDay}
+                  onToggleShowAllPlaces={onToggleShowAllPlaces}
                   openCheckRequest={calendarCheckTarget}
                   clearSelectionRequest={calendarSelectionClear}
                   timelineLoading={serverCalendarSnapshot.loading}
@@ -4207,6 +4210,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
                   reduceMotion={reduceMotion}
                   refreshing={isFocused && refreshing}
+                  showAllPlaces={showAllPlaces}
                   theme={theme}
                   timeline={calendarTimeline}
                 />
