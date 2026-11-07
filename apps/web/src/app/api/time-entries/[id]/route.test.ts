@@ -54,7 +54,40 @@ vi.mock("@/lib/live-activity-post-response", () => ({
   scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
 }));
 
-const { DELETE, PATCH } = await import("./route");
+const { DELETE, GET, PATCH } = await import("./route");
+
+describe("GET /api/time-entries/[id]", () => {
+  const id = "00000000-0000-4000-8000-000000000099";
+  const request = new Request("http://localhost/api/time-entries/" + id);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.resolveRequestSession.mockResolvedValue(session);
+  });
+
+  it("returns one owned block with private caching disabled", async () => {
+    const entry = { id, description: "Reading" };
+    mocks.getTimeEntryById.mockResolvedValue(entry);
+    const response = await GET(request, routeContext(id));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ entry });
+    expect(mocks.getTimeEntryById).toHaveBeenCalledWith(session, id);
+  });
+
+  it("requires an app session before looking up the block", async () => {
+    mocks.resolveRequestSession.mockRejectedValueOnce(new AuthError("Login required."));
+    expect((await GET(request, routeContext(id))).status).toBe(401);
+    expect(mocks.getTimeEntryById).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for an invalid ID and 404 when the owner has no matching block", async () => {
+    expect((await GET(request, routeContext())).status).toBe(400);
+    expect(mocks.getTimeEntryById).not.toHaveBeenCalled();
+    mocks.getTimeEntryById.mockResolvedValue(null);
+    expect((await GET(request, routeContext(id))).status).toBe(404);
+  });
+});
 
 describe("PATCH /api/time-entries/[id]", () => {
   beforeEach(() => {

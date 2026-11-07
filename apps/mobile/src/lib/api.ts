@@ -1942,6 +1942,28 @@ export async function deliverPendingTimerStop(
   }
 }
 
+export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner): Promise<MobileTimeEntry> {
+  const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const { response, body } = await mobileJsonRequest<MobileTimeEntry | null>(
+    `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store" },
+    { timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS, timeoutMessage: "This block is taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (value, response) => {
+        if (!response.ok) return null;
+        const entry = (value as { entry?: MobileTimeEntry } | null)?.entry;
+        if (entry?.id !== id || typeof entry.startedAt !== "string") throw new InvalidMobileAcknowledgementError();
+        return entry;
+      } }
+  );
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Couldn't open this block.");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
+}
+
 export async function deleteTimeEntry(id: string) {
   const response = await mobileFetchWithTimeout(
     `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,

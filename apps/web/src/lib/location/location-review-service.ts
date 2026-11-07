@@ -488,13 +488,13 @@ async function resolveClosedLocationReview(
       await locationEditMatchesExisting(client, item, action.edit, session)
     ) ||
     (
-      action.action === "record_poi_once" && Boolean(action.edit?.categoryId) &&
+      action.action === "record_poi_once" && logsVenueFreeTime(action.edit) &&
       item.status === "accepted" &&
       await pickedVenueMatches(client, item, action.applePlaceId, session) &&
-      await venueFreeTimeMatches(client, item, action.edit!, action.name.trim(), action.applePlaceId ?? null, session)
+      await venueFreeTimeMatches(client, item, action.edit, action.name.trim(), action.applePlaceId ?? null, session)
     ) ||
     (
-      action.action === "record_poi_once" && !action.edit?.categoryId &&
+      action.action === "record_poi_once" && !logsVenueFreeTime(action.edit) &&
       item.status === "accepted" &&
       await pickedVenueMatches(client, item, action.applePlaceId, session) &&
       await locationEditMatchesExisting(
@@ -508,7 +508,7 @@ async function resolveClosedLocationReview(
   if (equivalent) {
     // A one-time place with an activity answers a retry with the blocks it made (oldest first), so a retry under
     // another id still hands the iPhone its block ids (Location review of #620).
-    const venueBlocks = action.action === "record_poi_once" && action.edit?.categoryId
+    const venueBlocks = action.action === "record_poi_once" && logsVenueFreeTime(action.edit)
       ? (await client.query<{ id: string }>(
           `select id from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3
             order by started_at, id`,
@@ -633,7 +633,7 @@ async function performAction(
       await rememberPickedVenue(client, item, action.applePlaceId, session);
       // With an activity (the iPhone's "Visited {name}?" Yes with Logs as, Codex r2 on #620): only the time the
       // person's own blocks don't cover, as Logs as (`log_place`) logs it.
-      if (action.edit?.categoryId) return recordVenueFreeTime(client, item, action.edit, action.name.trim(), action.applePlaceId ?? null, session);
+      if (logsVenueFreeTime(action.edit)) return recordVenueFreeTime(client, item, action.edit, action.name.trim(), action.applePlaceId ?? null, session);
       return confirmReview(
         client,
         item,
@@ -788,8 +788,12 @@ async function confirmReview(
   return { ok: true, action, status: "accepted", entryId };
 }
 
+function logsVenueFreeTime(edit: ReviewEntryEdit | undefined): edit is ReviewEntryEdit {
+  return Boolean(edit && (edit.categoryId || (edit.categoryId === null && edit.description?.trim())));
+}
+
 /**
- * "Visited {name}?" Yes with an activity (Codex r2 on #620; orchestrator option a, 29 Oct 2026): a one-time place
+ * "Visited {name}?" Yes with an activity or description: a one-time place
  * (`record_poi_once`) that logs only the time the person's own blocks don't cover, as `log_place` does (its
  * `freeSpans`), in the caller's one transaction under the owner lock (`resolveLocationReviewAction`: owner lock,
  * then the review row, then the segment, then the blocks, as `log_place` takes them). Each free span is one block

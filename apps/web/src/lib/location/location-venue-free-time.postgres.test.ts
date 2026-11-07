@@ -115,6 +115,22 @@ describeWithDatabase("record_poi_once with an activity on disposable PostgreSQL 
     expect(await blocksFrom(card.event)).toEqual([]);
   });
 
+  it("logs an uncategorised description around existing blocks for a one-time venue", async () => {
+    const { resolveLocationReviewAction } = await import("./location-review-service");
+    const card = await stay("seg-description", 240, 270, [250, 260]);
+    const decision = { ...action, edit: { categoryId: null, description: "Read a book" } };
+    const first = await resolveLocationReviewAction(card.reviewId, decision, session);
+    expect(first).toMatchObject({ ok: true, status: "accepted" });
+    const retry = await resolveLocationReviewAction(card.reviewId, decision, session);
+    expect(retry).toMatchObject({ alreadyResolved: true, equivalent: true, entryIds: (first as { entryIds: string[] }).entryIds });
+    expect(await blocksFrom(card.event)).toEqual([
+      { startedAt: at(240), stoppedAt: at(250), categoryId: null, placeLabel: "Exampleton Bakery", placeId: null },
+      { startedAt: at(260), stoppedAt: at(270), categoryId: null, placeLabel: "Exampleton Bakery", placeId: null }
+    ]);
+    const { rows } = await database!.query("select description from time_entries where created_from_event_id = $1", [card.event]);
+    expect(rows).toEqual([{ description: "Read a book" }, { description: "Read a book" }]);
+  });
+
   it("keeps the whole stay without an activity, as before", async () => {
     const { resolveLocationReviewAction } = await import("./location-review-service");
     const card = await stay("seg-plain", 200, 230, [205, 210]);
