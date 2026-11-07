@@ -982,7 +982,23 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
     expect(chips().every((chip) => !chip.props.accessibilityState.checked)).toBe(true);
     expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Optional");
+    const preview = tree.root.find((node) => node.type === ("View" as never) && node.props.accessibilityLabel === "Activity");
+    const disclosure = () => preview.findByProps({ testID: "location-correction-log-all" });
+    const style = (node: ReturnType<typeof disclosure>) => Object.assign({}, ...node.props.style({ pressed: false }));
+    expect(preview.props.style.flexWrap).toBe("wrap");
+    expect(style(disclosure()).minHeight).toBe(style(chips()[0]).minHeight);
+    expect(disclosure().props.hitSlop).toEqual(chips()[0].props.hitSlop);
+    expect(disclosure().props).toMatchObject({
+      accessibilityLabel: "All activities", accessibilityRole: "button", accessibilityState: { expanded: false }
+    });
+    const labelSize = () => disclosure().find((node) => node.type === ("Text" as never)
+      && node.props.style.some((part: { opacity?: number }) => part.opacity === 0)).props.children;
+    expect(labelSize()).toBe("Fewer activities");
     tap(tree, "location-correction-log-all");
+    expect(disclosure().props).toMatchObject({
+      accessibilityLabel: "Fewer activities", accessibilityRole: "button", accessibilityState: { expanded: true }
+    });
+    expect(labelSize()).toBe("Fewer activities");
     expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch", "Gym", "Walk"]);
     tap(tree, "location-correction-log-cat-gym");
     tap(tree, "location-correction-log-all");

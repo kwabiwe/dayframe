@@ -787,21 +787,22 @@ export function LocationCorrectionSheet({
                   style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
                   testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
               </View>
-              <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={[activityChipStyles.compactWrap, styles.activityPreview]}>
-                {recommendedActivities.map(activityChip)}
-              </View>
-              {remainingActivities.length ? (
-                <View>
-                  <ShapeAction expanded={allActivities} label={allActivities ? "Fewer activities" : "All activities"}
-                    onPress={() => setAllActivities((open) => !open)} testID="location-correction-log-all" theme={theme} />
+              <View style={styles.activityPreview}>
+                <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
+                  {recommendedActivities.map(activityChip)}
+                  {remainingActivities.length ? (
+                    <ActivityDisclosure expanded={allActivities} onPress={() => setAllActivities((open) => !open)} theme={theme} />
+                  ) : null}
+                </View>
+                {remainingActivities.length ? (
                   <InlineReveal open={allActivities} reduceMotion={reduceMotion}>
                     <View accessibilityLabel="More activities" accessibilityRole="radiogroup"
                       style={[activityChipStyles.compactWrap, styles.moreActivities]}>
                       {remainingActivities.map(activityChip)}
                     </View>
                   </InlineReveal>
-                </View>
-              ) : null}
+                ) : null}
+              </View>
             </View>
           ) : null}
           {placeSection ? (
@@ -1021,14 +1022,36 @@ function InlineReveal({ children, onHeightChange, open, reduceMotion, testID }: 
   );
 }
 
+/** Keep the disclosure in the same wrapped slot as its label changes. */
+function ActivityDisclosure({ expanded, onPress, theme }: {
+  expanded: boolean; onPress: () => void; theme: MobileTheme;
+}) {
+  const label = expanded ? "Fewer activities" : "All activities";
+  const typography = mobileTextProps("control");
+  return (
+    <Pressable accessibilityLabel={label} accessibilityRole="button" accessibilityState={{ expanded }}
+      hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID="location-correction-log-all"
+      style={({ pressed }) => [activityChipStyles.compact, styles.activityDisclosure,
+        { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.activityDisclosureText}>
+        <Text {...typography} numberOfLines={1} style={[activityChipStyles.compactText, styles.activityDisclosureMeasure]}>
+          Fewer activities
+        </Text>
+        <Text {...typography} numberOfLines={1} style={[activityChipStyles.compactText, StyleSheet.absoluteFill, { color: theme.textPrimary }]}>
+          {label}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 /** A correction's compact pill: neutral, or in the danger colour for one that takes something off the day. */
-function ShapeAction({ danger = false, expanded, label, onPress, testID, theme }: {
-  danger?: boolean; expanded?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
+function ShapeAction({ danger = false, label, onPress, testID, theme }: {
+  danger?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme;
 }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityState={expanded === undefined ? undefined : { expanded }}
-      hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
-      style={({ pressed }) => [compactPillStyles.pill, expanded !== undefined && styles.activityDisclosure,
+    <Pressable accessibilityRole="button" hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
+      style={({ pressed }) => [compactPillStyles.pill,
         { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
       <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: danger ? theme.dangerText : theme.textPrimary }]}>{label}</Text>
     </Pressable>
@@ -1184,8 +1207,10 @@ const styles = StyleSheet.create({
   activityFirst: { gap: 8 },
   activityHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
   activityPreview: { paddingVertical: 6 },
-  activityDisclosure: { minHeight: 44 },
-  moreActivities: { paddingTop: 12, paddingBottom: 6 },
+  activityDisclosure: { borderColor: "transparent", paddingLeft: 12 },
+  activityDisclosureText: { flexShrink: 1 },
+  activityDisclosureMeasure: { opacity: 0 },
+  moreActivities: { paddingTop: 12 },
   inlineClip: { overflow: "hidden" },
   inlineMeasure: { position: "absolute", left: 0, right: 0, top: 0 },
   inlineChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
