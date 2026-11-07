@@ -45,9 +45,17 @@ export type CalendarListWeeks = {
   failedWeeks: readonly string[];
   /** Reads a week again now (its line's Try again). */
   retryWeek: (startKey: string) => void;
+  /** Drops older copies of a successfully moved block without reading its interior weeks. */
+  evictOlderBlockVersions: (entryId: string, updatedAt: string) => void;
 };
 
 const NO_ENTRIES: readonly TimeEntryRow[] = [];
+type PendingWeekRead = { generation: number; movedVersions?: Map<string, number> };
+
+function isOlderVersion(entry: TimeEntryRow, updatedAt: number) {
+  const version = Date.parse(entry.updatedAt);
+  return !Number.isFinite(version) || version < updatedAt;
+}
 
 /** Days from one date key to another (positive when `to` is later). */
 function dayDistance(from: string, to: string) {
@@ -125,6 +133,7 @@ export function useCalendarListWeeks({
   }, [generation, refreshToken]);
   // The newest read of each week ("generation:startKey"), so an older answer never replaces a newer one.
   const readSeqRef = useRef(new Map<string, number>());
+  const pendingReadsRef = useRef(new Set<PendingWeekRead>());
   const loadedDuringEditRef = useRef<(forGeneration: number, startKey: string, edit: boolean) => void>(() => undefined);
   const revalidateRef = useRef<(forGeneration: number, startKey: string, edit?: boolean) => void>(() => undefined);
   // Every invalidation (an edit or a bootstrap refresh), so a week loading through one is known to predate it.
@@ -143,26 +152,51 @@ export function useCalendarListWeeks({
 
   /** Reads one week for this lifetime; commits only if it is still the week's newest read. */
   const readWeek = useCallback((startKey: string, forGeneration: number, commit: (entries: TimeEntryRow[]) => void) => {
-    const read = (): Promise<boolean> => {
-      const seqKey = `${forGeneration}:${startKey}`;
-      const seq = (readSeqRef.current.get(seqKey) ?? 0) + 1;
-      readSeqRef.current.set(seqKey, seq);
-      return clientFetch(`/api/bootstrap?date=${startKey}`, { cache: "no-store" })
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`Unable to load the week of ${startKey}: ${response.status}`);
-          return (await response.json()) as BootstrapData;
-        })
-        .then((payload) => {
-          if (generationRef.current !== forGeneration || readSeqRef.current.get(seqKey) !== seq) return false;
-          if (`${payload.workspace.id}:${payload.user.id}` !== owner) return false;
-          commit(payload.weekEntries);
-          // A read never re-reads itself after an edit (Codex r2 on #634: 20 delayed reads made 20 more): the edit marks
-          // every loaded week stale, reads its own bounded set again, and leaves the rest to their visits.
-          return true;
-        });
-    };
-    return read();
+    const seqKey = `${forGeneration}:${startKey}`;
+    const seq = (readSeqRef.current.get(seqKey) ?? 0) + 1;
+    readSeqRef.current.set(seqKey, seq);
+    const pending: PendingWeekRead = { generation: forGeneration };
+    const reads = pendingReadsRef.current;
+    reads.add(pending);
+    return clientFetch(`/api/bootstrap?date=${startKey}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Unable to load the week of ${startKey}: ${response.status}`);
+        return (await response.json()) as BootstrapData;
+      })
+      .then((payload) => {
+        if (generationRef.current !== forGeneration || readSeqRef.current.get(seqKey) !== seq) return false;
+        if (`${payload.workspace.id}:${payload.user.id}` !== owner) return false;
+        const movedVersions = pending.movedVersions;
+        commit(movedVersions ? payload.weekEntries.filter((entry) => {
+          const version = movedVersions.get(entry.id);
+          return version === undefined || !isOlderVersion(entry, version);
+        }) : payload.weekEntries);
+        // A read never re-reads itself after an edit (Codex r2 on #634: 20 delayed reads made 20 more): the edit marks
+        // every loaded week stale, reads its own bounded set again, and leaves the rest to their visits.
+        return true;
+      })
+      .finally(() => { reads.delete(pending); });
   }, [owner]);
+
+  const evictOlderBlockVersions = useCallback((entryId: string, updatedAt: string) => {
+    const version = Date.parse(updatedAt);
+    if (!enabled || generationRef.current !== generation || !Number.isFinite(version)) return;
+    // A read begun before this save can still arrive for a week outside the refresh window.
+    for (const pending of pendingReadsRef.current) {
+      if (pending.generation !== generation) continue;
+      const movedVersions = pending.movedVersions ??= new Map();
+      movedVersions.set(entryId, Math.max(version, movedVersions.get(entryId) ?? version));
+    }
+    setStored((current) => {
+      if (current?.generation !== generation) return current;
+      const evict = (week: WeekPage) => {
+        const entries = week.entries.filter((entry) => entry.id !== entryId || !isOlderVersion(entry, version));
+        return entries.length === week.entries.length ? week : { ...week, entries };
+      };
+      // Only a week read updates the empty-edge count. A local eviction must not widen this edit's immediate reads.
+      return { ...current, earlier: current.earlier.map(evict), later: current.later.map(evict) };
+    });
+  }, [enabled, generation]);
 
   const replaceWeek = useCallback((forGeneration: number, startKey: string) => (entries: TimeEntryRow[]) => {
     setStored((current) => {
@@ -382,6 +416,7 @@ export function useCalendarListWeeks({
     reachedLatest,
     load,
     failedWeeks: enabled && failedWeeks.generation === generation ? [...failedWeeks.weeks] : NO_DATES,
-    retryWeek
+    retryWeek,
+    evictOlderBlockVersions
   };
 }

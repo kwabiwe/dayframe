@@ -29,6 +29,7 @@ import { duplicateTimeEntry, splitTimeEntry } from "@/lib/time-entry-split";
 import { timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, ReviewItemRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
+import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
 import {
   dateTimeLocal,
   formatDate,
@@ -50,6 +51,7 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
+import { addCalendarDays, resolveTimelineRanges, toTimelineDateKey } from "@/lib/timeline-view";
 import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, visitedGuess, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TimelineTrip, type TripLeg } from "@dayframe/shared";
 import { useLocalDayStartMs, useMediaQuery } from "@/components/useCalendarClock";
 import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-preferences";
@@ -286,7 +288,24 @@ function emptyDayTimeline(day: DateRange): LocationTimeline {
 }
 
 /** What a save in the List changed: the blocks (their days before it) and their new times (their days after it). */
-export type ListChange = { entryIds?: readonly string[]; times?: readonly (string | null | undefined)[] };
+export type ListChange = {
+  entryIds?: readonly string[];
+  times?: readonly (string | null | undefined)[];
+  moved?: { entryId: string; updatedAt: string };
+};
+
+function savedListChange(entry: TimeEntryRow, plan: CalendarEntryCompactSavePlan, outcome: { ok: true; updatedAt?: string }): ListChange {
+  const { startedAt, stoppedAt } = plan.resolved;
+  const change: ListChange = { entryIds: [entry.id], times: [startedAt, stoppedAt] };
+  if (entry.stoppedAt && outcome.updatedAt && (plan.payload.startedAt || plan.payload.stoppedAt)) {
+    const startWeek = resolveTimelineRanges({ date: toTimelineDateKey(new Date(entry.startedAt)), scope: "week", view: "list" }).week;
+    // Refresh uses the dates of both endpoints, so a Monday midnight end still leaves the preceding week in between.
+    if (Date.parse(entry.stoppedAt) >= +addCalendarDays(startWeek.end, 7)) {
+      change.moved = { entryId: entry.id, updatedAt: outcome.updatedAt };
+    }
+  }
+  return change;
+}
 
 export function EntriesTable({
   entries: loadedEntries,
@@ -1375,7 +1394,7 @@ export function EntriesTable({
       inlineEditorRef.current = null;
       setInlineEditor(null);
     }
-    refreshRouteIfNeeded(await onChanged?.({ entryIds: [entry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] }));
+    refreshRouteIfNeeded(await onChanged?.(savedListChange(entry, plan, outcome)));
   }
 
   function refreshRouteIfNeeded(shellRefreshed: boolean | void) {
@@ -1990,7 +2009,7 @@ export function EntriesTable({
               ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
               : await updateActiveEntryFromCalendar({ plan });
             if (outcome.ok) {
-              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id], times: [plan.resolved.startedAt, plan.resolved.stoppedAt] }));
+              refreshRouteIfNeeded(await onChanged?.(savedListChange(editingEntry, plan, outcome)));
             }
             return outcome;
           }}

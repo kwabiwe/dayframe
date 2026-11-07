@@ -1364,6 +1364,14 @@ export async function saveTimeEntryQuickEdit(entryId: string, plan: CalendarEntr
       }
       return { ok: false, error: message } as const;
     }
+    if (plan.payload.startedAt || plan.payload.stoppedAt) {
+      try {
+        const { updatedAt } = (await response.json()) as { updatedAt?: unknown };
+        if (typeof updatedAt === "string") return { ok: true, updatedAt } as const;
+      } catch {
+        // A successful save can still use the normal refresh if the response has no version.
+      }
+    }
     return { ok: true } as const;
   } catch {
     return { ok: false, error: "Unable to save this block. Check your connection and try again." } as const;
