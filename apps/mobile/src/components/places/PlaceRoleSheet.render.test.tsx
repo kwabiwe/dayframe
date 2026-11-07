@@ -7,8 +7,18 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+const keyboard = vi.hoisted(() => ({
+  dismiss: vi.fn(),
+  freezeForDismissal: vi.fn(),
+  keyboardInset: 0,
+  keyboardSpace: { value: 0 },
+  onScrollLayout: vi.fn(),
+  revealWhenSettled: vi.fn(),
+  sheetMaxHeight: 680
+}));
 vi.mock("react-native", () => ({
   AccessibilityInfo: { announceForAccessibility: () => undefined },
+  Keyboard: { dismiss: keyboard.dismiss },
   Modal: "Modal",
   Pressable: "Pressable",
   ScrollView: "ScrollView",
@@ -20,15 +30,18 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "ReanimatedView" },
-  LayoutAnimationConfig: ({ children }: { children: unknown }) => children
+  LayoutAnimationConfig: ({ children }: { children: unknown }) => children,
+  useAnimatedStyle: (style: () => unknown) => style()
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 59 }) }));
 vi.mock("../SwipeDismissSheet", async () => {
   const React = await import("react");
   return {
     SwipeDismissSheet: forwardRef(function Sheet(props: Record<string, unknown>, ref) {
-      useImperativeHandle(ref, () => ({ dismiss: () => (props.onDismiss as () => void)() }));
-      return React.createElement("Sheet", null, props.children as never);
+      useImperativeHandle(ref, () => ({ dismiss: () => {
+        if ((props.onDismissStart as () => boolean | void)() !== false) (props.onDismiss as () => void)();
+      } }));
+      return React.createElement("Sheet", props, props.children as never);
     })
   };
 });
@@ -47,11 +60,12 @@ vi.mock("../settings/SettingsBlocks", async () => {
   };
 });
 vi.mock("../../lib/motion", () => ({ localLayoutTransition: () => null, localPresenceEntering: () => null, localPresenceExiting: () => null }));
+vi.mock("../../lib/contentSizedSheetKeyboard", () => ({ useContentSizedSheetKeyboard: () => keyboard }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}), MOBILE_DISPLAY_FONT: { bold: "Display" } }));
 
 const { PlaceRoleSheet } = await import("./PlaceRoleSheet");
 const theme = { border: "#333", dangerText: "#f55", surface: "#000", surfaceInset: "#111", surfaceMuted: "#222", textMuted: "#777", textPrimary: "#fff", textSecondary: "#aaa" } as never;
-const styles = {} as never;
+const styles = { activeEditSheet: { paddingBottom: 10 } } as never;
 // Synthetic coordinates: at latitude 10, 0.001° of latitude is about 111 m.
 const oldHome = { id: "p-home", name: "Example Flat", role: "home" as const, radiusMeters: 100, latitude: 10, longitude: 20 };
 const near = { id: "p-near", name: "Example Studio", role: null, radiusMeters: 100, latitude: 10.002, longitude: 20 };
@@ -61,18 +75,21 @@ let tree: ReturnType<typeof create> | undefined;
 afterEach(() => {
   if (tree) act(() => tree!.unmount());
   tree = undefined;
+  keyboard.keyboardInset = 0;
+  keyboard.keyboardSpace.value = 0;
+  vi.clearAllMocks();
 });
 const find = (type: string) => tree!.root.findAll((node: ReactTestInstance) => (node.type as unknown) === type);
 const byTestID = (testID: string) => tree!.root.findAll((node: ReactTestInstance) => node.props.testID === testID && typeof node.type === "string");
 
 type SheetPlace = { id: string; name: string; role: "home" | "work" | null; radiusMeters: number; latitude: number | null; longitude: number | null };
 
-function render(places: SheetPlace[] = [oldHome, near, far]) {
+function render(places: SheetPlace[] = [oldHome, near, far], mode: "choose" | "clear" = "choose") {
   const onSave = vi.fn(() => Promise.resolve(null));
   act(() => {
     tree = create(
       <PlaceRoleSheet
-        mode="choose"
+        mode={mode}
         onAddNew={() => undefined}
         onClose={() => undefined}
         onSave={onSave}
@@ -96,6 +113,25 @@ async function save() {
 }
 
 describe("Home and Work sheet › Replace the old place (PRD D19 A10)", () => {
+  it("reserves the keyboard space inside Clear and freezes it when a rename is saved", async () => {
+    keyboard.keyboardInset = 260;
+    keyboard.keyboardSpace.value = 256;
+    const onSave = render(undefined, "clear");
+    const sheet = find("Sheet")[0];
+    expect(sheet.props.keyboardInset).toBe(260);
+    expect(sheet.props.style[1]).toEqual({ height: 656, paddingBottom: 266 });
+    const input = byTestID("place-role-previous-name")[0];
+    act(() => {
+      input.props.onFocus();
+      input.props.onChangeText("Renamed home");
+    });
+    expect(keyboard.revealWhenSettled).toHaveBeenCalledOnce();
+    await save();
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ role: "home", placeId: null, previousPlaceName: "Renamed home" }));
+    expect(keyboard.freezeForDismissal).toHaveBeenCalledOnce();
+    expect(keyboard.dismiss).toHaveBeenCalledOnce();
+  });
+
   it("offers it, on, when the new Home is within 300 m of the old one, and asks to archive it", async () => {
     const onSave = render();
     expect(byTestID("place-role-replace")).toHaveLength(0);

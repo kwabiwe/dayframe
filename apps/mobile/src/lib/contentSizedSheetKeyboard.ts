@@ -36,6 +36,8 @@ const KEYBOARD_EASING = Easing.bezier(0.17, 0.59, 0.4, 0.77);
  *   space finishes, or — for an immediate update — on the scroll view's next layout
  *   (`onScrollLayout`) and two frames later, whichever lands; also after `keyboardDidShow` and
  *   `revealWhenSettled` (a field focused with the keyboard already up).
+ * - A fixed-height consumer can use `keyboardSpace` to grow and pad the same surface, and call
+ *   `freezeForDismissal` once it accepts a close so the keyboard cannot resize the departing sheet.
  */
 export function useContentSizedSheetKeyboard({
   bottomInset,
@@ -56,17 +58,18 @@ export function useContentSizedSheetKeyboard({
   // While the keyboard is leaving: whether it has gone, and whether the space has settled.
   const leaving = useRef({ keyboardGone: true, spaceSettled: true });
   const pendingReveal = useRef(false);
+  const frozen = useRef(false);
   // The direction of the latest "will" event (null before any); "did" events only complete it.
   const latestWill = useRef<"show" | "hide" | null>(null);
   const onRevealRef = useRef(onReveal);
   onRevealRef.current = onReveal;
 
   const reveal = useCallback(() => {
-    if (target.current > 0) onRevealRef.current();
+    if (!frozen.current && target.current > 0) onRevealRef.current();
   }, []);
 
   const revealWhenSettled = useCallback(() => {
-    if (target.current <= 0) return;
+    if (frozen.current || target.current <= 0) return;
     pendingReveal.current = true;
     requestAnimationFrame(() => requestAnimationFrame(reveal));
   }, [reveal]);
@@ -84,7 +87,7 @@ export function useContentSizedSheetKeyboard({
   }, []);
 
   const spaceSettled = useCallback((settledInset: number) => {
-    if (settledInset !== target.current) return;
+    if (frozen.current || settledInset !== target.current) return;
     if (settledInset > 0) {
       reveal();
       return;
@@ -93,8 +96,15 @@ export function useContentSizedSheetKeyboard({
     releaseIfGone();
   }, [releaseIfGone, reveal]);
 
+  const freezeForDismissal = useCallback(() => {
+    frozen.current = true;
+    pendingReveal.current = false;
+    cancelAnimation(keyboardSpace);
+  }, [keyboardSpace]);
+
   useEffect(() => {
     const follow = (event: KeyboardEvent, nextInset: number, phase: "will" | "didShow" | "didHide") => {
+      if (frozen.current) return;
       if (phase === "didHide") {
         // The completion of a hide that a newer show has replaced.
         if (latestWill.current === "show") return;
@@ -153,7 +163,9 @@ export function useContentSizedSheetKeyboard({
 
   return {
     contentPaddingBottom: layout.contentPaddingBottom,
+    freezeForDismissal,
     keyboardInset,
+    keyboardSpace,
     keyboardSpaceStyle,
     onScrollLayout,
     revealWhenSettled,
