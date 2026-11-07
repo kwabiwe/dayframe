@@ -14,6 +14,8 @@ const server = vi.hoisted(() => ({
   /** Every request, in order, with the fake clock's time. */
   requests: [] as Array<{ at: number; request: string }>,
   timerStateStatus: 200,
+  completedRevision: undefined as string | undefined,
+  bootstrapRevision: undefined as string | undefined,
   activeEntry: null as TimeEntryRow | null,
   /** The fingerprint the next timer-state answers carry, when it differs from the stored block. */
   fingerprintOverride: null as { activeEntryId: string | null; updatedAt: string | null } | null,
@@ -47,7 +49,9 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         if (server.holdTimerState) await new Promise<void>((resolve) => server.held.push(resolve));
         const fingerprint = server.fingerprintOverride
           ?? { activeEntryId: server.activeEntry?.id ?? null, updatedAt: server.activeEntry?.updatedAt ?? null };
-        return reply(server.timerStateStatus, { ...fingerprint, serverNow: new Date().toISOString() });
+        return reply(server.timerStateStatus, {
+          ...fingerprint, completedEntryRevision: server.completedRevision, serverNow: new Date().toISOString()
+        });
       } finally {
         server.inFlight -= 1;
       }
@@ -58,7 +62,10 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         server.holdNextBootstrap = false;
         await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
       }
-      return reply(200, bootstrap(server.activeEntry, server.workspace));
+      return reply(200, {
+        ...bootstrap(server.activeEntry, server.workspace),
+        completedEntryRevision: server.bootstrapRevision ?? server.completedRevision
+      });
     }
     if (method === "POST" && url === "/api/time-entries") {
       if (server.holdPosts) await new Promise<void>((resolve) => server.heldPosts.push(resolve));
@@ -94,6 +101,8 @@ beforeEach(() => {
   vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
   server.requests = [];
   server.timerStateStatus = 200;
+  server.completedRevision = undefined;
+  server.bootstrapRevision = undefined;
   server.activeEntry = null;
   server.fingerprintOverride = null;
   server.holdTimerState = false;
@@ -148,6 +157,28 @@ async function mount(ui = tree()) {
 }
 
 describe("web timer-state polling cadence", () => {
+  it("checks a remote completed-block change on reconnect and acknowledges only the applied bootstrap", async () => {
+    server.completedRevision = "1";
+    await mount();
+    await advance(500);
+    expect(probe.runtime?.data?.completedEntryRevision).toBe("1");
+    const before = bootstraps().length;
+
+    server.completedRevision = "3";
+    server.bootstrapRevision = "2";
+    act(() => { window.dispatchEvent(new Event("online")); });
+    await advance(1);
+    expect(bootstraps()).toHaveLength(before + 1);
+    expect(probe.runtime?.data?.completedEntryRevision).toBe("2");
+
+    server.bootstrapRevision = undefined;
+    await advance(10_000);
+    expect(bootstraps()).toHaveLength(before + 2);
+    expect(probe.runtime?.data?.completedEntryRevision).toBe("3");
+    await advance(10_000);
+    expect(bootstraps()).toHaveLength(before + 2);
+  });
+
   it("polls every 10 s while visible and focused: about 60 in 10 minutes", async () => {
     await mount();
     expect(polls()).toHaveLength(1); // the first poll, at once

@@ -100,6 +100,9 @@ describe("query normalization context", () => {
 
   it("sends every activity that doesn't count, archived ones included, with bootstrap (UIA-043)", async () => {
     mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("dayframe_sync.completed_entry_revisions")) {
+        return { rows: [{ completedEntryRevision: "3" }] };
+      }
       if (statement.includes("counts_toward_goal = false")) {
         // No is_archived filter: an archived Sleep must keep its history out of the goal.
         expect(statement).not.toContain("is_archived");
@@ -109,6 +112,8 @@ describe("query normalization context", () => {
     });
     const data = await getBootstrapData(session);
     expect(data.goalExcludedCategoryIds).toEqual(["archived-sleep", "nap"]);
+    expect(data.completedEntryRevision).toBe("3");
+    expect(mocks.query.mock.calls[0][0]).toContain("dayframe_sync.completed_entry_revisions");
   });
 
   it("reads automation rule references from workspace-joined rows", async () => {

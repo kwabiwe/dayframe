@@ -33,6 +33,7 @@ import { placeDisplayNameSql } from "./place-display";
 import { reviewProposalHash } from "./review-proposal-hash";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
+import { getCompletedEntryRevision } from "./timer-state";
 import { addDaysToDateKey, mondayOfDateKey, zonedDateKey, zonedStartOfDay, zonedWallHour } from "./viewer-time-zone";
 
 export type ClientRow = {
@@ -259,6 +260,7 @@ export type DashboardSeriesPoint = {
 };
 
 export type BootstrapData = {
+  completedEntryRevision?: string;
   authMode?: RequestSession["authMode"];
   /**
    * The zone whose midnights built `dateRange` and the series: the web viewer's (`dayframe_tz`)
@@ -395,6 +397,9 @@ export async function getBootstrapData(
     timeZone?: string | null;
   } = {}
 ): Promise<BootstrapData> {
+  // Read the revision before the entries. A concurrent commit may appear in the data ahead of
+  // its marker, which causes a harmless refresh. The reverse would acknowledge a change we missed.
+  const completedEntryRevision = await getCompletedEntryRevision(session);
   const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
   const timeZone = options.timeZone ?? null;
   const capturedNow = new Date().toISOString();
@@ -492,6 +497,7 @@ export async function getBootstrapData(
 
   return {
     authMode: session.authMode,
+    completedEntryRevision,
     viewerTimeZone: timeZone,
     user,
     workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],

@@ -483,6 +483,7 @@ export function TimeReviewViews({
     owner: listOwner,
     refreshToken: listRefreshToken,
     staleKey: listWeekBootstrap,
+    completedEntryRevision: listWeekBootstrap.completedEntryRevision,
     consumeEditBootstrap
   });
   const { evictOlderBlockVersions } = listWeeks;

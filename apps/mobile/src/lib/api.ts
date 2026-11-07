@@ -258,6 +258,7 @@ export type MobileOpenTrip = {
 };
 
 export type MobileBootstrap = {
+  completedEntryRevision?: string;
   openTrip?: MobileOpenTrip | null;
   serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean};
   user: {

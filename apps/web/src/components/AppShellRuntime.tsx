@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { useSearchParams } from "next/navigation";
 import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
+  completedEntriesChanged,
   timerStateChanged,
   type DayframePaletteKey,
   type TimerStateFingerprint
@@ -581,8 +582,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (hasCurrentTimerAction()) return;
         // A changed fingerprint is kept only once its reload has committed (which records the
         // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
-        if (!timerStateChanged(timerStateRef.current, next)) timerStateRef.current = next;
-        else await reconcileFromPoll(stale);
+        const needsRefresh = timerStateChanged(timerStateRef.current, next) ||
+          completedEntriesChanged(dataRef.current?.completedEntryRevision, next.completedEntryRevision);
+        if (needsRefresh) await reconcileFromPoll(stale);
+        else timerStateRef.current = next;
       } catch {
         if (!stale()) consecutiveFailures += 1;
       } finally {
@@ -609,6 +612,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
     pollSoon();
     window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
     document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
@@ -616,6 +620,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       clear();
       unregister();
       window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
       document.removeEventListener("visibilitychange", resume);
     };
   }, [hasCurrentTimerAction, reconcileFromPoll]);

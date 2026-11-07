@@ -260,7 +260,7 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     });
     return { weeks, failing };
   }
-  async function loadWeeks(count: number, props: { focusDate: string; staleKey: number; refreshToken: number; affectedDates?: string[] }) {
+  async function loadWeeks(count: number, props: { focusDate: string; staleKey: number; refreshToken: number; affectedDates?: string[]; completedEntryRevision?: string }) {
     const { useCalendarListWeeks } = await import("./useCalendarListWeeks");
     const view = renderHook((current: typeof props) => useCalendarListWeeks({
       anchorWeekStart: ANCHOR, currentWeekStart: ANCHOR, enabled: true, owner: "w:u", ...current
@@ -274,6 +274,27 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
   }
   const ids = (entries: readonly TimeEntryRow[]) => entries.map((row) => row.id);
   const bootstrapReads = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).length;
+
+  it("updates a stationary historical viewport after a remote edit without reading all loaded weeks", async () => {
+    const remote = server();
+    const focusDate = weekKey(5);
+    const props = { focusDate, staleKey: 0, refreshToken: 0, completedEntryRevision: "4" };
+    const view = await loadWeeks(12, props);
+    const changed = entry("remote-edit", local(9, 26, 9));
+    remote.weeks.set(focusDate, [changed]);
+    remote.weeks.set(weekKey(12), []);
+    const before = bootstrapReads();
+    view.rerender({ ...props, staleKey: 1, completedEntryRevision: "5" });
+    await flush();
+    await flush();
+    expect(ids(view.result.current.entries)).toContain(changed.id);
+    expect(ids(view.result.current.entries)).toContain(`week-${weekKey(12)}`);
+    expect(bootstrapReads() - before).toBeLessThanOrEqual(3);
+    view.rerender({ ...props, focusDate: weekKey(12), staleKey: 1, completedEntryRevision: "5" });
+    await flush();
+    await flush();
+    expect(ids(view.result.current.entries)).not.toContain(`week-${weekKey(12)}`);
+  });
 
   it("reads an edited block's own week at once, far from the top day: its old row goes", async () => {
     const remote = server();
