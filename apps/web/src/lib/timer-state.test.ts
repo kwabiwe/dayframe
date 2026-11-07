@@ -26,7 +26,8 @@ describe("getTimerState", () => {
     mocks.query.mockResolvedValue({
       rows: [{
         activeEntryId: "entry-1",
-        updatedAt: new Date("2026-07-30T15:00:00.000Z")
+        updatedAt: new Date("2026-07-30T15:00:00.000Z"),
+        completedEntryRevision: "19"
       }]
     });
 
@@ -34,7 +35,8 @@ describe("getTimerState", () => {
 
     expect(result).toEqual(expect.objectContaining({
       activeEntryId: "entry-1",
-      updatedAt: "2026-07-30T15:00:00.000Z"
+      updatedAt: "2026-07-30T15:00:00.000Z",
+      completedEntryRevision: "19"
     }));
     expect(mocks.query).toHaveBeenCalledTimes(1);
     expect(mocks.query.mock.calls[0][0]).toContain("workspace_id = $1");
@@ -46,11 +48,12 @@ describe("getTimerState", () => {
     ]);
   });
 
-  it("returns a null fingerprint when no timer is active", async () => {
-    mocks.query.mockResolvedValue({ rows: [] });
+  it("returns the completed-entry revision even when no timer is active", async () => {
+    mocks.query.mockResolvedValue({ rows: [{ activeEntryId: null, updatedAt: null, completedEntryRevision: "27" }] });
     await expect(getTimerState(session)).resolves.toEqual(expect.objectContaining({
       activeEntryId: null,
-      updatedAt: null
+      updatedAt: null,
+      completedEntryRevision: "27"
     }));
   });
 });

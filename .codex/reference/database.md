@@ -52,6 +52,8 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Deploy `supabase/migrations/202608010001_health_sleep_session_reconciliation.sql` before server code that queries `user_edited_at`. Its historical backfill intentionally protects all previously changed Health sleep rows. It does not merge or delete historical duplicates.
 - Reporting coverage must clip intervals to the requested range and use a gaps-and-islands union. Do not infer covered time by subtracting pairwise intersections.
 
+Completed-block revisions are in `dayframe_sync.completed_entry_revisions`. Statement triggers increment the affected workspace/user keys inside the entry transaction. Inserts and deletes count only completed blocks. Updates count changed rows that were or became completed. A rollback and an identical update leave the marker unchanged. The counter is private to the database and cascades with the workspace membership. Hosted and local definitions must agree. Apply the migration before deploying its readers.
+
 ## Connection Pool
 
 - The web pool (`apps/web/src/lib/db.ts`, 10 connections, 1.5 s to connect or to wait for a free one) and every client it creates have `error` listeners for their whole life (`observeDatabaseErrors`): a connection the pooler or Postgres ends emits `error` outside any awaited promise, and without a listener Node crashes the function instance (stability audit 22 Oct 2026, SERVER-2). The running query still rejects; release a broken client with `client.release(true)`.

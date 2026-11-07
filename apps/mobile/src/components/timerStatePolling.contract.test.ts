@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { timerStateChanged, timerStatePollDelay, type TimerStateFingerprint } from "@dayframe/shared";
+import { completedEntriesChanged, timerStateChanged, timerStatePollDelay, type TimerStateFingerprint } from "@dayframe/shared";
 import { createDeletionCoordinator } from "../lib/historyDeletion";
 
 const dashboardSource = readFileSync(
@@ -40,6 +40,7 @@ const effectEnd = dashboardSource.indexOf(effectClose, fetchIndex) + effectClose
 const runPollEffect = new Function(
   "useEffect", "authState", "authStateCurrent", "AppState", "timerStateRef", "timerStatePollInFlight",
   "fetchTimerState", "reconcilePendingActiveDeletionAfterQueueBarrier", "timerStateChanged", "timerStatePollDelay",
+  "loadedBootstrap", "completedEntriesChanged",
   "loadRef", "transitionToSignedOut", "currentSessionGeneration", "currentMobileAccountEpoch", "AuthRequiredError",
   transpileModule(dashboardSource.slice(effectStart, effectEnd), {
     compilerOptions: { target: ScriptTarget.ES2022 }
@@ -93,6 +94,7 @@ function startPoll(pollInFlight = { current: false }) {
     }
   };
   const fingerprint = { current: before };
+  const loadedBootstrap = { current: { completedEntryRevision: "0" } };
   const fetchTimerState = vi.fn<() => Promise<TimerStateFingerprint>>().mockResolvedValue(stopped);
   const reconcileDeletion = vi.fn(async (_entryId: string | null, _canReconcile?: () => boolean) => new Set<string>());
   const load = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
@@ -107,6 +109,8 @@ function startPoll(pollInFlight = { current: false }) {
     reconcileDeletion,
     timerStateChanged,
     timerStatePollDelay,
+    loadedBootstrap,
+    completedEntriesChanged,
     { current: load },
     vi.fn(),
     () => sessionGeneration,
@@ -114,7 +118,7 @@ function startPoll(pollInFlight = { current: false }) {
     class AuthRequiredError extends Error {}
   );
   return {
-    fingerprint, fetchTimerState, reconcileDeletion, load, cleanup,
+    fingerprint, fetchTimerState, reconcileDeletion, load, loadedBootstrap, cleanup,
     replaceSession: () => { sessionGeneration += 1; },
     replaceAccount: () => { accountEpoch += 1; },
     changeAppState: (state: string) => {
@@ -127,6 +131,31 @@ function startPoll(pollInFlight = { current: false }) {
 describe("foreground timer-state reconciliation", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("retries completed-block changes until a bootstrap publishes the revision", async () => {
+    const poll = startPoll();
+    try {
+      poll.fetchTimerState.mockResolvedValue({ ...before, completedEntryRevision: "2" });
+      poll.load.mockResolvedValueOnce(false).mockImplementationOnce(async () => {
+        poll.loadedBootstrap.current.completedEntryRevision = "1";
+        return true;
+      }).mockImplementationOnce(async () => {
+        poll.loadedBootstrap.current.completedEntryRevision = "2";
+        return true;
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(poll.load).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(poll.load).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(poll.load).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(poll.load).toHaveBeenCalledTimes(3);
+    } finally {
+      poll.cleanup?.();
+    }
   });
 
   it("backs off a failed bootstrap and retries the same web Stop until it applies", async () => {

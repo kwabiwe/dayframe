@@ -39,6 +39,7 @@ import {
   paletteColorFor,
   previousEndOffer,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
+  completedEntriesChanged,
   timerStateChanged,
   timerStatePollDelay,
   formatClockTime,
@@ -1528,7 +1529,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           : fetched;
         // A coalesced, refused or failed bootstrap did not apply this change. Leave it
         // eligible for the next poll, with the same backoff used by a failed fingerprint.
-        if (timerStateChanged(timerStateRef.current, next) && !(await loadRef.current({ silent: true }))) {
+        const needsRefresh = timerStateChanged(timerStateRef.current, next) ||
+          completedEntriesChanged(loadedBootstrap.current?.completedEntryRevision, next.completedEntryRevision);
+        if (needsRefresh && !(await loadRef.current({ silent: true }))) {
           if (sameSession()) consecutiveFailures += 1;
           return;
         }

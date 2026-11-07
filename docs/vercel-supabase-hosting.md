@@ -178,6 +178,12 @@ Hosted prerequisite (owner, Supabase dashboard, per project): Authentication ›
 
 Auth email delivery (owner decision, 12 Oct 2026: deferred). Both projects still send auth email (password reset, confirmation) through Supabase's built-in mailer (Supabase's own sender address). It only delivers to members of the Supabase organisation's team — the Dayframe signup allowlist does not change that, so a friend on the allowlist gets no reset or confirmation email until custom SMTP is set up — and it is rate-limited (a repeat request within the cooldown returns `over_email_send_rate_limit`, which the app hides behind its uniform reply) and its mail often lands in spam, so a reset can look as if it never arrived even when the auth logs show `mail.send` (staging, 12 Oct). The owner plans to move Dayframe to its own domain and may later self-host Supabase; custom SMTP from that domain (with branded templates) is set up then, in the Supabase Auth dashboard by the owner. Until then, check spam and the project's auth logs before treating a missing reset email as a code fault.
 
+## Completed-block refresh migration
+
+Apply `supabase/migrations/202611070001_completed_entry_revisions.sql` to staging before promoting its Preview and to production before deploying the matching server. The ordered local equivalent is `packages/db/migrations/024_completed_entry_revisions.sql`. The migration is additive, does not backfill historical entries and works with the previous server and installed clients. Existing owners start at revision zero.
+
+Verify the revision table's composite key and all three statement triggers. Confirm browser and iPhone sessions read the same marker for the same disposable workspace and user, and a different owner stays at zero after an edit. Keep the `dayframe_sync` schema outside the hosted public API. The app database role needs access to read the counter. Browser and mobile app sessions only receive their own marker through the server.
+
 ## Personal Beta Defaults
 
 - Single-user/friends testing.

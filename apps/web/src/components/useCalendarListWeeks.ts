@@ -1,5 +1,6 @@
 "use client";
 
+import { completedEntriesChanged } from "@dayframe/shared";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -95,6 +96,7 @@ export function useCalendarListWeeks({
   owner,
   refreshToken,
   staleKey,
+  completedEntryRevision,
   consumeEditBootstrap
 }: {
   anchorWeekStart: Date;
@@ -109,6 +111,8 @@ export function useCalendarListWeeks({
   refreshToken: number;
   /** Changes with each independent bootstrap refresh: every loaded week becomes stale (read again when visited). */
   staleKey?: unknown;
+  /** A completed-block change also revalidates weeks around the already visible day. */
+  completedEntryRevision?: string;
   /** Identifies the exact shell commit of a mutation already covered by refreshToken. */
   consumeEditBootstrap?: (snapshot: unknown) => boolean;
 }): CalendarListWeeks {
@@ -352,16 +356,27 @@ export function useCalendarListWeeks({
   // An independent bootstrap refresh (another device's change may be anywhere) marks all loaded weeks stale.
   // The same mutation's shell commit is already covered by the refresh token.
   const lastStaleKeyRef = useRef(staleKey);
+  const lastCompletedEntryRevision = useRef(completedEntryRevision);
   useEffect(() => {
     if (lastStaleKeyRef.current === staleKey) return;
     lastStaleKeyRef.current = staleKey;
-    if (consumeEditBootstrap?.(staleKey)) return;
+    const completedChange = completedEntriesChanged(lastCompletedEntryRevision.current, completedEntryRevision);
+    lastCompletedEntryRevision.current = completedEntryRevision;
+    const alreadyCovered = consumeEditBootstrap?.(staleKey);
+    if (alreadyCovered && !completedChange) return;
     invalidationRef.current += 1;
     const current = storedRef.current;
     if (!enabled || !current || current.generation !== generation) return;
-    markStale(generation, [...current.earlier, ...current.later]);
+    const loaded = [...current.earlier, ...current.later];
+    markStale(generation, loaded);
+    if (completedChange) {
+      // Reuse the same bounded window as local edits. In-flight reads see the newer mark and retry once.
+      for (const week of loaded) {
+        if (weekInListRefreshWindow(week.startKey, windowRef.current)) revalidate(generation, week.startKey);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consumeEditBootstrap, enabled, generation, staleKey]);
+  }, [completedEntryRevision, consumeEditBootstrap, enabled, generation, staleKey]);
   // The stale weeks of the window the List's top day has come to (at most the three weeks that overlap it), and of the
   // stale empty weeks it passed over on the way, at most LIST_GAP_WEEKS_READ_ON_SCROLL nearest the destination: an empty
   // week has no heading, so the top day can never be in it, and a block added to it elsewhere would otherwise never show

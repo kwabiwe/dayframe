@@ -1,13 +1,71 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "./db";
-import { processActivityEvent } from "./event-service";
+import { createManualEntry, deleteTimeEntry, processActivityEvent, updateTimeEntry } from "./event-service";
+import { getCompletedEntryRevision, getTimerState } from "./timer-state";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
 describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
   afterAll(async () => {
     await pool.end();
+  });
+
+  it("tracks only committed completed-block changes for their workspace and user", async () => {
+    const database = new URL(process.env.DATABASE_URL!);
+    expect(["localhost", "127.0.0.1"]).toContain(database.hostname);
+    expect(database.pathname).toMatch(/_test$/);
+    const relation = await pool.query("select to_regclass('dayframe_sync.completed_entry_revisions') as relation");
+    if (!relation.rows[0].relation) {
+      const migration = new URL("../../../../packages/db/migrations/024_completed_entry_revisions.sql", import.meta.url);
+      await pool.query(readFileSync(migration, "utf8"));
+    }
+    const userId = randomUUID();
+    const workspaceId = randomUUID();
+    const otherWorkspaceId = randomUUID();
+    const owner = { authMode: "dev" as const, scopes: ["app:read", "app:write"], userId, workspaceId };
+    const other = { ...owner, workspaceId: otherWorkspaceId };
+
+    try {
+      await pool.query("insert into users (id,email,name) values ($1,$2,'Revision test')", [userId, `${userId}@example.invalid`]);
+      await pool.query("insert into workspaces (id,name) values ($1,'Revision test'),($2,'Isolation test')", [workspaceId, otherWorkspaceId]);
+      await pool.query("insert into workspace_members (workspace_id,user_id) values ($1,$3),($2,$3)", [workspaceId, otherWorkspaceId, userId]);
+      expect(await getTimerState(owner)).toMatchObject({ activeEntryId: null, completedEntryRevision: "0" });
+      const timer = await pool.query<{ id: string }>(
+        "insert into time_entries (workspace_id,user_id,description,started_at) values ($1,$2,'Running',now()) returning id",
+        [workspaceId, userId]
+      );
+      expect(await getTimerState(owner)).toMatchObject({ activeEntryId: timer.rows[0].id, completedEntryRevision: "0" });
+      await pool.query("delete from time_entries where id = $1", [timer.rows[0].id]);
+
+      const block = await createManualEntry({
+        description: "Completed", startedAt: "2026-07-06T10:00:00Z", stoppedAt: "2026-07-06T10:15:00Z"
+      }, owner);
+      expect(await getTimerState(owner)).toMatchObject({ activeEntryId: null, completedEntryRevision: "1" });
+      await updateTimeEntry(block.id, { description: "Changed", tagNames: ["revision fixture"] }, owner);
+      expect(await getCompletedEntryRevision(owner)).toBe("2");
+      expect(await getCompletedEntryRevision(other)).toBe("0");
+
+      const writer = await pool.connect();
+      try {
+        await writer.query("begin");
+        await writer.query("update time_entries set description = 'Rolled back' where id = $1", [block.id]);
+        expect(await getCompletedEntryRevision(owner)).toBe("2");
+      } finally {
+        await writer.query("rollback");
+        writer.release();
+      }
+      await pool.query("update time_entries set description = description where id = $1", [block.id]);
+      expect(await getCompletedEntryRevision(owner)).toBe("2");
+      await deleteTimeEntry(block.id, owner);
+      expect(await getCompletedEntryRevision(owner)).toBe("3");
+      expect(await getCompletedEntryRevision(other)).toBe("0");
+    } finally {
+      await pool.query("delete from workspaces where id in ($1,$2)", [workspaceId, otherWorkspaceId]);
+      await pool.query("delete from users where id = $1", [userId]);
+    }
+    expect(await getCompletedEntryRevision(owner)).toBe("0");
   });
 
   it("refuses a switch after another device replaces its outgoing block", async () => {

@@ -5,6 +5,8 @@ export type TimerStateFingerprint = {
   activeEntryId: string | null;
   updatedAt: string | null;
   serverNow: string;
+  /** Optional while an installed client can still reach a server without the completed-block marker. */
+  completedEntryRevision?: string;
 };
 
 export function timerStateChanged(
@@ -16,6 +18,13 @@ export function timerStateChanged(
     previous.activeEntryId !== next.activeEntryId ||
     previous.updatedAt !== next.updatedAt
   );
+}
+
+export function completedEntriesChanged(
+  appliedRevision: string | undefined,
+  observedRevision: string | undefined
+) {
+  return observedRevision !== undefined && observedRevision !== appliedRevision;
 }
 
 export function timerStatePollDelay(consecutiveFailures: number) {
