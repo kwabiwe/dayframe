@@ -1015,6 +1015,23 @@ describe("automatic Location transfer permissions and replay", () => {
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(5);
   });
 
+  it("does not coalesce a failed replay or one that returned warnings", async () => {
+    await signInThroughApi(A, [place]);
+    await store.syncLocationEvidence();
+    calls.length = 0;
+    mockReplay(503);
+    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
+    routes["/api/location/replay"] = () => json({
+      ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0,
+      warnings: ["semantic_replay_deferred"]
+    });
+    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
+    mockReplay();
+    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
+    expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(3);
+  });
+
   it("aborts a dispatched replay when the user turns Location off", async () => {
     await signInThroughApi(A, [place]);
     await store.syncLocationEvidence();

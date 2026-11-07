@@ -1260,7 +1260,9 @@ async function uploadLocationEvidenceBatch(
     if (request.status === "session_changed") {
       return { status: "stopped", reason: "session_changed" };
     }
-    if (!request.response) return { status: "stopped", reason: "location_paused" };
+    if (!request.response) return options.signal?.aborted
+      ? { status: "stopped", reason: "cancelled", outcome: "cancelled" }
+      : { status: "stopped", reason: "location_paused" };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1453,7 +1455,9 @@ async function requestServerLocationReplay(
         message: "Location account changed while replay was running."
       };
     }
-    if (!request.response) return { ok: false as const, reason: "location_paused" as const };
+    if (!request.response) return options.signal?.aborted
+      ? { ok: false as const, reason: "cancelled" as const, outcome: "cancelled" as const }
+      : { ok: false as const, reason: "location_paused" as const };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1492,7 +1496,8 @@ async function requestServerLocationReplay(
       };
     }
     if (!options.signal?.aborted && isLocationCaptureSnapshotCurrent(options.capture) &&
-        payload.clientAcknowledgedMode && payload.rolloutMode === prepared.requestedMode) {
+        payload.clientAcknowledgedMode && payload.rolloutMode === prepared.requestedMode &&
+        payload.warnings.length === 0 && (!isSemanticMode(payload.rolloutMode) || prepared.semanticModeAcknowledgedAt)) {
       lastSuccessfulReplay = { revision: options.capture.revision, mode: payload.rolloutMode, at: Date.parse(completedAt) };
     }
     attemptOutcome = "success";
