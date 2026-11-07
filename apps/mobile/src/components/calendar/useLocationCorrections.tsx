@@ -82,9 +82,8 @@ export function useLocationCorrections({
   const [held, setHeld] = useState<{ id: number; target: LocationCorrectionTarget } | null>(null);
   // The presentation whose Done kept corrections: its item may leave the List as the sheet closes.
   const [closingId, setClosingId] = useState<number | null>(null);
-  // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet), with the span and account
-  // it was read for.
-  const [evidence, setEvidence] = useState<{ itemId: string; span: string; ownerKey: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
+  // The open sheet owns its map. A replacement, even for the same item, gets its own read.
+  const [evidence, setEvidence] = useState<{ presentationId: number; evidence: TimelineItemEvidenceDto | null } | null>(null);
   // The open sheet's own day (Codex r3 on #625): the timeline it was opened from, followed through that day's refreshes
   // and projected corrections, and held while the List browses another day (the Calendar tab's tap goes to today), so
   // the sheet's item, Logs as and Done never depend on the day being shown.
@@ -101,6 +100,13 @@ export function useLocationCorrections({
   // The span the map is read for: the item's when the sheet opens (at once), then each new span once it has held for
   // EVIDENCE_REREAD_DELAY_MS (a burst of refreshes reads once).
   const [readSpan, setReadSpan] = useState<{ id: number; span: string; startedAt: string } | null>(null);
+  // The shell reports dismissal after its exit. Once closed, release what the Dashboard no longer displays.
+  if (!open && (evidence || held || sheetDay || readSpan)) {
+    setEvidence(null);
+    setHeld(null);
+    setSheetDay(null);
+    setReadSpan(null);
+  }
   if (open && liveItem && liveSpan && readSpan?.id !== open.id) setReadSpan({ id: open.id, span: liveSpan, startedAt: liveItem.startedAt });
   const openId = open?.id ?? null;
   const liveStart = liveItem?.startedAt ?? null;
@@ -113,21 +119,18 @@ export function useLocationCorrections({
   const readStart = read?.startedAt ?? null;
   const readKey = read?.span ?? null;
   useEffect(() => {
-    if (!openItemId || !openKind || !readStart || !readKey || !userId || !workspaceId) return;
-    // Fenced to the account it was asked for: another account aborts it, and its answer is never shown there.
-    const forOwner = `${workspaceId}:${userId}`;
+    if (openId === null || !openItemId || !openKind || !readStart || !readKey || !userId || !workspaceId) return;
+    // Closing, replacing the sheet or changing accounts cancels the read.
     const controller = new AbortController();
     fetchTimelineItemEvidence({ id: openItemId, kind: openKind, startedAt: readStart },
       { owner: { userId, workspaceId }, signal: controller.signal }).then(
-      (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: result }); },
-      () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: null }); }
+      (result) => { if (!controller.signal.aborted) setEvidence({ presentationId: openId, evidence: result }); },
+      () => { if (!controller.signal.aborted) setEvidence({ presentationId: openId, evidence: null }); }
     );
     return () => controller.abort();
-  }, [openItemId, openKind, readStart, readKey, userId, workspaceId]);
-  // The last map read for this item and account (an older span's stays until the new one arrives; the sheet fences its
-  // guess to the times it describes).
-  const shownEvidence = evidence && evidence.itemId === openItemId && evidence.ownerKey === ownerKey && open
-    ? evidence.evidence ?? "unavailable" as const : null;
+  }, [openId, openItemId, openKind, readStart, readKey, userId, workspaceId]);
+  // A map for an older span stays until this sheet's next read completes.
+  const shownEvidence = evidence?.presentationId === openId ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
     if (!ownerKey) return;
