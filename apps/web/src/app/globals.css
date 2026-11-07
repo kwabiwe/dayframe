@@ -7326,8 +7326,11 @@ dialog.ui-dialog.df-range-custom {
     display: none;
   }
 
-  /* Long words in narrow columns wrap instead of spilling into the next cell (Codex r3 on #632). */
-  .timeline-list-table .timeline-group-time-summary,
+  /* The disclosure already shows the count. The duplicate label crowds the title in narrow rows. */
+  .timeline-list-table .timeline-group-time-summary {
+    display: none;
+  }
+
   .timeline-list-table .timeline-location-note {
     font-size: 11px;
     line-height: 1.25;
