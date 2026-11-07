@@ -661,6 +661,38 @@ final class DayframeCalendarCoreTests: XCTestCase {
     ))
   }
 
+  func testBracketNameFitsBelowTheHourLabelAtEveryZoom() throws {
+    for hourHeight in [48.0, 72, 128] {
+      let hour = 18 * hourHeight
+      let span = DayframeCalendarBracketSpan(top: hour, height: hourHeight / 2)
+      let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+        in: span, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+      ))
+      XCTAssertEqual(placement.offset, 8)
+      XCTAssertGreaterThanOrEqual(placement.maxLines, 1)
+      XCTAssertLessThanOrEqual(
+        placement.offset + Double(placement.maxLines) * DayframeCalendarBracketMath.labelLineHeight,
+        span.height - 2
+      )
+    }
+  }
+
+  func testBracketNameLeavesTheClockReadableEvenWhenNoLineFits() throws {
+    let hourHeight = 48.0
+    let hour = 18 * hourHeight
+    let beforeHour = DayframeCalendarBracketSpan(top: hour - 28, height: 24)
+    let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+      in: beforeHour, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+    ))
+    XCTAssertEqual(placement.offset, 2)
+    XCTAssertEqual(placement.maxLines, 1)
+    XCTAssertNil(DayframeCalendarBracketMath.labelPlacement(
+      in: DayframeCalendarBracketSpan(top: hour - 8, height: 24), hourHeight: hourHeight, hourLabelGlyphHeight: 12
+    ))
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 0, hourHeight: hourHeight), 11)
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 24, hourHeight: hourHeight), 24 * hourHeight - 11)
+  }
+
   func testBracketSpansItsPartsWhereAClockChangeDrawsThem() throws {
     // London's fall-back day (25 Oct 2026, 25 hours): a trip 01:40 BST → 01:20 GMT. Measured as one
     // block it would be a sliver at 01:40; its parts are drawn from 01:10 to just past 01:50.

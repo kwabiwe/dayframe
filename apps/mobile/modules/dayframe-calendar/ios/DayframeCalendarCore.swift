@@ -1896,6 +1896,38 @@ public struct DayframeCalendarBracketSpan: Equatable {
 }
 
 public enum DayframeCalendarBracketMath {
+  public static let labelLineHeight = 12.0
+
+  public static func hourLabelCenter(hour: Int, hourHeight: Double) -> Double {
+    min(24 * hourHeight - 11, max(11, Double(hour) * hourHeight))
+  }
+
+  /// Fits the decorative name into the first gap between clock labels within its rail.
+  public static func labelPlacement(
+    in span: DayframeCalendarBracketSpan,
+    hourHeight: Double,
+    hourLabelGlyphHeight: Double
+  ) -> (offset: Double, maxLines: Int)? {
+    let bottom = span.top + span.height - 2
+    var top = span.top + 2
+    guard bottom.isFinite, top.isFinite, hourHeight.isFinite, hourHeight > 0,
+          hourLabelGlyphHeight.isFinite, bottom - top >= labelLineHeight else { return nil }
+    let hourLabelClearance = max(0, hourLabelGlyphHeight) / 2 + 4
+
+    for hour in 0...24 {
+      let center = hourLabelCenter(hour: hour, hourHeight: hourHeight)
+      guard center + hourLabelClearance > top else { continue }
+      let gapEnd = min(bottom, center - hourLabelClearance)
+      if gapEnd - top >= labelLineHeight {
+        return (top - span.top, Int((gapEnd - top) / labelLineHeight))
+      }
+      top = center + hourLabelClearance
+      guard bottom - top >= labelLineHeight else { return nil }
+    }
+
+    return (top - span.top, Int((bottom - top) / labelLineHeight))
+  }
+
   /// A named pattern's bracket (location v3 PR 14b) runs from its first part's drawn top to its last
   /// part's drawn bottom: each part measured as the block it is (its minimum height, a clock change's
   /// wall-clock place), never the trip as one block, so it stays beside its parts at every zoom.

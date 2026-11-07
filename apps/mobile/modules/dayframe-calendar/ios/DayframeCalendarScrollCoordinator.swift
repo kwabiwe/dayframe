@@ -125,7 +125,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
       pinchGesture.addTarget(self, action: #selector(handlePinch(_:)))
       pinchGesture.delegate = self
-      pinchGesture.cancelsTouchesInView = false
+      // Once zoom starts, neither finger belongs to the block or lane item underneath it.
+      pinchGesture.cancelsTouchesInView = true
 
       horizontalPanGesture.addTarget(self, action: #selector(handleHorizontalPan(_:)))
       horizontalPanGesture.delegate = self
@@ -541,10 +542,16 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       _ gestureRecognizer: UIGestureRecognizer,
       shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-      if gestureRecognizer === longPressGesture || otherGestureRecognizer === longPressGesture {
+      // A pinch may take over from either pan. Its touches must never also activate a block.
+      let competingGesture: UIGestureRecognizer
+      if gestureRecognizer === pinchGesture {
+        competingGesture = otherGestureRecognizer
+      } else if otherGestureRecognizer === pinchGesture {
+        competingGesture = gestureRecognizer
+      } else {
         return false
       }
-      return gestureRecognizer === pinchGesture || otherGestureRecognizer === pinchGesture
+      return competingGesture === scrollView?.panGestureRecognizer || competingGesture === horizontalPanGesture
     }
 
     private func createRequest(
