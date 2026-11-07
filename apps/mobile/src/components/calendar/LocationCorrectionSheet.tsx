@@ -427,11 +427,22 @@ export function LocationCorrectionSheet({
   useEffect(() => () => { if (closingMore.current) clearTimeout(closingMore.current); }, []);
   // The map waits for the sheet's spring; with Reduce Motion there is none.
   const [mapReady, setMapReady] = useState(false);
+  const [inlinePlaceHeight, setInlinePlaceHeight] = useState(0);
   useEffect(() => {
-    if (mapReady || reduceMotion || (activityFirst && !placePickerOpen)) return;
+    if (activityFirst && !placePickerOpen) {
+      setMapReady(false);
+      setInlinePlaceHeight(0);
+      return;
+    }
+    if (mapReady) return;
+    if (reduceMotion) {
+      setMapReady(true);
+      return;
+    }
+    if (activityFirst && !inlinePlaceHeight) return;
     const timer = setTimeout(() => setMapReady(true), SHEET_MAP_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [activityFirst, mapReady, placePickerOpen, reduceMotion]);
+  }, [activityFirst, inlinePlaceHeight, mapReady, placePickerOpen, reduceMotion]);
   /** Opens with the row scrolled to the sheet's top; closes by scrolling back first, so nothing snaps. */
   function toggleMore() {
     const closing = moreOptions && !closingMore.current;
@@ -680,8 +691,6 @@ export function LocationCorrectionSheet({
   const availableActivities = logAs?.allActivities ?? suggestedActivities;
   const recommendedActivities = suggestedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT);
   const remainingActivities = availableActivities.filter((activity) => !recommendedActivities.some(({ id }) => id === activity.id));
-  const previewActivities = !allActivities && activeCategory && !recommendedActivities.some(({ id }) => id === activeCategory.id)
-    ? [...recommendedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT - 1), activeCategory] : recommendedActivities;
   const activityChips = logAs && (
     <View accessibilityLabel={activityFirst ? "Activity" : "Logs as"} accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
       {(allActivities ? availableActivities : suggestedActivities).map(activityChip)}
@@ -773,10 +782,12 @@ export function LocationCorrectionSheet({
             <View style={styles.activityFirst}>
               <View style={styles.activityHeading}>
                 <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
-                <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>Optional</Text>
+                <Text {...mobileTextProps("metadata")} numberOfLines={1}
+                  style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
+                  testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
               </View>
-              <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-                {previewActivities.map(activityChip)}
+              <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={[activityChipStyles.compactWrap, styles.activityPreview]}>
+                {recommendedActivities.map(activityChip)}
               </View>
               {remainingActivities.length ? (
                 <View>
@@ -796,7 +807,7 @@ export function LocationCorrectionSheet({
             <View>
               <View style={styles.inlineChoice}>
                 <Pressable accessibilityRole="button" accessibilityState={{ expanded: placePickerOpen }}
-                  onPress={() => { setMapReady(false); setPlacePickerOpen((open) => !open); }}
+                  onPress={() => setPlacePickerOpen((open) => !open)}
                   style={styles.inlineDisclosure} testID="location-correction-place-picker">
                   <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={19} />
                   <Text {...mobileTextProps("control")} numberOfLines={1}
@@ -818,7 +829,8 @@ export function LocationCorrectionSheet({
                   </Pressable>
                 ) : null}
               </View>
-              <InlineReveal open={placePickerOpen} reduceMotion={reduceMotion}>
+              <InlineReveal onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
+                testID="location-correction-inline-picker">
                 <View style={styles.view}>
                   {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
                     style={{ color: theme.textPrimary }} testID="location-correction-ask">{asks}</Text> : null}
@@ -980,10 +992,11 @@ export function LocationCorrectionSheet({
 }
 
 /** Let the body's normal layout follow the measured reveal, including results that arrive after opening. */
-function InlineReveal({ children, open, reduceMotion }: {
-  children: ReactNode; open: boolean; reduceMotion: boolean;
+function InlineReveal({ children, onHeightChange, open, reduceMotion, testID }: {
+  children: ReactNode; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
 }) {
   const [contentHeight, setContentHeight] = useState(0);
+  useEffect(() => { if (!open) setContentHeight(0); }, [open]);
   const size = useAnimatedStyle(() => ({
     height: reduceMotion ? undefined : withTiming(open ? contentHeight : 0, {
       duration: MOBILE_MOTION.sheet,
@@ -991,11 +1004,15 @@ function InlineReveal({ children, open, reduceMotion }: {
     })
   }));
   return (
-    <Reanimated.View style={[styles.inlineClip, size]}>
+    <Reanimated.View style={[styles.inlineClip, size]} testID={testID}>
       {open ? (
         <Reanimated.View collapsable={false} exiting={reduceMotion ? undefined : localPresenceExiting(false)}
           style={reduceMotion ? undefined : styles.inlineMeasure}
-          onLayout={({ nativeEvent }) => setContentHeight(nativeEvent.layout.height)}>
+          onLayout={({ nativeEvent }) => {
+            const height = nativeEvent.layout.height;
+            setContentHeight(height);
+            onHeightChange?.(height);
+          }}>
           {children}
         </Reanimated.View>
       ) : null}
@@ -1010,7 +1027,8 @@ function ShapeAction({ danger = false, expanded, label, onPress, testID, theme }
   return (
     <Pressable accessibilityRole="button" accessibilityState={expanded === undefined ? undefined : { expanded }}
       hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID={testID}
-      style={({ pressed }) => [compactPillStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
+      style={({ pressed }) => [compactPillStyles.pill, expanded !== undefined && styles.activityDisclosure,
+        { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
       <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: danger ? theme.dangerText : theme.textPrimary }]}>{label}</Text>
     </Pressable>
   );
@@ -1163,8 +1181,10 @@ function TimesSection({ clockFormat, onChange, onReveal, problem, reduceMotion, 
 
 const styles = StyleSheet.create({
   activityFirst: { gap: 8 },
-  activityHeading: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
-  moreActivities: { paddingTop: 12 },
+  activityHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  activityPreview: { paddingVertical: 6 },
+  activityDisclosure: { minHeight: 44 },
+  moreActivities: { paddingTop: 12, paddingBottom: 6 },
   inlineClip: { overflow: "hidden" },
   inlineMeasure: { position: "absolute", left: 0, right: 0, top: 0 },
   inlineChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },
