@@ -79,6 +79,35 @@ describe("EntriesTable typed times in 12-hour mode (Codex r2 on #446)", () => {
     expect(finish.value).toBe("");
   });
 
+  it.each([
+    { startDay: 5, stopMonth: 6, stopDay: 16, stopHour: 8, stopMinute: 30, finishText: "8:30 AM" },
+    { startDay: 1, stopMonth: 5, stopDay: 15, stopHour: 0, stopMinute: 0, finishText: "12:00 AM" }
+  ])("passes the saved version for an interior week, including a Monday midnight end ($finishText)", async ({
+    startDay, stopMonth, stopDay, stopHour, stopMinute, finishText
+  }) => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn(async () => true);
+    const updatedAt = new Date("2026-08-11T12:00:00.000Z").toISOString();
+    const block = {
+      ...entry("entry-a", "Planning"),
+      startedAt: new Date(2026, 5, startDay, 8).toISOString(),
+      stoppedAt: new Date(2026, stopMonth, stopDay, stopHour, stopMinute).toISOString()
+    };
+    mocks.clientFetch.mockResolvedValue({ ok: true, json: async () => ({ id: block.id, updatedAt }) });
+    renderTable({ entries: [block], onChanged });
+    const finish = screen.getAllByLabelText<HTMLInputElement>("Finish time for Planning").find((input) => input.value === finishText)!;
+    expect(finish).toBeDefined();
+    await user.click(finish);
+    await user.clear(finish);
+    await user.type(finish, "10:15 AM");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith({
+      entryIds: [block.id],
+      times: [block.startedAt, new Date(2026, 5, startDay, 10, 15).toISOString()],
+      moved: { entryId: block.id, updatedAt }
+    }));
+  });
+
   it.each([true, false])("only refreshes the route if the Calendar shell did not refresh (shell: %s)", async (shellRefreshed) => {
     const user = userEvent.setup();
     const onChanged = vi.fn(async () => shellRefreshed);

@@ -279,28 +279,6 @@ export function TimeReviewViews({
     return typeof snapshot === "object" && snapshot !== null && listEditBootstraps.delete(snapshot);
   }, [listEditBootstraps]);
   const shownEntriesRef = useRef<readonly TimeEntryRow[]>([]);
-  const refreshList = useCallback(async (change?: ListChange) => {
-    const entryIds = change?.entryIds ?? [];
-    const times = change?.times ?? [];
-    const before = shownEntriesRef.current.filter((entry) => entryIds.includes(entry.id))
-      .flatMap((entry) => [entry.startedAt, entry.stoppedAt]);
-    const affected = [...new Set([...before, ...times].flatMap((time) => {
-      const at = time ? new Date(time) : null;
-      return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
-    }))];
-    setListRefresh((current) => ({ token: current.token + 1, affected }));
-    // These reads already invalidate the loaded weeks. Recognise the exact shell snapshot for
-    // this mutation so its arrival doesn't overtake its own nearby-week read.
-    let shellRefreshed = false;
-    await refresh({ onCommit: (snapshot) => {
-      listEditBootstraps.add(snapshot);
-      shellRefreshed = true;
-    } });
-    return shellRefreshed;
-  }, [listEditBootstraps, refresh]);
-  const refreshDeleted = useCallback(async (entryIds: readonly string[]) => {
-    await refreshList({ entryIds });
-  }, [refreshList]);
 
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
@@ -507,6 +485,30 @@ export function TimeReviewViews({
     staleKey: listWeekBootstrap,
     consumeEditBootstrap
   });
+  const { evictOlderBlockVersions } = listWeeks;
+  const refreshList = useCallback(async (change?: ListChange) => {
+    const entryIds = change?.entryIds ?? [];
+    const times = change?.times ?? [];
+    const before = shownEntriesRef.current.filter((entry) => entryIds.includes(entry.id))
+      .flatMap((entry) => [entry.startedAt, entry.stoppedAt]);
+    const affected = [...new Set([...before, ...times].flatMap((time) => {
+      const at = time ? new Date(time) : null;
+      return at && Number.isFinite(at.getTime()) ? [toTimelineDateKey(at)] : [];
+    }))];
+    if (change?.moved) evictOlderBlockVersions(change.moved.entryId, change.moved.updatedAt);
+    setListRefresh((current) => ({ token: current.token + 1, affected }));
+    // These reads already invalidate the loaded weeks. Recognise the exact shell snapshot for
+    // this mutation so its arrival doesn't overtake its own nearby-week read.
+    let shellRefreshed = false;
+    await refresh({ onCommit: (snapshot) => {
+      listEditBootstraps.add(snapshot);
+      shellRefreshed = true;
+    } });
+    return shellRefreshed;
+  }, [evictOlderBlockVersions, listEditBootstraps, refresh]);
+  const refreshDeleted = useCallback(async (entryIds: readonly string[]) => {
+    await refreshList({ entryIds });
+  }, [refreshList]);
   // The blocks the List shows (the shell's week and every loaded one): an edit's days before it are read from them.
   useLayoutEffect(() => {
     shownEntriesRef.current = [...data.weekEntries, ...data.entries, ...listWeeks.entries];

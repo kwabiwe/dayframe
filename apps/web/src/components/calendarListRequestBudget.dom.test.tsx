@@ -5,7 +5,7 @@ import type { LocationTimeline } from "@dayframe/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { projectBlockEnds } from "@/lib/block-end-projection";
 import type { BootstrapData, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
-import type { ContinuousListProps } from "./EntriesTable";
+import type { ContinuousListProps, ListChange } from "./EntriesTable";
 
 // Request-storm fix (30 Oct 2026): staging's Calendar › List made thousands of requests, because every edit or delete
 // re-read every week and every day the List had ever loaded (on the local seed, one delete after scrolling back nine
@@ -14,7 +14,8 @@ import type { ContinuousListProps } from "./EntriesTable";
 // however much history is loaded, and none from the running block's clock (performance.md). Synthetic data only.
 
 const navigation = vi.hoisted(() => ({ search: "" }));
-const listed = vi.hoisted(() => ({ continuous: null as ContinuousListProps | null, onChanged: null as null | (() => Promise<void>), entries: [] as Array<{ id: string }> }));
+const listed = vi.hoisted(() => ({ continuous: null as ContinuousListProps | null,
+  onChanged: null as null | ((change?: ListChange) => Promise<boolean | void>), entries: [] as TimeEntryRow[] }));
 const runtime = vi.hoisted(() => {
   const values: Record<string, unknown> = { dateLoadError: null, isDateLoading: false, isTimerBusy: false, shellData: null };
   return new Proxy(values, {
@@ -42,7 +43,8 @@ vi.mock("@/components/AppShellRuntime", () => ({
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
 // The List itself (its Places column and "?" rows render from the props below and fetch nothing); the props are kept.
 vi.mock("@/components/EntriesTable", () => ({
-  EntriesTable: ({ continuous, entries, onChanged }: { continuous?: ContinuousListProps; entries?: Array<{ id: string }>; onChanged?: () => Promise<void> }) => {
+  EntriesTable: ({ continuous, entries, onChanged }: { continuous?: ContinuousListProps; entries?: TimeEntryRow[];
+    onChanged?: (change?: ListChange) => Promise<boolean | void> }) => {
     listed.continuous = continuous ?? null;
     listed.onChanged = onChanged ?? null;
     listed.entries = entries ?? [];
@@ -286,6 +288,25 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     expect(ids(view.result.current.entries)).not.toContain(`week-${weekKey(12)}`);
     // The window around 19 Aug (the 3 weeks overlapping 12–26 Aug) and the edited week: never all 12.
     expect(bootstrapReads() - before).toBeLessThanOrEqual(4);
+  });
+
+  it("does not add edge reads when evicting the only block in the oldest loaded weeks", async () => {
+    const remote = server();
+    const old = { ...entry("spanning", local(8, 2, 9)), stoppedAt: local(9, 16, 10).toISOString() };
+    const tail = [weekKey(11), weekKey(12)];
+    for (const week of tail) remote.weeks.set(week, [old]);
+    const props = { focusDate: "2026-10-30", staleKey: 0, refreshToken: 0 };
+    const view = await loadWeeks(12, props);
+    expect(ids(view.result.current.entries).filter((id) => id === old.id)).toHaveLength(2);
+
+    clientFetch.mockClear();
+    act(() => view.result.current.evictOlderBlockVersions(old.id, local(10, 30, 12).toISOString()));
+    view.rerender({ ...props, refreshToken: 1, affectedDates: ["2026-08-02", "2026-09-16", "2026-10-01"] });
+    await flush();
+
+    expect(ids(view.result.current.entries)).not.toContain(old.id);
+    for (const week of tail) expect(clientFetch).not.toHaveBeenCalledWith(`/api/bootstrap?date=${week}`, { cache: "no-store" });
+    expect(bootstrapReads()).toBe(3);
   });
 
   it("keeps a week stale when its read fails, and reads it again on the next visit", async () => {
@@ -745,6 +766,79 @@ describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #
 });
 
 describe("Calendar › List bootstrap after a local edit", () => {
+  it.each([false, true])("evicts a moved block's cached interior copies before a late read settles (destination failure: %s)", async (failed) => {
+    const { TimeReviewViews } = await import("./TimeReviewViews");
+    const page = (data: BootstrapData) => <TimeReviewViews initialData={data} initialPreference={null} initialTodayKey="2026-10-30"
+      renderedAt={local(10, 30, 12).toISOString()} />;
+    const old = { ...entry("spanning", local(8, 5, 9)), stoppedAt: local(9, 16, 10).toISOString() };
+    const moved = { ...entry(old.id, local(10, 1, 9)), stoppedAt: local(10, 1, 10).toISOString(),
+      updatedAt: local(10, 30, 12).toISOString() };
+    const destination = "/api/bootstrap?date=2026-09-28";
+    const interior = "/api/bootstrap?date=2026-08-24";
+    let serverEntry = old;
+    let failDestination = false;
+    let holdInterior = false;
+    let releaseInterior: (() => void) | undefined;
+    clientFetch.mockImplementation(async (url: string) => {
+      const response = respond(url);
+      if (!url.startsWith("/api/bootstrap?date=")) return response;
+      if (failDestination && url === destination) return { ok: false, status: 503 };
+      const [year, month, day] = url.slice(-10).split("-").map(Number);
+      const start = new Date(year, month - 1, day);
+      const end = new Date(year, month - 1, day + 7);
+      const payload = await response.json() as { weekEntries: TimeEntryRow[] };
+      const overlaps = Date.parse(serverEntry.startedAt) < +end && Date.parse(serverEntry.stoppedAt) > +start;
+      if (overlaps) payload.weekEntries.push(serverEntry);
+      const answer = { ok: true, json: async () => payload };
+      if (holdInterior && url === interior) {
+        holdInterior = false;
+        return new Promise((resolve) => { releaseInterior = () => resolve(answer); });
+      }
+      return answer;
+    });
+    const view = render(page(bootstrap()));
+    await flush();
+    for (let week = 0; week < WEEKS_BACK; week += 1) {
+      act(() => listed.continuous!.onLoad("earlier"));
+      await flush();
+    }
+    const spanning = () => listed.entries.filter((row) => row.id === old.id);
+    expect(spanning()).toEqual([expect.objectContaining({ startedAt: old.startedAt, stoppedAt: old.stoppedAt })]);
+
+    // A remote refresh marks cached weeks stale. A visit starts a pre-edit read of one interior week.
+    view.rerender(page(bootstrap()));
+    await flush();
+    holdInterior = true;
+    act(() => listed.continuous!.onVisibleDay!(local(8, 24).getTime()));
+    await flush();
+    expect(releaseInterior).toBeDefined();
+    act(() => listed.continuous!.onVisibleDay!(local(10, 30).getTime()));
+    await flush();
+
+    serverEntry = moved;
+    failDestination = failed;
+    clientFetch.mockClear();
+    await act(async () => { await listed.onChanged!({
+      entryIds: [old.id], times: [moved.startedAt, moved.stoppedAt], moved: { entryId: old.id, updatedAt: moved.updatedAt }
+    }); });
+    await flush();
+    const expected = [expect.objectContaining({ startedAt: moved.startedAt, stoppedAt: moved.stoppedAt, durationSeconds: 3600 })];
+    expect(spanning()).toEqual(failed ? [] : expected);
+    expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).map(([url]) => url))
+      .toEqual(["/api/bootstrap?date=2026-10-19", destination, "/api/bootstrap?date=2026-09-14", "/api/bootstrap?date=2026-08-03"]);
+    if (failed) expect(listed.continuous?.staleWeeks).toEqual(expect.arrayContaining([expect.objectContaining({ key: "2026-09-28" })]));
+
+    act(() => releaseInterior!());
+    await flush();
+    expect(spanning()).toEqual(failed ? [] : expected);
+    if (failed) {
+      failDestination = false;
+      act(() => listed.continuous!.onRetryWeek!("2026-09-28"));
+      await flush();
+      expect(spanning()).toEqual(expected);
+    }
+  });
+
   it.each([
     { independentRefresh: false, projected: false },
     { independentRefresh: true, projected: false },
@@ -785,7 +879,7 @@ describe("Calendar › List bootstrap after a local edit", () => {
       });
     });
 
-    let edited!: Promise<void>;
+    let edited!: Promise<boolean | void>;
     act(() => { edited = listed.onChanged!(); });
     await flush();
     expect(weekReads()).toBe(initially + 1);
