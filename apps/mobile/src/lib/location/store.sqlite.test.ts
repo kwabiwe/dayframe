@@ -3,6 +3,10 @@ import {DatabaseSync} from "node:sqlite";
 import {LOCATION_ENGINE_V2_CONFIG} from "@dayframe/shared";
 const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true),owner:{userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"}}));
 vi.mock("expo-sqlite",()=>({openDatabaseAsync:mocks.open}));
+vi.mock("expo-location", () => ({
+  getForegroundPermissionsAsync: async () => ({ status: "granted" }),
+  getBackgroundPermissionsAsync: async () => ({ status: "granted" })
+}));
 vi.mock("./captureConsent",()=>({readLocationCaptureConsent:async()=>true}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
 vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));

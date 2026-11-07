@@ -23,6 +23,7 @@ import {
   isLocationCaptureSnapshotCurrent,
   isLocationCaptureAdmissionSuspended,
   locationCaptureRevision,
+  locationSyncAllowed,
   persistLocationEvidence,
   refreshLocalJournalReplayIfDue,
   readLocationCaptureBinding,
@@ -301,8 +302,9 @@ export function syncLocationIntelligenceOnForeground(options: LocationSyncOption
   armLocationAdmissionGuard();
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
-    await drainNativeLocationSignalsInBatches();
-    return syncLocationEvidence({ forceReplay: true, ...options });
+    const capture = await captureLocationOwnership();
+    if (await locationSyncAllowed(capture)) await drainNativeLocationSignalsInBatches();
+    return syncLocationEvidence({ foregroundReplay: true, ...options });
   });
 }
 
