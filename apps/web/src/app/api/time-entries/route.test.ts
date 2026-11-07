@@ -167,6 +167,22 @@ describe("POST /api/time-entries", () => {
     expect((await POST(jsonRequest({ mode: "join", entryId, splitEntryId }))).status).toBe(422);
   });
 
+  it("requires an entry ID before a finished-only split can reach the timer service", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const splitAt = "2026-07-04T10:30:00.000Z";
+    const source = "mobile_app";
+    const missing = await POST(jsonRequest({ mode: "split", source, splitAt, requireFinished: true }));
+    expect(missing.status).toBe(400);
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+
+    mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: null, replayed: false });
+    const response = await POST(jsonRequest({ mode: "split", source, splitAt, entryId, requireFinished: true }));
+    expect(response.status).toBe(201);
+    expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId, {
+      splitAt, source, expectedUpdatedAt: undefined, clientCommandId: undefined, requireFinished: true
+    }, session);
+  });
+
   it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     const { TimeEntryConflictError, TimeEntryValidationError } = await import("@/lib/event-service");

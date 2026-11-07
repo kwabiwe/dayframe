@@ -97,13 +97,16 @@ export async function POST(request: Request) {
     // `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id header makes
     // a retry safe. A running block splits too: its second part keeps running (owner 28 Oct 2026).
     const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
+    const requireFinished = mode === "split" && z.boolean().optional().parse(body.requireFinished);
+    if (requireFinished && !finishedEntryId) throw new BadRequestError("entryId is required.");
     if (finishedEntryId) {
       entryId = finishedEntryId;
       const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
       const clientCommandId = requestClientCommandId(request);
       const result = mode === "split"
         ? await splitFinishedEntry(finishedEntryId, {
-          splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId, source: eventSource
+          splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId, source: eventSource,
+          ...(requireFinished ? { requireFinished } : {})
         }, session)
         : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
       scheduleLiveActivityNotification(session);

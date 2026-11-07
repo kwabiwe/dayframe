@@ -77,6 +77,14 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     expect(await blocks()).toHaveLength(1);
   });
 
+  it("keeps the active timer intact for a finished-only split", async () => {
+    const { splitFinishedEntry, TimeEntryValidationError } = await import("./event-service");
+    await expect(splitFinishedEntry(running, {
+      splitAt: ago(30), expectedUpdatedAt: await version(running), requireFinished: true
+    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    expect(await blocks()).toMatchObject([{ id: running, stoppedAt: null }]);
+  });
+
   it("ends the block at the time and keeps the second part running with every detail; a repeat is answered", async () => {
     const { splitFinishedEntry } = await import("./event-service");
     const first = await splitFinishedEntry(running, {

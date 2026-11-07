@@ -1,4 +1,4 @@
-import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER } from "@dayframe/shared";
+import { clampSplit, splitBounds, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, type SplitBounds } from "@dayframe/shared";
 import type { TimeEntryRow } from "./queries";
 
 /**
@@ -10,18 +10,7 @@ import type { TimeEntryRow } from "./queries";
 
 const MINUTE_MS = 60_000;
 
-export type SplitBounds = { startMs: number; stopMs: number; minMs: number; maxMs: number };
-
-/** Where a finished block can be split: on whole minutes, leaving each half a minute or more. Null when it can't. */
-export function splitBounds(entry: Pick<TimeEntryRow, "startedAt" | "stoppedAt">): SplitBounds | null {
-  if (!entry.stoppedAt) return null;
-  const startMs = Date.parse(entry.startedAt);
-  const stopMs = Date.parse(entry.stoppedAt);
-  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return null;
-  const minMs = Math.ceil((startMs + MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
-  const maxMs = Math.floor((stopMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
-  return maxMs >= minMs ? { startMs, stopMs, minMs, maxMs } : null;
-}
+export { clampSplit, defaultSplit, splitBounds, type SplitBounds } from "@dayframe/shared";
 
 /**
  * Where a running block can be split (owner 28 Oct 2026, as Toggl): on whole minutes, never within its first
@@ -33,17 +22,6 @@ export function runningSplitBounds(entry: Pick<TimeEntryRow, "startedAt">, nowMs
   const minMs = Math.ceil((startMs + MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
   const maxMs = Math.floor((nowMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
   return maxMs >= minMs ? { startMs, stopMs: nowMs, minMs, maxMs } : null;
-}
-
-/** A split time snapped to the minute and kept inside the bounds. */
-export function clampSplit(bounds: SplitBounds, atMs: number) {
-  const snapped = Math.round(atMs / MINUTE_MS) * MINUTE_MS;
-  return Math.min(bounds.maxMs, Math.max(bounds.minMs, snapped));
-}
-
-/** The middle of the block, on a minute: where the line starts. */
-export function defaultSplit(bounds: SplitBounds) {
-  return clampSplit(bounds, (bounds.startMs + bounds.stopMs) / 2);
 }
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;

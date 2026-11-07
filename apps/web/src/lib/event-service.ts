@@ -3076,7 +3076,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
  */
 export async function splitFinishedEntry(
   id: string,
-  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string; source?: "manual_app" | "mobile_app"; now?: Date },
+  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string; requireFinished?: boolean; source?: "manual_app" | "mobile_app"; now?: Date },
   session: RequestSession = getDevSession()
 ) {
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
@@ -3189,7 +3189,7 @@ async function copyFinishedEntry(
   id: string,
   input: {
     kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string;
-    source?: "manual_app" | "mobile_app"; now?: Date;
+    requireFinished?: boolean; source?: "manual_app" | "mobile_app"; now?: Date;
   },
   session: RequestSession
 ) {
@@ -3240,6 +3240,7 @@ async function copyFinishedEntry(
     if (!row) throw new TimeEntryNotFoundError();
     if (input.expectedUpdatedAt && versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
     if (!row.stoppedAt && input.kind === "duplicate") throw new TimeEntryValidationError("Stop this block before duplicating it.");
+    if (!row.stoppedAt && input.requireFinished) throw new TimeEntryValidationError("Stop this block before splitting it.");
     const running = !row.stoppedAt;
     const startMs = row.startedAt.getTime();
     // A running block's end is now: a split of it lands between its start and now.
