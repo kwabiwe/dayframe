@@ -31,8 +31,8 @@ describe("Library actions (UIA-316)", () => {
     expect(roles.match(/df-rbtn df-rbtn--sm df-rbtn--ghost/g)?.length).toBe(4);
   });
 
-  it("makes the activity card's Edit span the card", () => {
-    const start = css.indexOf(".df-lcard > .df-rbtn {");
-    expect(css.slice(start, css.indexOf("}", start))).toContain("justify-self: stretch;");
+  it("gives each activity row a flexible Edit area and a separate 44 px pin column", () => {
+    expect(css).toMatch(/\.df-lrow \{[^}]*grid-template-columns: minmax\(0, 1fr\) 44px;/);
+    expect(css).toMatch(/\.df-lrow-edit \{[^}]*min-height: 48px;/);
   });
 });

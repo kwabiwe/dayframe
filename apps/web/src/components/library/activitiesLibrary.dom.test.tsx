@@ -58,10 +58,10 @@ describe("Library › Activities", () => {
   it("puts New activity first in Your own, before existing activities (UIA-316)", async () => {
     mount([activity(ID(1), "Pottery"), activity(ID(2), "Chess")]);
     const add = await screen.findByRole("button", { name: /New activity/ });
-    const grid = add.parentElement!;
-    expect(grid.firstElementChild).toBe(add);
-    expect(grid.textContent).toContain("Pottery");
-    expect(grid.textContent).toContain("Chess");
+    const list = add.closest("ul")!;
+    expect(list.firstElementChild).toBe(add.closest("li"));
+    expect(list.textContent).toContain("Pottery");
+    expect(list.textContent).toContain("Chess");
   });
 
   it("pins to quick start and says so on the toast", async () => {
@@ -240,22 +240,33 @@ describe("Library › Activities", () => {
     await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Zither practice"));
   });
 
-  it("keeps each card reachable by its activity link and locks Edit while a change saves", async () => {
+  it("keeps each row reachable by its activity link with separate Edit and Pin controls", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;
     answer = (call) => call.method === "PATCH"
       ? new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })); })
       : undefined;
     const { container } = mount([activity(ID(1), "Reading")]);
-    expect(container.querySelector(`#category-${ID(1)}`)?.getAttribute("aria-label")).toBe("Reading");
-    await user.click(await screen.findByRole("button", { name: "Pin Reading to quick start" }));
-    expect((screen.getByRole("button", { name: "Edit Reading" }) as HTMLButtonElement).disabled).toBe(true);
+    const row = container.querySelector<HTMLElement>(`#category-${ID(1)}`)!;
+    const edit = within(row).getByRole("button", { name: "Edit Reading", description: "Not used in the last 7 days" }) as HTMLButtonElement;
+    const pin = within(row).getByRole("button", { name: "Pin Reading to quick start" });
+    expect(edit.parentElement).toBe(pin.parentElement);
+    expect(pin.querySelector("svg")?.getAttribute("fill")).toBe("none");
+    await user.click(pin);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(edit.disabled).toBe(true);
     expect((screen.getByRole("button", { name: /New activity/ }) as HTMLButtonElement).disabled).toBe(true);
     release();
-    await waitFor(() => expect((screen.getByRole("button", { name: "Edit Reading" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(edit.disabled).toBe(false));
   });
 
-  it("moves focus to the restored card's Edit when an Archived row is restored", async () => {
+  it("uses a solid pin for pinned rows so the state survives forced colours", async () => {
+    mount([activity(ID(1), "Reading", { isPinned: true })]);
+    const pin = await screen.findByRole("button", { name: "Unpin Reading from quick start", pressed: true });
+    expect(pin.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+  });
+
+  it("moves focus to the restored activity's Edit when an Archived row is restored", async () => {
     const user = userEvent.setup();
     let restored = false;
     answer = (call) => {
