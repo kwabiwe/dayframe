@@ -922,12 +922,41 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     }
   });
 
+  it("waits for the picker height to settle before mounting MapKit and discards a closed reveal", () => {
+    vi.useFakeTimers();
+    try {
+      const tree = sheetWith({ reduceMotion: false, evidence: nearSaved, logAs: logs });
+      const picker = () => tree.root.find((node) => node.type === ("AnimatedView" as never)
+        && node.props.testID === "location-correction-inline-picker");
+      const measure = (height: number) => act(() => {
+        picker().find((node) => typeof node.props.onLayout === "function").props.onLayout({ nativeEvent: { layout: { height } } });
+      });
+      const nativeMap = () => tree.root.findAllByType("LocationEvidenceMap" as never);
+      tap(tree, "location-correction-place-picker");
+      measure(240);
+      act(() => { vi.advanceTimersByTime(250); });
+      measure(350);
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(nativeMap()).toHaveLength(0);
+      tap(tree, "location-correction-place-picker");
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(nativeMap()).toHaveLength(0);
+      tap(tree, "location-correction-place-picker");
+      measure(240);
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(nativeMap()).toHaveLength(1);
+      act(() => tree.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tells the list it is waiting for a centre while an unknown place's evidence loads, with no save callback yet", () => {
     const tree = sheetWith({ evidence: null, onSavePlace: undefined });
     expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.awaitingCentre).toBe(true);
   });
 
-  it("shows three optional choices and keeps a selected extra activity visible after collapsing the full list", () => {
+  it("keeps the same three choices and shows the selected activity in the heading when the full list closes", () => {
     const activities = [
       ...logs.activities,
       { id: "cat-work", name: "Work", color: "teal", icon: null },
@@ -940,12 +969,13 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
       && node.props.testID?.startsWith("location-correction-log-cat-"));
     expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
     expect(chips().every((chip) => !chip.props.accessibilityState.checked)).toBe(true);
+    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Optional");
     tap(tree, "location-correction-log-all");
     expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch", "Gym", "Walk"]);
     tap(tree, "location-correction-log-cat-gym");
     tap(tree, "location-correction-log-all");
-    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Gym"]);
-    expect(chips()[2].props.accessibilityState.checked).toBe(true);
+    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
+    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Gym");
     const few = sheetWith({ logAs: { ...logs, allActivities: logs.activities } });
     expect(few.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
   });
