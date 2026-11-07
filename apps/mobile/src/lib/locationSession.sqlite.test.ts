@@ -939,10 +939,10 @@ describe("failed Location operation recovery", () => {
 });
 
 describe("automatic Location transfer permissions and replay", () => {
-  function mockReplay(status = 200) {
+  function mockReplay(status = 200, warnings: string[] = []) {
     routes["/api/location/replay"] = () => json({
       ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-      rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings: []
+      rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings
     }, status);
   }
 
@@ -1015,7 +1015,7 @@ describe("automatic Location transfer permissions and replay", () => {
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(5);
   });
 
-  it("does not coalesce a failed replay or one that returned warnings", async () => {
+  it("retries failed and deferred replays but coalesces completed output with a gap", async () => {
     await signInThroughApi(A, [place]);
     await store.syncLocationEvidence();
     calls.length = 0;
@@ -1027,8 +1027,9 @@ describe("automatic Location transfer permissions and replay", () => {
       warnings: ["semantic_replay_deferred"]
     });
     expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
-    mockReplay();
-    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
+    mockReplay(200, ["evidence_gap", "V2 shadow mode stored segments without emitting user-visible semantics."]);
+    expect((await runtime.syncLocationIntelligenceOnForeground())).toMatchObject({ replayed: true, warnings: expect.arrayContaining(["evidence_gap"]) });
+    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(3);
   });
 

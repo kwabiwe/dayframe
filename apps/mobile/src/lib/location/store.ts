@@ -1495,9 +1495,12 @@ async function requestServerLocationReplay(
         message: "Location account changed before replay was accepted."
       };
     }
+    // These describe completed output. Other warnings may mean work was deferred.
+    const completedReplay = payload.warnings.every(warning => warning === "evidence_gap" ||
+      (payload.rolloutMode === "v2_shadow" && warning === "V2 shadow mode stored segments without emitting user-visible semantics."));
     if (!options.signal?.aborted && isLocationCaptureSnapshotCurrent(options.capture) &&
         payload.clientAcknowledgedMode && payload.rolloutMode === prepared.requestedMode &&
-        payload.warnings.length === 0 && (!isSemanticMode(payload.rolloutMode) || prepared.semanticModeAcknowledgedAt)) {
+        completedReplay && (!isSemanticMode(payload.rolloutMode) || prepared.semanticModeAcknowledgedAt)) {
       lastSuccessfulReplay = { revision: options.capture.revision, mode: payload.rolloutMode, at: Date.parse(completedAt) };
     }
     attemptOutcome = "success";
