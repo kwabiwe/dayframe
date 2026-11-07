@@ -48,11 +48,12 @@ type LiveActivityPayload = {
 
 type OutboxRow = {
   id: string;
-  tokenId: string;
   token: string;
   activityId: string;
+  activeEntryId: string | null;
   environment: ApnsEnvironment;
   revision: string;
+  leaseUntil: string;
   event: ApnsEvent;
   payload: LiveActivityPayload;
   attemptCount: number;
@@ -295,6 +296,7 @@ export async function drainLiveActivityOutbox(options?: {
     authorization
   )));
   for (const delivery of deliveries) {
+    if (delivery === null) continue;
     if (delivery === "delivered") result.delivered += 1;
     else if (delivery === "retry") result.retryScheduled += 1;
     else if (delivery === "invalid_token") result.invalidatedTokens += 1;
@@ -477,11 +479,12 @@ async function claimDueOutboxRows(
      where o.id = due.id
        and t.id = o.token_id
      returning o.id,
-               o.token_id as "tokenId",
                t.token,
                t.activity_id as "activityId",
+               t.active_entry_id as "activeEntryId",
                t.environment,
                o.revision::text as revision,
+               o.leased_until::text as "leaseUntil",
                o.event,
                o.payload,
                o.attempt_count as "attemptCount",
@@ -501,7 +504,7 @@ async function deliverOutboxRow(
   row: OutboxRow,
   config: ApnsConfiguration,
   authorization: string
-): Promise<"delivered" | "retry" | "permanent" | "invalid_token"> {
+): Promise<"delivered" | "retry" | "permanent" | "invalid_token" | null> {
   const host = row.environment === "development"
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
@@ -519,56 +522,33 @@ async function deliverOutboxRow(
       "content-type": "application/json"
     }, JSON.stringify(row.payload));
   } catch {
-    const failure = failureFor(row, null, "NetworkError", "retry");
-    await recordOutboxFailure(row, failure, null, apnsId);
-    return row.attemptCount + 1 < MAX_DELIVERY_ATTEMPTS ? "retry" : "permanent";
+    return recordOutboxFailure(row, failureFor(row, null, "NetworkError", "retry"), null, apnsId);
   }
 
   if (response.ok) {
-    await Promise.all([
-      query(
-        `update live_activity_push_tokens
-         set last_attempt_at = now(),
-             last_delivered_at = now(),
-             last_delivery_status = $2,
-             last_delivery_reason = null,
-             consecutive_failures = 0,
-             active_entry_id = case when $3 = 'end' then null else active_entry_id end,
-             invalidated_at = case when $3 = 'end' then now() else invalidated_at end
-         where id = $1`,
-        [row.tokenId, response.status, row.event]
-      ),
-      query(
-        `update live_activity_delivery_outbox
-         set status = 'delivered',
-             attempt_count = attempt_count + 1,
-             leased_until = null,
-             last_attempt_at = now(),
-             last_delivery_status = $3,
-             last_delivery_reason = null,
-             last_apns_id = $4,
-             updated_at = now()
-         where id = $1 and revision = $2::bigint`,
-        [row.id, row.revision, response.status, response.apnsId ?? apnsId]
-      )
-    ]);
-    return "delivered";
+    const settled = await settleOutboxDelivery(row, {
+      status: "delivered",
+      nextAttempt: null,
+      httpStatus: response.status,
+      reason: null,
+      apnsId: response.apnsId ?? apnsId,
+      invalidate: row.event === "end"
+    });
+    return settled ? "delivered" : null;
   }
 
   const reason = safeApnsReason(parseApnsBody(response.body).reason, response.status);
   const disposition = classifyApnsFailure(response.status, reason);
-  if (reason === TOPIC_MISMATCH_REASON) {
+  const result = await recordOutboxFailure(
+    row, failureFor(row, response.status, reason, disposition), response.retryAfter, response.apnsId ?? apnsId
+  );
+  if (result && reason === TOPIC_MISMATCH_REASON) {
     console.error("Dayframe Live Activity APNs topic does not match the app: check APNS_BUNDLE_ID", {
       environment: row.environment,
       event: row.event
     });
   }
-  const failure = failureFor(row, response.status, reason, disposition);
-  await recordOutboxFailure(row, failure, response.retryAfter, response.apnsId ?? apnsId);
-  if (disposition === "retry" && row.attemptCount + 1 >= MAX_DELIVERY_ATTEMPTS) {
-    return "permanent";
-  }
-  return disposition;
+  return result;
 }
 
 async function recordOutboxFailure(
@@ -577,43 +557,69 @@ async function recordOutboxFailure(
   retryAfter: string | null,
   apnsId: string
 ) {
-  const nextAttempt = new Date(
-    Date.now() + retryDelayMs(row.attemptCount + 1, retryAfter)
-  ).toISOString();
-  const nextStatus = failure.disposition === "retry" && row.attemptCount + 1 < MAX_DELIVERY_ATTEMPTS
-    ? "pending"
-    : "permanent_failure";
-  // A topic mismatch keeps the token only while its Activity runs, so its Lock Screen Stop still works;
-  // an `end` means the block has stopped, and nothing would ever retire the token again (Codex r1 on #574).
+  const retry = failure.disposition === "retry" && row.attemptCount + 1 < MAX_DELIVERY_ATTEMPTS;
+  // A topic mismatch keeps the running Activity's Lock Screen Stop available.
   const invalidate = failure.disposition === "invalid_token" ||
     (failure.reason === TOPIC_MISMATCH_REASON && row.event === "end");
+  const settled = await settleOutboxDelivery(row, {
+    status: retry ? "pending" : "permanent_failure",
+    nextAttempt: new Date(Date.now() + retryDelayMs(row.attemptCount + 1, retryAfter)).toISOString(),
+    httpStatus: failure.status,
+    reason: failure.reason,
+    apnsId,
+    invalidate
+  });
+  if (!settled) return null;
+  return failure.disposition === "retry" && !retry ? "permanent" : failure.disposition;
+}
 
-  await Promise.all([
-    query(
-      `update live_activity_push_tokens
-       set last_attempt_at = now(),
-           last_delivery_status = $2,
-           last_delivery_reason = $3,
-           consecutive_failures = consecutive_failures + 1,
-           invalidated_at = case when $4 then now() else invalidated_at end
-       where id = $1`,
-      [row.tokenId, failure.status, failure.reason, invalidate]
-    ),
-    query(
-      `update live_activity_delivery_outbox
-       set status = $3,
+async function settleOutboxDelivery(row: OutboxRow, outcome: {
+  status: "delivered" | "pending" | "permanent_failure";
+  nextAttempt: string | null;
+  httpStatus: number | null;
+  reason: string | null;
+  apnsId: string;
+  invalidate: boolean;
+}) {
+  // Claim identity includes the exact lease as text, preserving PostgreSQL's
+  // microseconds. A delayed response must not settle a re-claimed revision.
+  const result = await query(
+    `with settled as (
+       update live_activity_delivery_outbox
+       set status = $4,
            attempt_count = attempt_count + 1,
-           next_attempt_at = $4,
+           next_attempt_at = coalesce($5::timestamptz, next_attempt_at),
            leased_until = null,
            last_attempt_at = now(),
-           last_delivery_status = $5,
-           last_delivery_reason = $6,
-           last_apns_id = $7,
+           last_delivery_status = $6,
+           last_delivery_reason = $7,
+           last_apns_id = $8,
            updated_at = now()
-       where id = $1 and revision = $2::bigint`,
-      [row.id, row.revision, nextStatus, nextAttempt, failure.status, failure.reason, apnsId]
-    )
-  ]);
+       where id = $1 and revision = $2::bigint and leased_until = $3::timestamptz
+         and status = 'pending'
+       returning token_id, workspace_id, user_id, event, status
+     )
+     update live_activity_push_tokens t
+     set last_attempt_at = now(),
+         last_delivered_at = case when s.status = 'delivered' then now() else t.last_delivered_at end,
+         last_delivery_status = $6,
+         last_delivery_reason = $7,
+         consecutive_failures = case when s.status = 'delivered' then 0 else t.consecutive_failures + 1 end,
+         active_entry_id = case when s.status = 'delivered' and s.event = 'end' then null else t.active_entry_id end,
+         invalidated_at = case when $9 then now() else t.invalidated_at end
+     from settled s
+     where t.id = s.token_id and t.workspace_id = s.workspace_id and t.user_id = s.user_id
+       and t.activity_id = $10
+       -- Deleting the stopped entry can clear its foreign key while End is in flight.
+       and (t.active_entry_id is not distinct from $11::uuid or (s.event = 'end' and t.active_entry_id is null))
+       and t.environment = $12 and t.invalidated_at is null`,
+    [
+      row.id, row.revision, row.leaseUntil, outcome.status, outcome.nextAttempt,
+      outcome.httpStatus, outcome.reason, outcome.apnsId, outcome.invalidate,
+      row.activityId, row.activeEntryId, row.environment
+    ]
+  );
+  return result.rowCount === 1;
 }
 
 type ApnsResponse = {

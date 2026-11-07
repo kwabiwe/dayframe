@@ -29,8 +29,34 @@ async function controlledQuery(client: Pick<pg.Pool, "query">, text: string, val
   return rows;
 }
 
+const provider = vi.hoisted(() => ({
+  reply: undefined as undefined | ((respond: (status: number, body?: string) => void) => void)
+}));
+
 vi.mock("node:http2", () => ({
-  default: { connect: () => { throw new Error("Synthetic provider network failure"); } }
+  default: {
+    connect: () => {
+      if (!provider.reply) throw new Error("Synthetic provider network failure");
+      return {
+        close: () => {},
+        once: () => {},
+        request: () => {
+          const callbacks = new Map<string, (value?: unknown) => void>();
+          return {
+            on: (event: string, callback: (value?: unknown) => void) => callbacks.set(event, callback),
+            once: (event: string, callback: (value?: unknown) => void) => callbacks.set(event, callback),
+            setEncoding: () => {},
+            setTimeout: () => {},
+            end: () => provider.reply!((status, body) => {
+              callbacks.get("response")?.({ ":status": status });
+              if (body) callbacks.get("data")?.(body);
+              callbacks.get("end")?.();
+            })
+          };
+        }
+      };
+    }
+  }
 }));
 
 vi.mock("./db", () => ({
@@ -53,7 +79,7 @@ vi.mock("./db", () => ({
 }));
 
 const {
-  notifyLiveActivities, reconcileLiveActivityDesiredState, registerLiveActivity, retryLiveActivityDeliveryBestEffort
+  drainLiveActivityOutbox, notifyLiveActivities, reconcileLiveActivityDesiredState, registerLiveActivity, retryLiveActivityDeliveryBestEffort
 } =
   await import("./live-activity-push");
 
@@ -76,6 +102,14 @@ async function outbox(owner = session) {
   );
   expect(rows).toHaveLength(1);
   return rows[0];
+}
+
+function configureSyntheticProvider() {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  vi.stubEnv("APNS_KEY_ID", "test");
+  vi.stubEnv("APNS_TEAM_ID", "test");
+  vi.stubEnv("APNS_PRIVATE_KEY", privateKey.export({ format: "pem", type: "pkcs8" }).toString());
+  vi.stubEnv("APNS_BUNDLE_ID", "com.layereight.dayframe.test");
 }
 
 async function registerRunningTimer(owner: RequestSession, id: string, title: string) {
@@ -116,6 +150,7 @@ describeWithDatabase("Live Activity retries on disposable Postgres", () => {
   });
 
   afterEach(async () => {
+    provider.reply = undefined;
     afterActiveRead = undefined;
     onOwnerLock = undefined;
     vi.useRealTimers();
@@ -232,6 +267,115 @@ describeWithDatabase("Live Activity retries on disposable Postgres", () => {
     ]);
   });
 
+  it("keeps a successful reclaimed delivery when the previous lease replies late", async () => {
+    configureSyntheticProvider();
+    let lateReply: ((status: number, body?: string) => void) | undefined;
+    const held = signal();
+    provider.reply = reply => {
+      lateReply = reply;
+      held.resolve();
+    };
+    const first = drainLiveActivityOutbox({ session });
+    try {
+      await Promise.race([held.promise, first]);
+      expect(lateReply).toBeDefined();
+      // Model a delayed invocation whose lease expires before it can handle the response.
+      await database.query(
+        "update live_activity_delivery_outbox set leased_until = now() - interval '1 second' where workspace_id=$1 and user_id=$2",
+        [session.workspaceId, session.userId]
+      );
+      provider.reply = reply => reply(200);
+      expect(await drainLiveActivityOutbox({ session })).toMatchObject({ delivered: 1 });
+      expect(await outbox()).toMatchObject({ revision: "1", status: "delivered", attempt_count: 1 });
+    } finally {
+      lateReply?.(503, '{"reason":"Shutdown"}');
+      await first;
+    }
+    expect(await outbox()).toMatchObject({ revision: "1", status: "delivered", attempt_count: 1 });
+  });
+
+  it.each(["reclaimed lease", "new revision"] as const)("ignores a stale invalid-token reply during a %s", async supersession => {
+    configureSyntheticProvider();
+    const firstHeld = signal();
+    const secondHeld = signal();
+    let firstReply: ((status: number, body?: string) => void) | undefined;
+    let secondReply: ((status: number, body?: string) => void) | undefined;
+    provider.reply = reply => {
+      firstReply = reply;
+      firstHeld.resolve();
+    };
+    const first = drainLiveActivityOutbox({ session });
+    let second: ReturnType<typeof drainLiveActivityOutbox> | undefined;
+    try {
+      await Promise.race([firstHeld.promise, first]);
+      expect(firstReply).toBeDefined();
+      provider.reply = reply => {
+        secondReply = reply;
+        secondHeld.resolve();
+      };
+      if (supersession === "reclaimed lease") {
+        await database.query(
+          "update live_activity_delivery_outbox set leased_until = now() - interval '1 second' where workspace_id=$1 and user_id=$2",
+          [session.workspaceId, session.userId]
+        );
+        second = drainLiveActivityOutbox({ session });
+      } else {
+        await database.query("update time_entries set description = 'Newer edit' where id = $1", [entryId]);
+        second = notifyLiveActivities(session);
+      }
+      await Promise.race([secondHeld.promise, second]);
+      expect(secondReply).toBeDefined();
+      const latestClaim = await outbox();
+
+      firstReply?.(410, '{"reason":"Unregistered"}');
+      expect(await first).toMatchObject({ claimed: 1, invalidatedTokens: 0 });
+      expect(await outbox()).toEqual(latestClaim);
+      const token = (await database.query(
+        "select invalidated_at, consecutive_failures from live_activity_push_tokens where workspace_id=$1 and user_id=$2",
+        [session.workspaceId, session.userId]
+      )).rows[0];
+      expect(token).toEqual({ invalidated_at: null, consecutive_failures: 0 });
+
+      secondReply?.(200);
+      expect(await second).toMatchObject({ delivered: 1 });
+    } finally {
+      firstReply?.(410, '{"reason":"Unregistered"}');
+      secondReply?.(200);
+      await Promise.all([first, second]);
+    }
+    expect(await outbox()).toMatchObject({
+      revision: supersession === "reclaimed lease" ? "1" : "2",
+      status: "delivered", attempt_count: 1
+    });
+  });
+
+  it("retires the original token when its stopped entry is deleted during End delivery", async () => {
+    await database.query("update time_entries set stopped_at = $1 where id = $2", [new Date(), entryId]);
+    configureSyntheticProvider();
+    const held = signal();
+    let replyToEnd: ((status: number) => void) | undefined;
+    provider.reply = reply => {
+      replyToEnd = reply;
+      held.resolve();
+    };
+    const end = notifyLiveActivities(session);
+    try {
+      await Promise.race([held.promise, end]);
+      expect(replyToEnd).toBeDefined();
+      expect(await outbox()).toMatchObject({ event: "end", revision: "2" });
+      await database.query("delete from time_entries where id = $1", [entryId]);
+    } finally {
+      replyToEnd?.(200);
+      await end;
+    }
+    expect(await end).toMatchObject({ delivered: 1 });
+    const token = (await database.query(
+      "select active_entry_id, invalidated_at from live_activity_push_tokens where workspace_id=$1 and user_id=$2",
+      [session.workspaceId, session.userId]
+    )).rows[0];
+    expect(token).toEqual({ active_entry_id: null, invalidated_at: expect.any(Date) });
+  });
+
   it("keeps processing other owners and drains due rows while the first owner is busy", async () => {
     const other = { ...session, userId: randomUUID() };
     const holder = await database.connect();
@@ -246,11 +390,7 @@ describeWithDatabase("Live Activity retries on disposable Postgres", () => {
       await holder.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
         [`live-activity-outbox:${session.workspaceId}:${session.userId}`]);
 
-      const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-      vi.stubEnv("APNS_KEY_ID", "test");
-      vi.stubEnv("APNS_TEAM_ID", "test");
-      vi.stubEnv("APNS_PRIVATE_KEY", privateKey.export({ format: "pem", type: "pkcs8" }).toString());
-      vi.stubEnv("APNS_BUNDLE_ID", "com.layereight.dayframe.test");
+      configureSyntheticProvider();
 
       // Both due pushes enter the drain and use the mocked network failure.
       const result = await reconcileLiveActivityDesiredState();
