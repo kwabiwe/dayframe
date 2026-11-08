@@ -47,8 +47,8 @@ const MAX_COMPLETED_COPY_RECEIPTS = 64;
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
 
 export class PendingCompletedEntryChangeError extends Error {
-  constructor() {
-    super("Finish syncing this block before splitting or duplicating it.");
+  constructor(message = "Finish syncing this block before splitting or duplicating it.") {
+    super(message);
     this.name = "PendingCompletedEntryChangeError";
   }
 }
@@ -846,6 +846,22 @@ async function enqueueTimeEntryCommand(input: {
       (command.targetEntryId === input.target.targetEntryId || command.copy?.copyId === input.target.targetEntryId)
     )) {
       throw new PendingCompletedEntryChangeError();
+    }
+    if (!input.copy && input.target.targetEntryId) {
+      const target = input.target.targetEntryId;
+      const related = all.find((command) => {
+        const copy = command.copy;
+        if (!copy || command.copyAcknowledged || !mobileAccountOwnersEqual(command, input.owner)) return false;
+        if (copy.copyId === target) return true;
+        if (copy.action.kind !== "split" || command.targetEntryId !== target) return false;
+        return command.failureKind !== "permanent" || input.operation === "delete" ||
+          input.patch?.stoppedAt === copy.action.splitAt;
+      });
+      if (related) {
+        throw new PendingCompletedEntryChangeError(related.failureKind === "permanent"
+          ? "Resolve the split or copy in Sync help before changing this block."
+          : "Wait for this split or copy to sync before changing either block.");
+      }
     }
     const now = new Date().toISOString();
     const fenced = input.target.optimisticEntryId

@@ -152,6 +152,31 @@ describe("durable time-entry outbox", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("cannot queue a provisional shortened end that survives a refused split", async () => {
+    const original = "original-before-split";
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const copy = await outbox.enqueueCompletedEntryCopy({
+      owner: OWNER_A, entryId: original, expectedUpdatedAt: "2026-08-22T11:00:00.000Z",
+      action: { kind: "split", splitAt }, originalStoppedAt: "2026-08-22T11:00:00.000Z"
+    });
+    const update = {
+      owner: OWNER_A, target: { targetEntryId: original },
+      patch: { description: "Later edit", startedAt: "2026-08-22T10:00:00.000Z", stoppedAt: splitAt }
+    };
+    await expect(outbox.enqueueTimeEntryUpdate(update)).rejects.toBeInstanceOf(outbox.PendingCompletedEntryChangeError);
+    await expect(outbox.enqueueTimeEntryDelete({ owner: OWNER_A, target: { targetEntryId: copy.copy!.copyId } }))
+      .rejects.toBeInstanceOf(outbox.PendingCompletedEntryChangeError);
+    const send = vi.fn().mockResolvedValue(new Response("{}", { status: 409 }));
+    vi.stubGlobal("fetch", send);
+    const input = { owner: OWNER_A, correlations: new Map<string, string>() };
+    expect(await outbox.synchroniseTimeEntryCommands(input)).toMatchObject({ needsAttentionCount: 1, waitingCount: 0 });
+    expect(send.mock.calls.map(([, init]) => init.method)).toEqual(["POST"]);
+    await expect(outbox.enqueueTimeEntryUpdate(update)).rejects.toBeInstanceOf(outbox.PendingCompletedEntryChangeError);
+    await expect(outbox.enqueueTimeEntryUpdate({
+      ...update, patch: { ...update.patch, stoppedAt: "2026-08-22T11:00:00.000Z" }
+    })).resolves.toMatchObject({ operation: "update" });
+  });
+
   it.each(["update", "delete"] as const)(
     "keeps a %s command durable when delivery reaches the bounded deadline",
     async (operation) => {

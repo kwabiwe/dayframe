@@ -214,6 +214,8 @@ export type MobileTimeEntry = {
   stoppedAt: string | null;
   /** The version received from the server. A locally projected copy has no version yet. */
   updatedAt?: string;
+  /** Local only. A split part or duplicate awaiting canonical data must not be edited. */
+  pendingCompletedCopy?: true;
   durationSeconds: number;
   tagNames?: string[];
   tags?: MobileTag[];

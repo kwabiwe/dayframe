@@ -1232,6 +1232,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function presentCompletedEntry(entry: NativeCalendarEntry) {
+    if (entry.pendingCompletedCopy) {
+      showTodayNotice("Wait for this split or copy to sync before editing the block.", null);
+      return;
+    }
     const presentation = createSheetPresentation("completed_entry", false);
     // A Start again from an earlier sheet that never finished leaving must not fire later.
     pendingStartAgain.current = null;
@@ -3013,7 +3017,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         patch,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       }));
-    } catch {
+    } catch (error) {
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         errorTitle,
         "Dayframe could not save this change on your iPhone. Check available storage and try again."
@@ -3418,6 +3426,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   ) {
     const bootstrap = snapshot ?? latestData.current;
     if (!bootstrap) return false;
+    if (entries.some((entry) => entry.pendingCompletedCopy)) {
+      getDeletionCoordinator().invalidate(token);
+      showTodayNotice("Wait for this split or copy to sync before deleting the block.", null);
+      return false;
+    }
     const owner = timerStopOwner(bootstrap);
     // Captured now: a sign-out or teardown during the writes ends this lease, not a later one.
     getDeletionCoordinator();
@@ -3437,9 +3450,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (lease.ended) return false;
       deletionCommandIds.current.set(token, commandIds);
       return true;
-    } catch {
+    } catch (error) {
       if (lease.ended) return false;
       getDeletionCoordinator().invalidate(token);
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
         "Dayframe could not save this deletion on your iPhone. Check available storage and try again."

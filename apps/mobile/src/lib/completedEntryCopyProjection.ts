@@ -18,6 +18,7 @@ export function projectCompletedEntryCopy(
     data = optimisticDeleteTimeEntry(data, copy.copyId) ?? data;
   }
   if (removedOnServer && copy.action.kind === "duplicate") return data;
+  if (removedOnServer) data = setPendingCompletedCopy(data, entryId, false);
   // A fresh bootstrap may already have the copy, or the original may have changed.
   // Duplicate advances the original's version as well, so a deleted copy stays deleted.
   const original = mobileTimeEntryById(data, entryId) ?? linkedSource;
@@ -39,6 +40,7 @@ export function projectCompletedEntryCopy(
     if (!bounds || !Number.isFinite(copyStart) || copyStart < bounds.minMs || copyStart > bounds.maxMs) return data;
     copyEnd = endMs;
     projected = optimisticPatchTimeEntry(data, entryId, { stoppedAt: copy.action.splitAt }) ?? data;
+    if (!removedOnServer) projected = setPendingCompletedCopy(projected, entryId, true);
   }
 
   const entry: MobileTimeEntry = {
@@ -51,6 +53,7 @@ export function projectCompletedEntryCopy(
     confidence: "high",
     reviewStatus: "confirmed",
     updatedAt: undefined,
+    pendingCompletedCopy: true,
     confirmedInReview: undefined,
     ownerAuthoredInReview: undefined,
     locationGroup: undefined,
@@ -76,6 +79,21 @@ export function projectCompletedEntryCopy(
     historyEntries: inRange(projected.historyEntries, dayStart === undefined ? undefined : dayStart - 59 * DAY_MS, dayEnd),
     dayEntries: inRange(projected.dayEntries, dayStart, dayEnd),
     weekEntries: inRange(projected.weekEntries, range ? Date.parse(range.weekStart) : undefined, range ? Date.parse(range.weekEnd) : undefined)
+  };
+}
+
+function setPendingCompletedCopy(data: MobileBootstrap, entryId: string, pending: boolean) {
+  const entry = mobileTimeEntryById(data, entryId);
+  if (!entry || Boolean(entry.pendingCompletedCopy) === pending) return data;
+  const mark = (items: MobileTimeEntry[] | undefined) => items?.map((item) =>
+    item.id === entryId ? { ...item, pendingCompletedCopy: pending ? true as const : undefined } : item
+  );
+  return {
+    ...data,
+    entries: mark(data.entries) ?? data.entries,
+    historyEntries: mark(data.historyEntries),
+    dayEntries: mark(data.dayEntries),
+    weekEntries: mark(data.weekEntries)
   };
 }
 
@@ -129,6 +147,7 @@ export function rollbackRejectedCompletedCopy(
   const previousEnd = matchingSaved?.stoppedAt ?? copy.originalStoppedAt;
   if (!previousEnd) return next;
   next = optimisticPatchTimeEntry(next, entryId, { stoppedAt: previousEnd }) ?? next;
+  next = setPendingCompletedCopy(next, entryId, false);
   if (scopedBaseline && matchingSaved && data.dateRange?.selectedDate === scopedBaseline.dateRange?.selectedDate) {
     // A split exactly at a day boundary can remove the first half from that day's collection.
     const restored = mobileTimeEntryById(next, entryId);
