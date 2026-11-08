@@ -17,6 +17,7 @@ import {
   type TripLegMode
 } from "@dayframe/shared";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
+import { CategoryPicker } from "@/components/CategoryPicker";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { blockStyle } from "@/lib/block-style";
@@ -318,8 +319,6 @@ export function LocationCorrectionDialog({
   };
   const [logAs, setLogAs] = useState<string | null>(null);
   const [logDescription, setLogDescription] = useState("");
-  // The Logs as chips, so "Don't log" (which goes as it clears the pick) hands focus to the chip it cleared (Codex r5 on #620).
-  const logAsChips = useRef(new Map<string, HTMLButtonElement>());
   // Closed (or replaced) while saving: what was in flight stops at its next step, so nothing is sent for a
   // dialog that is gone (Codex r1 on #609).
   const alive = useRef(true);
@@ -345,7 +344,9 @@ export function LocationCorrectionDialog({
   const [query, setQuery] = useState("");
   const [moreOptions, setMoreOptions] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [allActivities, setAllActivities] = useState(false);
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
+  const [previewActivityId, setPreviewActivityId] = useState<string | null>(null);
+  const activityChoices = useMemo(() => activities.map((activity) => ({ ...activity, color: activity.color ?? "" })), [activities]);
   const [error, setError] = useState<string | null>(null);
   // "I wasn't here", asked once in place before the place comes off the day.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -655,7 +656,11 @@ export function LocationCorrectionDialog({
 
   const { place } = target;
   const open = place.stoppedAt == null;
-  const logActivities = allActivities ? activities : activities.slice(0, 8);
+  const logActivities = activities.slice(0, 8);
+  const previewActivity = activities.find((activity) => activity.id === previewActivityId);
+  if (previewActivity && !logActivities.some((activity) => activity.id === previewActivity.id)) {
+    logActivities[logActivities.length - 1] = previewActivity;
+  }
 
   // The dialog is the question (owner, 30 Oct 2026): the map, a short list where a tap answers, and the footer.
   // The list: Apple's three nearest places, then up to two saved places within about 1 km; everything else
@@ -759,7 +764,7 @@ export function LocationCorrectionDialog({
           </div>
         </div>
         <button aria-controls={`location-correction-more-${place.id}`} aria-expanded={moreOptions} className="location-correction-disclosure"
-          disabled={busy} onClick={() => setMoreOptions((value) => !value)} type="button">
+          disabled={busy} onClick={() => { setActivityPickerOpen(false); setMoreOptions((value) => !value); }} type="button">
           <span>More options</span>
           {moreOptions ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
         </button>
@@ -771,16 +776,26 @@ export function LocationCorrectionDialog({
                 <div aria-labelledby="location-correction-logs-as" className="df-rchips location-correction-logs-as" role="radiogroup">
                   {logActivities.map((activity) => (
                     <button aria-checked={logAs === activity.id} className={`df-rchip${logAs === activity.id ? " is-checked" : ""}`}
-                      ref={(element) => { if (element) logAsChips.current.set(activity.id, element); else logAsChips.current.delete(activity.id); }}
                       disabled={busy} key={activity.id} onClick={() => setLogAs(logAs === activity.id ? null : activity.id)} role="radio"
                       style={blockStyle(activity.color ?? null, activity.name)} type="button">
                       <ActivityChipFace activity={{ color: activity.color ?? activity.id, icon: activity.icon ?? null, name: activity.name }} checked={logAs === activity.id} />
                     </button>
                   ))}
-                  {activities.length > 8 && !allActivities ? (
-                    <button className="df-rchip location-correction-all-activities" disabled={busy} onClick={() => setAllActivities(true)} type="button">
-                      All activities <span className="df-tnum">{activities.length}</span>
-                    </button>
+                  {activities.length > 8 ? (
+                    <CategoryPicker
+                      categories={activityChoices}
+                      disabled={busy}
+                      menuId={`location-correction-activities-${place.id}`}
+                      onOpenChange={setActivityPickerOpen}
+                      onSelect={(activityId) => {
+                        setLogAs(activityId || null);
+                        if (activityId) setPreviewActivityId(activityId);
+                      }}
+                      open={activityPickerOpen}
+                      scope={place.id}
+                      selectedId={logAs ?? ""}
+                      variant="more"
+                    />
                   ) : null}
                 </div>
                 {logAs ? (
