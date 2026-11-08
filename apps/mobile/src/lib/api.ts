@@ -1947,6 +1947,47 @@ export async function deliverPendingTimerStop(
   }
 }
 
+export type EntryLastStop = { id: string; stoppedAt: string };
+export type EntryLastStopPage = { rows: EntryLastStop[]; truncated: boolean };
+
+export async function fetchEntryLastStops(input: {
+  owner: MobileAccountOwner;
+  fromMs: number;
+  throughMs: number;
+  excludeId?: string;
+  signal: AbortSignal;
+}): Promise<EntryLastStopPage> {
+  const { owner, fromMs, throughMs, excludeId, signal } = input;
+  const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const params = new URLSearchParams({ from: new Date(fromMs).toISOString(), through: new Date(throughMs).toISOString() });
+  // Local provisional IDs never address server rows. The editor still excludes them locally.
+  if (excludeId && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(excludeId)) params.set("exclude", excludeId);
+  const { response, body } = await mobileJsonRequest<EntryLastStopPage | null>(
+    `${DAYFRAME_API_BASE}/api/time-entries/last-stops?${params}`,
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal },
+    { timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS, timeoutMessage: "Previous blocks are taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (value, response) => {
+        if (!response.ok) return null;
+        const page = value as EntryLastStopPage | null;
+        if (!Array.isArray(page?.rows) || typeof page.truncated !== "boolean" || page.rows.length > 128 ||
+          page.rows.some((row) => {
+            if (typeof row?.id !== "string" || typeof row.stoppedAt !== "string") return true;
+            const stop = Date.parse(row.stoppedAt);
+            return !Number.isFinite(stop) || stop < fromMs || stop > throughMs;
+          })) throw new InvalidMobileAcknowledgementError();
+        return page;
+      }
+    }
+  );
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Couldn't load previous blocks.");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
+}
+
 export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner): Promise<MobileTimeEntry> {
   const session = await readOwnedAuthenticatedSessionSnapshot(owner);
   if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();

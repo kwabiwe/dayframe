@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -67,18 +67,21 @@ import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityChip, AllActivitiesChip } from "@/components/ActivityChips";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
-import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
+import { BlocksSheetHead, blocksSheetHeadStyles } from "@/components/blocks/BlocksSheetHead";
+import { EntrySplitPanel } from "@/components/EntrySplitPanel";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
-import { localLayoutTransition } from "@/lib/motion";
+import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import {
   editSheetKeyboardLayout,
   keyboardInsetFromScreenY
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
+import type { MobileAccountOwner } from "@/lib/mobileAccount";
+import { useEntryLastStop } from "@/lib/useEntryLastStop";
 import {
   HISTORICAL_SUGGESTION_ROLLBACK_ANNOUNCEMENT,
   historicalSuggestionAppliedAnnouncement
@@ -162,7 +165,9 @@ type ActiveTimerEditSheetProps = {
   elapsedSeconds: number;
   entry: MobileTimeEntry | null;
   historicalEntries?: MobileTimeEntry[];
-  lastStoppedAt: string | null;
+  lastStopEntries?: readonly MobileTimeEntry[];
+  lastStopOwner?: MobileAccountOwner;
+  lastStopDeletedIds?: ReadonlySet<string>;
   onCancel: (presentationId: number) => void;
   onCreateTag: (name: string) => Promise<MobileTag | null>;
   /** Creates an activity from the All-activities picker; resolves to its id or a message to show. */
@@ -207,7 +212,9 @@ export function ActiveTimerEditSheet({
   elapsedSeconds,
   entry: currentEntry,
   historicalEntries = [],
-  lastStoppedAt,
+  lastStopEntries = historicalEntries,
+  lastStopOwner,
+  lastStopDeletedIds,
   mode = "running",
   onCancel,
   onCreateTag,
@@ -279,15 +286,19 @@ export function ActiveTimerEditSheet({
   // A11b time wheel (owner decisions 12 Oct 2026): one inline native wheel under the time cards,
   // aimed at one card. It writes the draft live (React owns it); `timeWheelRevision` counts outside
   // changes (the dial, a date, the previous-end chip) so the wheel re-aims only for those.
-  const [splitDraft, setSplitDraft] = useState<{ sheetId: number; wheelId: number; valueMs: number; revision: number } | null>(null);
-  const splitWheelSequence = useRef(0);
-  const splitScrolledId = useRef(0);
+  const [splitDraft, setSplitDraft] = useState<{ sheetId: number; sessionId: number; wheelId: number | null; valueMs: number; revision: number } | null>(null);
+  const splitSequence = useRef(0);
+  const [actionsPosition, setActionsPosition] = useState<{ id: number; top: number; left: number; width: number } | null>(null);
+  const editorScrollBeforeSplit = useRef<{ x: number; y: number } | null>(null);
+  const lastStopAppliedRef = useRef<{ startMs: number; cutoffMs: number } | null>(null);
+  const actionsMeasureSequence = useRef(0);
+  const editorRootRef = useRef<View>(null);
+  const actionsButtonRef = useRef<View>(null);
+  const firstActionRef = useRef<View>(null);
   const [copyError, setCopyError] = useState<{ sheetId: number; text: string } | null>(null);
   const formScrollRef = useRef<ScrollView>(null);
   const formContentRef = useRef<View>(null);
-  const splitPanelRef = useRef<View>(null);
   const copyErrorRef = useRef<Text>(null);
-  const splitButtonRef = useRef<View>(null);
   const splitValueRef = useRef<View>(null);
   const [timeWheel, setTimeWheelState] = useState<{ presentationId: number; target: "start" | "end" } | null>(null);
   // The refs change in the same tick as the action (not at the next render), so a spin queued
@@ -668,6 +679,8 @@ export function ActiveTimerEditSheet({
     descriptionInputRef.current?.blur();
     Keyboard.dismiss();
     contentScrollOffsetRef.current = { x: 0, y: 0 };
+    editorScrollBeforeSplit.current = null;
+    lastStopAppliedRef.current = null;
     pendingKeyboardUpdate.current = null;
     keyboardMotionFrozen.current = false;
     invalidateNativeKeyboardSession();
@@ -1265,6 +1278,13 @@ export function ActiveTimerEditSheet({
     if (mutationGateRef.current !== null) return false;
     if (discardBypassPresentationIdRef.current === committedPresentationId) {
       discardBypassPresentationIdRef.current = null;
+    } else if (actionsOpen) {
+      closeEntryActions();
+      return false;
+    } else if (split) {
+      if (split.wheelId !== null) toggleSplitWheel();
+      else closeCompletedSplit();
+      return false;
     } else if (draftHasUnsavedChanges) {
       presentDiscardConfirmation();
       return false;
@@ -1512,8 +1532,9 @@ export function ActiveTimerEditSheet({
   const dialNowMs = Date.now();
   const busy = saving || stopping || deleting || sheetState.mutationPhase !== "idle";
   const canStop = isRunningMode && Boolean(onStop);
+  const isFinishedMode = !isRunningMode && !isAddMode;
   const canDelete = Boolean(onDelete);
-  const showDeleteButton = canDelete || isAddMode;
+  const showDeleteButton = !isFinishedMode && (canDelete || isAddMode);
   const cancelLabel = isRunningMode ? "Cancel editing block" : isAddMode ? "Cancel adding time" : "Cancel editing block";
   const saveLabel = isRunningMode ? "Save block" : isAddMode ? "Add block" : "Save block";
   const sheetTitle = isAddMode ? "Add time" : "Edit block";
@@ -1529,6 +1550,17 @@ export function ActiveTimerEditSheet({
     : null;
   const completedCopyError = copyError?.sheetId === presentation.id ? copyError.text : null;
   const copyLocked = busy || draftHasUnsavedChanges;
+  const lastStopStartMs = parsedStart.date?.getTime() ?? null;
+  const lastStopEndMs = hasStoppedTime ? parsedStop.date?.getTime() ?? Number.NaN : dialNowMs;
+  const lastStopCutoffMs = lastStopAppliedRef.current?.startMs === lastStopStartMs
+    ? lastStopAppliedRef.current.cutoffMs : lastStopStartMs;
+  const lastStop = useEntryLastStop({
+    owner: lastStopOwner, visible, presentationId: presentation.id, entryId: entry?.id,
+    startMs: lastStopStartMs, cutoffMs: lastStopCutoffMs, endMs: lastStopEndMs,
+    entries: lastStopEntries, deletedIds: lastStopDeletedIds
+  });
+  const hasEntryActions = isFinishedMode && (canCopyCompletedEntry || canStartAgain || canDelete);
+  const actionsOpen = hasEntryActions && actionsPosition?.id === presentation.id && !split;
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -1536,7 +1568,7 @@ export function ActiveTimerEditSheet({
     windowHeight: windowDimensions.height
   });
   const keyboardAwareSheetStyle = {
-    height: keyboardLayout.sheetHeight,
+    height: split ? undefined : keyboardLayout.sheetHeight,
     maxHeight: keyboardLayout.sheetMaxHeight
   };
   const layoutDensity = timeEntrySheetLayoutDensity({
@@ -1824,8 +1856,13 @@ export function ActiveTimerEditSheet({
   }
 
   function handleUserRequestClose() {
+    if (actionsOpen) {
+      closeEntryActions();
+      return;
+    }
     if (split && !busy) {
-      closeCompletedSplit();
+      if (split.wheelId !== null) toggleSplitWheel();
+      else closeCompletedSplit();
       return;
     }
     // Escape with the wheel open sets the time and closes only the wheel (A11b).
@@ -1927,7 +1964,7 @@ export function ActiveTimerEditSheet({
     });
   }
 
-  function focusSplitControl(ref: { current: View | null }) {
+  function focusEntryControl(ref: { current: View | null }) {
     const id = presentationRef.current.id;
     void AccessibilityInfo.isScreenReaderEnabled().then((enabled) => {
       if (!enabled) return;
@@ -1939,40 +1976,78 @@ export function ActiveTimerEditSheet({
     }).catch(() => undefined);
   }
 
-  function openCompletedSplit() {
-    if (!completedSplitBounds || copyLocked) return;
-    if (split) {
-      closeCompletedSplit();
+  function closeEntryActions(restoreFocus = true) {
+    actionsMeasureSequence.current += 1;
+    setActionsPosition(null);
+    if (restoreFocus) focusEntryControl(actionsButtonRef);
+  }
+
+  function openEntryActions() {
+    if (busy) return;
+    if (actionsOpen) {
+      closeEntryActions();
       return;
     }
+    const root = editorRootRef.current;
+    const anchor = actionsButtonRef.current;
+    if (!root || !anchor) return;
+    const id = presentation.id;
+    const sequence = ++actionsMeasureSequence.current;
+    dismissTransientEditingSurfaces();
+    anchor.measureLayout(root, (x, y, anchorWidth, height) => {
+      if (actionsMeasureSequence.current !== sequence || presentationRef.current.id !== id || mutationGateRef.current !== null) return;
+      const rootWidth = sheetRootLayoutRef.current?.width ?? windowDimensions.width - 32;
+      const width = Math.min(202, rootWidth);
+      setActionsPosition({ id, top: y + height + 6, left: Math.max(0, Math.min(x + anchorWidth - width, rootWidth - width)), width });
+      focusEntryControl(firstActionRef);
+    });
+  }
+
+  function openCompletedSplit() {
+    if (!completedSplitBounds || copyLocked || split) return;
+    editorScrollBeforeSplit.current = contentScrollOffsetRef.current;
+    closeEntryActions(false);
     dismissTransientEditingSurfaces();
     setCopyError(null);
     setSplitDraft({
-      sheetId: presentation.id, wheelId: ++splitWheelSequence.current,
+      sheetId: presentation.id, sessionId: ++splitSequence.current, wheelId: null,
       valueMs: defaultSplit(completedSplitBounds), revision: 0
     });
-    focusSplitControl(splitValueRef);
+    focusEntryControl(splitValueRef);
+  }
+
+  function restoreEditorScroll() {
+    const saved = editorScrollBeforeSplit.current;
+    if (!saved || !formScrollRef.current) return;
+    formScrollRef.current.scrollTo({ ...saved, animated: false });
+    contentScrollOffsetRef.current = saved;
+    editorScrollBeforeSplit.current = null;
   }
 
   function closeCompletedSplit() {
     setSplitDraft(null);
     setCopyError(null);
-    focusSplitControl(splitButtonRef);
+    const id = presentation.id;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (presentationRef.current.id === id) restoreEditorScroll();
+    }));
+    focusEntryControl(actionsButtonRef);
   }
 
-  function changeCompletedSplit(input: {
-    wheelId: number; revision?: number; valueMs?: number; step?: number;
-  }) {
-    if (!completedSplitBounds || copyLocked) return;
+  function toggleSplitWheel() {
+    if (!split || copyLocked) return;
+    const wheelId = split.wheelId === null ? ++splitSequence.current : null;
+    setSplitDraft((draft) => draft?.sessionId === split.sessionId ? { ...draft, wheelId } : draft);
+  }
+
+  function changeCompletedSplit(input: { sessionId: number; valueMs: number; wheelId?: number; revision?: number }) {
+    if (!completedSplitBounds || copyLocked || mutationGateRef.current !== null || !Number.isFinite(input.valueMs)) return;
     setSplitDraft((draft) => {
-      if (draft?.sheetId !== presentation.id || draft.wheelId !== input.wheelId) return draft;
-      if (input.revision !== undefined && draft.revision !== input.revision) return draft;
-      const valueMs = input.valueMs ?? draft.valueMs + (input.step ?? 0) * 60_000;
-      if (!Number.isFinite(valueMs)) return draft;
-      return {
-        ...draft, valueMs: clampSplit(completedSplitBounds, valueMs),
-        revision: draft.revision + Number(input.step !== undefined)
-      };
+      if (draft?.sheetId !== presentation.id || draft.sessionId !== input.sessionId) return draft;
+      if (input.wheelId !== undefined && (draft.wheelId !== input.wheelId || draft.revision !== input.revision)) return draft;
+      const valueMs = clampSplit(completedSplitBounds, input.valueMs);
+      if (valueMs === draft.valueMs) return draft;
+      return { ...draft, valueMs, revision: draft.revision + Number(input.wheelId === undefined) };
     });
   }
 
@@ -2427,6 +2502,7 @@ export function ActiveTimerEditSheet({
   }
 
   function handleFormBackgroundPress() {
+    if (actionsOpen) closeEntryActions();
     // A tap outside the cards and the wheel sets the time (it is already in the draft).
     closeTimeWheel({ haptic: true });
     dismissTransientEditingSurfaces();
@@ -2436,6 +2512,25 @@ export function ActiveTimerEditSheet({
   // (saved with Done, like any start edit); pressed again it returns to the block's own start.
   const previousEndMs = presentedPreviousEnd ? Date.parse(presentedPreviousEnd.startedAt) : Number.NaN;
   const previousEndApplied = Number.isFinite(previousEndMs) && parsedStart.date?.getTime() === previousEndMs;
+  const lastStopMs = lastStop.candidate ? Date.parse(lastStop.candidate.stoppedAt) : null;
+  const lastStopMatchesPreviousEnd = lastStopMs !== null && isRunningMode && lastStopMs === previousEndMs;
+  const lastStopDisabled = busy || lastStopMs === null || (lastStopMs === lastStopStartMs && !lastStopMatchesPreviousEnd);
+  const lastStopLabel = lastStopMs !== null ? `Last stop ${formatClockTime(lastStopMs, clockFormat)}`
+    : lastStop.status === "ready" ? "No previous entry on this day"
+      : lastStop.status === "loading" ? "Checking previous blocks…" : "Last stop unavailable";
+
+  function applyLastStop() {
+    if (lastStopDisabled || lastStopMs === null || lastStopCutoffMs === null) return;
+    lastStopAppliedRef.current = previousEndApplied && lastStopMatchesPreviousEnd
+      ? null : { startMs: lastStopMs, cutoffMs: lastStopCutoffMs };
+    if (lastStopMatchesPreviousEnd) {
+      togglePreviousEnd();
+      return;
+    }
+    dismissTransientEditingSurfaces({ keepTimeWheel: true });
+    applyDialInterval({ startMs: lastStopMs, endMs: lastStopEndMs });
+  }
+
   const previousEndHolds = () => previousEndStillHolds({
     current: previousEndRef.current,
     currentEntryStartedAt: entry?.startedAt,
@@ -2649,11 +2744,12 @@ export function ActiveTimerEditSheet({
           <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
             <SwipeDismissSheet
               ref={sheetRef}
-              accessibilityLabel={isRunningMode ? "Edit block" : sheetTitle}
+              accessibilityLabel={split ? "Split block" : isRunningMode ? "Edit block" : sheetTitle}
+              animateContentSize={isFinishedMode && !keyboardLayout.keyboardOpen && !sheetHeightAnimating}
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen || datePickerDismissGuarded}
-              gestureHandleOnly={canCopyCompletedEntry}
+              gestureHandleOnly={isFinishedMode || layoutDensity === "condensed"}
               dismissGestureRef={sheetDismissGestureRef}
               handleStyle={styles.sheetHandle}
               keyboardInset={keyboardInset}
@@ -2694,7 +2790,7 @@ export function ActiveTimerEditSheet({
               ]}
               onLayout={(event) => {
                 measuredSheetHeight.current = event.nativeEvent.layout.height;
-                if (!keyboardLayout.keyboardOpen && !sheetHeightAnimating) {
+                if (!split && !keyboardLayout.keyboardOpen && !sheetHeightAnimating) {
                   closedSheetHeight.current = event.nativeEvent.layout.height;
                 }
                 scheduleGeometryMeasurement();
@@ -2703,28 +2799,54 @@ export function ActiveTimerEditSheet({
               translateYOffset={0}
               visible={visible}
             >
+              {split && completedSplitBounds ? (
+                <EntrySplitPanel
+                  bounds={completedSplitBounds}
+                  busy={busy}
+                  clockFormat={clockFormat}
+                  error={completedCopyError}
+                  onBack={closeCompletedSplit}
+                  onConfirm={() => void copyCompletedEntry({ kind: "split", splitAt: new Date(split.valueMs).toISOString() })}
+                  onDividerChange={(valueMs) => changeCompletedSplit({ sessionId: split.sessionId, valueMs })}
+                  onToggleWheel={toggleSplitWheel}
+                  onWheelChange={(change) => changeCompletedSplit({
+                    sessionId: split.sessionId, wheelId: change.presentationId, revision: change.revision, valueMs: change.valueMs
+                  })}
+                  reduceMotion={reduceMotion}
+                  revision={split.revision}
+                  theme={theme}
+                  timeControlRef={splitValueRef}
+                  valueMs={split.valueMs}
+                  wheelId={split.wheelId}
+                  wheelHeight={TIME_WHEEL_HEIGHT_BY_DENSITY[layoutDensity]}
+                />
+              ) : null}
               <View
-                accessibilityElementsHidden={!presentationInteractionReady}
+                ref={editorRootRef}
+                accessibilityElementsHidden={!presentationInteractionReady || Boolean(split)}
                 collapsable={false}
                 importantForAccessibility={
-                  presentationInteractionReady ? "auto" : "no-hide-descendants"
+                  presentationInteractionReady && !split ? "auto" : "no-hide-descendants"
                 }
                 onLayout={(event) => {
                   const { height, width } = event.nativeEvent.layout;
+                  if (actionsOpen && sheetRootLayoutRef.current?.width !== width) closeEntryActions();
                   sheetRootLayoutRef.current = { height, width, x: 0, y: 0 };
                   scheduleGeometryMeasurement();
                 }}
                 style={[
                   styles.activeEditBody,
-                  keyboardLayout.keyboardOpen ? styles.activeEditBodyKeyboard : null
+                  keyboardLayout.keyboardOpen ? styles.activeEditBodyKeyboard : null,
+                  split ? sheetStyles.editorHidden : null
                 ]}
-                pointerEvents={presentationInteractionReady ? "auto" : "none"}
+                pointerEvents={presentationInteractionReady && !split ? "auto" : "none"}
                 testID="time-entry-sheet-content"
               >
+              {actionsOpen ? <Pressable accessible={false} onPress={() => closeEntryActions()} style={sheetStyles.menuBackdrop} /> : null}
               <Pressable
                 accessible={false}
                 onPress={handleFormBackgroundPress}
-                style={sheetStyles.head}
+                style={[sheetStyles.head, actionsOpen ? sheetStyles.menuHead : null]}
                 testID="time-entry-sheet-upper-dismiss-area"
               >
                 <BlocksSheetHead
@@ -2733,10 +2855,26 @@ export function ActiveTimerEditSheet({
                     busy,
                     label: "Done",
                     onPress: () => {
+                      if (actionsOpen) closeEntryActions(false);
                       void saveChanges();
                     },
                     testID: "time-entry-sheet-done"
                   } : null}
+                  secondaryAction={hasEntryActions ? (
+                    <View style={sheetStyles.actionAnchor}>
+                      <Pressable
+                        ref={actionsButtonRef}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: busy, expanded: actionsOpen }}
+                        disabled={busy}
+                        onPress={openEntryActions}
+                        style={pressable([blocksSheetHeadStyles.pill, { backgroundColor: actionsOpen ? theme.borderStrong : theme.surfaceMuted }], styles.buttonPressed)}
+                        testID="time-entry-actions-menu"
+                      >
+                        <Text {...mobileTextProps("control")} style={[blocksSheetHeadStyles.pillText, { color: theme.textPrimary }]}>Actions</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
                   eyebrow={headEyebrow}
                   eyebrowTestID="time-entry-sheet-elapsed"
                   textTestID="time-entry-sheet-hero"
@@ -2744,6 +2882,45 @@ export function ActiveTimerEditSheet({
                   title={headTitle}
                 />
               </Pressable>
+              {actionsOpen && actionsPosition ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  accessibilityViewIsModal
+                  onAccessibilityEscape={() => closeEntryActions()}
+                  style={[sheetStyles.menu, { backgroundColor: theme.surfaceRaised, shadowColor: theme.shadow, top: actionsPosition.top, left: actionsPosition.left, width: actionsPosition.width }]}
+                  testID="time-entry-actions-options"
+                >
+                  {canCopyCompletedEntry ? <>
+                    <EntryActionRow
+                      rowRef={firstActionRef} disabled={copyLocked || !completedSplitBounds}
+                      glyph={DAYFRAME_APP_ICONS.split} hint={draftHasUnsavedChanges ? "Save your changes first." : !completedSplitBounds ? "This block is too short to split." : undefined}
+                      label="Split" onPress={openCompletedSplit} testID="time-entry-split" theme={theme}
+                    />
+                    <EntryActionRow
+                      disabled={copyLocked} glyph="copy"
+                      hint={draftHasUnsavedChanges ? "Save your changes first." : "Adds a copy immediately after this block."}
+                      label="Duplicate" onPress={() => { closeEntryActions(); void copyCompletedEntry({ kind: "duplicate" }); }}
+                      testID="time-entry-duplicate" theme={theme}
+                    />
+                  </> : null}
+                  {canStartAgain ? <EntryActionRow
+                    rowRef={!canCopyCompletedEntry ? firstActionRef : undefined} disabled={busy}
+                    glyph={DAYFRAME_APP_ICONS.startAgain} hint="Saves your changes and starts this block again"
+                    label="Start again" onPress={() => { closeEntryActions(); startAgainFromSheet(); }}
+                    testID="time-entry-sheet-start-again" theme={theme}
+                  /> : null}
+                  {canDelete ? <>
+                    {canCopyCompletedEntry || canStartAgain ? <View style={[sheetStyles.menuDivider, { backgroundColor: theme.border }]} /> : null}
+                    <EntryActionRow
+                      rowRef={!canCopyCompletedEntry && !canStartAgain ? firstActionRef : undefined} danger disabled={busy}
+                      glyph={DAYFRAME_APP_ICONS.delete} label="Delete"
+                      onPress={() => { closeEntryActions(); void deleteEntryFromSheet(); }}
+                      testID="time-entry-sheet-delete" theme={theme}
+                    />
+                  </> : null}
+                </Reanimated.View>
+              ) : null}
               {question ? (
                 // Unsaved edits first (Codex r1 on #618): the answers wait, and a tap asks to discard them, so an answer
                 // never closes the sheet over a draft.
@@ -2752,11 +2929,13 @@ export function ActiveTimerEditSheet({
               ) : null}
 
               <EntryFormViewport
-                scrollable={canCopyCompletedEntry}
+                accessibilityHidden={actionsOpen}
+                scrollable={isFinishedMode || layoutDensity === "condensed"}
                 scrollRef={formScrollRef}
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   scrollViewportLayoutRef.current = { height, width, x, y };
+                  if (!split && height > 0) restoreEditorScroll();
                   scheduleGeometryMeasurement();
                 }}
                 onScrollOffset={(offset) => {
@@ -3113,8 +3292,8 @@ export function ActiveTimerEditSheet({
                     styles.activeEditTimeGroups,
                     timeCardsStacked ? styles.activeEditTimeGroupsStacked : null
                   ]}>
-                    {/* PRD D16: the start column holds the START card and, under it, the compact
-                        "From 15:20" pill (owner, 15 Oct 2026); the end card keeps its own height. */}
+                    {/* The start column holds the START card and the compact
+                        Last stop pill. The end card keeps its own height. */}
                     <View pointerEvents="box-none" style={[sheetStyles.startColumn, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
                       <View style={[
                         styles.activeEditTimeGroup,
@@ -3167,33 +3346,35 @@ export function ActiveTimerEditSheet({
                           </Text>
                         </Pressable>
                       </View>
-                      {presentedPreviousEnd ? (
+                      <View style={[sheetStyles.lastStopSlot, timeCardsStacked && sheetStyles.lastStopSlotLarge]}>
                         <Pressable
-                          accessibilityHint={previousEndApplied ? "Returns the start to when this block started" : "Moves the start back to when that block ended; Done saves it"}
-                          accessibilityLabel={`Start from ${formatClockTime(previousEndMs, clockFormat)}, after ${presentedPreviousEnd.previousName}`}
+                          accessibilityHint={lastStopMatchesPreviousEnd && previousEndApplied
+                            ? "Returns the start to when this block started"
+                            : lastStopMs !== null ? "Sets the start to this time. Done saves it." : undefined}
+                          accessibilityLabel={lastStopMatchesPreviousEnd && presentedPreviousEnd
+                            ? `${lastStopLabel}, after ${presentedPreviousEnd.previousName}` : lastStopLabel}
                           accessibilityRole="button"
-                          accessibilityState={{ disabled: busy, selected: previousEndApplied }}
-                          disabled={busy}
+                          accessibilityState={{ disabled: lastStopDisabled, selected: lastStopMatchesPreviousEnd && previousEndApplied }}
+                          disabled={lastStopDisabled}
                           hitSlop={{ top: 6, bottom: 6 }}
-                          onPress={togglePreviousEnd}
+                          onPress={applyLastStop}
                           style={({ pressed }) => [
-                            sheetStyles.previousEndPill,
+                            sheetStyles.lastStopPill,
                             { backgroundColor: theme.surfaceMuted },
-                            pressed && !busy ? styles.buttonPressed : null,
-                            busy ? styles.buttonDisabled : null
+                            pressed && !lastStopDisabled ? styles.buttonPressed : null
                           ]}
-                          testID="time-entry-previous-end"
+                          testID="time-entry-set-last-stop-time"
                         >
-                          <DayframeIcon
-                            color={previousEndApplied ? theme.textPrimary : theme.textSecondary}
-                            glyph={previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}
+                          {lastStopMs !== null ? <DayframeIcon
+                            color={lastStopMatchesPreviousEnd && previousEndApplied ? theme.textPrimary : theme.textSecondary}
+                            glyph={lastStopMatchesPreviousEnd && previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}
                             size={14}
-                          />
-                          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.previousEndPillText, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
-                            From {formatClockTime(previousEndMs, clockFormat)}
+                          /> : null}
+                          <Text {...mobileTextProps("metadata")} style={[sheetStyles.lastStopText, { color: lastStopDisabled ? theme.textSecondary : theme.textPrimary }]}>
+                            {lastStopLabel}
                           </Text>
                         </Pressable>
-                      ) : null}
+                      </View>
                     </View>
                     {hasStoppedTime ? (
                       <View style={[
@@ -3284,96 +3465,7 @@ export function ActiveTimerEditSheet({
                 {/* A11b: while the wheel is open it takes the dial's place (the panel is sized to the
                     dial's measured room), so the fixed sheet never grows and its actions stay on screen
                     at every density (Codex r1/r2 on #428; the prototype's shrinking dial does not fit). */}
-                {split && completedSplitBounds ? (
-                  <Reanimated.View
-                    ref={splitPanelRef}
-                    collapsable={false}
-                    layout={localLayoutTransition(reduceMotion)}
-                    onLayout={() => {
-                      if (splitScrolledId.current === split.wheelId) return;
-                      splitScrolledId.current = split.wheelId;
-                      scrollFormTo(splitPanelRef.current);
-                    }}
-                    style={sheetStyles.splitPanel}
-                  >
-                    <Pressable
-                      ref={splitValueRef}
-                      accessibilityRole="adjustable"
-                      accessibilityLabel="Split time"
-                      accessibilityValue={{ text: formatClockTime(split.valueMs, clockFormat) }}
-                      accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-                      accessibilityState={{ disabled: busy }}
-                      onAccessibilityAction={(event) => {
-                        const action = event.nativeEvent.actionName;
-                        if (action === "increment" || action === "decrement") {
-                          changeCompletedSplit({ wheelId: split.wheelId, step: action === "increment" ? 1 : -1 });
-                        }
-                      }}
-                      style={sheetStyles.splitValue}
-                      testID="time-entry-split-value"
-                    >
-                      <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary }}>
-                        {formatClockTime(split.valueMs, clockFormat)}
-                      </Text>
-                    </Pressable>
-                    <TimeWheelPanel
-                      key={split.wheelId}
-                      model={{
-                        modelVersion: 1,
-                        presentationId: split.wheelId,
-                        revision: split.revision,
-                        valueMs: split.valueMs,
-                        minimumMs: completedSplitBounds.minMs,
-                        maximumMs: completedSplitBounds.maxMs,
-                        minuteInterval: 1,
-                        clockFormat,
-                        colorScheme: theme.mode === "dark" ? "dark" : "light"
-                      }}
-                      notch={null}
-                      onTimeChange={(change) => changeCompletedSplit({
-                        wheelId: change.presentationId, revision: change.revision, valueMs: change.valueMs
-                      })}
-                      reduceMotion={reduceMotion}
-                      testIDPrefix="time-entry-split-wheel"
-                      theme={theme}
-                      wheelHeight={TIME_WHEEL_HEIGHT_BY_DENSITY[layoutDensity]}
-                    />
-                    <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>
-                      {formatClockTime(completedSplitBounds.startMs, clockFormat)}–{formatClockTime(split.valueMs, clockFormat)}
-                      {" · "}{formatDuration((split.valueMs - completedSplitBounds.startMs) / 1000)}
-                    </Text>
-                    <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>
-                      {formatClockTime(split.valueMs, clockFormat)}–{formatClockTime(completedSplitBounds.stopMs, clockFormat)}
-                      {" · "}{formatDuration((completedSplitBounds.stopMs - split.valueMs) / 1000)}
-                    </Text>
-                    {completedCopyError ? <Text
-                      ref={copyErrorRef}
-                      onLayout={() => scrollFormTo(copyErrorRef.current)}
-                      {...mobileTextProps("body")}
-                      style={styles.errorText}
-                    >{completedCopyError}</Text> : null}
-                    <View style={[sheetStyles.actions, sheetStyles.copyActions]}>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={closeCompletedSplit}
-                        style={[sheetStyles.actionPill, sheetStyles.copyPill, { backgroundColor: theme.surfaceMuted }]}
-                      >
-                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Keep as one</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => void copyCompletedEntry({ kind: "split", splitAt: new Date(split.valueMs).toISOString() })}
-                        style={[sheetStyles.actionPill, sheetStyles.copyPill, { backgroundColor: theme.accent }]}
-                        testID="time-entry-split-confirm"
-                      >
-                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Split at {formatClockTime(split.valueMs, clockFormat)}</Text>
-                      </Pressable>
-                    </View>
-                  </Reanimated.View>
-                ) : null}
-                {timeWheel || split ? null : (
+                {timeWheel ? null : (
                   <View
                     onLayout={(event) => setDialAreaMeasure({ height: event.nativeEvent.layout.height, key: dialAreaKey })}
                     pointerEvents="box-none"
@@ -3383,7 +3475,6 @@ export function ActiveTimerEditSheet({
                     activityColor={dialActivityColor}
                     disabled={busy}
                     endMs={parsedStop.date?.getTime() ?? draftEndMs}
-                    lastStoppedAt={lastStoppedAt}
                     layoutDensity={layoutDensity}
                     mode={isRunningMode ? "running" : "stopped"}
                     nowMs={dialNowMs}
@@ -3406,38 +3497,7 @@ export function ActiveTimerEditSheet({
                       {...mobileTextProps("body")}
                       style={styles.errorText}
                     >{completedCopyError}</Text> : null}
-                {canCopyCompletedEntry ? (
-                  <View style={[sheetStyles.actions, sheetStyles.copyActions]} testID="time-entry-copy-actions">
-                    <Pressable
-                      ref={splitButtonRef}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: copyLocked || !completedSplitBounds, expanded: Boolean(split) }}
-                      accessibilityHint={draftHasUnsavedChanges ? "Save your changes first." : !completedSplitBounds ? "This block is too short to split." : undefined}
-                      disabled={copyLocked || !completedSplitBounds}
-                      onPress={openCompletedSplit}
-                      onTouchStart={(event) => event.stopPropagation()}
-                      style={[sheetStyles.actionPill, sheetStyles.copyPill, { backgroundColor: theme.surfaceMuted }, (copyLocked || !completedSplitBounds) && styles.buttonDisabled]}
-                      testID="time-entry-split"
-                    >
-                      <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.split} size={18} />
-                      <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Split</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityHint={draftHasUnsavedChanges ? "Save your changes first." : "Adds a copy immediately after this block."}
-                      disabled={copyLocked}
-                      onPress={() => void copyCompletedEntry({ kind: "duplicate" })}
-                      onTouchStart={(event) => event.stopPropagation()}
-                      style={[sheetStyles.actionPill, sheetStyles.copyPill, { backgroundColor: theme.surfaceMuted }, copyLocked && styles.buttonDisabled]}
-                      testID="time-entry-duplicate"
-                    >
-                      <DayframeIcon color={theme.textPrimary} glyph="copy" size={18} />
-                      <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Duplicate</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-
-                {showDeleteButton || canStop || canStartAgain ? (
+                {showDeleteButton || canStop || (isAddMode && onSave) ? (
                   <View style={sheetStyles.actions} testID="time-entry-sheet-actions">
                     {showDeleteButton ? (
                       <Pressable
@@ -3502,26 +3562,6 @@ export function ActiveTimerEditSheet({
                       >
                         <DayframeIcon color={theme.onAccent} glyph={DAYFRAME_APP_ICONS.add} size={18} />
                         <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Add block</Text>
-                      </Pressable>
-                    ) : null}
-                    {canStartAgain ? (
-                      <Pressable
-                        accessibilityHint="Saves your changes and starts this block again"
-                        accessibilityLabel="Start again"
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={startAgainFromSheet}
-                        onTouchStart={(event) => event.stopPropagation()}
-                        style={({ pressed }) => [
-                          sheetStyles.actionPill,
-                          { backgroundColor: theme.surfaceMuted },
-                          pressed && !busy ? styles.buttonPressed : null,
-                          busy ? styles.buttonDisabled : null
-                        ]}
-                        testID="time-entry-sheet-start-again"
-                      >
-                        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={18} />
-                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Start again</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -3784,7 +3824,8 @@ function formatSheetDay(date: Date) {
 }
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
-function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scrollable, scrollRef, style, testID }: {
+function EntryFormViewport({ accessibilityHidden, children, onLayout, onPress, onScrollOffset, scrollable, scrollRef, style, testID }: {
+  accessibilityHidden: boolean;
   children: ReactNode;
   onLayout: (event: LayoutChangeEvent) => void;
   onPress: () => void;
@@ -3803,6 +3844,8 @@ function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scroll
   }
   return (
     <ScrollView
+      accessibilityElementsHidden={accessibilityHidden}
+      importantForAccessibility={accessibilityHidden ? "no-hide-descendants" : "auto"}
       ref={scrollRef}
       onLayout={onLayout}
       onScroll={(event) => onScrollOffset(event.nativeEvent.contentOffset)}
@@ -3813,6 +3856,31 @@ function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scroll
     >
       <Pressable accessible={false} onPress={onPress}>{children}</Pressable>
     </ScrollView>
+  );
+}
+
+function EntryActionRow({ danger = false, disabled, glyph, hint, label, onPress, rowRef, testID, theme }: {
+  danger?: boolean;
+  disabled: boolean;
+  glyph: ComponentProps<typeof DayframeIcon>["glyph"];
+  hint?: string;
+  label: string;
+  onPress: () => void;
+  rowRef?: Ref<View>;
+  testID: string;
+  theme: MobileTheme;
+}) {
+  const color = danger ? theme.dangerText : theme.textPrimary;
+  return (
+    <Pressable
+      ref={rowRef} accessibilityHint={hint} accessibilityRole="button" accessibilityState={{ disabled }}
+      disabled={disabled} onPress={onPress} onTouchStart={(event) => event.stopPropagation()}
+      style={({ pressed }) => [sheetStyles.menuRow, pressed && { backgroundColor: theme.surfaceMuted }, disabled && sheetStyles.menuDisabled]}
+      testID={testID}
+    >
+      <DayframeIcon color={color} glyph={glyph} size={18} />
+      <Text {...mobileTextProps("control")} style={[sheetStyles.menuText, { color }]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -3829,25 +3897,30 @@ const sheetStyles = StyleSheet.create({
   tagChipName: { flexShrink: 1, minWidth: 0 },
   // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
   tagAdd: { gap: 4 },
-  // The START card's column (PRD D16): the card, then the "From 15:20" pill directly under it.
+  // The START card's column holds the card and the fixed Last stop slot directly under it.
   startColumn: { flex: 1, gap: 6, minWidth: 0 },
-  // PRD D16 (owner, 15 Oct 2026): a compact filled pill, back arrow + "From 15:20"; the previous
-  // block's name is spoken, not shown.
-  previousEndPill: {
+  lastStopSlot: { minHeight: 44, justifyContent: "center" },
+  lastStopSlotLarge: { minHeight: 52 },
+  lastStopPill: {
     alignItems: "center", alignSelf: "flex-start", borderRadius: 999, flexDirection: "row", gap: 5,
     maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 11
   },
-  previousEndPillText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  lastStopText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },
   // The card's time as plain text (owner, 16 Oct 2026: no number pad), centred on the old field's line.
   timeCardValue: { lineHeight: 28 },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
-  splitPanel: { gap: 6, marginBottom: 8 },
-  splitValue: { alignSelf: "stretch", alignItems: "center", justifyContent: "center", minHeight: 44 },
+  editorHidden: { display: "none" },
+  menuHead: { zIndex: 4 },
+  menuBackdrop: { ...StyleSheet.absoluteFill, zIndex: 3 },
+  actionAnchor: { position: "relative" },
+  menu: { position: "absolute", zIndex: 5, padding: 6, borderRadius: 16, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, shadowOpacity: 1, elevation: 6 },
+  menuRow: { minHeight: 44, paddingHorizontal: 10, paddingVertical: 7, alignItems: "center", flexDirection: "row", gap: 10, borderRadius: 10 },
+  menuText: { flexShrink: 1, fontSize: 15, fontWeight: "600" },
+  menuDisabled: { opacity: 0.55 },
+  menuDivider: { marginHorizontal: 8, height: StyleSheet.hairlineWidth },
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
-  copyActions: { flexWrap: "wrap" },
-  copyPill: { flexBasis: 125 },
   actionPill: {
     alignItems: "center",
     borderRadius: 999,

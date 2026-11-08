@@ -118,9 +118,6 @@ function SheetQaHarness() {
   const [mutationFailureCount, setMutationFailureCount] = useState(0);
   const [startAgainCount, setStartAgainCount] = useState(0);
   const [tagCreateCount, setTagCreateCount] = useState(0);
-  const runningLastStoppedAtRef = useRef(
-    new Date(Date.now() - 90 * 60 * 1_000).toISOString()
-  );
   // `?previousEnd=1`: the running fixture is offered "← From …" after Bauhaus research (PRD D16),
   // 25 minutes before it started.
   const previousEndRef = useRef(params.previousEnd === "1"
@@ -487,9 +484,10 @@ function SheetQaHarness() {
         elapsedSeconds={elapsedSeconds}
         entry={entry}
         historicalEntries={historicalEntries}
-        lastStoppedAt={mode === "running"
-          ? runningLastStoppedAtRef.current
-          : "2026-08-07T16:45:00.000Z"}
+        lastStopEntries={mode === "running" && historyFixtures[0] ? [{
+          ...historyFixtures[0],
+          stoppedAt: previousEndRef.current?.startedAt ?? new Date(Date.parse(runningStartedAt) - 25 * 60 * 1000).toISOString()
+        }] : historicalEntries}
         mode={mode}
         previousEnd={mode === "running" ? previousEndRef.current : null}
         onApplySuggestion={async (_entryId, suggestion) => {

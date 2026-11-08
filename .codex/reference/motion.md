@@ -281,7 +281,7 @@ Block pull-to-refresh:
 - Entrance/update/exit: opening fades the hint out and the pills in; a shortcut applies its interval through the dial's existing `onChange` (the dial and the time cards update in the same render) and fades the pills back to the hint. The time cards have no motion of their own.
 - Interruption: turning the dial while the pills are open closes them; a disabled sheet (a mutation in flight) disables `…` and the pills.
 - Async outcome: none; shortcuts only change the draft.
-- Accessibility: Reduce Motion keeps the swap as a short fade (90 ms in, 70 ms out) with no movement. `…` reports `expanded`; its label is "Time shortcuts" or "Hide time shortcuts"; each pill has a spoken label ("Set start to the last stop time, 21:22", "Round stop time", "Round duration").
+- Accessibility: Reduce Motion keeps the swap as a short fade (90 ms in, 70 ms out) with no movement. `…` reports `expanded`; its label is "Time shortcuts" or "Hide time shortcuts"; each pill has a spoken label ("Round stop time", "Round duration").
 
 ## iPhone Review deck (Blocks parity steps 5a, 5b and 5f; Today · Earlier segments)
 
@@ -323,15 +323,12 @@ The running block's menu opens Switch activity in the shared modal. The modal ow
 - Async outcome: the Start is optimistic as always; if it fails or another Start takes over, nothing is edited. If a newer loaded block has ended since the chip appeared, the block stays at now with the bar's notice "Started now: an earlier block ends later than that, so the start wasn't moved." A rejected start edit rolls back as the start editor's does.
 - Accessibility: no motion to reduce. The chip's name is "Start from 10:15, after Write report"; it is a native button in the tab order after the description.
 
-## Entry sheet "← From 10:15" (PRD D16, 14 Oct 2026; compact pill under START 15 Oct)
+## iPhone block editor Actions, Split and Last stop
 
-- Trigger: the running block's sheet presented with an offer (Dashboard's `previousEndOffer`); a tap on the chip.
-- Owner: none of its own. The chip is read once when the sheet hydrates and stays for that presentation, so it never appears or leaves while the sheet is up; a tap goes through the dial's `applyDialInterval`, so the start card, the dial and its arc update in the same render exactly as a dial shortcut does.
-- Entrance/update/exit: present from the sheet's first frame (part of the sheet's own entrance); a tap toggles its selected state in place (the back arrow becomes a check, primary text); it leaves with the sheet.
-- Surrounding layout: a 32-point pill (44-point target) in the START card's column, directly under the card (the end card keeps its own height); its size never changes, so the dial and actions never move after presentation.
-- Interruption: disabled while a mutation is in flight; a turn of the dial afterwards simply un-selects it. If the previous block's end has moved since the sheet opened (refresh, another device, a reconciled queued Stop), a tap or Done shows the sheet's inline error instead of moving or saving the start; nothing animates.
-- Async outcome: none — it changes the draft only; Done saves the start (a running start edit), and closing without Done keeps the block's own start.
-- Accessibility: no motion to reduce. Name "Start from 10:15, after Write report", role button, selected while applied, with a hint that Done saves it.
+- Actions is a labelled header pill beside Done in Edit block. The anchored menu owns its own short fade. Outside tap, Escape and choosing an action close it. Split and Duplicate keep the saved-block eligibility guard. Start again and Delete keep their existing save and Undo owners. The editor and header stay in place while the menu opens or closes.
+- Split replaces the editor content inside the same sheet. `SwipeDismissSheet` owns the content size transition. The compact panel fades in at the bottom, with the horizontal divider, time pill, live previews and confirmation together. The editor stays mounted but hidden from touch and VoiceOver. Back and Keep as one discard only the split draft and restore the editor scroll offset and Actions focus. Escape or the backdrop closes the open wheel before returning to the editor. Under Reduce Motion, the sheet changes size without travel and the panel uses the short fade.
+- The divider pan owns thumb position on the UI thread. React receives only changed whole minutes, with one selection tick. A cancelled pan restores its original minute. The time pill toggles the existing native minute wheel, and VoiceOver can adjust the time in one-minute steps. A wheel callback from an earlier panel, opening or revision is ignored. The previews update in place. Confirm captures the existing durable split command once. A refusal leaves the chosen minute and the error in the panel. A successful local save dismisses the sheet through its usual owner.
+- Last stop occupies a stable slot below Start in every block editor. Its copy changes in place while the owner-scoped read resolves, with cached candidates usable offline. Pending and unavailable do not claim that the date is empty. The shortcut updates the draft through the dial path and re-aims an open wheel. When it matches the running block's existing D16 offer, the second tap still returns to its saved start, and tap and Done retain the existing stale-gap check. No movement or new haptic belongs to the slot.
 
 ## Entry sheet date sheet (date pickers PR 2, owner decisions D1/D2, 14 Oct 2026)
 

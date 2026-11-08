@@ -362,7 +362,6 @@ function DashboardBrandLockup({
     </View>
   );
 }
-const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Correlation pruning reads every durable store, so a refresh does it at most this often. */
 const TIMER_ID_CORRELATION_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 /**
@@ -1935,10 +1934,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     timerEntryIdentity(stopFlight.entryId) === timerEntryIdentity(displayedActiveEntry.id)
       ? stopFlight.presentation.elapsedSeconds
       : undefined;
-  const recentStoppedAt = useMemo(
-    () => recentStoppedEntryTime(timerShownData?.entries ?? [], timerShownData?.activeEntry ?? null),
-    [timerShownData?.activeEntry, timerShownData?.entries]
-  );
   // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
   // today's last finished block ended, when that was 1 min–4 h before the block started.
   const previousEndForSheet = useMemo(() => {
@@ -4471,7 +4466,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
         entry={manualDraftEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={pendingDeletionEntryIds}
         mode="add"
         onCancel={completeManualEntryExit}
         onCreateActivity={createSheetActivity}
@@ -4492,7 +4488,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={displayedActiveDurationSeconds}
         entry={retainedActiveEntryForSheet}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={pendingDeletionEntryIds}
         onApplySuggestion={applyRunningTimerSuggestion}
         previousEnd={previousEndForSheet}
         onCancel={completeActiveEditorExit}
@@ -4518,7 +4515,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={null}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={pendingDeletionEntryIds}
         mode="entry"
         dismissRequestId={calendarEditDismissRequestId}
         onCancel={completeCalendarEntryExit}
@@ -4770,31 +4768,6 @@ function addDaysToDate(date: Date, days: number) {
 
 function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
   return left.userId === right.userId && left.workspaceId === right.workspaceId;
-}
-
-function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
-  if (!activeEntry) return null;
-  const activeStart = new Date(activeEntry.startedAt).getTime();
-  if (Number.isNaN(activeStart)) return null;
-
-  let recentStop: string | null = null;
-  let recentStopTime = 0;
-  for (const entry of entries) {
-    if (!entry.stoppedAt) continue;
-    const stoppedAt = new Date(entry.stoppedAt).getTime();
-    if (
-      Number.isNaN(stoppedAt) ||
-      stoppedAt > activeStart ||
-      activeStart - stoppedAt > RECENT_LAST_STOP_WINDOW_MS ||
-      stoppedAt <= recentStopTime
-    ) {
-      continue;
-    }
-    recentStop = entry.stoppedAt;
-    recentStopTime = stoppedAt;
-  }
-
-  return recentStop;
 }
 
 function pad2(value: number) {
