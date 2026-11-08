@@ -1069,6 +1069,8 @@ export type TimeEntryQueryOptions = {
   limit?: number;
 };
 
+const capturedNowParam = "$3";
+
 function timeEntryQueryScope(
   session: RequestSession,
   options: TimeEntryQueryOptions,
@@ -1085,7 +1087,7 @@ function timeEntryQueryScope(
   }
   if (options.overlappingFrom) {
     values.push(options.overlappingFrom);
-    where.push(`coalesce(te.stopped_at, $3::timestamptz) > $${values.length}::timestamptz`);
+    where.push(`coalesce(te.stopped_at, ${capturedNowParam}::timestamptz) > $${values.length}::timestamptz`);
   }
   if (options.startedFrom) {
     values.push(options.startedFrom);
@@ -1159,7 +1161,7 @@ export function buildTimeEntriesQuery(
             ) as tags,
             greatest(
               0,
-              extract(epoch from (coalesce(te.stopped_at, $3::timestamptz) - te.started_at))
+              extract(epoch from (coalesce(te.stopped_at, ${capturedNowParam}::timestamptz) - te.started_at))
             )::int as "durationSeconds"
      from time_entries te
      left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
