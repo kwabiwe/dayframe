@@ -423,7 +423,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
             ) {
               return "continue";
             }
-            const result=await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly});
+            const result=await syncLocationIntelligenceOnForeground({foregroundReplay:!context?.dueOnly});
             changed ||= locationSyncChangedDashboard(result);
             return locationConnectivityRecoveryStepResult(result);
           }

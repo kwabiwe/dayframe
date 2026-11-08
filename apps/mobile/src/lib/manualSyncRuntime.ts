@@ -173,7 +173,7 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
           signal: context.signal,
           deadlineAt: context.deadlineAt,
         });
-        if (result.reason === "v1")
+        if (result.reason === "v1" || result.reason === "location_paused")
           return { outcome: "complete", stage: "disabled" };
         return {
           outcome: result.outcome ?? "partial",
