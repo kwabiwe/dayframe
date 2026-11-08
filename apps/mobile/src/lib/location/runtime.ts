@@ -137,7 +137,9 @@ export function enableLocationCaptureOwnership(owner: MobileAccountOwner, revisi
     if (!ownerIsCurrent(owner, revision)) return false;
     const geofence = await import("../geofence");
     await geofence.writeLocationLearningPreference(owner, true);
-    return bindOwnerUnsafe(owner, revision, true);
+    const bound = await bindOwnerUnsafe(owner, revision, true);
+    if (bound && ownerIsCurrent(owner, revision)) setAutomaticLocationTransferPaused(owner, false);
+    return bound;
   });
 }
 

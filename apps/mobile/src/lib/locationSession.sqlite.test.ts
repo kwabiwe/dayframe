@@ -1258,4 +1258,52 @@ describe("legacy location transfer and foreground replay", () => {
       background.mockResolvedValue({ status: "granted" } as never);
     }
   });
+
+  it("aborts an in-flight V2 replay when the legacy lane observes a revoked grant", async () => {
+    await signInThroughApi(A, [place]);
+    await store.syncLocationEvidence();
+    await api.enqueueEvent({
+      source: "geofence_specific", type: "geofence_enter", localId: "synthetic-denied-v1",
+      owner: A, rawPayload: { placeId: A_PLACE }
+    });
+    const entered = deferred(), aborted = deferred();
+    routes["/api/location/replay"] = init => {
+      entered.resolve();
+      return new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => {
+        aborted.resolve();
+        reject(new DOMException("Cancelled", "AbortError"));
+      }, { once: true }));
+    };
+    const background = vi.mocked((await import("expo-location")).getBackgroundPermissionsAsync);
+    try {
+      const replay = store.syncLocationEvidence({ forceReplay: true });
+      await entered.promise;
+      background.mockResolvedValue({ status: "denied" } as never);
+      await api.syncQueue({ eventScope: "non_timer" });
+      await aborted.promise;
+      expect(await replay).toMatchObject({ replayed: false, reason: "location_paused", outcome: "complete" });
+      expect(calls).not.toContain("/api/events");
+      expect(await api.readQueue()).toHaveLength(1);
+    } finally {
+      background.mockResolvedValue({ status: "granted" } as never);
+    }
+  });
+
+  it("resumes paused delivery after an explicit restart with an already enabled binding", async () => {
+    await signInThroughApi(A, [place], true, "v1");
+    const binding = await store.readLocationCaptureBinding();
+    const { isAutomaticLocationTransferPaused } = await import("./location/automaticTransferPause");
+    const background = vi.mocked((await import("expo-location")).getBackgroundPermissionsAsync);
+    try {
+      background.mockResolvedValue({ status: "denied" } as never);
+      await store.syncLocationEvidence();
+      expect(isAutomaticLocationTransferPaused(A)).toBe(true);
+      background.mockResolvedValue({ status: "granted" } as never);
+      expect(await geofence.setLocationLearningEnabled(true, [place], A)).toContain("is on");
+      expect(await store.readLocationCaptureBinding()).toEqual(binding);
+      expect(isAutomaticLocationTransferPaused(A)).toBe(false);
+    } finally {
+      background.mockResolvedValue({ status: "granted" } as never);
+    }
+  });
 });

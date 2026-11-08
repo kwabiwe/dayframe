@@ -127,7 +127,11 @@ export type LocationCaptureSnapshot = {
 // Authentication still belongs exclusively to mobileAccount/secure-session.
 let captureRevision = 0;
 let captureAdmissionSuspended = false;
-let activeLocationSync: { capture: LocationCaptureSnapshot; controller: AbortController } | undefined;
+let activeLocationSync: {
+  capture: LocationCaptureSnapshot;
+  controller: AbortController;
+  permissionPaused: boolean;
+} | undefined;
 const legacyLocationTransfers = new Map<AbortController, number>();
 export function invalidateLocationCaptureOwnership() {
   captureAdmissionSuspended = true;
@@ -982,7 +986,7 @@ export type LocationSyncOptions = {
 type PermittedLocationSync = LocationSyncOptions & { capture: LocationCaptureSnapshot };
 let lastSuccessfulReplay: { revision: number; mode: LocationRolloutMode; at: number } | undefined;
 
-export async function locationSyncAllowed(capture: LocationCaptureSnapshot) {
+export async function locationSyncAllowed(capture: LocationCaptureSnapshot, checkingSignal?: AbortSignal) {
   const owner = capture.context;
   if (!owner) return false;
   let granted = false;
@@ -1002,13 +1006,25 @@ export async function locationSyncAllowed(capture: LocationCaptureSnapshot) {
       !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return false;
   const allowed = granted && isLocationCaptureSnapshotCurrent(capture);
   setAutomaticLocationTransferPaused(owner, !allowed);
+  if (!allowed) {
+    if (lastSuccessfulReplay?.revision === capture.revision) lastSuccessfulReplay = undefined;
+    for (const [transfer, revision] of legacyLocationTransfers) {
+      if (revision === capture.revision && transfer.signal !== checkingSignal) transfer.abort();
+    }
+    if (activeLocationSync?.capture.revision === capture.revision &&
+        mobileAccountOwnersEqual(activeLocationSync.capture.context, owner) &&
+        activeLocationSync.controller.signal !== checkingSignal) {
+      activeLocationSync.permissionPaused = true;
+      activeLocationSync.controller.abort();
+    }
+  }
   return allowed;
 }
 
 class LocationTransferPausedError extends Error {}
 
-async function requireLocationTransferPermission(capture: LocationCaptureSnapshot) {
-  if (!await locationSyncAllowed(capture)) throw new LocationTransferPausedError();
+async function requireLocationTransferPermission(capture: LocationCaptureSnapshot, signal?: AbortSignal) {
+  if (!await locationSyncAllowed(capture, signal)) throw new LocationTransferPausedError();
 }
 
 function assertLocationTransferCurrent(capture: LocationCaptureSnapshot, session: AuthenticatedSessionSnapshot) {
@@ -1034,7 +1050,7 @@ export async function openLegacyLocationTransfer(owner: MobileAccountOwner, sign
     signal: controller.signal,
     isCurrent,
     mayDispatch: async () => {
-      if (!await locationSyncAllowed(capture)) abort();
+      if (!await locationSyncAllowed(capture, controller.signal)) abort();
       return isCurrent();
     },
     release: () => {
@@ -1061,31 +1077,26 @@ export async function syncLocationEvidence(options: LocationSyncOptions = {}): P
   const capture = await captureLocationOwnership();
   const owner = capture.context;
   if (!owner) return { synced: false, reason: "no_session", outcome: "authentication_required" };
-  if (!await locationSyncAllowed(capture)) {
-    if (lastSuccessfulReplay?.revision === capture.revision) lastSuccessfulReplay = undefined;
-    for (const [transfer, revision] of legacyLocationTransfers) {
-      if (revision === capture.revision) transfer.abort();
-    }
-    if (activeLocationSync?.capture.revision === capture.revision &&
-        mobileAccountOwnersEqual(activeLocationSync.capture.context, owner)) {
-      activeLocationSync.controller.abort();
-    }
-    return { synced: true, reason: "location_paused", outcome: "complete" };
-  }
+  if (!await locationSyncAllowed(capture)) return { synced: true, reason: "location_paused", outcome: "complete" };
   const operation = async (): Promise<LocationSyncResult> => {
     if (!isLocationCaptureSnapshotCurrent(capture)) return { synced: true, reason: "location_paused", outcome: "complete" };
     if (!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(), owner)) {
       return { synced: false, reason: "session_changed", outcome: "cancelled" };
     }
     const controller = new AbortController();
-    const active = { capture, controller };
+    const active = { capture, controller, permissionPaused: false };
     activeLocationSync = active;
     const cancel = () => controller.abort();
     if (options.signal?.aborted) cancel();
     else options.signal?.addEventListener("abort", cancel, { once: true });
     try {
       const bounded = { ...options, capture, signal: controller.signal, deadlineAt: Math.min(options.deadlineAt ?? Infinity, Date.now() + 45_000) };
-      return await runPermittedLocationSync(owner, bounded);
+      const result = await runPermittedLocationSync(owner, bounded);
+      if (active.permissionPaused && !options.signal?.aborted && isLocationCaptureSnapshotCurrent(capture)) {
+        // Permission denial completes this lane so unrelated sync can still publish its changes.
+        return { ...result, synced: true, reason: "location_paused", outcome: "complete" };
+      }
+      return result;
     } finally {
       options.signal?.removeEventListener("abort", cancel);
       if (activeLocationSync === active) activeLocationSync = undefined;
@@ -1137,7 +1148,7 @@ async function runPermittedLocationSync(owner: MobileAccountOwner, options: Perm
 }
 
 async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, options:PermittedLocationSync): Promise<LocationSyncResult> {
-  if (!await locationSyncAllowed(options.capture)) return { synced: true, reason: "location_paused", outcome: "complete" };
+  if (!await locationSyncAllowed(options.capture, options.signal)) return { synced: true, reason: "location_paused", outcome: "complete" };
   let sessionRead: Awaited<ReturnType<typeof readOwnedAuthenticatedSessionSnapshot>>;
   try {
     sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -1342,7 +1353,7 @@ async function uploadLocationEvidenceBatch(
         body: batch.body_json,signal:options.signal
       }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
         () => !options.signal?.aborted && isLocationSyncOwnershipCurrent(owner, session), {
-          beforeDispatch: () => requireLocationTransferPermission(options.capture),
+          beforeDispatch: () => requireLocationTransferPermission(options.capture, options.signal),
           onDispatch: () => {
             assertLocationTransferCurrent(options.capture, session);
             attemptStartedAt = Date.now();
@@ -1536,7 +1547,7 @@ async function requestServerLocationReplay(
         async () => !options.signal?.aborted && await isLocationSyncOwnershipCurrent(owner, session) &&
           isLocationCaptureSnapshotCurrent(options.capture),
         {
-          beforeDispatch: () => requireLocationTransferPermission(options.capture),
+          beforeDispatch: () => requireLocationTransferPermission(options.capture, options.signal),
           onDispatch: () => {
             assertLocationTransferCurrent(options.capture, session);
             attemptStartedAt = Date.now();
