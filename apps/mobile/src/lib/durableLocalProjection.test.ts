@@ -153,6 +153,30 @@ describe("durable dashboard projection", () => {
     }
   });
 
+  it("fences a pre-split source in one bootstrap list even when a different list has the canonical split", () => {
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const original = {
+      ...entry("source"), startedAt: "2026-08-22T10:00:00.000Z", stoppedAt: "2026-08-22T11:00:00.000Z",
+      updatedAt: "2026-08-22T11:00:00.000Z"
+    };
+    const first = { ...original, stoppedAt: splitAt, updatedAt: "2026-08-22T11:30:00.000Z" };
+    const second = { ...first, id: "second", startedAt: splitAt, stoppedAt: original.stoppedAt };
+    const command: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "split-mixed-read", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "split", splitAt }, copyId: second.id, expectedUpdatedAt: original.updatedAt },
+      createdAt: first.updatedAt, updatedAt: first.updatedAt, attemptCount: 0, copyAcknowledged: true
+    };
+    const durable = work({ timeEntryCommands: [command] });
+    for (const head of [original, first]) {
+      const mixed = bootstrap({ entries: [head], dayEntries: [original], weekEntries: [first, second] });
+      const projected = projectDurableLocalWork(mixed, durable);
+      expect(projected.dayEntries).toEqual([expect.objectContaining({ id: original.id, pendingCompletedCopy: true })]);
+      expect(projected.weekEntries).toBe(mixed.weekEntries);
+    }
+    const coherent = bootstrap({ entries: [first, second], dayEntries: [first, second], weekEntries: [first, second] });
+    expect(projectDurableLocalWork(coherent, durable)).toBe(coherent);
+  });
+
   it("rolls back a refused split immediately against cached server truth while retaining a later edit", () => {
     const splitAt = "2026-08-23T00:00:00.000Z";
     const original = {

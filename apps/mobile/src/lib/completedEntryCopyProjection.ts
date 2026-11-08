@@ -22,9 +22,16 @@ export function projectCompletedEntryCopy(
   // A fresh bootstrap may already have the copy, or the original may have changed.
   // Duplicate advances the original's version as well, so a deleted copy stays deleted.
   const original = mobileTimeEntryById(data, entryId) ?? linkedSource;
+  const expected = Date.parse(copy.expectedUpdatedAt);
+  const canonicalCopy = mobileTimeEntryById(data, copy.copyId);
+  if (copy.action.kind === "split" && (canonicalCopy?.updatedAt ||
+      (original?.updatedAt && Date.parse(original.updatedAt) !== expected))) {
+    // Bootstrap lists are separate reads. A copy or newer source in one list does not
+    // establish the version of the original in every other list.
+    return fenceMixedSplitRead(data, entryId, expected);
+  }
   if (!original?.stoppedAt || !original.updatedAt ||
-      Date.parse(original.updatedAt) !== Date.parse(copy.expectedUpdatedAt) ||
-      mobileTimeEntryById(data, copy.copyId)) {
+      Date.parse(original.updatedAt) !== expected || canonicalCopy) {
     return data;
   }
 
@@ -80,6 +87,23 @@ export function projectCompletedEntryCopy(
     dayEntries: inRange(projected.dayEntries, dayStart, dayEnd),
     weekEntries: inRange(projected.weekEntries, range ? Date.parse(range.weekStart) : undefined, range ? Date.parse(range.weekEnd) : undefined)
   };
+}
+
+function fenceMixedSplitRead(data: MobileBootstrap, entryId: string, expected: number) {
+  const fence = (items: MobileTimeEntry[] | undefined) => {
+    if (!items?.some((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") === expected &&
+        !entry.pendingCompletedCopy)) return items;
+    return items.map((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") === expected
+      ? { ...entry, pendingCompletedCopy: true as const }
+      : entry);
+  };
+  const entries = fence(data.entries) ?? data.entries;
+  const historyEntries = fence(data.historyEntries);
+  const dayEntries = fence(data.dayEntries);
+  const weekEntries = fence(data.weekEntries);
+  if (entries === data.entries && historyEntries === data.historyEntries &&
+      dayEntries === data.dayEntries && weekEntries === data.weekEntries) return data;
+  return { ...data, entries, historyEntries, dayEntries, weekEntries };
 }
 
 function setPendingCompletedCopy(data: MobileBootstrap, entryId: string, pending: boolean) {
