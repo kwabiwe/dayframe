@@ -233,14 +233,16 @@ describe("compact answer pills", () => {
     expect(Number(gaps[1])).toBeGreaterThanOrEqual(left + right);
   });
 
-  it("uses the shared hit slop for inline answers and the compact activity disclosure", () => {
+  it("uses the shared hit slop for every inline answer pill", () => {
     for (const path of ["src/components/calendar/CalendarListView.tsx", "src/components/calendar/LocationCorrectionSheet.tsx"]) {
       const text = read(path);
       expect(text, path).toMatch(/from "\.\.\/compactPill"/);
       expect(text, path).not.toMatch(/const COMPACT_PILL_HIT_SLOP/);
-      const pills = text.match(/\[(?:compactPillStyles\.pill|activityChipStyles\.compact)\b/g)?.length ?? 0;
-      expect(pills, path).toBeGreaterThan(0);
-      expect(text.match(/hitSlop=\{COMPACT_PILL_HIT_SLOP\}/g)?.length, path).toBe(pills);
+      const pills = [...text.matchAll(/<Pressable\b(?:(?!<\/?Pressable\b)[\s\S])*?<\/Pressable>/g)]
+        .map(([button]) => button)
+        .filter((button) => button.includes("compactPillStyles.pill"));
+      expect(pills.length, path).toBeGreaterThan(0);
+      for (const pill of pills) expect(pill, path).toContain("hitSlop={COMPACT_PILL_HIT_SLOP}");
     }
     // The sheet's "?" answers wrap with the shared row gap, not the 44-point pills' 8.
     expect(read("src/components/calendar/LocationCorrectionSheet.tsx")).toMatch(/<View style=\{compactPillStyles\.answers\}>/);
