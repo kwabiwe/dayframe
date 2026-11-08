@@ -11,8 +11,9 @@ export function projectCompletedEntryCopy(
   data: MobileBootstrap,
   entryId: string,
   copy: PendingCompletedEntryCopy,
-  linkedSource?: MobileTimeEntry,
-  removedOnServer = false
+  { linkedSource, removedOnServer, acknowledged }: {
+    linkedSource?: MobileTimeEntry; removedOnServer?: boolean; acknowledged?: boolean;
+  } = {}
 ) {
   if (removedOnServer && mobileTimeEntryById(data, copy.copyId)) {
     data = optimisticDeleteTimeEntry(data, copy.copyId) ?? data;
@@ -24,9 +25,10 @@ export function projectCompletedEntryCopy(
   const original = mobileTimeEntryById(data, entryId) ?? linkedSource;
   const expected = Date.parse(copy.expectedUpdatedAt);
   const canonicalCopy = mobileTimeEntryById(data, copy.copyId);
-  const hasNewerSource = [data.entries, data.historyEntries, data.dayEntries, data.weekEntries].some((entries) =>
-    entries?.some((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") > expected)
-  );
+  const newerSource = (entry: MobileTimeEntry) =>
+    entry.id === entryId && Date.parse(entry.updatedAt ?? "") > expected;
+  const hasNewerSource = (data.activeEntry && newerSource(data.activeEntry)) ||
+    [data.entries, data.historyEntries, data.dayEntries, data.weekEntries].some((entries) => entries?.some(newerSource));
   // Bootstrap lists are separate reads. A copy or newer source in one list does not
   // establish the version of the original in every other list.
   if (hasNewerSource || canonicalCopy?.updatedAt) {
@@ -34,7 +36,7 @@ export function projectCompletedEntryCopy(
   }
   if (!original?.stoppedAt || !original.updatedAt ||
       Date.parse(original.updatedAt) !== expected || canonicalCopy) {
-    return data;
+    return acknowledged && copy.action.kind === "split" ? fenceMixedSplitRead(data, entryId, expected) : data;
   }
 
   const startMs = Date.parse(original.startedAt);
@@ -46,7 +48,9 @@ export function projectCompletedEntryCopy(
   if (copy.action.kind === "split") {
     copyStart = Date.parse(copy.action.splitAt);
     const bounds = splitBounds(original);
-    if (!bounds || !Number.isFinite(copyStart) || copyStart < bounds.minMs || copyStart > bounds.maxMs) return data;
+    if (!bounds || !Number.isFinite(copyStart) || copyStart < bounds.minMs || copyStart > bounds.maxMs) {
+      return acknowledged ? fenceMixedSplitRead(data, entryId, expected) : data;
+    }
     copyEnd = endMs;
     projected = optimisticPatchTimeEntry(data, entryId, { stoppedAt: copy.action.splitAt }) ?? data;
     if (!removedOnServer) projected = setPendingCompletedCopy(projected, entryId, true);

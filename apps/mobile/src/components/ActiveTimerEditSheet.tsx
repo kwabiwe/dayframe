@@ -1872,7 +1872,9 @@ export function ActiveTimerEditSheet({
       tagNames: appliedTagNames
     };
 
-    if (!isRunningMode || startTimeEdited) {
+    // A completed-block detail edit must not send an old time from its open snapshot.
+    const changedStart = parsed.date.getTime() !== Date.parse(entry.startedAt);
+    if (isAddMode || (isRunningMode ? startTimeEdited : changedStart)) {
       patch.startedAt = parsed.date.toISOString();
     }
 
@@ -1890,7 +1892,9 @@ export function ActiveTimerEditSheet({
         setValidationError("A block can be no longer than 24 hours.");
         return;
       }
-      patch.stoppedAt = stopped.date.toISOString();
+      if (isAddMode || stopped.date.getTime() !== Date.parse(entry.stoppedAt ?? "")) {
+        patch.stoppedAt = stopped.date.toISOString();
+      }
     }
 
     const token = beginMutation("saving");

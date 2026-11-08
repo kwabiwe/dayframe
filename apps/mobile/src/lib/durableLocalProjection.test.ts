@@ -186,6 +186,31 @@ describe("durable dashboard projection", () => {
       timeEntryCommands: [{ ...command, copy: { ...command.copy!, action: { kind: "duplicate" } } }]
     });
     expect(projectDurableLocalWork(afterDeletion, duplicate)).toBe(afterDeletion);
+    const reopened = { ...changed, stoppedAt: null };
+    const active = bootstrap({ entries: [original], dayEntries: [older], activeEntry: reopened });
+    const withReopened = projectDurableLocalWork(active, durable);
+    expect(withReopened.activeEntry).toBe(reopened);
+    expect(withReopened.dayEntries).toEqual([expect.objectContaining({ pendingCompletedCopy: true })]);
+  });
+
+  it.each([false, true])("fences an older cached source after a split receipt (copy removed: %s)", (removed) => {
+    const old = {
+      ...entry("cached-source"), startedAt: "2026-08-22T10:00:00.000Z", stoppedAt: "2026-08-22T11:00:00.000Z",
+      updatedAt: "2026-08-22T10:59:00.000Z"
+    };
+    const command: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "cached-split-receipt", operation: "copy", targetEntryId: old.id,
+      copy: {
+        action: { kind: "split", splitAt: "2026-08-22T10:30:00.000Z" }, copyId: "copy",
+        expectedUpdatedAt: "2026-08-22T11:00:00.000Z"
+      },
+      createdAt: old.updatedAt, updatedAt: old.updatedAt, attemptCount: 0, copyAcknowledged: true,
+      copyRemovedOnServer: removed ? true : undefined
+    };
+    const data = bootstrap({ entries: [old], dayEntries: [old] });
+    const projected = projectDurableLocalWork(data, work({ timeEntryCommands: [command] }));
+    expect(projected.dayEntries).toEqual([expect.objectContaining({ id: old.id, pendingCompletedCopy: true })]);
+    expect(projected.entries.some((candidate) => candidate.id === "copy")).toBe(false);
   });
 
   it("rolls back a refused split immediately against cached server truth while retaining a later edit", () => {

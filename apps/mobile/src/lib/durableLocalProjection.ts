@@ -80,7 +80,9 @@ export function projectDurableLocalWork(
     );
     if (!target) continue;
     if (operation.command.copy) {
-      projected = projectCompletedEntryCopy(projected, target, operation.command.copy, undefined, operation.command.copyRemovedOnServer);
+      projected = projectCompletedEntryCopy(projected, target, operation.command.copy, {
+        acknowledged: operation.command.copyAcknowledged, removedOnServer: operation.command.copyRemovedOnServer
+      });
       continue;
     }
     projected = operation.kind === "delete"

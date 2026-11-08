@@ -2146,7 +2146,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         for (const command of terminalCopies) {
           if (!command.copy || !command.targetEntryId) continue;
           if (command.copyRemovedOnServer) {
-            next = projectCompletedEntryCopy(next, command.targetEntryId, command.copy, undefined, true);
+            next = projectCompletedEntryCopy(next, command.targetEntryId, command.copy, { acknowledged: true, removedOnServer: true });
             continue;
           }
           next = rollbackRejectedCompletedCopy(
@@ -3058,7 +3058,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const copy = command.copy;
       if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return unavailable;
       nextTimerMutationVersion(entry.id);
-      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy, entry) : data);
+      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy, { linkedSource: entry }) : data);
       queuedTimerStartRecoveryRequested.current = true;
       deliverQueuedTimeEntry(owner, command.clientCommandId);
       return { ok: true as const };
