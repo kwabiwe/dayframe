@@ -175,6 +175,17 @@ describe("durable dashboard projection", () => {
     }
     const coherent = bootstrap({ entries: [first, second], dayEntries: [first, second], weekEntries: [first, second] });
     expect(projectDurableLocalWork(coherent, durable)).toBe(coherent);
+    const changed = { ...first, stoppedAt: "2026-08-22T10:15:00.000Z" };
+    const older = { ...original, updatedAt: "2026-08-22T10:59:00.000Z" };
+    const afterDeletion = bootstrap({ entries: [original], dayEntries: [older], weekEntries: [changed] });
+    const guarded = projectDurableLocalWork(afterDeletion, durable);
+    expect(guarded.dayEntries).toEqual([expect.objectContaining({ id: original.id, pendingCompletedCopy: true })]);
+    expect(guarded.weekEntries).toBe(afterDeletion.weekEntries);
+    expect(guarded.entries.some((candidate) => candidate.id === second.id)).toBe(false);
+    const duplicate = work({
+      timeEntryCommands: [{ ...command, copy: { ...command.copy!, action: { kind: "duplicate" } } }]
+    });
+    expect(projectDurableLocalWork(afterDeletion, duplicate)).toBe(afterDeletion);
   });
 
   it("rolls back a refused split immediately against cached server truth while retaining a later edit", () => {

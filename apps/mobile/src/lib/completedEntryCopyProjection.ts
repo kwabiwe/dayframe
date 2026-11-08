@@ -24,11 +24,13 @@ export function projectCompletedEntryCopy(
   const original = mobileTimeEntryById(data, entryId) ?? linkedSource;
   const expected = Date.parse(copy.expectedUpdatedAt);
   const canonicalCopy = mobileTimeEntryById(data, copy.copyId);
-  if (copy.action.kind === "split" && (canonicalCopy?.updatedAt ||
-      (original?.updatedAt && Date.parse(original.updatedAt) !== expected))) {
-    // Bootstrap lists are separate reads. A copy or newer source in one list does not
-    // establish the version of the original in every other list.
-    return fenceMixedSplitRead(data, entryId, expected);
+  const hasNewerSource = [data.entries, data.historyEntries, data.dayEntries, data.weekEntries].some((entries) =>
+    entries?.some((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") > expected)
+  );
+  // Bootstrap lists are separate reads. A copy or newer source in one list does not
+  // establish the version of the original in every other list.
+  if (hasNewerSource || canonicalCopy?.updatedAt) {
+    return copy.action.kind === "split" ? fenceMixedSplitRead(data, entryId, expected) : data;
   }
   if (!original?.stoppedAt || !original.updatedAt ||
       Date.parse(original.updatedAt) !== expected || canonicalCopy) {
@@ -90,12 +92,11 @@ export function projectCompletedEntryCopy(
 }
 
 function fenceMixedSplitRead(data: MobileBootstrap, entryId: string, expected: number) {
+  const isStale = (entry: MobileTimeEntry) => entry.id === entryId && !entry.pendingCompletedCopy &&
+    (!entry.updatedAt || Date.parse(entry.updatedAt) <= expected);
   const fence = (items: MobileTimeEntry[] | undefined) => {
-    if (!items?.some((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") === expected &&
-        !entry.pendingCompletedCopy)) return items;
-    return items.map((entry) => entry.id === entryId && Date.parse(entry.updatedAt ?? "") === expected
-      ? { ...entry, pendingCompletedCopy: true as const }
-      : entry);
+    if (!items?.some(isStale)) return items;
+    return items.map((entry) => isStale(entry) ? { ...entry, pendingCompletedCopy: true as const } : entry);
   };
   const entries = fence(data.entries) ?? data.entries;
   const historyEntries = fence(data.historyEntries);

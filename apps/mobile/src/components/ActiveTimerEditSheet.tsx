@@ -2764,6 +2764,7 @@ export function ActiveTimerEditSheet({
                   styles.activeEditScroller,
                   keyboardLayout.keyboardOpen ? styles.activeEditScrollerKeyboard : null
                 ]}
+                testID="time-entry-sheet-form"
               >
                 <View
                   ref={formContentRef}
@@ -3779,7 +3780,7 @@ function formatSheetDay(date: Date) {
 }
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
-function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scrollable, scrollRef, style }: {
+function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scrollable, scrollRef, style, testID }: {
   children: ReactNode;
   onLayout: (event: LayoutChangeEvent) => void;
   onPress: () => void;
@@ -3787,10 +3788,11 @@ function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scroll
   scrollable: boolean;
   scrollRef: Ref<ScrollView>;
   style: StyleProp<ViewStyle>;
+  testID: string;
 }) {
   if (!scrollable) {
     return (
-      <Pressable accessible={false} onLayout={onLayout} onPress={onPress} style={style} testID="time-entry-sheet-form">
+      <Pressable accessible={false} onLayout={onLayout} onPress={onPress} style={style} testID={testID}>
         {children}
       </Pressable>
     );
@@ -3803,7 +3805,7 @@ function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scroll
       scrollEventThrottle={64}
       keyboardShouldPersistTaps="handled"
       style={style}
-      testID="time-entry-sheet-form"
+      testID={testID}
     >
       <Pressable accessible={false} onPress={onPress}>{children}</Pressable>
     </ScrollView>
