@@ -18,6 +18,7 @@ const ORDER: ConnectivityRecoveryStepName[] = [
   "activity_queue",
   "time_entry_outbox",
   "timer_stops_after_correlation",
+  "foreground_time_entries",
   "review_outbox",
   "location_intelligence",
   "bootstrap"

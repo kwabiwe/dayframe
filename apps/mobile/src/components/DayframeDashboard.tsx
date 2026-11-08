@@ -35,6 +35,7 @@ import { router, useFocusEffect, useIsFocused, usePathname } from "expo-router";
 import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  type CompletedEntryCopyAction,
   withGoalExclusions,
   paletteColorFor,
   previousEndOffer,
@@ -181,6 +182,7 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
+import { projectCompletedEntryCopy, rollbackRejectedCompletedCopy } from "@/lib/completedEntryCopyProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import {
@@ -219,6 +221,8 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
+  enqueueCompletedEntryCopy,
+  PendingCompletedEntryChangeError,
   enqueueTimeEntryUpdate,
   isTimeEntryCommandRejected,
   readPendingTimeEntryCommands,
@@ -1228,6 +1232,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function presentCompletedEntry(entry: NativeCalendarEntry) {
+    if (entry.pendingCompletedCopy) {
+      showTodayNotice("Wait for this split or copy to sync before editing the block.", null);
+      return;
+    }
     const presentation = createSheetPresentation("completed_entry", false);
     // A Start again from an earlier sheet that never finished leaving must not fire later.
     pendingStartAgain.current = null;
@@ -2117,10 +2125,36 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const own = deleteTombstones.current;
     const read = () => {
       const mine = ++sequence;
-      readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then((commands) => {
-        if (!current || mine !== sequence || deleteTombstones.current !== own) return;
+      readPendingTimeEntryCommands(
+        { userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId },
+        { includeCompletedCopies: true }
+      ).then(async (commands) => {
+        const readCurrent = () => current && mine === sequence && deleteTombstones.current === own;
+        if (!readCurrent()) return;
         own.tombstones.observe(commands);
         setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+        const terminalCopies = commands.filter((command) => command.copy &&
+          (command.failureKind === "permanent" || command.copyRemovedOnServer));
+        if (terminalCopies.length === 0) return;
+        const baseline = terminalCopies.some((command) => command.failureKind === "permanent")
+          ? await loadCachedDashboardBootstrap().catch(() => null)
+          : null;
+        if (!readCurrent()) return;
+        const data = latestData.current;
+        if (!data || !sameTimerStopOwner(timerStopOwner(data), scopedOwner)) return;
+        let next = data;
+        for (const command of terminalCopies) {
+          if (!command.copy || !command.targetEntryId) continue;
+          if (command.copyRemovedOnServer) {
+            next = projectCompletedEntryCopy(next, command.targetEntryId, command.copy, { acknowledged: true, removedOnServer: true });
+            continue;
+          }
+          next = rollbackRejectedCompletedCopy(
+            next, baseline?.bootstrap ?? null, command.targetEntryId, command.copy,
+            own.tombstones.ids().has(command.targetEntryId)
+          );
+        }
+        if (next !== data) updateDashboardData(() => next);
       }).catch(() => undefined);
     };
     read();
@@ -2983,7 +3017,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         patch,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       }));
-    } catch {
+    } catch (error) {
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         errorTitle,
         "Dayframe could not save this change on your iPhone. Check available storage and try again."
@@ -2995,40 +3033,73 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
     queuedTimerStartRecoveryRequested.current = true;
 
-    if (connectivityCurrent.current.isOnline) {
-      void (async () => {
-        const correlations = await readTimerEntryIdCorrelations(owner);
-        const result = await synchroniseTimeEntryCommands({
-          owner,
-          correlations,
-          force: true
-        });
-        if (result.reason === "authentication_required") {
-          transitionToSignedOut();
-          return;
-        }
-        // Feedback belongs to the account that made the edit, checked again after every wait.
-        const ownerCurrent = () => {
-          const current = latestData.current;
-          return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
-        };
-        if (!ownerCurrent()) return;
-        // Any rejection reloads, so its block returns as it was; only this edit's own rejection
-        // alerts, as older sync issues stay in Settings › Sync help.
-        const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
-        if (!ownerCurrent()) return;
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
-          await loadRef.current({ silent: true });
-        }
-        if (rejected && ownerCurrent()) {
-          Alert.alert(
-            "Change not saved",
-            "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
-          );
-        }
-      })().catch(() => undefined);
-    }
+    deliverQueuedTimeEntry(owner, clientCommandId);
     return true;
+  }
+
+  async function copyCalendarEntry(entry: TimeEntry, action: CompletedEntryCopyAction) {
+    const bootstrap = latestData.current;
+    const unavailable = { ok: false as const, message: "Open a saved finished block to make this change." };
+    if (!bootstrap?.serverBuild?.completedEntryCopy || !entry.stoppedAt || !entry.updatedAt) return unavailable;
+    const owner = timerStopOwner(bootstrap);
+    const current = mobileTimeEntryById(bootstrap, entry.id);
+    if (current && (!current.stoppedAt || current.updatedAt !== entry.updatedAt)) {
+      return { ok: false as const, message: "This block changed. Close and reopen it to see its current details." };
+    }
+    try {
+      const command = await enqueueCompletedEntryCopy({
+        owner,
+        entryId: entry.id,
+        expectedUpdatedAt: entry.updatedAt,
+        originalStoppedAt: entry.stoppedAt,
+        action,
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
+      });
+      const copy = command.copy;
+      if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return unavailable;
+      nextTimerMutationVersion(entry.id);
+      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy, { linkedSource: entry }) : data);
+      queuedTimerStartRecoveryRequested.current = true;
+      deliverQueuedTimeEntry(owner, command.clientCommandId);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: error instanceof PendingCompletedEntryChangeError
+          ? error.message
+          : "Dayframe could not save this change on your iPhone. Check available storage and try again."
+      };
+    }
+  }
+
+  function deliverQueuedTimeEntry(owner: TimerStopOwner, clientCommandId: string) {
+    if (!connectivityCurrent.current.isOnline) return;
+    void (async () => {
+      const correlations = await readTimerEntryIdCorrelations(owner);
+      const result = await synchroniseTimeEntryCommands({
+        owner, correlations, force: true, isForeground: () => AppState.currentState === "active"
+      });
+      if (result.reason === "authentication_required") {
+        transitionToSignedOut();
+        return;
+      }
+      const ownerCurrent = () => {
+        const current = latestData.current;
+        return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
+      };
+      if (!ownerCurrent()) return;
+      const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
+      if (!ownerCurrent()) return;
+      if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
+        await loadRef.current({ silent: true });
+      }
+      if (rejected && ownerCurrent()) {
+        Alert.alert(
+          "Change not saved",
+          "Dayframe couldn't save this change. Try again or discard it in Settings › Sync help."
+        );
+      }
+    })().catch(() => undefined);
   }
 
   async function deleteCalendarEntry(entryId: string) {
@@ -3355,6 +3426,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   ) {
     const bootstrap = snapshot ?? latestData.current;
     if (!bootstrap) return false;
+    if (entries.some((entry) => entry.pendingCompletedCopy)) {
+      getDeletionCoordinator().invalidate(token);
+      showTodayNotice("Wait for this split or copy to sync before deleting the block.", null);
+      return false;
+    }
     const owner = timerStopOwner(bootstrap);
     // Captured now: a sign-out or teardown during the writes ends this lease, not a later one.
     getDeletionCoordinator();
@@ -3374,9 +3450,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (lease.ended) return false;
       deletionCommandIds.current.set(token, commandIds);
       return true;
-    } catch {
+    } catch (error) {
       if (lease.ended) return false;
       getDeletionCoordinator().invalidate(token);
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
         "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
@@ -4444,6 +4524,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCancel={completeCalendarEntryExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
+        onCopyCompletedEntry={data?.serverBuild?.completedEntryCopy ? copyCalendarEntry : undefined}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
         onStartAgain={(values) => {

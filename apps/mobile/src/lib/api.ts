@@ -212,6 +212,10 @@ export type MobileTimeEntry = {
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
+  /** The version received from the server. A locally projected copy has no version yet. */
+  updatedAt?: string;
+  /** Local only. A split part or duplicate awaiting canonical data must not be edited. */
+  pendingCompletedCopy?: true;
   durationSeconds: number;
   tagNames?: string[];
   tags?: MobileTag[];
@@ -260,7 +264,7 @@ export type MobileOpenTrip = {
 export type MobileBootstrap = {
   completedEntryRevision?: string;
   openTrip?: MobileOpenTrip | null;
-  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean};
+  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean;completedEntryCopy?:boolean};
   user: {
     id: string;
     email: string;

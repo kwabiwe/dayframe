@@ -54,7 +54,9 @@ describe("entry sheet time wheel (A11b)", () => {
   });
 
   it("gives VoiceOver adjustable cards that open and close the wheel, with Change date (owner, 16 Oct 2026)", () => {
-    expect((sheet.match(/accessibilityRole="adjustable"/g) ?? []).length).toBe(2);
+    expect((sheet.match(/accessibilityRole="adjustable"/g) ?? []).length).toBe(3);
+    expect(sheet).toContain('accessibilityLabel="Split time"');
+    expect(sheet).toContain('testIDPrefix="time-entry-split-wheel"');
     expect(sheet).toContain('{ name: "changeDate", label: "Change date" }');
     // Swipes stay at 5 minutes; exact minutes through the Plus / Minus 1 minute actions (owner, 16 Oct 2026).
     expect(sheet).toContain('{ name: "plusMinute", label: "Plus 1 minute" }');
@@ -73,7 +75,7 @@ describe("entry sheet time wheel (A11b)", () => {
   });
 
   it("takes the dial's measured room while open, so the fixed sheet never grows (Codex r1/r2 on #428)", () => {
-    expect(sheet).toMatch(/\{timeWheel \? null : \(\s*<View\s*onLayout=\{\(event\) => setDialAreaMeasure\(\{ height: event\.nativeEvent\.layout\.height, key: dialAreaKey \}\)\}/);
+    expect(sheet).toMatch(/\{timeWheel \|\| split \? null : \(\s*<View\s*onLayout=\{\(event\) => setDialAreaMeasure\(\{ height: event\.nativeEvent\.layout\.height, key: dialAreaKey \}\)\}/);
     // A measurement taken at another density, text size or width is not used (Codex r3 on #428).
     expect(sheet).toContain("const dialAreaHeight = dialAreaMeasure?.key === dialAreaKey ? dialAreaMeasure.height : null;");
     expect(sheet).toContain("const dialAreaKey = `${layoutDensity}:${windowDimensions.fontScale}:${windowDimensions.width}`;");

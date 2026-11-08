@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
+import {
+  completedEntryCopyId,
+  completedEntryCopySeed,
+  TIME_ENTRY_CLIENT_COMMAND_ID_HEADER,
+  TimeEntryClientCommandIdSchema,
+  type CompletedEntryCopyAction
+} from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
@@ -37,11 +43,30 @@ const REFUSED_START_FENCE_MAX_RECORDS = 200;
 export const REFUSED_START_COMMAND_MESSAGE = "The block this change was for was never saved.";
 export const MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS = 8_000;
 const PERMANENT_STATUS_CODES = new Set([400, 409, 413, 422]);
+const MAX_COMPLETED_COPY_RECEIPTS = 64;
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
+
+export class PendingCompletedEntryChangeError extends Error {
+  constructor(message = "Finish syncing this block before splitting or duplicating it.") {
+    super(message);
+    this.name = "PendingCompletedEntryChangeError";
+  }
+}
+
+export type PendingCompletedEntryCopy = {
+  action: CompletedEntryCopyAction;
+  copyId: string;
+  expectedUpdatedAt: string;
+  originalStoppedAt?: string;
+};
 
 export type PendingTimeEntryCommand = MobileAccountOwner & {
   clientCommandId: string;
-  operation: "update" | "delete";
+  operation: "update" | "delete" | "copy";
+  copy?: PendingCompletedEntryCopy;
+  /** Keep a bounded delivered copy for an older cached bootstrap, outside delivery and diagnostics. */
+  copyAcknowledged?: true;
+  copyRemovedOnServer?: true;
   targetEntryId?: string;
   optimisticEntryId?: string;
   patch?: TimeEntryUpdatePatch;
@@ -71,6 +96,7 @@ export type TimeEntryOutboxSyncResult = {
     | "authentication_required"
     | "dependency_wait"
     | "deferred"
+    | "foreground_required"
     | "retry_wait"
     | "retryable_failure"
     | "session_changed";
@@ -134,6 +160,31 @@ export async function enqueueTimeEntryUpdate(input: {
     target: input.target,
     operation: "update",
     patch: input.patch,
+    requestImmediateDelivery: input.requestImmediateDelivery
+  });
+}
+
+export async function enqueueCompletedEntryCopy(input: {
+  owner: MobileAccountOwner;
+  entryId: string;
+  expectedUpdatedAt: string;
+  originalStoppedAt?: string;
+  action: CompletedEntryCopyAction;
+  requestImmediateDelivery?: boolean;
+}) {
+  const { CryptoDigestAlgorithm, digestStringAsync, randomUUID } = await import("expo-crypto");
+  const commandId = randomUUID();
+  const seed = completedEntryCopySeed(input.owner, input.entryId, commandId, input.expectedUpdatedAt, input.action);
+  const copyId = completedEntryCopyId(await digestStringAsync(CryptoDigestAlgorithm.SHA256, seed));
+  return enqueueTimeEntryCommand({
+    owner: input.owner,
+    target: { targetEntryId: input.entryId },
+    operation: "copy",
+    commandId,
+    copy: {
+      action: input.action, copyId, expectedUpdatedAt: input.expectedUpdatedAt,
+      ...(input.action.kind === "split" && input.originalStoppedAt ? { originalStoppedAt: input.originalStoppedAt } : {})
+    },
     requestImmediateDelivery: input.requestImmediateDelivery
   });
 }
@@ -332,12 +383,14 @@ export async function removeTimeEntryCommands(clientCommandIds: readonly string[
 }
 
 export async function readPendingTimeEntryCommands(
-  owner?: MobileAccountOwner
+  owner?: MobileAccountOwner,
+  { includeCompletedCopies = false }: { includeCompletedCopies?: boolean } = {}
 ): Promise<PendingTimeEntryCommand[]> {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return [];
   const all = await readAllCommands();
-  return all.filter((command) => mobileAccountOwnersEqual(command, resolvedOwner));
+  return all.filter((command) => mobileAccountOwnersEqual(command, resolvedOwner) &&
+    (includeCompletedCopies || !command.copyAcknowledged));
 }
 
 /**
@@ -375,7 +428,7 @@ export async function resolvePendingTimeEntryCommandTargets(
       return { ...command, targetEntryId, updatedAt: new Date().toISOString() };
     });
     if (changed) await writeAllCommands(next);
-    return next.filter((command) => mobileAccountOwnersEqual(command, owner));
+    return next.filter((command) => mobileAccountOwnersEqual(command, owner) && !command.copyAcknowledged);
   });
 }
 
@@ -385,6 +438,8 @@ export async function synchroniseTimeEntryCommands(input: {
   force?: boolean;
   now?: Date;
   signal?: AbortSignal;
+  foregroundOnly?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   const ownerKey = mobileAccountKey(input.owner);
   const existing = syncInFlightByOwner.get(ownerKey);
@@ -415,7 +470,9 @@ export async function synchroniseTimeEntryCommands(input: {
     control,
     now: input.now,
     owner: input.owner,
-    signal: input.signal
+    signal: input.signal,
+    backgroundExecutionChecked: input.foregroundOnly,
+    isForeground: input.isForeground
   }).finally(() => {
     if (syncInFlightByOwner.get(ownerKey)?.promise === sync) {
       syncInFlightByOwner.delete(ownerKey);
@@ -443,15 +500,17 @@ export async function getTimeEntryOutboxDiagnostics(
   const deviceQuarantine = quarantine.filter((record) => record.owner === null);
   const retryable = commands.filter((command) => command.failureKind !== "permanent");
   const permanent = commands.filter((command) => command.failureKind === "permanent");
+  const next = retryable[0];
+  const ready = (command: PendingTimeEntryCommand) => isTimeEntryCommandTransportReady(
+    command, options.correlations ?? new Map(), { now: options.now }
+  );
   return {
     pendingCount: retryable.length,
-    transportReadyCount: retryable.filter((command) =>
-      isTimeEntryCommandTransportReady(
-        command,
-        options.correlations ?? new Map(),
-        { now: options.now }
-      )
-    ).length,
+    transportReadyCount: retryable.filter(ready).length,
+    backgroundReadyCount: next && !next.copy && ready(next) ? 1 : 0,
+    headNextDueAt: [next?.nextAttemptAt, next?.deliverAfter]
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null,
     needsAttentionCount: permanent.length,
     /** Stable identities of the rejected commands, so a new rejection is noticed even at an equal count. */
     needsAttentionIds: permanent.map((command) => `entry:${command.clientCommandId}`),
@@ -566,6 +625,7 @@ async function runTimeEntryCommandDrain(input: {
   now?: Date;
   signal?: AbortSignal;
   backgroundExecutionChecked?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
     return currentOutboxResult(input.owner, 0, true, "session_changed");
@@ -574,7 +634,7 @@ async function runTimeEntryCommandDrain(input: {
     const reservationKey = timeEntryBackgroundExecutionKey(input.owner);
     const firstPendingCommand = (await readPendingTimeEntryCommands(input.owner))
       .find((command) => command.failureKind !== "permanent");
-    const hasTransportReadyCommand = firstPendingCommand
+    const hasTransportReadyCommand = firstPendingCommand && !firstPendingCommand.copy
       ? isTimeEntryCommandTransportReady(
           firstPendingCommand,
           input.control.correlations,
@@ -585,10 +645,9 @@ async function runTimeEntryCommandDrain(input: {
         )
       : false;
     if (
-      hasTimerBackgroundExecutionReservation(reservationKey) ||
-      hasTransportReadyCommand
+      hasTimerBackgroundExecutionReservation(reservationKey) || hasTransportReadyCommand
     ) {
-      return withTimerBackgroundExecutionReservation(
+      const result = await withTimerBackgroundExecutionReservation(
         reservationKey,
         "Dayframe timer Edit or Delete sync",
         (signal) => runTimeEntryCommandDrain({
@@ -598,6 +657,10 @@ async function runTimeEntryCommandDrain(input: {
         }),
         { beginIfMissing: hasTransportReadyCommand }
       );
+      if (result.reason !== "foreground_required") return result;
+      // A copy queued behind timer work gets its own foreground attempt after the assertion ends.
+      const remaining = await runTimeEntryCommandDrain({ ...input, backgroundExecutionChecked: true });
+      return combineTimeEntryOutboxSyncResults(result, remaining);
     }
   }
   let deliveredCount = 0;
@@ -612,11 +675,14 @@ async function runTimeEntryCommandDrain(input: {
       return {
         all: current,
         command: current.find((command) =>
-          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent"
+          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent" && !command.copyAcknowledged
         )
       };
     });
     if (!original) return outboxResult(all, input.owner, deliveredCount, false);
+    if ((original.copy && input.signal) || (!input.signal && input.isForeground?.() === false)) {
+      return outboxResult(all, input.owner, deliveredCount, true, "foreground_required");
+    }
     if (isHeld(original, now)) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
@@ -657,14 +723,27 @@ async function runTimeEntryCommandDrain(input: {
     if (heldCommands.has(original.clientCommandId)) {
       return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
     }
+    if (!input.signal && input.isForeground?.() === false) {
+      return currentOutboxResult(input.owner, deliveredCount, true, "foreground_required");
+    }
     markDispatched(original.clientCommandId);
     try {
+      const copy = original.copy;
+      const entryPath = "/api/time-entries";
+      const path = copy ? entryPath : entryPath + "/" + encodeURIComponent(targetEntryId);
+      const body = copy
+        ? {
+            mode: "copy-completed", action: copy.action.kind, entryId: targetEntryId,
+            expectedUpdatedAt: copy.expectedUpdatedAt, source: "mobile_app",
+            ...(copy.action.kind === "split" ? { splitAt: copy.action.splitAt } : {})
+          }
+        : original.operation === "update" ? original.patch ?? {} : undefined;
       const response = await mobileFetchWithTimeout(
-        `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(targetEntryId)}`,
+        DAYFRAME_API_BASE + path,
         {
-          method: original.operation === "delete" ? "DELETE" : "PATCH",
+          method: copy ? "POST" : original.operation === "delete" ? "DELETE" : "PATCH",
           headers: {
-            ...(original.operation === "update" ? { "Content-Type": "application/json" } : {}),
+            ...(body ? { "Content-Type": "application/json" } : {}),
             Authorization: `Bearer ${sessionRead.snapshot.token}`,
             // The same id on every attempt: the server answers a resend of an Edit it already applied
             // as delivered instead of applying it again over a newer change (item 17).
@@ -672,9 +751,7 @@ async function runTimeEntryCommandDrain(input: {
               ? { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: original.clientCommandId }
               : {})
           },
-          ...(original.operation === "update"
-            ? { body: JSON.stringify(original.patch ?? {}) }
-            : {}),
+          ...(body ? { body: JSON.stringify(body) } : {}),
           signal: input.signal
         },
         {
@@ -695,6 +772,25 @@ async function runTimeEntryCommandDrain(input: {
         !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)
       ) {
         return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
+      }
+      if (response.ok && copy) {
+        const result = await response.json().catch(() => null);
+        const exists = result?.newEntryId === copy.copyId;
+        const removedSince = result?.replayed === true && result?.newEntryId === null;
+        if (exists || removedSince) {
+          try {
+            const acknowledged = await acknowledgeCompletedCopy(original.clientCommandId, removedSince);
+            if (acknowledged) deliveredCount += 1;
+            continue;
+          } catch {
+            // The server receipt is safe to replay if the phone couldn't persist the acknowledgement.
+          }
+        }
+        const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
+          kind: "retryable",
+          message: "Dayframe couldn't confirm this block change yet."
+        });
+        return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
       }
       if (response.ok || (original.operation === "delete" && response.status === 404)) {
         const removed = await removeDeliveredCommand(original.clientCommandId);
@@ -731,7 +827,9 @@ async function runTimeEntryCommandDrain(input: {
 async function enqueueTimeEntryCommand(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
-  operation: "update" | "delete";
+  operation: PendingTimeEntryCommand["operation"];
+  commandId?: string;
+  copy?: PendingCompletedEntryCopy;
   patch?: TimeEntryUpdatePatch;
   deliverAfter?: string;
   holdLease?: TimeEntryCommandHoldLease;
@@ -742,18 +840,42 @@ async function enqueueTimeEntryCommand(input: {
     throw new Error("This change belongs to a different Dayframe account.");
   }
   return withMutation(async () => {
+    const all = await readAllCommands();
+    if (input.copy && all.some((command) =>
+      mobileAccountOwnersEqual(command, input.owner) && !command.copyAcknowledged &&
+      (command.targetEntryId === input.target.targetEntryId || command.copy?.copyId === input.target.targetEntryId)
+    )) {
+      throw new PendingCompletedEntryChangeError();
+    }
+    if (!input.copy && input.target.targetEntryId) {
+      const target = input.target.targetEntryId;
+      const related = all.find((command) => {
+        const copy = command.copy;
+        if (!copy || command.copyAcknowledged || !mobileAccountOwnersEqual(command, input.owner)) return false;
+        if (copy.copyId === target) return true;
+        if (copy.action.kind !== "split" || command.targetEntryId !== target) return false;
+        return command.failureKind !== "permanent" || input.operation === "delete" ||
+          input.patch?.stoppedAt === copy.action.splitAt;
+      });
+      if (related) {
+        throw new PendingCompletedEntryChangeError(related.failureKind === "permanent"
+          ? "Resolve the split or copy in Sync help before changing this block."
+          : "Wait for this split or copy to sync before changing either block.");
+      }
+    }
     const now = new Date().toISOString();
     const fenced = input.target.optimisticEntryId
       ? (await readRefusedStartFence()).find((record) =>
           fencedFor(record, input.owner, input.target.optimisticEntryId as string))
       : undefined;
     const command: PendingTimeEntryCommand = {
-      clientCommandId: generatedCommandId(),
+      clientCommandId: input.commandId ?? generatedCommandId(),
       operation: input.operation,
       userId: input.owner.userId,
       workspaceId: input.owner.workspaceId,
       ...input.target,
       ...(input.operation === "update" ? { patch: input.patch ?? {} } : {}),
+      ...(input.copy ? { copy: input.copy } : {}),
       ...(validIso(input.deliverAfter) && !fenced ? { deliverAfter: input.deliverAfter } : {}),
       createdAt: now,
       updatedAt: now,
@@ -771,7 +893,6 @@ async function enqueueTimeEntryCommand(input: {
         lease
       });
     }
-    const all = await readAllCommands();
     try {
       await writeAllCommands([...all, command]);
     } catch (error) {
@@ -781,6 +902,9 @@ async function enqueueTimeEntryCommand(input: {
     if (
       !fenced &&
       input.requestImmediateDelivery &&
+      input.operation !== "copy" &&
+      !all.some((candidate) => candidate.copy && !candidate.copyAcknowledged &&
+        candidate.failureKind !== "permanent" && mobileAccountOwnersEqual(candidate, input.owner)) &&
       isTimeEntryCommandTransportReady(command, new Map(), {
         force: true,
         now: new Date()
@@ -797,7 +921,7 @@ export function isTimeEntryCommandTransportReady(
   correlations: ReadonlyMap<string, string>,
   options: { force?: boolean; now?: Date } = {}
 ) {
-  if (command.failureKind === "permanent") return false;
+  if (command.failureKind === "permanent" || command.copyAcknowledged) return false;
   const now = options.now ?? new Date();
   if (isHeld(command, now)) return false;
   if (!command.targetEntryId && !(
@@ -1097,6 +1221,24 @@ async function currentOutboxResult(
   );
 }
 
+function acknowledgeCompletedCopy(clientCommandId: string, removedSince: boolean) {
+  return withMutation(async () => {
+    const current = await readAllCommands();
+    const command = current.find((candidate) => candidate.clientCommandId === clientCommandId && candidate.copy);
+    if (!command) return false;
+    const next = current.filter((candidate) => candidate.clientCommandId !== clientCommandId);
+    const delivered = next.filter((candidate) => candidate.copyAcknowledged);
+    const obsolete = new Set(delivered.slice(0, Math.max(0, delivered.length - MAX_COMPLETED_COPY_RECEIPTS + 1))
+      .map((candidate) => candidate.clientCommandId));
+    const receipt: PendingTimeEntryCommand = {
+      ...command, copyAcknowledged: true, copyRemovedOnServer: removedSince ? true : undefined, failureKind: undefined,
+      nextAttemptAt: undefined, lastError: undefined, lastStatusCode: undefined
+    };
+    await writeAllCommands([...next.filter((candidate) => !obsolete.has(candidate.clientCommandId)), receipt]);
+    return true;
+  });
+}
+
 function removeDeliveredCommand(clientCommandId: string) {
   return withMutation(async () => {
     const current = await readAllCommands();
@@ -1171,7 +1313,7 @@ function outboxResult(
   stopped: boolean,
   reason?: TimeEntryOutboxSyncResult["reason"]
 ): TimeEntryOutboxSyncResult {
-  const owned = commands.filter((command) => mobileAccountOwnersEqual(command, owner));
+  const owned = commands.filter((command) => mobileAccountOwnersEqual(command, owner) && !command.copyAcknowledged);
   return {
     deliveredCount,
     waitingCount: owned.filter((command) => command.failureKind !== "permanent").length,
@@ -1202,7 +1344,7 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   const clientCommandId = optionalText(item.clientCommandId);
-  const operation = item.operation === "update" || item.operation === "delete"
+  const operation = item.operation === "update" || item.operation === "delete" || item.operation === "copy"
     ? item.operation
     : null;
   const userId = optionalText(item.userId);
@@ -1211,7 +1353,9 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   const optimisticEntryId = optionalText(item.optimisticEntryId);
   const createdAt = validIso(item.createdAt);
   const updatedAt = validIso(item.updatedAt);
+  const copy = operation === "copy" ? parseCompletedEntryCopy(item.copy) : null;
   if (
+    (operation === "copy" && (!copy || !targetEntryId || optimisticEntryId)) ||
     !clientCommandId || !operation || !userId || !workspaceId ||
     (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt
   ) {
@@ -1224,6 +1368,11 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
     workspaceId,
     ...(targetEntryId ? { targetEntryId } : {}),
     ...(optimisticEntryId ? { optimisticEntryId } : {}),
+    ...(copy ? { copy } : {}),
+    ...(copy && item.copyAcknowledged === true ? {
+      copyAcknowledged: true as const,
+      ...(item.copyRemovedOnServer === true ? { copyRemovedOnServer: true as const } : {})
+    } : {}),
     ...(operation === "update" && item.patch && typeof item.patch === "object"
       ? { patch: item.patch as TimeEntryUpdatePatch }
       : {}),
@@ -1244,6 +1393,23 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
       : {}),
     ...(item.refusedStart === true ? { refusedStart: true } : {})
   };
+}
+
+function parseCompletedEntryCopy(value: unknown): PendingCompletedEntryCopy | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Partial<PendingCompletedEntryCopy>;
+  const expectedUpdatedAt = validIso(item.expectedUpdatedAt);
+  const copyId = optionalText(item.copyId);
+  const action = item.action;
+  if (!copyId || !/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(copyId) || !expectedUpdatedAt) {
+    return null;
+  }
+  if (action?.kind === "duplicate") return { action: { kind: action.kind }, copyId, expectedUpdatedAt };
+  const splitAt = action?.kind === "split" ? validIso(action.splitAt) : null;
+  const originalStoppedAt = validIso(item.originalStoppedAt) ?? undefined;
+  return splitAt ? {
+    action: { kind: "split", splitAt }, copyId, expectedUpdatedAt, ...(originalStoppedAt ? { originalStoppedAt } : {})
+  } : null;
 }
 
 function generatedCommandId() {

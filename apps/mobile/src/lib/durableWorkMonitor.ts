@@ -212,7 +212,7 @@ async function refreshOnce() {
   const { timerEventCount, timerMutationCount } = durableTimerMutationCounts({
     activityQueue: queue,
     nativeShortcutCount,
-    timeEntryCommandCount: timeEntries.transportReadyCount,
+    timeEntryCommandCount: timeEntries.backgroundReadyCount,
     timerStopCount
   });
   const reviewOwned = reviewOwner?.userId === owner.userId &&
@@ -233,7 +233,10 @@ async function refreshOnce() {
   const nonTimerQueue=queue.filter(event=>!['timer_start','timer_stop'].includes(event.type)&&event.failureKind!=='permanent');
   const activityDue=nonTimerQueue.some(event=>!event.nextRetryAt)?null:earliestIso(nonTimerQueue.map(event=>event.nextRetryAt))??null;
   const retryLanes:SyncDueTimes={
-    timer:{pending:timerMutationCount,nextDueAt:timerStopCount||nativeShortcutCount||timerEventCount?null:timeEntries.nextRetryAt??null},
+    timer: {
+      pending: timerStopCount + nativeShortcutCount + timerEventCount + timeEntries.pendingCount,
+      nextDueAt: timerStopCount || nativeShortcutCount || timerEventCount ? null : timeEntries.headNextDueAt
+    },
     activity:{pending:nonTimerQueue.length,nextDueAt:activityDue},
     review:{
       pending:reviewCount+corrections.pendingCount,

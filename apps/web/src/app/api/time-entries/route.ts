@@ -32,11 +32,12 @@ export async function POST(request: Request) {
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate", "join"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, split, duplicate, or join.");
+      throw new BadRequestError("mode must be one of start, stop, manual, split, duplicate, join, or copy-completed.");
     }
-    const mode = modeResult.data;
+    const durableCopy = modeResult.data === "copy-completed";
+    const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
     const tagNames = optionalTagNames(body.tagNames);
@@ -97,15 +98,20 @@ export async function POST(request: Request) {
     // `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id header makes
     // a retry safe. A running block splits too: its second part keeps running (owner 28 Oct 2026).
     const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
+    if (durableCopy && !finishedEntryId) throw new BadRequestError("entryId is required.");
     if (finishedEntryId) {
       entryId = finishedEntryId;
       const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
       const clientCommandId = requestClientCommandId(request);
+      if (durableCopy && (!expectedUpdatedAt || !clientCommandId)) {
+        throw new BadRequestError("A durable copy requires the block version and a client command ID.");
+      }
+      const command = { expectedUpdatedAt, clientCommandId, ...(durableCopy ? { durableCopy } : {}) };
       const result = mode === "split"
         ? await splitFinishedEntry(finishedEntryId, {
-          splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId, source: eventSource
+          ...command, splitAt: requiredTimestamp(body.splitAt, "splitAt"), source: eventSource
         }, session)
-        : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
+        : await duplicateFinishedEntry(finishedEntryId, command, session);
       scheduleLiveActivityNotification(session);
       // Both blocks as they are now (on a repeat too): whether the second part runs is read from them.
       const reader = session;
