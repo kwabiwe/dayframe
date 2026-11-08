@@ -2790,10 +2790,13 @@ export default function SettingsScreen() {
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
-                      title={issue.operation === "delete" ? "Couldn't delete a block" : "Couldn't save an edit"}
+                      title={issue.operation === "delete" ? "Couldn't delete a block"
+                        : issue.copy?.action.kind === "split" ? "Couldn't split a block"
+                        : issue.copy?.action.kind === "duplicate" ? "Couldn't duplicate a block"
+                        : "Couldn't save an edit"}
                     >
-                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
-                      <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
+                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel="Try this block change again" label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
+                      <SettingsPillButton accessibilityLabel="Discard this block change" danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {reviewSyncIssues.map((issue, index) => (

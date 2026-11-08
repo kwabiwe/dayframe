@@ -35,6 +35,7 @@ import { router, useFocusEffect, useIsFocused, usePathname } from "expo-router";
 import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  type CompletedEntryCopyAction,
   withGoalExclusions,
   paletteColorFor,
   previousEndOffer,
@@ -181,6 +182,7 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
+import { projectCompletedEntryCopy } from "@/lib/completedEntryCopyProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import {
@@ -219,6 +221,8 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
+  enqueueCompletedEntryCopy,
+  PendingCompletedEntryChangeError,
   enqueueTimeEntryUpdate,
   isTimeEntryCommandRejected,
   readPendingTimeEntryCommands,
@@ -2995,40 +2999,68 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
     queuedTimerStartRecoveryRequested.current = true;
 
-    if (connectivityCurrent.current.isOnline) {
-      void (async () => {
-        const correlations = await readTimerEntryIdCorrelations(owner);
-        const result = await synchroniseTimeEntryCommands({
-          owner,
-          correlations,
-          force: true
-        });
-        if (result.reason === "authentication_required") {
-          transitionToSignedOut();
-          return;
-        }
-        // Feedback belongs to the account that made the edit, checked again after every wait.
-        const ownerCurrent = () => {
-          const current = latestData.current;
-          return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
-        };
-        if (!ownerCurrent()) return;
-        // Any rejection reloads, so its block returns as it was; only this edit's own rejection
-        // alerts, as older sync issues stay in Settings › Sync help.
-        const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
-        if (!ownerCurrent()) return;
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
-          await loadRef.current({ silent: true });
-        }
-        if (rejected && ownerCurrent()) {
-          Alert.alert(
-            "Change not saved",
-            "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
-          );
-        }
-      })().catch(() => undefined);
-    }
+    deliverQueuedTimeEntry(owner, clientCommandId);
     return true;
+  }
+
+  async function copyCalendarEntry(entry: TimeEntry, action: CompletedEntryCopyAction) {
+    const bootstrap = latestData.current;
+    if (!bootstrap?.serverBuild?.completedEntryCopy || !entry.stoppedAt || !entry.updatedAt) return false;
+    const owner = timerStopOwner(bootstrap);
+    const current = mobileTimeEntryById(bootstrap, entry.id);
+    if (!current?.stoppedAt || current.updatedAt !== entry.updatedAt) {
+      Alert.alert("Block changed", "Close and reopen this block to see its current details.");
+      return false;
+    }
+    try {
+      const command = await enqueueCompletedEntryCopy({
+        owner,
+        entryId: entry.id,
+        expectedUpdatedAt: entry.updatedAt,
+        action,
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
+      });
+      const copy = command.copy;
+      if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return false;
+      nextTimerMutationVersion(entry.id);
+      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy) : data);
+      queuedTimerStartRecoveryRequested.current = true;
+      deliverQueuedTimeEntry(owner, command.clientCommandId);
+      return true;
+    } catch (error) {
+      Alert.alert("Block not copied", error instanceof PendingCompletedEntryChangeError
+        ? error.message
+        : "Dayframe could not save this change on your iPhone. Check available storage and try again.");
+      return false;
+    }
+  }
+
+  function deliverQueuedTimeEntry(owner: TimerStopOwner, clientCommandId: string) {
+    if (!connectivityCurrent.current.isOnline) return;
+    void (async () => {
+      const correlations = await readTimerEntryIdCorrelations(owner);
+      const result = await synchroniseTimeEntryCommands({ owner, correlations, force: true });
+      if (result.reason === "authentication_required") {
+        transitionToSignedOut();
+        return;
+      }
+      const ownerCurrent = () => {
+        const current = latestData.current;
+        return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
+      };
+      if (!ownerCurrent()) return;
+      const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
+      if (!ownerCurrent()) return;
+      if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
+        await loadRef.current({ silent: true });
+      }
+      if (rejected && ownerCurrent()) {
+        Alert.alert(
+          "Change not saved",
+          "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
+        );
+      }
+    })().catch(() => undefined);
   }
 
   async function deleteCalendarEntry(entryId: string) {
@@ -4444,6 +4476,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCancel={completeCalendarEntryExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
+        onCopyCompletedEntry={data?.serverBuild?.completedEntryCopy ? copyCalendarEntry : undefined}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
         onStartAgain={(values) => {

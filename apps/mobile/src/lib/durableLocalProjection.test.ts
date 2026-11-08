@@ -84,6 +84,65 @@ describe("durable dashboard projection", () => {
     expect(projected.entries.some((item) => item.id === deleted.id)).toBe(false);
   });
 
+  it("projects a duplicate across midnight once and retires it on canonical or changed-source reads", () => {
+    const updatedAt = "2026-08-22T23:30:00.000Z";
+    const original = {
+      ...entry("finished"), startedAt: "2026-08-22T23:20:00.000Z", stoppedAt: "2026-08-22T23:50:00.000Z",
+      updatedAt, tagNames: ["writing"], locationGroup: { key: "trip", name: "Trip" }
+    };
+    const copyId = "e99b1dae-3711-8125-8a38-a05709a63d52";
+    const copy: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "copy-1", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "duplicate" }, copyId, expectedUpdatedAt: updatedAt },
+      createdAt: updatedAt, updatedAt, attemptCount: 0
+    };
+    const data = bootstrap({
+      entries: [original], dayEntries: [], weekEntries: [original],
+      dateRange: {
+        selectedDate: "2026-08-23", previousDate: "2026-08-22", nextDate: "2026-08-24",
+        dayStart: "2026-08-23T00:00:00.000Z", dayEnd: "2026-08-24T00:00:00.000Z",
+        weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const durable = work({ timeEntryCommands: [copy] });
+    const first = projectDurableLocalWork(data, durable);
+    expect(first.dayEntries).toHaveLength(1);
+    expect(first.dayEntries?.[0]).toMatchObject({
+      id: copyId, startedAt: "2026-08-22T23:50:00.000Z", stoppedAt: "2026-08-23T00:20:00.000Z",
+      tagNames: ["writing"], source: "manual_app", locationGroup: undefined
+    });
+    expect(projectDurableLocalWork(first, durable)).toBe(first);
+    const afterRemoval = { ...data, entries: [{ ...original, updatedAt: "2026-08-22T23:59:00.000Z" }] };
+    expect(projectDurableLocalWork(afterRemoval, durable)).toBe(afterRemoval);
+    expect(projectDurableLocalWork(data, work({ timeEntryCommands: [{ ...copy, failureKind: "permanent" }] }))).toBe(data);
+  });
+
+  it("projects a split without changing the running timer or showing an empty half in the next day", () => {
+    const running = entry("live");
+    const splitAt = "2026-08-23T00:00:00.000Z";
+    const original = {
+      ...entry("finished"), startedAt: "2026-08-22T23:30:00.000Z", stoppedAt: "2026-08-23T00:30:00.000Z",
+      updatedAt: "2026-08-23T01:00:00.000Z", durationSeconds: 3600
+    };
+    const copy: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "split-1", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "split", splitAt }, copyId: "split-half", expectedUpdatedAt: original.updatedAt },
+      createdAt: original.updatedAt, updatedAt: original.updatedAt, attemptCount: 0
+    };
+    const data = bootstrap({
+      entries: [running, original], activeEntry: running, dayEntries: [original],
+      dateRange: {
+        selectedDate: "2026-08-23", previousDate: "2026-08-22", nextDate: "2026-08-24",
+        dayStart: splitAt, dayEnd: "2026-08-24T00:00:00.000Z",
+        weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const projected = projectDurableLocalWork(data, work({ timeEntryCommands: [copy] }));
+    expect(projected.activeEntry).toBe(running);
+    expect(projected.entries.find((candidate) => candidate.id === original.id)).toMatchObject({ stoppedAt: splitAt, durationSeconds: 1800 });
+    expect(projected.dayEntries).toEqual([expect.objectContaining({ id: "split-half", startedAt: splitAt, durationSeconds: 1800 })]);
+  });
+
   it("restores server truth instead of projecting a permanently rejected edit", () => {
     const persisted = entry("persisted-edit");
     const projected = projectDurableLocalWork(bootstrap({

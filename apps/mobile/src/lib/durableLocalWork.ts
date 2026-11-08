@@ -22,7 +22,7 @@ export async function readDurableLocalWork(
     readQueue(owner),
     // Lock Screen Stops not yet moved into the app's queue (Codex r1 on #578).
     readPendingNativeEntryStops(owner).catch(() => []),
-    readPendingTimeEntryCommands(owner),
+    readPendingTimeEntryCommands(owner, { includeCompletedCopies: true }),
     readPendingTimerStops().then((stops) => pendingTimerStopsForOwner(stops, owner)),
     readTimerEntryIdCorrelations(owner)
   ]);

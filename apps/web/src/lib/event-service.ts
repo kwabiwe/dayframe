@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
 import { reconcileTimerTripClashes, timerTripChecksEnabled } from "./location/timer-trip-clash-service";
 import {
@@ -7,6 +8,10 @@ import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import { z } from "zod";
 import {
+  completedEntryCopyId,
+  completedEntryCopySeed,
+  splitBounds,
+  type CompletedEntryCopyAction,
   defaultCountsTowardGoal,
   ActivityEventInputSchema,
   hasAutomaticConfidence,
@@ -3076,7 +3081,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
  */
 export async function splitFinishedEntry(
   id: string,
-  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string; requireFinished?: boolean; source?: "manual_app" | "mobile_app"; now?: Date },
+  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string; durableCopy?: boolean; source?: "manual_app" | "mobile_app"; now?: Date },
   session: RequestSession = getDevSession()
 ) {
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
@@ -3177,7 +3182,7 @@ export async function joinSplitEntries(
 
 export async function duplicateFinishedEntry(
   id: string,
-  input: { expectedUpdatedAt?: string; clientCommandId?: string; now?: Date },
+  input: { expectedUpdatedAt?: string; clientCommandId?: string; durableCopy?: boolean; now?: Date },
   session: RequestSession = getDevSession()
 ) {
   return copyFinishedEntry(id, { kind: "duplicate", ...input }, session);
@@ -3189,11 +3194,22 @@ async function copyFinishedEntry(
   id: string,
   input: {
     kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string;
-    requireFinished?: boolean; source?: "manual_app" | "mobile_app"; now?: Date;
+    durableCopy?: boolean; source?: "manual_app" | "mobile_app"; now?: Date;
   },
   session: RequestSession
 ) {
   const clientEventId = input.clientCommandId ? `time_entry_${input.kind}:${input.clientCommandId}` : null;
+  let copyId: string | null = null;
+  if (input.durableCopy) {
+    if (!input.clientCommandId || !input.expectedUpdatedAt) {
+      throw new TimeEntryValidationError("A durable copy requires the block version and a client command ID.");
+    }
+    const action: CompletedEntryCopyAction = input.kind === "split"
+      ? { kind: input.kind, splitAt: input.splitAt ?? "" }
+      : { kind: input.kind };
+    const seed = completedEntryCopySeed(session, id, input.clientCommandId, input.expectedUpdatedAt, action);
+    copyId = completedEntryCopyId(createHash("sha256").update(seed).digest("hex"));
+  }
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -3206,13 +3222,16 @@ async function copyFinishedEntry(
     if (clientEventId) {
       // Already done (its reply was lost): the block it made, not a second one. The event is the receipt,
       // so a repeat after that block has gone (an Undo joined it back) is answered too, with no block.
-      const earlier = await client.query<{ entryId: string | null }>(
-        `select te.id as "entryId" from activity_events e
+      const earlier = await client.query<{ entryId: string | null; copyId: string | null }>(
+        `select te.id as "entryId", e.raw_payload->>'completedCopyId' as "copyId" from activity_events e
          left join time_entries te on te.created_from_event_id = e.id and te.workspace_id = e.workspace_id
          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
         [session.workspaceId, session.userId, clientEventId]
       );
       if (earlier.rows[0]) {
+        if (copyId && earlier.rows[0].copyId !== copyId) {
+          throw new TimeEntryValidationError("This command ID belongs to another block change.");
+        }
         await client.query("commit");
         return { id, newEntryId: earlier.rows[0].entryId, replayed: true as const };
       }
@@ -3240,7 +3259,7 @@ async function copyFinishedEntry(
     if (!row) throw new TimeEntryNotFoundError();
     if (input.expectedUpdatedAt && versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
     if (!row.stoppedAt && input.kind === "duplicate") throw new TimeEntryValidationError("Stop this block before duplicating it.");
-    if (!row.stoppedAt && input.requireFinished) throw new TimeEntryValidationError("Stop this block before splitting it.");
+    if (!row.stoppedAt && input.durableCopy) throw new TimeEntryValidationError("Stop this block before splitting it.");
     const running = !row.stoppedAt;
     const startMs = row.startedAt.getTime();
     // A running block's end is now: a split of it lands between its start and now.
@@ -3250,6 +3269,12 @@ async function copyFinishedEntry(
       const atMs = Date.parse(input.splitAt ?? "");
       if (!Number.isFinite(atMs) || atMs <= startMs || atMs >= stopMs) {
         throw new TimeEntryValidationError("Choose a split time inside the block.");
+      }
+      if (copyId && row.stoppedAt) {
+        const bounds = splitBounds({ startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() });
+        if (!bounds || atMs % RUNNING_SPLIT_MARGIN_MS !== 0 || atMs < bounds.minMs || atMs > bounds.maxMs) {
+          throw new TimeEntryValidationError("Choose a whole minute with at least one minute on each side.");
+        }
       }
       // A running block keeps a minute either side: never its first minute or the last minute before now.
       if (running && (atMs - startMs < RUNNING_SPLIT_MARGIN_MS || stopMs - atMs < RUNNING_SPLIT_MARGIN_MS)) {
@@ -3286,7 +3311,7 @@ async function copyFinishedEntry(
               }
             }
           // No `origin` key: a manual block, as createManualEntry's.
-          : { description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id }),
+          : { description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id, ...(copyId ? { completedCopyId: copyId } : {}) }),
         row.projectId,
         row.categoryId,
         row.placeId,
@@ -3297,19 +3322,27 @@ async function copyFinishedEntry(
     );
     if (input.kind === "split") {
       await client.query(
-        `update time_entries set stopped_at = $4, user_edited_at = now(), updated_at = now()
+        `update time_entries set stopped_at = $4, user_edited_at = now(),
+           updated_at = case when $5 then greatest(now(), updated_at + interval '1 millisecond') else now() end
          where id = $1 and workspace_id = $2 and user_id = $3`,
-        [id, session.workspaceId, session.userId, window.startedAt]
+        [id, session.workspaceId, session.userId, window.startedAt, Boolean(copyId)]
       );
       // The original's new end is one the person set: an earlier queued Stop never pulls it back.
       await recordTimeEntryEdits(client, [id], session, [id], input.clientCommandId);
+    } else if (copyId) {
+      // A fresh bootstrap can retire the provisional copy if the real copy was deleted before the reply.
+      await client.query(
+        `update time_entries set updated_at = greatest(now(), updated_at + interval '1 millisecond')
+         where id = $1 and workspace_id = $2 and user_id = $3`,
+        [id, session.workspaceId, session.userId]
+      );
     }
     const inserted = await client.query<{ id: string }>(
       `insert into time_entries (
           workspace_id, user_id, project_id, category_id, place_id, place_label, source, confidence, review_status,
-          description, started_at, stopped_at, created_from_event_id
+          description, started_at, stopped_at, created_from_event_id, id
        )
-       values ($1, $2, $3, $4, $5, $6, $11, 'high', 'confirmed', $7, $8, $9, $10)
+       values ($1, $2, $3, $4, $5, $6, $11, 'high', 'confirmed', $7, $8, $9, $10, coalesce($12::uuid, gen_random_uuid()))
        returning id`,
       [
         session.workspaceId,
@@ -3322,7 +3355,8 @@ async function copyFinishedEntry(
         window.startedAt,
         window.stoppedAt,
         event.rows[0].id,
-        running ? input.source ?? "manual_app" : "manual_app"
+        running ? input.source ?? "manual_app" : "manual_app",
+        copyId
       ]
     );
     const newEntryId = inserted.rows[0].id;

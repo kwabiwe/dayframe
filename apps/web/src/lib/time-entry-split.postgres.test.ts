@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { completedEntryCopyId, completedEntryCopySeed } from "@dayframe/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import type { RequestSession } from "./session";
@@ -93,5 +95,46 @@ describeWithDatabase("Split and Duplicate a finished block on disposable Postgre
     const made = (await blocks()).find((row) => row.id === copy.newEntryId)!;
     expect(made).toMatchObject({ startedAt: new Date(at(30)), stoppedAt: new Date(at(60)), placeLabel: "Exampleton Library", tags: ["deep"] });
     await expect(duplicateFinishedEntry(original, { now: new Date(at(50)) }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+  });
+
+  it("uses one stable mobile copy ID and a changed source version even after the copy is deleted", async () => {
+    const { createManualEntry, duplicateFinishedEntry, TimeEntryConflictError, TimeEntryValidationError } = await import("./event-service");
+    const entry = (await createManualEntry({ categoryId, description: "Copy receipt", startedAt: at(180), stoppedAt: at(210), tagNames: ["deep"] }, session)).id;
+    async function version() {
+      return (await database!.query<{ updatedAt: Date }>(
+        'select updated_at as "updatedAt" from time_entries where id = $1', [entry]
+      )).rows[0].updatedAt.toISOString();
+    }
+    const expectedUpdatedAt = await version();
+    const input = { clientCommandId: "mobile-completed-duplicate", expectedUpdatedAt, durableCopy: true };
+    const seed = completedEntryCopySeed(session, entry, input.clientCommandId, expectedUpdatedAt, { kind: "duplicate" });
+    const copyId = completedEntryCopyId(createHash("sha256").update(seed).digest("hex"));
+
+    expect(await duplicateFinishedEntry(entry, input, session)).toMatchObject({ newEntryId: copyId, replayed: false });
+    expect(Date.parse(await version())).toBeGreaterThan(Date.parse(expectedUpdatedAt));
+    expect(await duplicateFinishedEntry(entry, input, session)).toMatchObject({ newEntryId: copyId, replayed: true });
+    await expect(duplicateFinishedEntry(entry, { ...input, clientCommandId: "mobile-completed-other" }, session)).rejects.toBeInstanceOf(TimeEntryConflictError);
+    await expect(duplicateFinishedEntry(original, input, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    await database!.query("delete from time_entries where id = $1 and workspace_id = $2", [copyId, workspaceId]);
+    expect(await duplicateFinishedEntry(entry, input, session)).toMatchObject({ newEntryId: null, replayed: true });
+    expect((await blocks()).some((block) => block.id === copyId)).toBe(false);
+  });
+
+  it("requires a whole minute and preserves both parts for a durable finished split", async () => {
+    const { createManualEntry, splitFinishedEntry, TimeEntryValidationError } = await import("./event-service");
+    const entry = (await createManualEntry({ categoryId, description: "Split receipt", startedAt: at(270), stoppedAt: at(300), tagNames: ["deep"] }, session)).id;
+    const version = (await database!.query<{ updatedAt: Date }>(
+      'select updated_at as "updatedAt" from time_entries where id = $1', [entry]
+    )).rows[0].updatedAt.toISOString();
+    const input = { clientCommandId: "mobile-completed-split", expectedUpdatedAt: version, durableCopy: true };
+    await expect(splitFinishedEntry(entry, {
+      ...input, splitAt: new Date(Date.parse(at(285)) + 1000).toISOString()
+    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    const split = await splitFinishedEntry(entry, { ...input, splitAt: at(285) }, session);
+    expect(split.running).toBe(false);
+    expect((await blocks()).find((block) => block.id === entry)?.stoppedAt).toEqual(new Date(at(285)));
+    expect((await blocks()).find((block) => block.id === split.newEntryId)).toMatchObject({
+      startedAt: new Date(at(285)), stoppedAt: new Date(at(300)), categoryId, tags: ["deep"]
+    });
   });
 });

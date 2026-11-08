@@ -10,6 +10,7 @@ import {
   type MobileAccountOwner
 } from "./mobileAccount";
 import { isPermanentlyFailedQueuedEvent } from "./queuePermanence";
+import { projectCompletedEntryCopy } from "./completedEntryCopyProjection";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
 import {
@@ -78,6 +79,10 @@ export function projectDurableLocalWork(
         : null
     );
     if (!target) continue;
+    if (operation.command.copy) {
+      projected = projectCompletedEntryCopy(projected, target, operation.command.copy);
+      continue;
+    }
     projected = operation.kind === "delete"
       ? optimisticDeleteTimeEntry(projected, target) as MobileBootstrap
       : optimisticPatchTimeEntry(

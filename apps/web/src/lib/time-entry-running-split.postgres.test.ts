@@ -80,7 +80,7 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
   it("keeps the active timer intact for a finished-only split", async () => {
     const { splitFinishedEntry, TimeEntryValidationError } = await import("./event-service");
     await expect(splitFinishedEntry(running, {
-      splitAt: ago(30), expectedUpdatedAt: await version(running), requireFinished: true
+      splitAt: ago(30), expectedUpdatedAt: await version(running), clientCommandId: "finished-only-1", durableCopy: true
     }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
     expect(await blocks()).toMatchObject([{ id: running, stoppedAt: null }]);
   });

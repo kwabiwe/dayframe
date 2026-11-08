@@ -167,19 +167,26 @@ describe("POST /api/time-entries", () => {
     expect((await POST(jsonRequest({ mode: "join", entryId, splitEntryId }))).status).toBe(422);
   });
 
-  it("requires an entry ID before a finished-only split can reach the timer service", async () => {
+  it("requires the finished entry, version, and receipt ID for a durable copy", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     const splitAt = "2026-07-04T10:30:00.000Z";
+    const expectedUpdatedAt = "2026-07-04T11:00:00.000Z";
     const source = "mobile_app";
-    const missing = await POST(jsonRequest({ mode: "split", source, splitAt, requireFinished: true }));
-    expect(missing.status).toBe(400);
+    const clientCommandId = "mobile-copy-1";
+    const split = { mode: "copy-completed", action: "split", source, splitAt };
+    expect((await POST(jsonRequest(split))).status).toBe(400);
+    expect((await POST(jsonRequest({ ...split, entryId, expectedUpdatedAt }))).status).toBe(400);
     expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
 
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: null, replayed: false });
-    const response = await POST(jsonRequest({ mode: "split", source, splitAt, entryId, requireFinished: true }));
+    const response = await POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": clientCommandId },
+      body: JSON.stringify({ ...split, entryId, expectedUpdatedAt })
+    }));
     expect(response.status).toBe(201);
     expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId, {
-      splitAt, source, expectedUpdatedAt: undefined, clientCommandId: undefined, requireFinished: true
+      splitAt, source, expectedUpdatedAt, clientCommandId, durableCopy: true
     }, session);
   });
 
@@ -201,7 +208,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, split, duplicate, or join."
+      error: "mode must be one of start, stop, manual, split, duplicate, join, or copy-completed."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();

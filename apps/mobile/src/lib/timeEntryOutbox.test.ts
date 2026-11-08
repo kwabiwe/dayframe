@@ -14,6 +14,15 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   }
 }));
 
+vi.mock("expo-crypto", async () => {
+  const { createHash, randomUUID } = await import("node:crypto");
+  return {
+    CryptoDigestAlgorithm: { SHA256: "sha256" },
+    digestStringAsync: async (algorithm: string, value: string) => createHash(algorithm).update(value).digest("hex"),
+    randomUUID
+  };
+});
+
 vi.mock("./secure-session", () => ({
   invalidateMobileSessionIfCurrent: vi.fn(async () => false),
   isAuthenticatedSessionSnapshotCurrent: vi.fn(() => true),
@@ -48,6 +57,44 @@ describe("durable time-entry outbox", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("retries a completed copy using the durable command and expected result ID after relaunch", async () => {
+    const expectedUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const command = await outbox.enqueueCompletedEntryCopy({
+      owner: OWNER_A,
+      entryId: "entry-a",
+      expectedUpdatedAt,
+      action: { kind: "duplicate" }
+    });
+    expect(command.copy?.copyId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_B)).toEqual([]);
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ newEntryId: command.copy?.copyId }), { status: 200 }));
+    vi.stubGlobal("fetch", request);
+    const input = { owner: OWNER_A, correlations: new Map<string, string>(), force: true };
+    expect((await outbox.synchroniseTimeEntryCommands(input)).reason).toBe("retryable_failure");
+    outbox.__resetTimeEntryOutboxForTests();
+    expect((await outbox.readPendingTimeEntryCommands(OWNER_A))[0]).toMatchObject({
+      clientCommandId: command.clientCommandId,
+      copy: command.copy
+    });
+    expect((await outbox.synchroniseTimeEntryCommands(input)).deliveredCount).toBe(1);
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([]);
+    const receipts = await outbox.readPendingTimeEntryCommands(OWNER_A, { includeCompletedCopies: true });
+    expect(receipts).toEqual([expect.objectContaining({ copyAcknowledged: true, copy: command.copy })]);
+    expect((await outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).pendingCount).toBe(0);
+    expect((await outbox.synchroniseTimeEntryCommands(input)).deliveredCount).toBe(0);
+    expect(request).toHaveBeenCalledTimes(2);
+    for (const [url, init] of request.mock.calls) {
+      expect(url).toMatch(/\/api\/time-entries$/);
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({
+        mode: "copy-completed", action: "duplicate", entryId: "entry-a", expectedUpdatedAt, source: "mobile_app"
+      });
+      expect(new Headers(init.headers).get("X-Dayframe-Client-Command-Id")).toBe(command.clientCommandId);
+    }
   });
 
   it.each(["update", "delete"] as const)(
