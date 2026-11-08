@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   secure: new Map<string, string>(),
   nativeSignals: [] as Array<Record<string, unknown>>,
   nativeCalls: [] as string[],
+  appStateListeners: new Set<(state: string) => void>(),
   appState: { currentState: "active" },
   beforeRun: null as ((sql: string) => Promise<void>) | null,
   beforeFirst: null as ((sql: string, ...args: unknown[]) => Promise<void>) | null,
@@ -22,12 +23,17 @@ const h = vi.hoisted(() => ({
   onSet: null as ((key: string, value: string) => Promise<void>) | null
 }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: h.open }));
-vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://fixture.invalid" }));
+vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://fixture.invalid", IS_DAYFRAME_STAGING: false }));
 vi.mock("./backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "fixture-backend" }));
 vi.mock("expo-crypto", () => ({}));
 vi.mock("./healthSyncStore", () => ({ recordHealthAcknowledgement: vi.fn() }));
 vi.mock("react-native", () => ({
-  AppState: h.appState,
+  AppState: Object.assign(h.appState, {
+    addEventListener: (_name: string, listener: (state: string) => void) => {
+      h.appStateListeners.add(listener);
+      return { remove: () => h.appStateListeners.delete(listener) };
+    }
+  }),
   NativeModules: { DayframeLiveActivityModule: {
     clearRuntimeContext: vi.fn(async () => true), clearRuntimeContextIfToken: vi.fn(async () => true), setRuntimeContext: vi.fn(async () => true) } },
   Platform: { OS: "ios" }, Settings: { get: () => undefined, set: () => undefined }
@@ -1058,9 +1064,9 @@ describe("automatic Location transfer permissions and replay", () => {
 });
 
 describe("legacy location transfer and foreground replay", () => {
-  const reply = () => json({
+  const reply = (warnings: string[] = []) => json({
     ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-    rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings: []
+    rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings
   });
   const attemptKey = "last_server_replay_attempt_at";
   function metadataValue(name: string) {
@@ -1138,7 +1144,7 @@ describe("legacy location transfer and foreground replay", () => {
     await store.syncLocationEvidence({ foregroundReplay: true, forceReplay: true });
     expect(metadataValue(attemptKey)).toBe(new Date(T0).toISOString());
     calls.length = 0;
-    routes["/api/location/replay"] = reply;
+    routes["/api/location/replay"] = () => reply();
     vi.setSystemTime(T0 + 1000);
     const entered = deferred(), release = deferred();
     h.beforeFirst = async (_sql, name) => {
@@ -1160,7 +1166,7 @@ describe("legacy location transfer and foreground replay", () => {
 
   it("keeps replay time and diagnostics unchanged if permission closes before dispatch", async () => {
     await signInThroughApi(A, [place]);
-    routes["/api/location/replay"] = reply;
+    routes["/api/location/replay"] = () => reply();
     await store.syncLocationEvidence({ foregroundReplay: true, forceReplay: true });
     const previousTime = metadataValue(attemptKey);
     const diagnosticKey = "sync_diagnostics:" + key(A);
@@ -1170,8 +1176,14 @@ describe("legacy location transfer and foreground replay", () => {
     try {
       calls.length = 0;
       vi.setSystemTime(T0 + 30_000);
-      h.beforeFirst = async (_sql, name) => {
-        if (name !== "semantic_mode_acknowledged_at") return;
+      let replayPrepared = false;
+      let ownershipReads = 0;
+      h.beforeFirst = async (sql, name) => {
+        if (name === "semantic_mode_acknowledged_at") replayPrepared = true;
+        // After request preparation, the first lookup admits the owned operation
+        // and the second is the network helper's own dispatch fence.
+        if (!replayPrepared || !sql.includes("select context_json from location_account_context") ||
+            ++ownershipReads !== 2) return;
         h.beforeFirst = null;
         background.mockResolvedValue({ status: "denied" } as never);
       };
@@ -1180,6 +1192,69 @@ describe("legacy location transfer and foreground replay", () => {
       expect.soft(metadataValue(attemptKey)).toBe(previousTime);
       expect(metadataValue(diagnosticKey)).toBe(previousDiagnostics);
     } finally {
+      background.mockResolvedValue({ status: "granted" } as never);
+    }
+  });
+
+  it.each([false, true])("joins an ordinary replay with deferred output = %s", async deferredOutput => {
+    await signInThroughApi(A, [place]);
+    routes["/api/location/replay"] = () => reply();
+    await store.syncLocationEvidence({ forceReplay: true });
+    calls.length = 0;
+    vi.setSystemTime(T0 + 300_001);
+    const entered = deferred(), release = deferred();
+    routes["/api/location/replay"] = async () => {
+      routes["/api/location/replay"] = () => reply();
+      entered.resolve();
+      await release.promise;
+      return reply(deferredOutput ? ["semantic_replay_deferred"] : []);
+    };
+    const ordinary = store.syncLocationEvidence();
+    await entered.promise;
+    const foreground = store.syncLocationEvidence({ foregroundReplay: true });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    release.resolve();
+    const [, result] = await Promise.all([ordinary, foreground]);
+    expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(deferredOutput ? 2 : 1);
+    expect(result).toMatchObject({ replayed: true, warnings: [] });
+  });
+
+  it("keeps paused Location work in diagnostics and out of scheduled retries until foreground", async () => {
+    await signInThroughApi(A, [place]);
+    await store.syncLocationEvidence();
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    await api.enqueueEvent({
+      source: "geofence_specific", type: "geofence_enter", localId: "synthetic-paused-v1",
+      owner: A, rawPayload: { placeId: A_PLACE }
+    });
+    const monitor = await import("./durableWorkMonitor");
+    const { nextSyncWorkDueAt } = await import("./syncDueTimes");
+    const { shouldRetryConnectivityRecovery } = await import("./connectivityRecovery");
+    const stop = monitor.startDurableWorkMonitor();
+    const background = vi.mocked((await import("expo-location")).getBackgroundPermissionsAsync);
+    try {
+      background.mockResolvedValue({ status: "denied" } as never);
+      expect(await store.syncLocationEvidence()).toMatchObject({ reason: "location_paused" });
+      const paused = await monitor.refreshDurableWorkSnapshot();
+      expect(paused.activityCount).toBe(1);
+      expect(paused.locationCount).toBeGreaterThan(0);
+      expect(paused.pendingCount).toBe(0);
+      expect(paused.retryLanes).toMatchObject({ activity: { pending: 0 }, location: { pending: 0 } });
+      expect(nextSyncWorkDueAt(paused.retryLanes)).toBeNull();
+      expect(shouldRetryConnectivityRecovery("completed", paused.pendingCount)).toBe(false);
+
+      const permissionReads = background.mock.calls.length;
+      await api.syncQueue({ eventScope: "non_timer" });
+      expect(background).toHaveBeenCalledTimes(permissionReads);
+      expect(await api.readQueue()).toHaveLength(1);
+
+      background.mockResolvedValue({ status: "granted" } as never);
+      for (const listener of h.appStateListeners) listener("active");
+      const resumed = await monitor.refreshDurableWorkSnapshot();
+      expect(resumed.retryLanes).toMatchObject({ activity: { pending: 1 } });
+      expect(resumed.retryLanes?.location.pending).toBeGreaterThan(0);
+    } finally {
+      stop();
       background.mockResolvedValue({ status: "granted" } as never);
     }
   });

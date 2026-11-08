@@ -10,7 +10,7 @@ vi.mock("expo-location", () => ({
 vi.mock("./captureConsent",()=>({readLocationCaptureConsent:async()=>true}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
 vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
-vi.mock("../mobileAccount",()=>({readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
+vi.mock("../mobileAccount",()=>({readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountKey:(owner:{userId:string;workspaceId:string})=>`${owner.workspaceId}:${owner.userId}`,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
 
 const owner={userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"};
 let db:DatabaseSync,store:typeof import("./store");

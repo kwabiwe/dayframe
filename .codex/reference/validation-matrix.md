@@ -649,7 +649,7 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 3. Airplane mode: run a Start Shortcut, reopen Dayframe after reconnecting; the queued Start is delivered once.
 4. Leave Dayframe backgrounded with location on for several days of normal use: no new `0xdead10cc` report in Settings › Privacy & Security › Analytics Data or in App Store Connect.
 
-For automatic Location transfer, cover retained V1 events in the shared outbox as well as the location evidence journal. With iOS Always revoked or Dayframe Location off, the legacy items stay queued. Re-enable Location and verify one delivery. An opt-out aborts an in-flight automatic request as soon as the app observes it, and unrelated queued events still drain. A replay that loses permission before dispatch leaves the cooldown and diagnostics unchanged.
+For automatic Location transfer, cover retained V1 events in the shared outbox as well as the location evidence journal. With iOS Always revoked or Dayframe Location off, the legacy items stay queued. Re-enable Location and verify one delivery. An opt-out aborts an in-flight automatic request as soon as the app observes it, and unrelated queued events still drain. Revoke Always during the last ownership lookup and verify that evidence and replay do not dispatch. A replay that loses permission before dispatch leaves the cooldown and diagnostics unchanged. While paused, verify that queued items remain in diagnostics and do not keep the automatic retry scheduler running. A foreground request that joins a deferred replay gets its own replay eligibility check.
 
 ## Native Location status and signal journal (iPhone)
 

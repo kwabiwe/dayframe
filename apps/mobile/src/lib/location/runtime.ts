@@ -38,6 +38,7 @@ import {
 } from "./store";
 import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
 import { armLocationAdmissionGuard } from "./admissionGuard";
+import { setAutomaticLocationTransferPaused } from "./automaticTransferPause";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 import { withJsTask } from "../jsTasks";
@@ -190,6 +191,7 @@ export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "o
     if (!mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return Promise.resolve();
     const duringLogout = isLocationLogoutCurrent(owner);
     const revision = duringLogout ? locationCaptureRevision() : invalidateLocationCaptureOwnership();
+    setAutomaticLocationTransferPaused(owner, true);
     // Acceptance above authorises this scoped decision. Keep it in intent order
     // on the existing lane, even if logout/401 cancels its capture work. A later
     // authorised opt-in writes after it, so old off work cannot overwrite on.

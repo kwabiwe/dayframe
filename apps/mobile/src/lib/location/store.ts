@@ -1,5 +1,5 @@
 import {createOwnerSyncCoalescer} from "../ownerSyncCoalescer";
-import {MobileHttpResponseError, isMobileTransportFailure} from "../mobile-network";
+import {MobileHttpResponseError, StaleMobileSessionResponseError, isMobileTransportFailure} from "../mobile-network";
 import type {SyncLaneOutcome} from "../syncLane";
 import * as SQLite from "expo-sqlite";
 import * as Location from "expo-location";
@@ -45,12 +45,14 @@ import {
 import { armLocationAdmissionGuard } from "./admissionGuard";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { readLocationCaptureConsent } from "./captureConsent";
+import { setAutomaticLocationTransferPaused } from "./automaticTransferPause";
 import { fetchLocationSync, locationResponseDiagnostics, LocationHttpResponseError } from "./network";
 import {
   executeOwnedLocationRequest,
   prepareOwnedLocationBatch
 } from "./syncOwnership";
 import {
+  LOCATION_FOREGROUND_REPLAY_COALESCE_MS,
   MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC,
   locationUploadDisposition,
   partitionAcknowledgedEvidence,
@@ -436,6 +438,7 @@ async function configureLocationAccountUnsafe(
       : rolloutMode ? new Date().toISOString() : ""
     : "";
   let configured = false;
+  let newBinding = false;
   try { await db.withExclusiveTransactionAsync(async (transaction) => {
     if (revision !== captureRevision || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) return;
     const previousBinding = await readCaptureBinding(transaction);
@@ -461,13 +464,16 @@ async function configureLocationAccountUnsafe(
       !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
       throw new StaleLocationCaptureError();
     }
+    newBinding = binding !== previousBinding;
     configured = true;
   }); } catch (error) {
     if (!(error instanceof StaleLocationCaptureError)) throw error;
     return null;
   }
   if (configured && revision === captureRevision && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
+    const resumedAdmission = captureAdmissionSuspended;
     captureAdmissionSuspended = false;
+    if (!enabled || newBinding || resumedAdmission) setAutomaticLocationTransferPaused(context, !enabled);
   }
   return configured ? key : null;
 }
@@ -977,25 +983,48 @@ type PermittedLocationSync = LocationSyncOptions & { capture: LocationCaptureSna
 let lastSuccessfulReplay: { revision: number; mode: LocationRolloutMode; at: number } | undefined;
 
 export async function locationSyncAllowed(capture: LocationCaptureSnapshot) {
-  if (!capture.context || !isLocationCaptureSnapshotCurrent(capture)) return false;
+  const owner = capture.context;
+  if (!owner) return false;
+  let granted = false;
   try {
-    if (!await readLocationCaptureConsent(capture.context) || !isLocationCaptureSnapshotCurrent(capture)) return false;
-    const [foreground, background] = await Promise.all([
-      Location.getForegroundPermissionsAsync(),
-      Location.getBackgroundPermissionsAsync()
-    ]);
-    return foreground.status === "granted" && background.status === "granted" &&
-      isLocationCaptureSnapshotCurrent(capture);
+    if (isLocationCaptureSnapshotCurrent(capture) && await readLocationCaptureConsent(owner) &&
+        isLocationCaptureSnapshotCurrent(capture)) {
+      const [foreground, background] = await Promise.all([
+        Location.getForegroundPermissionsAsync(),
+        Location.getBackgroundPermissionsAsync()
+      ]);
+      granted = foreground.status === "granted" && background.status === "granted";
+    }
   } catch {
-    // Permission or consent could not be read. Leave the durable queue untouched.
-    return false;
+    // An unreadable permission or consent leaves the durable queue untouched.
   }
+  if (capture.revision !== captureRevision ||
+      !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return false;
+  const allowed = granted && isLocationCaptureSnapshotCurrent(capture);
+  setAutomaticLocationTransferPaused(owner, !allowed);
+  return allowed;
 }
+
+class LocationTransferPausedError extends Error {}
+
+async function requireLocationTransferPermission(capture: LocationCaptureSnapshot) {
+  if (!await locationSyncAllowed(capture)) throw new LocationTransferPausedError();
+}
+
+function assertLocationTransferCurrent(capture: LocationCaptureSnapshot, session: AuthenticatedSessionSnapshot) {
+  if (!isAuthenticatedSessionSnapshotCurrent(session)) throw new StaleMobileSessionResponseError();
+  if (!isLocationCaptureSnapshotCurrent(capture)) throw new LocationTransferPausedError();
+}
+
 /** The generic outbox still owns older automatic location events. Fence their network lease too. */
 export async function openLegacyLocationTransfer(owner: MobileAccountOwner, signal?: AbortSignal) {
   const capture = await captureLocationOwnership();
-  if (!mobileAccountOwnersEqual(capture.context, owner) || signal?.aborted ||
-      !isLocationCaptureSnapshotCurrent(capture)) return undefined;
+  if (signal?.aborted || capture.revision !== captureRevision ||
+      !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return undefined;
+  if (!isLocationCaptureSnapshotCurrent(capture)) {
+    setAutomaticLocationTransferPaused(owner, true);
+    return undefined;
+  }
   const controller = new AbortController();
   const abort = () => controller.abort();
   const isCurrent = () => !controller.signal.aborted && isLocationCaptureSnapshotCurrent(capture);
@@ -1073,11 +1102,20 @@ export async function syncLocationEvidence(options: LocationSyncOptions = {}): P
       pass.result.outcome === "cancelled" || pass.result.outcome === "authentication_required") return pass.result;
   // A foreground caller that joined a plain pass still gets its replay policy checked.
   // An explicit retry can arrive while that automatic follow-up is pending.
-  if ((foregroundReplay && !pass.foregroundReplay && !pass.result.replayed) ||
-      (forceReplay && !pass.forceReplay) || (forceUploadRetry && !pass.forceUploadRetry)) {
+  if ((forceReplay && !pass.forceReplay) || (forceUploadRetry && !pass.forceUploadRetry) ||
+      (foregroundReplay && !pass.foregroundReplay && !await canReuseJoinedReplay(pass.result, capture))) {
     return (await run(true)).result;
   }
   return pass.result;
+}
+
+async function canReuseJoinedReplay(result: LocationSyncResult, capture: LocationCaptureSnapshot) {
+  const completed = lastSuccessfulReplay;
+  if (!result.replayed || completed?.revision !== capture.revision) return false;
+  const mode = await getLocationRolloutMode();
+  const age = Date.now() - completed.at;
+  return lastSuccessfulReplay === completed && mode === completed.mode &&
+    isLocationCaptureSnapshotCurrent(capture) && age >= 0 && age < LOCATION_FOREGROUND_REPLAY_COALESCE_MS;
 }
 
 async function runPermittedLocationSync(owner: MobileAccountOwner, options: PermittedLocationSync): Promise<LocationSyncResult> {
@@ -1287,33 +1325,33 @@ async function uploadLocationEvidenceBatch(
   ) {
     return { status: "stopped", reason: "session_changed" };
   }
-  const attemptStartedAt = Date.now();
+  let attemptStartedAt: number | undefined;
   let attemptDetails: LocationSyncDiagnostics | undefined;
   let attemptOutcome: LocationSyncAttempt["outcome"] = "failed";
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
-      request: async () => {
-        if (!await locationSyncAllowed(options.capture) || options.signal?.aborted) return null;
-        return fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.token}`,
-            "Content-Type": "application/json",
-            // The reply's Review count counts cards, an outing once (PR 12c).
-            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
-          },
-          body: batch.body_json,signal:options.signal
-        }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
-          () => !options.signal?.aborted && isLocationSyncOwnershipCurrent(owner, session));
-      }
+      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json",
+          // The reply's Review count counts cards, an outing once (PR 12c).
+          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
+        },
+        body: batch.body_json,signal:options.signal
+      }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
+        () => !options.signal?.aborted && isLocationSyncOwnershipCurrent(owner, session), {
+          beforeDispatch: () => requireLocationTransferPermission(options.capture),
+          onDispatch: () => {
+            assertLocationTransferCurrent(options.capture, session);
+            attemptStartedAt = Date.now();
+          }
+        })
     });
     if (request.status === "session_changed") {
       return { status: "stopped", reason: "session_changed" };
     }
-    if (!request.response) return options.signal?.aborted
-      ? { status: "stopped", reason: "cancelled", outcome: "cancelled" }
-      : { status: "stopped", reason: "location_paused" };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1416,6 +1454,7 @@ async function uploadLocationEvidenceBatch(
     attemptOutcome = partition.retryIds.length ? "partial" : "success";
     return { status: "success", acknowledgedCount: acknowledged.length,warnings:payload.warnings };
   } catch (error) {
+    if (error instanceof LocationTransferPausedError) return { status: "stopped", reason: "location_paused" };
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
     if (!await isLocationSyncOwnershipCurrent(owner, session)) {
       return { status: "stopped", reason: "session_changed" };
@@ -1442,7 +1481,9 @@ async function uploadLocationEvidenceBatch(
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     return { status: "stopped", reason: "request_failed", message,outcome:isMobileTransportFailure(error)?"transport_failure":"server_busy" };
   } finally {
-    await recordLocationAttempt(owner, session, "evidence", attemptStartedAt, attemptOutcome, attemptDetails, options.signal);
+    if (attemptStartedAt !== undefined) {
+      await recordLocationAttempt(owner, session, "evidence", attemptStartedAt, attemptOutcome, attemptDetails, options.signal);
+    }
   }
 }
 
@@ -1472,35 +1513,36 @@ async function requestServerLocationReplay(
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
-      request: async () => {
-        if (!await locationSyncAllowed(options.capture) || options.signal?.aborted) return null;
-        return fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.token}`,
-            "Content-Type": "application/json",
-            // The reply then carries the Review count for the evening reminder, and what the replay changed.
-            // Counted in cards, an outing once (PR 12c).
-            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
-            [SEMANTIC_CHANGE_COUNT_REQUEST_HEADER]: "1"
-          },
-          signal:options.signal,
-          body: JSON.stringify({
-            deviceId: prepared.current.context.deviceId,
-            algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-            rolloutMode: prepared.requestedMode,
-            ...(prepared.semanticModeAcknowledgedAt
-              ? { semanticModeAcknowledgedAt: prepared.semanticModeAcknowledgedAt }
-              : {})
-          })
-        }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
-          async () => !options.signal?.aborted && await isLocationSyncOwnershipCurrent(owner, session) &&
-            isLocationCaptureSnapshotCurrent(options.capture),
-          () => {
+      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json",
+          // The reply then carries the Review count for the evening reminder, and what the replay changed.
+          // Counted in cards, an outing once (PR 12c).
+          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
+          [SEMANTIC_CHANGE_COUNT_REQUEST_HEADER]: "1"
+        },
+        signal:options.signal,
+        body: JSON.stringify({
+          deviceId: prepared.current.context.deviceId,
+          algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+          rolloutMode: prepared.requestedMode,
+          ...(prepared.semanticModeAcknowledgedAt
+            ? { semanticModeAcknowledgedAt: prepared.semanticModeAcknowledgedAt }
+            : {})
+        })
+      }, Math.max(1, Math.min(15_000, (options.deadlineAt ?? Date.now() + 15_000) - Date.now())),
+        async () => !options.signal?.aborted && await isLocationSyncOwnershipCurrent(owner, session) &&
+          isLocationCaptureSnapshotCurrent(options.capture),
+        {
+          beforeDispatch: () => requireLocationTransferPermission(options.capture),
+          onDispatch: () => {
+            assertLocationTransferCurrent(options.capture, session);
             attemptStartedAt = Date.now();
             lastSuccessfulReplay = undefined;
-          });
-      }
+          }
+        })
     });
     if (request.status === "session_changed") {
       return {
@@ -1509,9 +1551,6 @@ async function requestServerLocationReplay(
         message: "Location account changed while replay was running."
       };
     }
-    if (!request.response) return options.signal?.aborted
-      ? { ok: false as const, reason: "cancelled" as const, outcome: "cancelled" as const }
-      : { ok: false as const, reason: "location_paused" as const };
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
       await invalidateMobileSessionIfCurrent(session.token);
@@ -1567,7 +1606,7 @@ async function requestServerLocationReplay(
     };
   } catch (error) {
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {ok:false as const,reason:"cancelled" as const,outcome:"cancelled" as const,message:"Location pass ended."};
-    if (!isLocationCaptureSnapshotCurrent(options.capture)) {
+    if (error instanceof LocationTransferPausedError || !isLocationCaptureSnapshotCurrent(options.capture)) {
       return { ok: false as const, reason: "location_paused" as const };
     }
     if (!await isLocationSyncOwnershipCurrent(owner, session)) {

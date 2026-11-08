@@ -9,6 +9,7 @@ import {
 } from "./api";
 import { IS_DAYFRAME_STAGING } from "./config";
 import {
+  getActiveMobileAccountSnapshot,
   mobileAccountKey,
   readActiveMobileAccount,
   subscribeActiveMobileAccount
@@ -39,6 +40,12 @@ import {
 } from "./timelineCorrectionOutbox";
 import { getNativeLocationIntelligenceStatus } from "./location/runtime";
 import { durableTimerMutationCounts } from "./durableWorkCounts";
+import {
+  isAutomaticLocationTransferPaused,
+  isPausedLegacyLocationEvent,
+  setAutomaticLocationTransferPaused,
+  subscribeAutomaticLocationTransferPause
+} from "./location/automaticTransferPause";
 
 export type DurableWorkSnapshot = {
   accountKey: string | null;
@@ -59,6 +66,7 @@ export type DurableWorkSnapshot = {
   timelineCorrectionCount?: number;
   locationCount: number;
   nativeLocationSignalCount: number;
+  /** Work eligible for automatic recovery. Paused work remains in the per-source counts. */
   pendingCount: number;
   nextRetryAt: string | null;
   lastError: string | null;
@@ -105,7 +113,11 @@ export function startDurableWorkMonitor() {
       refresh: request
     });
     const appState = AppState.addEventListener("change", (state) => {
-      if (state === "active") locationGate.appBecameActive();
+      if (state !== "active") return;
+      // iOS can change the Always grant while Dayframe is in the background.
+      const owner = getActiveMobileAccountSnapshot();
+      if (owner) setAutomaticLocationTransferPaused(owner, false);
+      locationGate.appBecameActive();
     });
     unsubscribers = [
       () => appState.remove(),
@@ -116,7 +128,11 @@ export function startDurableWorkMonitor() {
       subscribeTimeEntryOutbox(request),
       subscribeReviewSync(request),
       subscribeTimelineCorrectionOutbox(request),
-      subscribeLocationStore(locationGate.locationChanged)
+      subscribeLocationStore(locationGate.locationChanged),
+      subscribeAutomaticLocationTransferPause(() => {
+        if (AppState.currentState === "active") request();
+        else locationGate.locationChanged();
+      })
     ];
     void readActiveMobileAccount().then(request, request);
   }
@@ -202,8 +218,12 @@ async function refreshOnce() {
   });
   const corrections = await getTimelineCorrectionDiagnostics(owner);
   const activityDiagnostics = getQueueDiagnostics(queue);
-  const queuedActivityCount = queue.filter((event) => event.failureKind !== "permanent").length;
-  const activityCount = queuedActivityCount + nativeShortcutCount;
+  const retryableActivity = queue.filter(event => event.failureKind !== "permanent");
+  const activityCount = retryableActivity.length + nativeShortcutCount;
+  const locationPaused = isAutomaticLocationTransferPaused(owner);
+  const runnableActivity = locationPaused
+    ? retryableActivity.filter(event => !isPausedLegacyLocationEvent(event))
+    : retryableActivity;
   const ownedTimerStops = pendingTimerStopsForOwner(stops, owner);
   const timerStopCount = ownedTimerStops
     .filter((stop) => stop.failureKind !== "permanent").length;
@@ -223,14 +243,15 @@ async function refreshOnce() {
   const locationCount = locationOwned
     ? location.outboxCount + location.pendingEvidenceCount + nativeLocationSignalCount
     : 0;
+  const runnableLocationCount = locationPaused ? 0 : locationCount;
   const nextRetryAt = earliestIso([
-    activityDiagnostics.nextRetryAt,
+    locationPaused ? earliestIso(runnableActivity.map(event => event.nextRetryAt)) : activityDiagnostics.nextRetryAt,
     timeEntries.nextRetryAt ?? undefined,
     reviewOwned ? review.nextRetryAt ?? undefined : undefined,
     corrections.nextRetryAt ?? undefined,
-    locationOwned ? location.nextRetryAt??undefined : undefined
+    locationOwned && !locationPaused ? location.nextRetryAt ?? undefined : undefined
   ]);
-  const nonTimerQueue=queue.filter(event=>!['timer_start','timer_stop'].includes(event.type)&&event.failureKind!=='permanent');
+  const nonTimerQueue = runnableActivity.filter(event => event.type !== "timer_start" && event.type !== "timer_stop");
   const activityDue=nonTimerQueue.some(event=>!event.nextRetryAt)?null:earliestIso(nonTimerQueue.map(event=>event.nextRetryAt))??null;
   const retryLanes:SyncDueTimes={
     timer:{pending:timerMutationCount,nextDueAt:timerStopCount||nativeShortcutCount||timerEventCount?null:timeEntries.nextRetryAt??null},
@@ -242,7 +263,10 @@ async function refreshOnce() {
         ?null
         :earliestIso([review.nextRetryAt??undefined,corrections.nextRetryAt??undefined])??null
     },
-    location:{pending:locationCount,nextDueAt:nativeLocationSignalCount?null:location.nextRetryAt??null}
+    location: {
+      pending: runnableLocationCount,
+      nextDueAt: runnableLocationCount && !nativeLocationSignalCount ? location.nextRetryAt ?? null : null
+    }
   };
   publish({
     retryLanes,
@@ -268,7 +292,8 @@ async function refreshOnce() {
     locationCount,
     nativeLocationSignalCount: locationOwned ? nativeLocationSignalCount : 0,
     pendingCount:
-      activityCount + timerStopCount + timeEntries.pendingCount + reviewCount + corrections.pendingCount + locationCount,
+      runnableActivity.length + nativeShortcutCount + timerStopCount + timeEntries.pendingCount +
+      reviewCount + corrections.pendingCount + runnableLocationCount,
     nextRetryAt: nextRetryAt ?? null,
     lastError: timeEntries.lastError ??
       (reviewOwned ? review.lastError : null) ??

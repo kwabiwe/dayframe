@@ -7,10 +7,10 @@ export async function fetchLocationSync(
   input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1],
   timeoutMilliseconds = LOCATION_SYNC_REQUEST_TIMEOUT_MS,
   isCurrent?: () => boolean | Promise<boolean>,
-  onDispatch?: () => void
+  dispatch?: { beforeDispatch?: () => Promise<void>; onDispatch?: () => void }
 ) {
   return mobileJsonRequest<Record<string,unknown> | null>(input,init,{
-    handleAuthentication:false,timeoutMilliseconds,timeoutMessage:"Location sync request timed out.",isCurrent,onDispatch,
+    handleAuthentication:false,timeoutMilliseconds,timeoutMessage:"Location sync request timed out.",isCurrent,...dispatch,
     validate:(body,response)=>{
       if(!response.ok) return body as Record<string,unknown>|null;
       if(String(input).endsWith("/replay")) return LocationReplayResponseSchema.parse(body);

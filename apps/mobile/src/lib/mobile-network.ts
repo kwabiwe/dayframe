@@ -53,6 +53,12 @@ type MobileRequestDeadline = {
   timeoutMessage: string;
 };
 
+type MobileRequestDispatch = {
+  /** Runs within the request deadline, after the final async ownership check. */
+  beforeDispatch?: () => Promise<void>;
+  onDispatch?: () => void;
+};
+
 /**
  * Mobile API requests use the SecureStore bearer as their only session carrier.
  *
@@ -124,10 +130,9 @@ export class InvalidMobileAcknowledgementError extends Error {
 export function mobileJsonRequest<T = Record<string, unknown> | null>(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1],
-  options: MobileRequestDeadline & {
+  options: MobileRequestDeadline & MobileRequestDispatch & {
     isCurrent?: () => boolean | Promise<boolean>;
     handleAuthentication?: boolean;
-    onDispatch?: () => void;
     validate?: (body: unknown, response: Response) => T | Promise<T>;
   }
 ) {
@@ -138,14 +143,13 @@ export function mobileJsonRequest<T = Record<string, unknown> | null>(
     if (options.isCurrent && !await options.isCurrent()) throw new StaleMobileSessionResponseError();
     const validated = options.validate ? await options.validate(body, response) : body as T;
     return { response, body: validated };
-  }, options.isCurrent, true, options.handleAuthentication !== false, options.onDispatch);
+  }, options.isCurrent, true, options.handleAuthentication !== false);
 }
 
 async function mobileRequestOperation<T>(
   input: Parameters<typeof fetch>[0], init: RequestInit,
-  deadline: MobileRequestDeadline, consume: (response: Response) => Promise<T>,
-  isCurrent?: () => boolean | Promise<boolean>, authenticateAfterConsume = false, handleAuthentication = true,
-  onDispatch?: () => void
+  deadline: MobileRequestDeadline & MobileRequestDispatch, consume: (response: Response) => Promise<T>,
+  isCurrent?: () => boolean | Promise<boolean>, authenticateAfterConsume = false, handleAuthentication = true
 ) {
   const requestGeneration = connectivityRequestGeneration();
   const controller = new AbortController();
@@ -175,8 +179,9 @@ async function mobileRequestOperation<T>(
       (async () => {
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         if (isCurrent && !await isCurrent()) throw new StaleMobileSessionResponseError();
+        if (deadline.beforeDispatch) await deadline.beforeDispatch();
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
-        onDispatch?.();
+        deadline.onDispatch?.();
         const response = await mobileFetch(input, { ...init, signal: controller.signal }, handleAuthentication && !authenticateAfterConsume);
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         const result = await consume(response);
