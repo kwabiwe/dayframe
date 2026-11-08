@@ -715,7 +715,7 @@ export function CategoryPicker({
 
   const wrapperClass = menuVariant === "timer"
     ? `swiss-category-field ${className}`.trim()
-    : `calendar-compact-category-field ${className}`.trim();
+    : `${variant === "more" ? "df-all-activities-field" : "calendar-compact-category-field"} ${className}`.trim();
   const menuClass = menuVariant === "timer"
     ? `ui-floating-surface swiss-category-menu${open ? " is-open" : ""}`
     : "calendar-compact-category-menu";
