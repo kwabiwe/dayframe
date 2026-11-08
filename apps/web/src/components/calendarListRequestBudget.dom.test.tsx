@@ -81,7 +81,7 @@ function bootstrap(): BootstrapData {
 function respond(url: string) {
   const path = url.split("?")[0];
   const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
-  if (path === "/api/bootstrap") {
+  if (path === "/api/calendar/week") {
     const [year, month, day] = date.split("-").map(Number);
     return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: [entry(`week-${date}`, new Date(year, month - 1, day + 2, 9))] }) };
   }
@@ -150,7 +150,8 @@ describe("Calendar › List request budget (request-storm fix, 30 Oct 2026)", ()
     act(() => listed.continuous!.onVisibleDay!(local(10, 30).getTime()));
     await flush();
     const loaded = counts();
-    expect(loaded["/api/bootstrap"]).toBe(WEEKS_BACK);
+    expect(loaded["/api/calendar/week"]).toBe(WEEKS_BACK);
+    expect(loaded["/api/bootstrap"] ?? 0).toBe(0);
     expect(loaded["/api/timeline"]).toBeLessThanOrEqual(7 * (WEEKS_BACK + 1) + 2);
 
     // Five minutes with the block running (the clock ticks each second) and nothing else: no request at all.
@@ -165,7 +166,7 @@ describe("Calendar › List request budget (request-storm fix, 30 Oct 2026)", ()
       await seconds(5);
     }
     const refreshes = delta(mark, counts());
-    expect(refreshes["/api/bootstrap"] ?? 0).toBe(0);
+    expect(refreshes["/api/calendar/week"] ?? 0).toBe(0);
     expect(refreshes["/api/timeline"] ?? 0).toBeLessThanOrEqual(3 * 2);
 
     // Three edits at the top of the List: only the weeks and days near the top day are read again at once.
@@ -178,7 +179,7 @@ describe("Calendar › List request budget (request-storm fix, 30 Oct 2026)", ()
     const edits = delta(mark, counts());
     // Per edit: at most the 2 loaded weeks overlapping 7 days around the 30th (the anchor week is the shell's own data)
     // and at most those 15 days. The old code read all 12 weeks and 91 days on every edit.
-    expect(edits["/api/bootstrap"] ?? 0).toBeLessThanOrEqual(3 * 2);
+    expect(edits["/api/calendar/week"] ?? 0).toBeLessThanOrEqual(3 * 2);
     expect(edits["/api/timeline"] ?? 0).toBeLessThanOrEqual(3 * 15);
 
     // Scrolling back down into the edited-over history reads each stale week and day once, as it comes near.
@@ -189,7 +190,7 @@ describe("Calendar › List request budget (request-storm fix, 30 Oct 2026)", ()
       await flush();
     }
     const revisit = delta(mark, counts());
-    expect(revisit["/api/bootstrap"] ?? 0).toBeLessThanOrEqual(WEEKS_BACK);
+    expect(revisit["/api/calendar/week"] ?? 0).toBeLessThanOrEqual(WEEKS_BACK);
     expect(revisit["/api/timeline"] ?? 0).toBeLessThanOrEqual(7 * (WEEKS_BACK + 1));
     // …and a second pass over the same days reads nothing more.
     mark = counts();
@@ -212,11 +213,11 @@ describe("Calendar › List request budget (request-storm fix, 30 Oct 2026)", ()
     await flush();
     await flush();
     const jump = delta(mark, counts());
-    expect(jump["/api/bootstrap"] ?? 0).toBeLessThanOrEqual(3);
+    expect(jump["/api/calendar/week"] ?? 0).toBeLessThanOrEqual(3);
     expect(jump["/api/timeline"] ?? 0).toBeLessThanOrEqual(15);
 
     // Nothing in the whole session read anything but the bootstrap and the location timeline.
-    expect(Object.keys(counts()).sort()).toEqual(["/api/bootstrap", "/api/timeline"]);
+    expect(Object.keys(counts()).sort()).toEqual(["/api/calendar/week", "/api/timeline"]);
   });
 
   it("reads clashes past the bootstrap's cap at most once a minute, even when the shell refreshes every 3 s", async () => {
@@ -273,7 +274,7 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     return view;
   }
   const ids = (entries: readonly TimeEntryRow[]) => entries.map((row) => row.id);
-  const bootstrapReads = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).length;
+  const weekReadCount = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/calendar/week")).length;
 
   it("updates a stationary historical viewport after a remote edit without reading all loaded weeks", async () => {
     const remote = server();
@@ -283,13 +284,13 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     const changed = entry("remote-edit", local(9, 26, 9));
     remote.weeks.set(focusDate, [changed]);
     remote.weeks.set(weekKey(12), []);
-    const before = bootstrapReads();
+    const before = weekReadCount();
     view.rerender({ ...props, staleKey: 1, completedEntryRevision: "5" });
     await flush();
     await flush();
     expect(ids(view.result.current.entries)).toContain(changed.id);
     expect(ids(view.result.current.entries)).toContain(`week-${weekKey(12)}`);
-    expect(bootstrapReads() - before).toBeLessThanOrEqual(3);
+    expect(weekReadCount() - before).toBeLessThanOrEqual(3);
     view.rerender({ ...props, focusDate: weekKey(12), staleKey: 1, completedEntryRevision: "5" });
     await flush();
     await flush();
@@ -302,13 +303,13 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     const view = await loadWeeks(12, { focusDate: "2026-08-19", staleKey: 0, refreshToken: 0 });
     expect(ids(view.result.current.entries)).toContain(`week-${weekKey(12)}`);
     remote.weeks.set(weekKey(12), []);
-    const before = bootstrapReads();
+    const before = weekReadCount();
     view.rerender({ focusDate: "2026-08-19", staleKey: 0, refreshToken: 1, affectedDates: ["2026-08-05", "2026-10-28"] });
     await flush();
     await flush();
     expect(ids(view.result.current.entries)).not.toContain(`week-${weekKey(12)}`);
     // The window around 19 Aug (the 3 weeks overlapping 12–26 Aug) and the edited week: never all 12.
-    expect(bootstrapReads() - before).toBeLessThanOrEqual(4);
+    expect(weekReadCount() - before).toBeLessThanOrEqual(4);
   });
 
   it("does not add edge reads when evicting the only block in the oldest loaded weeks", async () => {
@@ -326,8 +327,8 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     await flush();
 
     expect(ids(view.result.current.entries)).not.toContain(old.id);
-    for (const week of tail) expect(clientFetch).not.toHaveBeenCalledWith(`/api/bootstrap?date=${week}`, { cache: "no-store" });
-    expect(bootstrapReads()).toBe(3);
+    for (const week of tail) expect(clientFetch).not.toHaveBeenCalledWith(`/api/calendar/week?date=${week}`, { cache: "no-store" });
+    expect(weekReadCount()).toBe(3);
   });
 
   it("keeps a week stale when its read fails, and reads it again on the next visit", async () => {
@@ -337,10 +338,10 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     remote.weeks.set(far, []);
     remote.failing.add(far);
     // A bootstrap refresh: everything loaded is stale, nothing read at once.
-    const before = bootstrapReads();
+    const before = weekReadCount();
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
     await flush();
-    expect(bootstrapReads()).toBe(before);
+    expect(weekReadCount()).toBe(before);
     // Visiting it: the read fails, the old row stays.
     view.rerender({ focusDate: far, staleKey: 1, refreshToken: 0 });
     await flush();
@@ -355,12 +356,12 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     await flush();
     expect(ids(view.result.current.entries)).not.toContain(`week-${far}`);
     // Fresh now: another visit reads nothing.
-    const fresh = bootstrapReads();
+    const fresh = weekReadCount();
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
     await flush();
     view.rerender({ focusDate: far, staleKey: 1, refreshToken: 0 });
     await flush();
-    expect(bootstrapReads()).toBe(fresh);
+    expect(weekReadCount()).toBe(fresh);
   });
 
   it("keeps a week stale when an edit's read of it fails, and reads it again on the next visit", async () => {
@@ -399,11 +400,11 @@ describe("Calendar › List freshness under the request budget (Codex r1 on #634
     // An edit at the top: the window's 2 weeks and the 2 oldest empty ones, not all 12.
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
     await flush();
-    const before = bootstrapReads();
+    const before = weekReadCount();
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 1 });
     await flush();
     await flush();
-    expect(bootstrapReads() - before).toBeLessThanOrEqual(4);
+    expect(weekReadCount() - before).toBeLessThanOrEqual(4);
   });
 
   const day = (date: string, marker: string): LocationTimeline =>
@@ -456,7 +457,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     const day = local(10, 26 - 7 * weeksBack);
     return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
   };
-  const bootstrapCalls = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).length;
+  const weekCallCount = () => clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/calendar/week")).length;
 
   it("an edit never re-reads every outstanding historical read: 20 delayed reads, one edit, a fixed number more", async () => {
     // Every bootstrap read waits until released.
@@ -486,7 +487,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     }
     expect(held.length).toBeGreaterThanOrEqual(20);
     // Back at the top, one edit, then every delayed read lands.
-    const before = bootstrapCalls();
+    const before = weekCallCount();
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 0 });
     await flush();
     view.rerender({ focusDate: "2026-10-30", staleKey: 1, refreshToken: 1 });
@@ -495,7 +496,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     while (held.length) await act(async () => { held.shift()!(); await vi.advanceTimersByTimeAsync(0); });
     await flush();
     // The top window (2 loaded weeks) at once and when visited: never one more read per outstanding flight (20 before).
-    expect(bootstrapCalls() - before).toBeLessThanOrEqual(4);
+    expect(weekCallCount() - before).toBeLessThanOrEqual(4);
   });
 
   it("finds a block added elsewhere to a cached-empty week once the List has scrolled past it (TimeReviewViews)", { timeout: 30_000 }, async () => {
@@ -506,7 +507,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     clientFetch.mockImplementation(async (url: string) => {
       const path = url.split("?")[0];
       const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
-      if (path === "/api/bootstrap") return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) ?? [] }) };
+      if (path === "/api/calendar/week") return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) ?? [] }) };
       return respond(url);
     });
     const { TimeReviewViews } = await import("./TimeReviewViews");
@@ -527,7 +528,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     let passes = 0;
     while (!listed.entries.some((row) => row.id === "oct-7") && passes < 4) {
       passes += 1;
-      const before = bootstrapCalls();
+      const before = weekCallCount();
       act(() => listed.continuous!.onVisibleDay!(local(9, 16).getTime()));
       await flush();
       await flush();
@@ -535,7 +536,7 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
       await flush();
       await flush();
       // Each pass down and up: at most the destination windows' weeks and 2 passed-over empty weeks each way.
-      expect(bootstrapCalls() - before).toBeLessThanOrEqual(2 * (3 + 2));
+      expect(weekCallCount() - before).toBeLessThanOrEqual(2 * (3 + 2));
     }
     expect(listed.entries.map((row) => row.id)).toContain("oct-7");
     expect(passes).toBeLessThanOrEqual(2);
@@ -547,8 +548,8 @@ describe("Calendar › List freshness under the request budget (Codex r2 on #634
     clientFetch.mockImplementation(async (url: string) => {
       const path = url.split("?")[0];
       const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
-      if (path === "/api/bootstrap" && failing.has(date)) return { ok: false, status: 500, json: async () => ({}) };
-      if (path === "/api/bootstrap" && remote.has(date)) return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) }) };
+      if (path === "/api/calendar/week" && failing.has(date)) return { ok: false, status: 500, json: async () => ({}) };
+      if (path === "/api/calendar/week" && remote.has(date)) return { ok: true, json: async () => ({ workspace: { id: "workspace" }, user: { id: "user" }, weekEntries: remote.get(date) }) };
       return respond(url);
     });
     const { TimeReviewViews } = await import("./TimeReviewViews");
@@ -741,7 +742,7 @@ describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #
     let holding = false;
     clientFetch.mockImplementation((url: string) => {
       const path = url.split("?")[0];
-      if (path !== "/api/bootstrap") return Promise.resolve(respond(url));
+      if (path !== "/api/calendar/week") return Promise.resolve(respond(url));
       const date = new URLSearchParams(url.split("?")[1] ?? "").get("date") ?? "";
       const [year, month, day] = date.split("-").map(Number);
       // The week as it is when asked: a held answer is that old copy.
@@ -775,7 +776,7 @@ describe("Calendar › List first load across a bootstrap refresh (Codex r4 on #
     for (let pass = 0; pass < 4; pass += 1) await flush();
     expect(listed.entries.map((row) => row.id)).not.toContain("week-2026-09-28");
     // One re-read, no more (and none while further refreshes only mark it stale).
-    const weekReads = () => clientFetch.mock.calls.filter(([url]) => String(url) === "/api/bootstrap?date=2026-09-28").length;
+    const weekReads = () => clientFetch.mock.calls.filter(([url]) => String(url) === "/api/calendar/week?date=2026-09-28").length;
     expect(weekReads()).toBe(2);
     for (let refresh = 0; refresh < 3; refresh += 1) {
       view.rerender(page(bootstrap()));
@@ -794,15 +795,15 @@ describe("Calendar › List bootstrap after a local edit", () => {
     const old = { ...entry("spanning", local(8, 5, 9)), stoppedAt: local(9, 16, 10).toISOString() };
     const moved = { ...entry(old.id, local(10, 1, 9)), stoppedAt: local(10, 1, 10).toISOString(),
       updatedAt: local(10, 30, 12).toISOString() };
-    const destination = "/api/bootstrap?date=2026-09-28";
-    const interior = "/api/bootstrap?date=2026-08-24";
+    const destination = "/api/calendar/week?date=2026-09-28";
+    const interior = "/api/calendar/week?date=2026-08-24";
     let serverEntry = old;
     let failDestination = false;
     let holdInterior = false;
     let releaseInterior: (() => void) | undefined;
     clientFetch.mockImplementation(async (url: string) => {
       const response = respond(url);
-      if (!url.startsWith("/api/bootstrap?date=")) return response;
+      if (!url.startsWith("/api/calendar/week?date=")) return response;
       if (failDestination && url === destination) return { ok: false, status: 503 };
       const [year, month, day] = url.slice(-10).split("-").map(Number);
       const start = new Date(year, month - 1, day);
@@ -845,8 +846,8 @@ describe("Calendar › List bootstrap after a local edit", () => {
     await flush();
     const expected = [expect.objectContaining({ startedAt: moved.startedAt, stoppedAt: moved.stoppedAt, durationSeconds: 3600 })];
     expect(spanning()).toEqual(failed ? [] : expected);
-    expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/bootstrap")).map(([url]) => url))
-      .toEqual(["/api/bootstrap?date=2026-10-19", destination, "/api/bootstrap?date=2026-09-14", "/api/bootstrap?date=2026-08-03"]);
+    expect(clientFetch.mock.calls.filter(([url]) => String(url).startsWith("/api/calendar/week")).map(([url]) => url))
+      .toEqual(["/api/calendar/week?date=2026-10-19", destination, "/api/calendar/week?date=2026-09-14", "/api/calendar/week?date=2026-08-03"]);
     if (failed) expect(listed.continuous?.staleWeeks).toEqual(expect.arrayContaining([expect.objectContaining({ key: "2026-09-28" })]));
 
     act(() => releaseInterior!());
@@ -888,7 +889,7 @@ describe("Calendar › List bootstrap after a local edit", () => {
     act(() => listed.continuous!.onLoad("earlier"));
     await flush();
 
-    const nearby = "/api/bootstrap?date=2026-10-19";
+    const nearby = "/api/calendar/week?date=2026-10-19";
     const weekReads = () => clientFetch.mock.calls.filter(([url]) => url === nearby).length;
     const initially = weekReads();
     expect(initially).toBe(1);
