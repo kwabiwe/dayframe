@@ -205,7 +205,7 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
           );
           if (!(await isCurrent()) || context.signal.aborted)
             throw new StaleMobileSessionResponseError();
-          publication.publish(projected);
+          publication.publish(projected, bootstrap);
           return { outcome: "complete" };
         } finally {
           publication.abandon();

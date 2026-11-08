@@ -1,6 +1,4 @@
 import type { EntryLastStop, MobileTimeEntry } from "./api";
-import type { DurableLocalWork } from "./durableLocalProjection";
-import { isWaitingLockScreenStop } from "./durableLocalProjection";
 import { TIME_ENTRY_DIAL_MAX_DURATION_MS, TIME_ENTRY_DIAL_MIN_DURATION_MS } from "./timeEntryDurationDial";
 
 export function entryLastStopDay(startMs: number | null) {
@@ -37,28 +35,19 @@ export function latestEntryLastStop(candidates: readonly EntryLastStop[], input:
   return chosen;
 }
 
-/** IDs whose published local projection should replace any older candidate from the server. */
-export function lastStopProjectionIds(work: DurableLocalWork | null): ReadonlySet<string> {
-  const ids = new Set<string>();
-  if (!work) return ids;
-  const add = (id: string | undefined) => {
-    if (!id) return;
-    ids.add(id);
-    const canonical = work.correlations.get(id);
-    if (canonical) ids.add(canonical);
-  };
-  for (const command of work.timeEntryCommands) {
-    if (command.failureKind === "permanent") continue;
-    add(command.targetEntryId ?? command.optimisticEntryId);
-    add(command.copy?.copyId);
+/** Actual timing changes from the last raw bootstrap to the current, locally projected view. */
+export function projectedLastStopIds(
+  canonical: readonly MobileTimeEntry[],
+  visible: readonly MobileTimeEntry[]
+): ReadonlySet<string> {
+  const before = new Map(eligibleLocalLastStops(canonical).map((row) => [row.id, Date.parse(row.stoppedAt)]));
+  const after = new Map(eligibleLocalLastStops(visible).map((row) => [row.id, Date.parse(row.stoppedAt)]));
+  const changed = new Set<string>();
+  for (const [id, stop] of before) {
+    if (after.get(id) !== stop) changed.add(id);
   }
-  for (const stop of work.timerStops) {
-    if (stop.failureKind !== "permanent") add(stop.targetEntryId ?? stop.optimisticEntryId);
+  for (const [id, stop] of after) {
+    if (before.get(id) !== stop) changed.add(id);
   }
-  for (const event of work.activityEvents) {
-    if (event.failureKind === "permanent") continue;
-    if (event.type === "timer_start") add(event.localId);
-    else if (isWaitingLockScreenStop(event)) add(event.rawPayload?.targetEntryId as string);
-  }
-  return ids;
+  return changed;
 }

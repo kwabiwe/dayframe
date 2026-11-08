@@ -168,6 +168,8 @@ type ActiveTimerEditSheetProps = {
   lastStopEntries?: readonly MobileTimeEntry[];
   lastStopOwner?: MobileAccountOwner;
   lastStopDeletedIds?: ReadonlySet<string>;
+  lastStopProjectedIds?: ReadonlySet<string>;
+  lastStopBootstrapGeneration?: number;
   onCancel: (presentationId: number) => void;
   onCreateTag: (name: string) => Promise<MobileTag | null>;
   /** Creates an activity from the All-activities picker; resolves to its id or a message to show. */
@@ -215,6 +217,8 @@ export function ActiveTimerEditSheet({
   lastStopEntries = historicalEntries,
   lastStopOwner,
   lastStopDeletedIds,
+  lastStopProjectedIds,
+  lastStopBootstrapGeneration,
   mode = "running",
   onCancel,
   onCreateTag,
@@ -1557,7 +1561,8 @@ export function ActiveTimerEditSheet({
   const lastStop = useEntryLastStop({
     owner: lastStopOwner, visible, presentationId: presentation.id, entryId: entry?.id,
     startMs: lastStopStartMs, cutoffMs: lastStopCutoffMs, endMs: lastStopEndMs,
-    entries: lastStopEntries, deletedIds: lastStopDeletedIds
+    entries: lastStopEntries, deletedIds: lastStopDeletedIds,
+    projectedIds: lastStopProjectedIds, bootstrapGeneration: lastStopBootstrapGeneration
   });
   const hasEntryActions = isFinishedMode && (canCopyCompletedEntry || canStartAgain || canDelete);
   const actionsOpen = hasEntryActions && actionsPosition?.id === presentation.id && !split;
