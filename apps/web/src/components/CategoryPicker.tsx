@@ -32,7 +32,8 @@ import {
   FloatingList,
   FloatingListActivityOption,
   FloatingListSearch,
-  restoreFocusIfDropped
+  restoreFocusIfDropped,
+  type FloatingListActivity
 } from "@/components/FloatingList";
 import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { blockStyle } from "@/lib/block-style";
@@ -74,7 +75,7 @@ export function CategoryPicker({
    */
   panelWidth?: number;
   ariaLabelledBy?: string;
-  categories: CategoryRow[];
+  categories: readonly FloatingListActivity[];
   className?: string;
   disabled?: boolean;
   label?: string;
@@ -301,7 +302,15 @@ export function CategoryPicker({
   useLayoutEffect(() => {
     if (!open || !portal) return undefined;
 
+    // A scaled dialog temporarily contains fixed descendants. Wait for its entrance before
+    // positioning the list in viewport coordinates, or focusing search can scroll the dialog.
+    const entrance = listPanel ? triggerRef.current?.closest("dialog")?.getAnimations?.().find(
+      (animation) => animation.playState === "running" && "animationName" in animation && animation.animationName === "ui-dialog-in"
+    ) : undefined;
+    let waiting = Boolean(entrance);
+    let disposed = false;
     function updatePosition() {
+      if (waiting || disposed) return;
       const trigger = triggerRef.current;
       const root = rootRef.current;
       const menu = menuRef.current;
@@ -352,7 +361,15 @@ export function CategoryPicker({
       });
     }
 
-    updatePosition();
+    if (entrance) {
+      const finish = () => {
+        waiting = false;
+        updatePosition();
+      };
+      void entrance.finished.then(finish, finish);
+    } else {
+      updatePosition();
+    }
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
     if (rootRef.current) observer?.observe(rootRef.current);
     if (menuRef.current) observer?.observe(menuRef.current);
@@ -361,6 +378,7 @@ export function CategoryPicker({
     window.visualViewport?.addEventListener("resize", updatePosition);
     window.visualViewport?.addEventListener("scroll", updatePosition);
     return () => {
+      disposed = true;
       observer?.disconnect();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
@@ -368,6 +386,13 @@ export function CategoryPicker({
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
   }, [anchorRef, blockPanel, listPanel, open, panelWidth, portal, searchable, triggerRef]);
+
+  const listVisible = listPanel && open && (!portal || portalPosition !== null);
+  useEffect(() => {
+    if (!listVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => searchRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [listVisible]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -408,8 +433,7 @@ export function CategoryPicker({
     setActiveIndex(focus === "last" ? (listPanel ? fullCount : optionValues.length) - 1 : searchable ? fullIndex : selectedIndex);
     setQuery("");
     onOpenChange(true);
-    // The block's list keeps focus in its search field (the combobox); ↑/↓ move the highlight.
-    if (searchable && (!focus || listPanel)) window.requestAnimationFrame(() => searchRef.current?.focus());
+
     if (focus && !listPanel) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
@@ -891,6 +915,7 @@ export function CategoryPicker({
           ref={assignTrigger}
           type="button"
         >
+          <DayframeIcon glyph="search" size={16} />
           All activities
           <span aria-hidden="true" className="df-tnum">{categories.length}</span>
         </button>
@@ -938,7 +963,7 @@ export function CategoryPicker({
         heading="Activities"
         hints={FLOATING_LIST_HINTS.activities}
         id={menuId}
-        isOpen={open}
+        isOpen={listVisible}
         onBlur={closeOnFocusLeave}
         // A Create being saved holds the list open (as Escape, a press outside and the block do), so
         // its outcome — the new activity or the error beside the kept name — is always seen.
@@ -1158,7 +1183,7 @@ function CategoryOption({
   variant
 }: {
   active: boolean;
-  category: CategoryRow | null;
+  category: FloatingListActivity | null;
   onFocus: () => void;
   onSelect: () => void;
   selected: boolean;

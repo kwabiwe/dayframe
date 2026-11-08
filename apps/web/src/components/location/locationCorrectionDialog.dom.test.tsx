@@ -5,6 +5,7 @@ const originalTimeZone = process.env.TZ;
 process.env.TZ = "Europe/London";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TripLeg } from "@dayframe/shared";
 
@@ -748,6 +749,56 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(pressed()).toEqual(["Bus"]);
     expect(screen.getByRole("button", { name: "Done" }).className).toContain("ui-button-primary");
   });
+  it("uses the shared searchable All activities picker without expanding the place dialog", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
+    const activities = Array.from({ length: 10 }, (_, index) => ({ id: `activity-${index}`, name: `Optional ${index}` }));
+    const onClose = vi.fn();
+    render(<LocationCorrectionDialog activities={activities} clock="24h" onClose={onClose} onCorrected={vi.fn()}
+      places={places} target={{ kind: "place", label: "Unknown place", place: place() }} />);
+    const user = userEvent.setup();
+    const map = await screen.findByTestId("evidence-map");
+    const save = screen.getByRole("button", { name: "Save" });
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    const trigger = screen.getByRole("button", { name: "All activities, 10" });
+    expect(screen.getAllByRole("radio")).toHaveLength(8);
+    let finishEntrance!: () => void;
+    const entrance = new Promise<void>((resolve) => { finishEntrance = resolve; });
+    const dialog = trigger.closest("dialog")!;
+    const getAnimations = vi.fn().mockReturnValue([
+      { animationName: "ui-dialog-in", playState: "running", finished: entrance }
+    ]);
+    Object.defineProperty(dialog, "getAnimations", { value: getAnimations });
+    await user.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("combobox", { name: "Search activities" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await user.keyboard("{Escape}");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await user.click(trigger);
+    expect(screen.queryByRole("combobox", { name: "Search activities" })).toBeNull();
+    getAnimations.mockReturnValue([]);
+    await act(async () => finishEntrance());
+    const search = await screen.findByRole("combobox", { name: "Search activities" });
+    expect(search.closest("dialog")).toBe(trigger.closest("dialog"));
+    await user.type(search, "Optional 9");
+    expect(screen.getAllByRole("radio")).toHaveLength(8);
+    expect(screen.getByTestId("evidence-map")).toBe(map);
+    expect(screen.getByRole("button", { name: "Save" })).toBe(save);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("radio", { name: "Optional 9" })).toBeNull();
+    await user.click(trigger);
+    await user.type(await screen.findByRole("combobox", { name: "Search activities" }), "Optional 9{Enter}");
+    const choice = await screen.findByRole("radio", { name: "Optional 9", checked: true });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.getAllByRole("radio")).toHaveLength(8);
+    expect(clientFetch).not.toHaveBeenCalled();
+    await user.click(choice);
+    expect(screen.getByRole("radio", { name: "Optional 9", checked: false })).toBe(choice);
+    expect(screen.getByTestId("evidence-map")).toBe(map);
+  });
+
   describe("one layout for every place and trip dialog", () => {
     const sections = () => [...document.querySelectorAll("[data-section]")].map((node) => node.getAttribute("data-section"));
     const inOrder = (seen: Array<string | null>) => DIALOG_SECTION_ORDER.filter((id) => seen.includes(id));
