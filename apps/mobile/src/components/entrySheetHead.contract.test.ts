@@ -37,7 +37,8 @@ describe("time-entry sheet head and actions", () => {
     expect(start).toMatch(/if \(categoryId \|\| description\) \{\s*startFromToday\(categoryId, description, tagNames\);/);
     expect(start).toContain('void startTaskWith({ categoryId: null, description: "", startedAt: null, tagNames })');
     // A stale request never fires: a new completed-entry sheet and logout both clear it.
-    expect(dashboard.slice(dashboard.indexOf("function presentCompletedEntry("), dashboard.indexOf("function presentCompletedEntry(") + 400)).toContain("pendingStartAgain.current = null;");
+    const present = dashboard.slice(dashboard.indexOf("function presentCompletedEntry("), dashboard.indexOf("function completeActiveEditorExit("));
+    expect(present).toContain("pendingStartAgain.current = null;");
     expect(dashboard.slice(dashboard.indexOf("const transitionToSignedOut = useCallback("), dashboard.indexOf("const syncQueuedEvents = useCallback("))).toContain("pendingStartAgain.current = null;");
   });
 });

@@ -7,7 +7,8 @@ export function serverBuildMetadata() {
     backendId: backendIdentityFor(environment),
     environment,
     syncContractVersion: 1,
-    loggedVisitPlaceCorrections: true
+    loggedVisitPlaceCorrections: true,
+    completedEntryCopy: true
   };
 }
 
