@@ -1610,6 +1610,7 @@ async function syncQueueItems(
     }
 
     const attemptedAt = new Date().toISOString();
+    let locationTransfer: Awaited<ReturnType<typeof import("./location/store").openLegacyLocationTransfer>> = undefined;
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
       const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -1618,6 +1619,16 @@ async function syncQueueItems(
         stopped = true;
         break;
       }
+      if (item.source === "geofence_specific" || item.source === "geofence_broad" || item.source === "location_learning") {
+        const { openLegacyLocationTransfer } = await import("./location/store");
+        locationTransfer = await openLegacyLocationTransfer(owner, options.signal);
+        if (!locationTransfer) {
+          if (parkedRetry) parkedRetryBudget += 1;
+          remaining.push(item);
+          continue;
+        }
+      }
+      let dispatched = false;
       const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
         `${DAYFRAME_API_BASE}/api/events`,
         {
@@ -1629,10 +1640,14 @@ async function syncQueueItems(
             [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
           },
           body: JSON.stringify(queuedEventRequestBody(item)),
-          signal: options.signal
+          signal: locationTransfer?.signal ?? options.signal
         },
         {
-          isCurrent: async () => queuedEventMatchesOwner(item,owner) && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
+          isCurrent: async () => queuedEventMatchesOwner(item,owner) &&
+            mobileAccountOwnersEqual(await readActiveMobileAccount(),owner) &&
+            (!locationTransfer || (dispatched ? locationTransfer.isCurrent() : await locationTransfer.mayDispatch())) &&
+            isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+          onDispatch: () => { dispatched = true; },
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1710,6 +1725,11 @@ async function syncQueueItems(
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
+      if (locationTransfer && !options.signal?.aborted && !locationTransfer.isCurrent()) {
+        if (parkedRetry) parkedRetryBudget += 1;
+        remaining.push(item);
+        continue;
+      }
       if (error instanceof StaleMobileSessionResponseError || options.signal?.aborted || error instanceof Error && error.name === "AbortError") {
         remaining.push(item,...queue.slice(index+1));stopped=true;break;
       }
@@ -1724,6 +1744,8 @@ async function syncQueueItems(
       remaining.push(failedItem, ...queue.slice(index + 1));
       stopped = true;
       break;
+    } finally {
+      locationTransfer?.release();
     }
   }
 

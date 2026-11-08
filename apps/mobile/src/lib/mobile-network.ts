@@ -127,6 +127,7 @@ export function mobileJsonRequest<T = Record<string, unknown> | null>(
   options: MobileRequestDeadline & {
     isCurrent?: () => boolean | Promise<boolean>;
     handleAuthentication?: boolean;
+    onDispatch?: () => void;
     validate?: (body: unknown, response: Response) => T | Promise<T>;
   }
 ) {
@@ -137,13 +138,14 @@ export function mobileJsonRequest<T = Record<string, unknown> | null>(
     if (options.isCurrent && !await options.isCurrent()) throw new StaleMobileSessionResponseError();
     const validated = options.validate ? await options.validate(body, response) : body as T;
     return { response, body: validated };
-  }, options.isCurrent, true, options.handleAuthentication !== false);
+  }, options.isCurrent, true, options.handleAuthentication !== false, options.onDispatch);
 }
 
 async function mobileRequestOperation<T>(
   input: Parameters<typeof fetch>[0], init: RequestInit,
   deadline: MobileRequestDeadline, consume: (response: Response) => Promise<T>,
-  isCurrent?: () => boolean | Promise<boolean>, authenticateAfterConsume = false, handleAuthentication = true
+  isCurrent?: () => boolean | Promise<boolean>, authenticateAfterConsume = false, handleAuthentication = true,
+  onDispatch?: () => void
 ) {
   const requestGeneration = connectivityRequestGeneration();
   const controller = new AbortController();
@@ -174,6 +176,7 @@ async function mobileRequestOperation<T>(
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         if (isCurrent && !await isCurrent()) throw new StaleMobileSessionResponseError();
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
+        onDispatch?.();
         const response = await mobileFetch(input, { ...init, signal: controller.signal }, handleAuthentication && !authenticateAfterConsume);
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         const result = await consume(response);

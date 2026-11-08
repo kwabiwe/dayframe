@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   nativeCalls: [] as string[],
   appState: { currentState: "active" },
   beforeRun: null as ((sql: string) => Promise<void>) | null,
+  beforeFirst: null as ((sql: string, ...args: unknown[]) => Promise<void>) | null,
   reviewCleanupFailure: false,
   cleanupFailure: false,
   onRemove: null as ((key: string) => Promise<void>) | null,
@@ -87,7 +88,10 @@ let db: DatabaseSync;
 function adapterFor(database: DatabaseSync) {
   const value = {
     execAsync: async (sql: string) => { database.exec(sql); },
-    getFirstAsync: async (sql: string, ...args: never[]) => database.prepare(sql).get(...args) ?? null,
+    getFirstAsync: async (sql: string, ...args: never[]) => {
+      if (database === db && h.beforeFirst) await h.beforeFirst(sql, ...args);
+      return database.prepare(sql).get(...args) ?? null;
+    },
     getAllAsync: async (sql: string, ...args: never[]) => database.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => {
       if (database === db && h.beforeRun) await h.beforeRun(sql);
@@ -127,7 +131,7 @@ async function signInThroughApi(owner: typeof A, places: unknown[] = [], enable 
 
 beforeEach(async () => {
   vi.mocked((await import("expo-location")).hasStartedLocationUpdatesAsync).mockResolvedValue(true);
-  h.beforeRun = null; h.reviewCleanupFailure = false; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
+  h.beforeRun = null; h.beforeFirst = null; h.reviewCleanupFailure = false; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
   vi.resetModules(); h.tasks.clear(); h.asyncStore.clear(); h.secure.clear(); h.nativeSignals = []; h.nativeCalls.length = 0; h.dbs.clear(); calls.length = 0;
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
   db = new DatabaseSync(":memory:");
@@ -1050,5 +1054,133 @@ describe("automatic Location transfer permissions and replay", () => {
     await cancelled.promise;
     expect((await inFlight).replayed).toBe(false);
     expect((await runtime.syncLocationIntelligenceOnForeground()).reason).toBe("location_paused");
+  });
+});
+
+describe("legacy location transfer and foreground replay", () => {
+  const reply = () => json({
+    ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings: []
+  });
+  const attemptKey = "last_server_replay_attempt_at";
+  function metadataValue(name: string) {
+    return (db.prepare("select value from location_store_metadata where key = ?").get(name) as { value: string } | undefined)?.value;
+  }
+
+  it.each(["permission revoked", "opt-out"])("retains a V1 event after %s while the general queue drains", async mode => {
+    await signInThroughApi(A, [place], true, "v1");
+    await api.enqueueEvent({
+      source: "geofence_specific", type: "geofence_enter", localId: "synthetic-retained-v1",
+      owner: A, rawPayload: { placeId: A_PLACE }
+    });
+    const background = vi.mocked((await import("expo-location")).getBackgroundPermissionsAsync);
+    try {
+      if (mode === "permission revoked") background.mockResolvedValue({ status: "denied" } as never);
+      else await geofence.setLocationLearningEnabled(false, [], A);
+      const sent: string[] = [];
+      routes["/api/events"] = init => {
+        const event = JSON.parse(String(init.body)) as { clientEventId: string };
+        sent.push(event.clientEventId);
+        return json({ eventId: "synthetic-event", clientEventId: event.clientEventId }, 201);
+      };
+      await api.syncQueue({ eventScope: "non_timer", forceRetry: true });
+      expect.soft(sent).toEqual([]);
+      expect((await api.readQueue()).map(event => event.localId)).toContain("synthetic-retained-v1");
+
+      background.mockResolvedValue({ status: "granted" } as never);
+      if (mode === "opt-out") await geofence.setLocationLearningEnabled(true, [place], A);
+      await api.syncQueue({ eventScope: "non_timer", forceRetry: true });
+      expect(sent).toEqual(["synthetic-retained-v1"]);
+      expect(await api.readQueue()).toHaveLength(0);
+    } finally {
+      background.mockResolvedValue({ status: "granted" } as never);
+    }
+  });
+
+  it("cancels the in-flight legacy event on opt-out and lets an unrelated event drain", async () => {
+    await signInThroughApi(A, [place], true, "v1");
+    const legacyId = "synthetic-v1-in-flight";
+    const otherId = "synthetic-calendar-event";
+    await api.enqueueEvent({
+      source: "location_learning", type: "unknown_stay", localId: legacyId, owner: A, rawPayload: {}
+    });
+    await api.enqueueEvent({
+      source: "calendar", type: "calendar_hint", localId: otherId, owner: A, rawPayload: {}
+    });
+    const started = deferred();
+    const aborted = deferred();
+    const sent: string[] = [];
+    routes["/api/events"] = init => {
+      const event = JSON.parse(String(init.body)) as { clientEventId: string };
+      sent.push(event.clientEventId);
+      if (event.clientEventId !== legacyId) return json({ eventId: "synthetic-event", clientEventId: otherId }, 201);
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          aborted.resolve();
+          reject(new DOMException("Cancelled", "AbortError"));
+        }, { once: true });
+        started.resolve();
+      });
+    };
+    const before = (await api.readQueue()).find(event => event.localId === legacyId);
+    const pass = api.syncQueue({ eventScope: "non_timer", forceRetry: true });
+    await started.promise;
+    await geofence.setLocationLearningEnabled(false, [], A);
+    await aborted.promise;
+    expect((await pass).synced).toEqual([otherId]);
+    expect(sent).toEqual([legacyId, otherId]);
+    expect(await api.readQueue()).toEqual([before]);
+  });
+
+  it("retains foreground retry intent while a plain pass is active", async () => {
+    await signInThroughApi(A, [place]);
+    routes["/api/location/replay"] = () => json({ ok: false }, 503);
+    await store.syncLocationEvidence({ foregroundReplay: true, forceReplay: true });
+    expect(metadataValue(attemptKey)).toBe(new Date(T0).toISOString());
+    calls.length = 0;
+    routes["/api/location/replay"] = reply;
+    vi.setSystemTime(T0 + 1000);
+    const entered = deferred(), release = deferred();
+    h.beforeFirst = async (_sql, name) => {
+      if (name !== attemptKey) return;
+      h.beforeFirst = null;
+      entered.resolve();
+      await release.promise;
+    };
+    const plain = store.syncLocationEvidence();
+    await entered.promise;
+    const foreground = store.syncLocationEvidence({ foregroundReplay: true });
+    // Let the foreground caller clear its permission read and join the held plain operation.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    release.resolve();
+    const [, result] = await Promise.all([plain, foreground]);
+    expect.soft(calls.filter(path => path === "/api/location/replay")).toHaveLength(1);
+    expect(result.replayed).toBe(true);
+  });
+
+  it("keeps replay time and diagnostics unchanged if permission closes before dispatch", async () => {
+    await signInThroughApi(A, [place]);
+    routes["/api/location/replay"] = reply;
+    await store.syncLocationEvidence({ foregroundReplay: true, forceReplay: true });
+    const previousTime = metadataValue(attemptKey);
+    const diagnosticKey = "sync_diagnostics:" + key(A);
+    const previousDiagnostics = metadataValue(diagnosticKey);
+    expect(previousTime).toBe(new Date(T0).toISOString());
+    const background = vi.mocked((await import("expo-location")).getBackgroundPermissionsAsync);
+    try {
+      calls.length = 0;
+      vi.setSystemTime(T0 + 30_000);
+      h.beforeFirst = async (_sql, name) => {
+        if (name !== "semantic_mode_acknowledged_at") return;
+        h.beforeFirst = null;
+        background.mockResolvedValue({ status: "denied" } as never);
+      };
+      await expect(store.syncLocationEvidence({ forceReplay: true })).resolves.toMatchObject({ reason: "location_paused" });
+      expect(calls).not.toContain("/api/location/replay");
+      expect.soft(metadataValue(attemptKey)).toBe(previousTime);
+      expect(metadataValue(diagnosticKey)).toBe(previousDiagnostics);
+    } finally {
+      background.mockResolvedValue({ status: "granted" } as never);
+    }
   });
 });
