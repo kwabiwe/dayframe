@@ -97,6 +97,40 @@ describe("durable time-entry outbox", () => {
     }
   });
 
+  it("leaves an offline copy and following Edit to foreground recovery without reserving timer execution", async () => {
+    const copy = await outbox.enqueueCompletedEntryCopy({
+      owner: OWNER_A,
+      entryId: "offline-copy",
+      expectedUpdatedAt: "2026-08-22T11:00:00.000Z",
+      action: { kind: "duplicate" }
+    });
+    await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "other-entry" },
+      patch: { description: "Queued after copy" },
+      requestImmediateDelivery: true
+    });
+    expect(await outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).toMatchObject({
+      pendingCount: 2, backgroundReadyCount: 0, headNextDueAt: null
+    });
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+    const send = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ newEntryId: copy.copy?.copyId }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", send);
+    const input = { owner: OWNER_A, correlations: new Map<string, string>() };
+    const lease = new AbortController();
+    expect(await outbox.synchroniseTimeEntryCommands({ ...input, signal: lease.signal }))
+      .toMatchObject({ reason: "foreground_required", waitingCount: 2 });
+    expect(await outbox.synchroniseTimeEntryCommands({ ...input, foregroundOnly: true, isForeground: () => false }))
+      .toMatchObject({ reason: "foreground_required", waitingCount: 2 });
+    expect(send).not.toHaveBeenCalled();
+    expect(await outbox.synchroniseTimeEntryCommands({ ...input, foregroundOnly: true, isForeground: () => true }))
+      .toMatchObject({ deliveredCount: 2, waitingCount: 0 });
+    expect(send.mock.calls.map(([, init]) => init.method)).toEqual(["POST", "PATCH"]);
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+  });
+
   it.each(["update", "delete"] as const)(
     "keeps a %s command durable when delivery reaches the bounded deadline",
     async (operation) => {

@@ -5,6 +5,7 @@ export type ConnectivityRecoveryStepName =
   | "activity_queue"
   | "time_entry_outbox"
   | "timer_stops_after_correlation"
+  | "foreground_time_entries"
   | "review_outbox"
   | "timeline_corrections"
   | "location_intelligence"

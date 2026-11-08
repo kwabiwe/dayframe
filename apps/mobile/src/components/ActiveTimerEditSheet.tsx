@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type Ref } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -8,6 +8,9 @@ import {
   findNodeHandle,
   Keyboard,
   type KeyboardEvent,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
   Modal,
   Platform,
   Pressable,
@@ -164,7 +167,8 @@ type ActiveTimerEditSheetProps = {
   onCreateTag: (name: string) => Promise<MobileTag | null>;
   /** Creates an activity from the All-activities picker; resolves to its id or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
-  onCopyCompletedEntry?: (entry: MobileTimeEntry, action: CompletedEntryCopyAction) => Promise<boolean>;
+  onCopyCompletedEntry?: (entry: MobileTimeEntry, action: CompletedEntryCopyAction) =>
+    Promise<{ ok: true } | { ok: false; message: string }>;
   onDelete?: (entryId: string) => Promise<boolean>;
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
@@ -277,6 +281,8 @@ export function ActiveTimerEditSheet({
   // changes (the dial, a date, the previous-end chip) so the wheel re-aims only for those.
   const [splitDraft, setSplitDraft] = useState<{ sheetId: number; wheelId: number; valueMs: number; revision: number } | null>(null);
   const splitWheelSequence = useRef(0);
+  const splitScrolledId = useRef(0);
+  const formScrollRef = useRef<ScrollView>(null);
   const splitButtonRef = useRef<View>(null);
   const splitValueRef = useRef<View>(null);
   const [timeWheel, setTimeWheelState] = useState<{ presentationId: number; target: "start" | "end" } | null>(null);
@@ -1964,9 +1970,13 @@ export function ActiveTimerEditSheet({
     const token = beginMutation("saving");
     if (token === null) return;
     setValidationError(null);
-    const ok = await resolveMutation(() => onCopyCompletedEntry(entry, action));
-    const accepted = finishMutation(token, ok ? "succeeded" : "failed");
-    if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
+    const result = await onCopyCompletedEntry(entry, action).catch(() => ({
+      ok: false as const,
+      message: "Dayframe could not save this change on your iPhone. Try again."
+    }));
+    if (!finishMutation(token, result.ok ? "succeeded" : "failed")) return;
+    if (result.ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
+    else setValidationError(result.message);
   }
 
   async function stopFromSheet() {
@@ -2619,6 +2629,7 @@ export function ActiveTimerEditSheet({
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen || datePickerDismissGuarded}
+              gestureHandleOnly={canCopyCompletedEntry}
               dismissGestureRef={sheetDismissGestureRef}
               handleStyle={styles.sheetHandle}
               keyboardInset={keyboardInset}
@@ -2716,11 +2727,16 @@ export function ActiveTimerEditSheet({
                   reduceMotion={reduceMotion} theme={theme} />
               ) : null}
 
-              <Pressable
-                accessible={false}
+              <EntryFormViewport
+                scrollable={canCopyCompletedEntry}
+                scrollRef={formScrollRef}
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   scrollViewportLayoutRef.current = { height, width, x, y };
+                  scheduleGeometryMeasurement();
+                }}
+                onScrollOffset={(offset) => {
+                  contentScrollOffsetRef.current = offset;
                   scheduleGeometryMeasurement();
                 }}
                 onPress={handleFormBackgroundPress}
@@ -2728,7 +2744,6 @@ export function ActiveTimerEditSheet({
                   styles.activeEditScroller,
                   keyboardLayout.keyboardOpen ? styles.activeEditScrollerKeyboard : null
                 ]}
-                testID="time-entry-sheet-form"
               >
                 <View
                   pointerEvents="box-none"
@@ -3243,7 +3258,15 @@ export function ActiveTimerEditSheet({
                     dial's measured room), so the fixed sheet never grows and its actions stay on screen
                     at every density (Codex r1/r2 on #428; the prototype's shrinking dial does not fit). */}
                 {split && completedSplitBounds ? (
-                  <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={sheetStyles.splitPanel}>
+                  <Reanimated.View
+                    layout={localLayoutTransition(reduceMotion)}
+                    onLayout={(event) => {
+                      if (splitScrolledId.current === split.wheelId) return;
+                      splitScrolledId.current = split.wheelId;
+                      formScrollRef.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: !reduceMotion });
+                    }}
+                    style={sheetStyles.splitPanel}
+                  >
                     <Pressable
                       ref={splitValueRef}
                       accessibilityRole="adjustable"
@@ -3314,7 +3337,8 @@ export function ActiveTimerEditSheet({
                       </Pressable>
                     </View>
                   </Reanimated.View>
-                ) : timeWheel ? null : (
+                ) : null}
+                {timeWheel || split ? null : (
                   <View
                     onLayout={(event) => setDialAreaMeasure({ height: event.nativeEvent.layout.height, key: dialAreaKey })}
                     pointerEvents="box-none"
@@ -3463,7 +3487,7 @@ export function ActiveTimerEditSheet({
                 ) : null}
                 </View>
                 </View>
-              </Pressable>
+              </EntryFormViewport>
               <HistoricalSuggestionsOverlay
                 contentKey={historicalSuggestionResultSignature}
                 disabled={busy}
@@ -3719,6 +3743,37 @@ function formatSheetDay(date: Date) {
 }
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
+function EntryFormViewport({ children, onLayout, onPress, onScrollOffset, scrollable, scrollRef, style }: {
+  children: ReactNode;
+  onLayout: (event: LayoutChangeEvent) => void;
+  onPress: () => void;
+  onScrollOffset: (offset: { x: number; y: number }) => void;
+  scrollable: boolean;
+  scrollRef: Ref<ScrollView>;
+  style: StyleProp<ViewStyle>;
+}) {
+  if (!scrollable) {
+    return (
+      <Pressable accessible={false} onLayout={onLayout} onPress={onPress} style={style} testID="time-entry-sheet-form">
+        {children}
+      </Pressable>
+    );
+  }
+  return (
+    <ScrollView
+      ref={scrollRef}
+      onLayout={onLayout}
+      onScroll={(event) => onScrollOffset(event.nativeEvent.contentOffset)}
+      scrollEventThrottle={64}
+      keyboardShouldPersistTaps="handled"
+      style={style}
+      testID="time-entry-sheet-form"
+    >
+      <Pressable accessible={false} onPress={onPress}>{children}</Pressable>
+    </ScrollView>
+  );
+}
+
 const sheetStyles = StyleSheet.create({
   // The shared BlocksSheetHead (UIA-006) inside a tap target that dismisses the keyboard.
   head: { alignSelf: "stretch" },

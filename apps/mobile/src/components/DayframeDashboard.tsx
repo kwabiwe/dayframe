@@ -182,7 +182,7 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
-import { projectCompletedEntryCopy } from "@/lib/completedEntryCopyProjection";
+import { projectCompletedEntryCopy, rollbackRejectedCompletedCopy } from "@/lib/completedEntryCopyProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import {
@@ -2121,10 +2121,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const own = deleteTombstones.current;
     const read = () => {
       const mine = ++sequence;
-      readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then((commands) => {
-        if (!current || mine !== sequence || deleteTombstones.current !== own) return;
+      readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then(async (commands) => {
+        const readCurrent = () => current && mine === sequence && deleteTombstones.current === own;
+        if (!readCurrent()) return;
         own.tombstones.observe(commands);
         setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+        const refusedCopies = commands.filter((command) => command.copy && command.failureKind === "permanent");
+        if (refusedCopies.length === 0) return;
+        const baseline = await loadCachedDashboardBootstrap().catch(() => null);
+        if (!readCurrent()) return;
+        const data = latestData.current;
+        if (!data || !sameTimerStopOwner(timerStopOwner(data), scopedOwner)) return;
+        let next = data;
+        for (const command of refusedCopies) {
+          if (!command.copy || !command.targetEntryId) continue;
+          next = rollbackRejectedCompletedCopy(
+            next, baseline?.bootstrap ?? null, command.targetEntryId, command.copy,
+            own.tombstones.ids().has(command.targetEntryId)
+          );
+        }
+        if (next !== data) updateDashboardData(() => next);
       }).catch(() => undefined);
     };
     read();
@@ -3005,12 +3021,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   async function copyCalendarEntry(entry: TimeEntry, action: CompletedEntryCopyAction) {
     const bootstrap = latestData.current;
-    if (!bootstrap?.serverBuild?.completedEntryCopy || !entry.stoppedAt || !entry.updatedAt) return false;
+    const unavailable = { ok: false as const, message: "Open a saved finished block to make this change." };
+    if (!bootstrap?.serverBuild?.completedEntryCopy || !entry.stoppedAt || !entry.updatedAt) return unavailable;
     const owner = timerStopOwner(bootstrap);
     const current = mobileTimeEntryById(bootstrap, entry.id);
-    if (!current?.stoppedAt || current.updatedAt !== entry.updatedAt) {
-      Alert.alert("Block changed", "Close and reopen this block to see its current details.");
-      return false;
+    if (current && (!current.stoppedAt || current.updatedAt !== entry.updatedAt)) {
+      return { ok: false as const, message: "This block changed. Close and reopen it to see its current details." };
     }
     try {
       const command = await enqueueCompletedEntryCopy({
@@ -3021,17 +3037,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
       const copy = command.copy;
-      if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return false;
+      if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return unavailable;
       nextTimerMutationVersion(entry.id);
-      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy) : data);
+      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy, entry) : data);
       queuedTimerStartRecoveryRequested.current = true;
       deliverQueuedTimeEntry(owner, command.clientCommandId);
-      return true;
+      return { ok: true as const };
     } catch (error) {
-      Alert.alert("Block not copied", error instanceof PendingCompletedEntryChangeError
-        ? error.message
-        : "Dayframe could not save this change on your iPhone. Check available storage and try again.");
-      return false;
+      return {
+        ok: false as const,
+        message: error instanceof PendingCompletedEntryChangeError
+          ? error.message
+          : "Dayframe could not save this change on your iPhone. Check available storage and try again."
+      };
     }
   }
 
@@ -3039,7 +3057,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!connectivityCurrent.current.isOnline) return;
     void (async () => {
       const correlations = await readTimerEntryIdCorrelations(owner);
-      const result = await synchroniseTimeEntryCommands({ owner, correlations, force: true });
+      const result = await synchroniseTimeEntryCommands({
+        owner, correlations, force: true, isForeground: () => AppState.currentState === "active"
+      });
       if (result.reason === "authentication_required") {
         transitionToSignedOut();
         return;

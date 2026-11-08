@@ -258,6 +258,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
   let timerBackgroundLease: TimerBackgroundExecutionLease | null = null;
   let timerPhaseActive = due.has("timer") && getDurableWorkSnapshot().timerMutationCount > 0;
   let timerPhaseEnded = !timerPhaseActive;
+  let foregroundTimeEntriesNeeded = !timerPhaseActive;
   if (timerPhaseActive) {
     timerBackgroundLease = await beginTimerBackgroundExecution(
       "Dayframe timer mutation recovery"
@@ -326,13 +327,17 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
         {
           name: "time_entry_outbox",
           run: async () => {
-            if(!due.has("timer"))return "continue";
+            if (!due.has("timer") || !timerBackgroundLease) return "continue";
             const result = await synchroniseTimeEntryCommands({
               owner,
               correlations: await readTimerEntryIdCorrelations(owner),
               signal: timerBackgroundLease?.signal
             });
             changed ||= result.deliveredCount>0;
+            if (result.reason === "foreground_required") {
+              foregroundTimeEntriesNeeded = true;
+              return "continue";
+            }
             if (result.reason === "retryable_failure") return "transport_failure";
             if (
               result.reason === "authentication_required" ||
@@ -363,6 +368,22 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
                 timerBackgroundLease?.signal.aborted ? "cancelled" : "success"
               );
             }
+          }
+        },
+        {
+          name: "foreground_time_entries",
+          run: async () => {
+            if (!due.has("timer") || !foregroundTimeEntriesNeeded || AppState.currentState !== "active") return "continue";
+            const result = await synchroniseTimeEntryCommands({
+              owner,
+              correlations: await readTimerEntryIdCorrelations(owner),
+              foregroundOnly: true,
+              isForeground: () => AppState.currentState === "active"
+            });
+            changed ||= result.deliveredCount > 0;
+            if (result.reason === "authentication_required" || result.reason === "session_changed") throw new AuthRequiredError();
+            if (result.reason === "retryable_failure") return "transport_failure";
+            return result.waitingCount > 0 ? "application_failure" : "continue";
           }
         },
         {

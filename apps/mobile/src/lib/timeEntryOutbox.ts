@@ -94,6 +94,7 @@ export type TimeEntryOutboxSyncResult = {
     | "authentication_required"
     | "dependency_wait"
     | "deferred"
+    | "foreground_required"
     | "retry_wait"
     | "retryable_failure"
     | "session_changed";
@@ -431,6 +432,8 @@ export async function synchroniseTimeEntryCommands(input: {
   force?: boolean;
   now?: Date;
   signal?: AbortSignal;
+  foregroundOnly?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   const ownerKey = mobileAccountKey(input.owner);
   const existing = syncInFlightByOwner.get(ownerKey);
@@ -461,7 +464,9 @@ export async function synchroniseTimeEntryCommands(input: {
     control,
     now: input.now,
     owner: input.owner,
-    signal: input.signal
+    signal: input.signal,
+    backgroundExecutionChecked: input.foregroundOnly,
+    isForeground: input.isForeground
   }).finally(() => {
     if (syncInFlightByOwner.get(ownerKey)?.promise === sync) {
       syncInFlightByOwner.delete(ownerKey);
@@ -489,15 +494,17 @@ export async function getTimeEntryOutboxDiagnostics(
   const deviceQuarantine = quarantine.filter((record) => record.owner === null);
   const retryable = commands.filter((command) => command.failureKind !== "permanent");
   const permanent = commands.filter((command) => command.failureKind === "permanent");
+  const next = retryable[0];
+  const ready = (command: PendingTimeEntryCommand) => isTimeEntryCommandTransportReady(
+    command, options.correlations ?? new Map(), { now: options.now }
+  );
   return {
     pendingCount: retryable.length,
-    transportReadyCount: retryable.filter((command) =>
-      isTimeEntryCommandTransportReady(
-        command,
-        options.correlations ?? new Map(),
-        { now: options.now }
-      )
-    ).length,
+    transportReadyCount: retryable.filter(ready).length,
+    backgroundReadyCount: next && !next.copy && ready(next) ? 1 : 0,
+    headNextDueAt: [next?.nextAttemptAt, next?.deliverAfter]
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null,
     needsAttentionCount: permanent.length,
     /** Stable identities of the rejected commands, so a new rejection is noticed even at an equal count. */
     needsAttentionIds: permanent.map((command) => `entry:${command.clientCommandId}`),
@@ -612,6 +619,7 @@ async function runTimeEntryCommandDrain(input: {
   now?: Date;
   signal?: AbortSignal;
   backgroundExecutionChecked?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
     return currentOutboxResult(input.owner, 0, true, "session_changed");
@@ -620,7 +628,7 @@ async function runTimeEntryCommandDrain(input: {
     const reservationKey = timeEntryBackgroundExecutionKey(input.owner);
     const firstPendingCommand = (await readPendingTimeEntryCommands(input.owner))
       .find((command) => command.failureKind !== "permanent");
-    const hasTransportReadyCommand = firstPendingCommand
+    const hasTransportReadyCommand = firstPendingCommand && !firstPendingCommand.copy
       ? isTimeEntryCommandTransportReady(
           firstPendingCommand,
           input.control.correlations,
@@ -631,8 +639,7 @@ async function runTimeEntryCommandDrain(input: {
         )
       : false;
     if (
-      firstPendingCommand?.operation !== "copy" &&
-      (hasTimerBackgroundExecutionReservation(reservationKey) || hasTransportReadyCommand)
+      hasTimerBackgroundExecutionReservation(reservationKey) || hasTransportReadyCommand
     ) {
       const result = await withTimerBackgroundExecutionReservation(
         reservationKey,
@@ -644,7 +651,7 @@ async function runTimeEntryCommandDrain(input: {
         }),
         { beginIfMissing: hasTransportReadyCommand }
       );
-      if (result.reason !== "deferred") return result;
+      if (result.reason !== "foreground_required") return result;
       // A copy queued behind timer work gets its own foreground attempt after the assertion ends.
       const remaining = await runTimeEntryCommandDrain({ ...input, backgroundExecutionChecked: true });
       return combineTimeEntryOutboxSyncResults(result, remaining);
@@ -667,8 +674,8 @@ async function runTimeEntryCommandDrain(input: {
       };
     });
     if (!original) return outboxResult(all, input.owner, deliveredCount, false);
-    if (original.copy && input.signal) {
-      return outboxResult(all, input.owner, deliveredCount, true, "deferred");
+    if ((original.copy && input.signal) || (!input.signal && input.isForeground?.() === false)) {
+      return outboxResult(all, input.owner, deliveredCount, true, "foreground_required");
     }
     if (isHeld(original, now)) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
@@ -873,6 +880,8 @@ async function enqueueTimeEntryCommand(input: {
       !fenced &&
       input.requestImmediateDelivery &&
       input.operation !== "copy" &&
+      !all.some((candidate) => candidate.copy && !candidate.copyAcknowledged &&
+        candidate.failureKind !== "permanent" && mobileAccountOwnersEqual(candidate, input.owner)) &&
       isTimeEntryCommandTransportReady(command, new Map(), {
         force: true,
         now: new Date()
