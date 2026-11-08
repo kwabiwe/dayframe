@@ -25,7 +25,7 @@ export const LOCATION_GROUP_JOIN_TOLERANCE_MS = 30_000;
 /** Two ends of a trip at an unsaved place count as the same place within this distance. */
 export const LOCATION_GROUP_SAME_END_METERS = 150;
 
-const LOCATION_SOURCES = ["location_learning", "location_auto_log"];
+export const locationGroupSources = ["location_learning", "location_auto_log"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Corrections of corrections a block is followed back through (Codex r2 on #501). */
 export const LINEAGE_MAX_DEPTH = 8;
@@ -58,6 +58,10 @@ export const STAY_LINEAGE_SQL = `with recursive lineage(root, id, depth) as (
    group by lineage.root`;
 
 type EntryLike = { id: string; source: string; startedAt: string | Date; stoppedAt: string | Date | null };
+
+export function isLocationGroupCandidate(entry: EntryLike) {
+  return Boolean(entry.stoppedAt) && locationGroupSources.includes(entry.source);
+}
 
 type BlockRow = {
   id: string;
@@ -98,7 +102,7 @@ type Queryable = { query<T extends pg.QueryResultRow>(text: string, values?: unk
 export async function getLocationGroups(db: Queryable, session: RequestSession, entries: EntryLike[]) {
   const candidates = new Map<string, EntryLike>();
   for (const entry of entries) {
-    if (entry.stoppedAt && LOCATION_SOURCES.includes(entry.source)) candidates.set(entry.id, entry);
+    if (isLocationGroupCandidate(entry)) candidates.set(entry.id, entry);
   }
   if (candidates.size === 0) return new Map<string, LocationGroup>();
 
