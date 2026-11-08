@@ -143,6 +143,14 @@ describe("durable dashboard projection", () => {
     expect(projected.activeEntry).toBe(running);
     expect(projected.entries.find((candidate) => candidate.id === original.id)).toMatchObject({ stoppedAt: splitAt, durationSeconds: 1800 });
     expect(projected.dayEntries).toEqual([expect.objectContaining({ id: "split-half", startedAt: splitAt, durationSeconds: 1800 })]);
+    const removed = work({ timeEntryCommands: [{ ...copy, copyAcknowledged: true, copyRemovedOnServer: true }] });
+    for (const snapshot of [data, projected]) {
+      const settled = projectDurableLocalWork(snapshot, removed);
+      expect(settled.activeEntry).toBe(running);
+      expect(settled.entries.find((candidate) => candidate.id === original.id)).toMatchObject({ stoppedAt: splitAt });
+      expect(settled.entries.some((candidate) => candidate.id === "split-half")).toBe(false);
+      expect(settled.dayEntries).toEqual([]);
+    }
   });
 
   it("rolls back a refused split immediately against cached server truth while retaining a later edit", () => {
@@ -153,7 +161,7 @@ describe("durable dashboard projection", () => {
     };
     const copy: PendingTimeEntryCommand = {
       ...OWNER, clientCommandId: "refused-split", operation: "copy", targetEntryId: original.id,
-      copy: { action: { kind: "split", splitAt }, copyId: "provisional-half", expectedUpdatedAt: original.updatedAt },
+      copy: { action: { kind: "split", splitAt }, copyId: "provisional-half", expectedUpdatedAt: original.updatedAt, originalStoppedAt: original.stoppedAt },
       createdAt: original.updatedAt, updatedAt: original.updatedAt, attemptCount: 0
     };
     const baseline = bootstrap({
@@ -172,6 +180,13 @@ describe("durable dashboard projection", () => {
     })]);
     expect(rollback.entries.some((candidate) => candidate.id === "provisional-half")).toBe(false);
     expect(rollbackRejectedCompletedCopy(rollback, baseline, original.id, copy.copy!, false)).toBe(rollback);
+    const newerBaseline = { ...baseline, entries: [{ ...original, updatedAt: "2026-08-23T01:01:00.000Z" }] };
+    for (const unavailable of [null, newerBaseline]) {
+      const fallback = rollbackRejectedCompletedCopy(afterEdit, unavailable, original.id, copy.copy!, false);
+      expect(fallback.dayEntries).toEqual([expect.objectContaining({
+        id: original.id, stoppedAt: original.stoppedAt, description: "Later local edit"
+      })]);
+    }
   });
 
   it("restores server truth instead of projecting a permanently rejected edit", () => {

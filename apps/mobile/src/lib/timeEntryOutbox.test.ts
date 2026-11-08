@@ -131,6 +131,27 @@ describe("durable time-entry outbox", () => {
     expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
   });
 
+  it("keeps a replayed-removed receipt for old projections without retrying the copy", async () => {
+    await outbox.enqueueCompletedEntryCopy({
+      owner: OWNER_A, entryId: "removed-copy-original", expectedUpdatedAt: "2026-08-22T11:00:00.000Z",
+      action: { kind: "split", splitAt: "2026-08-22T10:30:00.000Z" },
+      originalStoppedAt: "2026-08-22T11:00:00.000Z"
+    });
+    const send = vi.fn().mockResolvedValue(new Response(JSON.stringify({ replayed: true, newEntryId: null }), { status: 200 }));
+    vi.stubGlobal("fetch", send);
+    const input = { owner: OWNER_A, correlations: new Map<string, string>() };
+    expect(await outbox.synchroniseTimeEntryCommands(input)).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([]);
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A, { includeCompletedCopies: true })).toEqual([
+      expect.objectContaining({
+        copyAcknowledged: true, copyRemovedOnServer: true,
+        copy: expect.objectContaining({ originalStoppedAt: "2026-08-22T11:00:00.000Z" })
+      })
+    ]);
+    expect(await outbox.synchroniseTimeEntryCommands(input)).toMatchObject({ deliveredCount: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["update", "delete"] as const)(
     "keeps a %s command durable when delivery reaches the bounded deadline",
     async (operation) => {

@@ -57,6 +57,7 @@ export type PendingCompletedEntryCopy = {
   action: CompletedEntryCopyAction;
   copyId: string;
   expectedUpdatedAt: string;
+  originalStoppedAt?: string;
 };
 
 export type PendingTimeEntryCommand = MobileAccountOwner & {
@@ -65,6 +66,7 @@ export type PendingTimeEntryCommand = MobileAccountOwner & {
   copy?: PendingCompletedEntryCopy;
   /** Keep a bounded delivered copy for an older cached bootstrap, outside delivery and diagnostics. */
   copyAcknowledged?: true;
+  copyRemovedOnServer?: true;
   targetEntryId?: string;
   optimisticEntryId?: string;
   patch?: TimeEntryUpdatePatch;
@@ -166,6 +168,7 @@ export async function enqueueCompletedEntryCopy(input: {
   owner: MobileAccountOwner;
   entryId: string;
   expectedUpdatedAt: string;
+  originalStoppedAt?: string;
   action: CompletedEntryCopyAction;
   requestImmediateDelivery?: boolean;
 }) {
@@ -178,7 +181,10 @@ export async function enqueueCompletedEntryCopy(input: {
     target: { targetEntryId: input.entryId },
     operation: "copy",
     commandId,
-    copy: { action: input.action, copyId, expectedUpdatedAt: input.expectedUpdatedAt },
+    copy: {
+      action: input.action, copyId, expectedUpdatedAt: input.expectedUpdatedAt,
+      ...(input.action.kind === "split" && input.originalStoppedAt ? { originalStoppedAt: input.originalStoppedAt } : {})
+    },
     requestImmediateDelivery: input.requestImmediateDelivery
   });
 }
@@ -717,6 +723,9 @@ async function runTimeEntryCommandDrain(input: {
     if (heldCommands.has(original.clientCommandId)) {
       return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
     }
+    if (!input.signal && input.isForeground?.() === false) {
+      return currentOutboxResult(input.owner, deliveredCount, true, "foreground_required");
+    }
     markDispatched(original.clientCommandId);
     try {
       const copy = original.copy;
@@ -770,10 +779,8 @@ async function runTimeEntryCommandDrain(input: {
         const removedSince = result?.replayed === true && result?.newEntryId === null;
         if (exists || removedSince) {
           try {
-            const removed = exists
-              ? await acknowledgeCompletedCopy(original.clientCommandId)
-              : await removeDeliveredCommand(original.clientCommandId);
-            if (removed) deliveredCount += 1;
+            const acknowledged = await acknowledgeCompletedCopy(original.clientCommandId, removedSince);
+            if (acknowledged) deliveredCount += 1;
             continue;
           } catch {
             // The server receipt is safe to replay if the phone couldn't persist the acknowledgement.
@@ -1198,7 +1205,7 @@ async function currentOutboxResult(
   );
 }
 
-function acknowledgeCompletedCopy(clientCommandId: string) {
+function acknowledgeCompletedCopy(clientCommandId: string, removedSince: boolean) {
   return withMutation(async () => {
     const current = await readAllCommands();
     const command = current.find((candidate) => candidate.clientCommandId === clientCommandId && candidate.copy);
@@ -1208,7 +1215,7 @@ function acknowledgeCompletedCopy(clientCommandId: string) {
     const obsolete = new Set(delivered.slice(0, Math.max(0, delivered.length - MAX_COMPLETED_COPY_RECEIPTS + 1))
       .map((candidate) => candidate.clientCommandId));
     const receipt: PendingTimeEntryCommand = {
-      ...command, copyAcknowledged: true, failureKind: undefined,
+      ...command, copyAcknowledged: true, copyRemovedOnServer: removedSince ? true : undefined, failureKind: undefined,
       nextAttemptAt: undefined, lastError: undefined, lastStatusCode: undefined
     };
     await writeAllCommands([...next.filter((candidate) => !obsolete.has(candidate.clientCommandId)), receipt]);
@@ -1345,7 +1352,11 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
     workspaceId,
     ...(targetEntryId ? { targetEntryId } : {}),
     ...(optimisticEntryId ? { optimisticEntryId } : {}),
-    ...(copy ? { copy, ...(item.copyAcknowledged === true ? { copyAcknowledged: true as const } : {}) } : {}),
+    ...(copy ? { copy } : {}),
+    ...(copy && item.copyAcknowledged === true ? {
+      copyAcknowledged: true as const,
+      ...(item.copyRemovedOnServer === true ? { copyRemovedOnServer: true as const } : {})
+    } : {}),
     ...(operation === "update" && item.patch && typeof item.patch === "object"
       ? { patch: item.patch as TimeEntryUpdatePatch }
       : {}),
@@ -1379,7 +1390,10 @@ function parseCompletedEntryCopy(value: unknown): PendingCompletedEntryCopy | nu
   }
   if (action?.kind === "duplicate") return { action: { kind: action.kind }, copyId, expectedUpdatedAt };
   const splitAt = action?.kind === "split" ? validIso(action.splitAt) : null;
-  return splitAt ? { action: { kind: "split", splitAt }, copyId, expectedUpdatedAt } : null;
+  const originalStoppedAt = validIso(item.originalStoppedAt) ?? undefined;
+  return splitAt ? {
+    action: { kind: "split", splitAt }, copyId, expectedUpdatedAt, ...(originalStoppedAt ? { originalStoppedAt } : {})
+  } : null;
 }
 
 function generatedCommandId() {

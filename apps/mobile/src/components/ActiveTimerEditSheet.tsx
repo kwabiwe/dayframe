@@ -282,7 +282,11 @@ export function ActiveTimerEditSheet({
   const [splitDraft, setSplitDraft] = useState<{ sheetId: number; wheelId: number; valueMs: number; revision: number } | null>(null);
   const splitWheelSequence = useRef(0);
   const splitScrolledId = useRef(0);
+  const [copyError, setCopyError] = useState<{ sheetId: number; text: string } | null>(null);
   const formScrollRef = useRef<ScrollView>(null);
+  const formContentRef = useRef<View>(null);
+  const splitPanelRef = useRef<View>(null);
+  const copyErrorRef = useRef<Text>(null);
   const splitButtonRef = useRef<View>(null);
   const splitValueRef = useRef<View>(null);
   const [timeWheel, setTimeWheelState] = useState<{ presentationId: number; target: "start" | "end" } | null>(null);
@@ -1523,6 +1527,7 @@ export function ActiveTimerEditSheet({
   const split = splitDraft?.sheetId === presentation.id && completedSplitBounds && !draftHasUnsavedChanges
     ? splitDraft
     : null;
+  const completedCopyError = copyError?.sheetId === presentation.id ? copyError.text : null;
   const copyLocked = busy || draftHasUnsavedChanges;
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
@@ -1909,6 +1914,15 @@ export function ActiveTimerEditSheet({
     }));
   }
 
+  function scrollFormTo(node: View | Text | null) {
+    const content = formContentRef.current;
+    const id = presentation.id;
+    if (!content || !node) return;
+    node.measureLayout(content, (_x, y) => {
+      if (presentationRef.current.id === id) formScrollRef.current?.scrollTo({ y, animated: !reduceMotion });
+    });
+  }
+
   function focusSplitControl(ref: { current: View | null }) {
     const id = presentationRef.current.id;
     void AccessibilityInfo.isScreenReaderEnabled().then((enabled) => {
@@ -1928,7 +1942,7 @@ export function ActiveTimerEditSheet({
       return;
     }
     dismissTransientEditingSurfaces();
-    setValidationError(null);
+    setCopyError(null);
     setSplitDraft({
       sheetId: presentation.id, wheelId: ++splitWheelSequence.current,
       valueMs: defaultSplit(completedSplitBounds), revision: 0
@@ -1938,6 +1952,7 @@ export function ActiveTimerEditSheet({
 
   function closeCompletedSplit() {
     setSplitDraft(null);
+    setCopyError(null);
     focusSplitControl(splitButtonRef);
   }
 
@@ -1957,26 +1972,31 @@ export function ActiveTimerEditSheet({
     });
   }
 
+  function showCompletedCopyError(text: string) {
+    setCopyError({ sheetId: presentation.id, text });
+    AccessibilityInfo.announceForAccessibility(text);
+  }
+
   async function copyCompletedEntry(action: CompletedEntryCopyAction) {
     if (!canCopyCompletedEntry || copyLocked || !entry?.stoppedAt || !onCopyCompletedEntry) return;
     if (action.kind === "duplicate") {
       const end = Date.parse(entry.stoppedAt);
       const start = Date.parse(entry.startedAt);
       if (end + (end - start) > Date.now()) {
-        setValidationError("No room after this block yet. The copy would end in the future.");
+        showCompletedCopyError("No room after this block yet. The copy would end in the future.");
         return;
       }
     }
     const token = beginMutation("saving");
     if (token === null) return;
-    setValidationError(null);
+    setCopyError(null);
     const result = await onCopyCompletedEntry(entry, action).catch(() => ({
       ok: false as const,
       message: "Dayframe could not save this change on your iPhone. Try again."
     }));
     if (!finishMutation(token, result.ok ? "succeeded" : "failed")) return;
     if (result.ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
-    else setValidationError(result.message);
+    else showCompletedCopyError(result.message);
   }
 
   async function stopFromSheet() {
@@ -2746,6 +2766,8 @@ export function ActiveTimerEditSheet({
                 ]}
               >
                 <View
+                  ref={formContentRef}
+                  collapsable={false}
                   pointerEvents="box-none"
                   style={[
                     styles.activeEditContent,
@@ -3259,11 +3281,13 @@ export function ActiveTimerEditSheet({
                     at every density (Codex r1/r2 on #428; the prototype's shrinking dial does not fit). */}
                 {split && completedSplitBounds ? (
                   <Reanimated.View
+                    ref={splitPanelRef}
+                    collapsable={false}
                     layout={localLayoutTransition(reduceMotion)}
-                    onLayout={(event) => {
+                    onLayout={() => {
                       if (splitScrolledId.current === split.wheelId) return;
                       splitScrolledId.current = split.wheelId;
-                      formScrollRef.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: !reduceMotion });
+                      scrollFormTo(splitPanelRef.current);
                     }}
                     style={sheetStyles.splitPanel}
                   >
@@ -3317,6 +3341,12 @@ export function ActiveTimerEditSheet({
                       {formatClockTime(split.valueMs, clockFormat)}–{formatClockTime(completedSplitBounds.stopMs, clockFormat)}
                       {" · "}{formatDuration((completedSplitBounds.stopMs - split.valueMs) / 1000)}
                     </Text>
+                    {completedCopyError ? <Text
+                      ref={copyErrorRef}
+                      onLayout={() => scrollFormTo(copyErrorRef.current)}
+                      {...mobileTextProps("body")}
+                      style={styles.errorText}
+                    >{completedCopyError}</Text> : null}
                     <View style={[sheetStyles.actions, sheetStyles.copyActions]}>
                       <Pressable
                         accessibilityRole="button"
@@ -3365,6 +3395,12 @@ export function ActiveTimerEditSheet({
                   </View>
                 )}
 
+                {!split && completedCopyError ? <Text
+                      ref={copyErrorRef}
+                      onLayout={() => scrollFormTo(copyErrorRef.current)}
+                      {...mobileTextProps("body")}
+                      style={styles.errorText}
+                    >{completedCopyError}</Text> : null}
                 {canCopyCompletedEntry ? (
                   <View style={[sheetStyles.actions, sheetStyles.copyActions]} testID="time-entry-copy-actions">
                     <Pressable

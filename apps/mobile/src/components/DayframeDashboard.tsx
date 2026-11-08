@@ -2121,20 +2121,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const own = deleteTombstones.current;
     const read = () => {
       const mine = ++sequence;
-      readPendingTimeEntryCommands({ userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId }).then(async (commands) => {
+      readPendingTimeEntryCommands(
+        { userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId },
+        { includeCompletedCopies: true }
+      ).then(async (commands) => {
         const readCurrent = () => current && mine === sequence && deleteTombstones.current === own;
         if (!readCurrent()) return;
         own.tombstones.observe(commands);
         setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
-        const refusedCopies = commands.filter((command) => command.copy && command.failureKind === "permanent");
-        if (refusedCopies.length === 0) return;
-        const baseline = await loadCachedDashboardBootstrap().catch(() => null);
+        const terminalCopies = commands.filter((command) => command.copy &&
+          (command.failureKind === "permanent" || command.copyRemovedOnServer));
+        if (terminalCopies.length === 0) return;
+        const baseline = terminalCopies.some((command) => command.failureKind === "permanent")
+          ? await loadCachedDashboardBootstrap().catch(() => null)
+          : null;
         if (!readCurrent()) return;
         const data = latestData.current;
         if (!data || !sameTimerStopOwner(timerStopOwner(data), scopedOwner)) return;
         let next = data;
-        for (const command of refusedCopies) {
+        for (const command of terminalCopies) {
           if (!command.copy || !command.targetEntryId) continue;
+          if (command.copyRemovedOnServer) {
+            next = projectCompletedEntryCopy(next, command.targetEntryId, command.copy, undefined, true);
+            continue;
+          }
           next = rollbackRejectedCompletedCopy(
             next, baseline?.bootstrap ?? null, command.targetEntryId, command.copy,
             own.tombstones.ids().has(command.targetEntryId)
@@ -3033,6 +3043,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         owner,
         entryId: entry.id,
         expectedUpdatedAt: entry.updatedAt,
+        originalStoppedAt: entry.stoppedAt,
         action,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
@@ -3077,7 +3088,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (rejected && ownerCurrent()) {
         Alert.alert(
           "Change not saved",
-          "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
+          "Dayframe couldn't save this change. Try again or discard it in Settings › Sync help."
         );
       }
     })().catch(() => undefined);

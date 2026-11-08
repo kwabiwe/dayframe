@@ -11,8 +11,13 @@ export function projectCompletedEntryCopy(
   data: MobileBootstrap,
   entryId: string,
   copy: PendingCompletedEntryCopy,
-  linkedSource?: MobileTimeEntry
+  linkedSource?: MobileTimeEntry,
+  removedOnServer = false
 ) {
+  if (removedOnServer && mobileTimeEntryById(data, copy.copyId)) {
+    data = optimisticDeleteTimeEntry(data, copy.copyId) ?? data;
+  }
+  if (removedOnServer && copy.action.kind === "duplicate") return data;
   // A fresh bootstrap may already have the copy, or the original may have changed.
   // Duplicate advances the original's version as well, so a deleted copy stays deleted.
   const original = mobileTimeEntryById(data, entryId) ?? linkedSource;
@@ -60,25 +65,43 @@ export function projectCompletedEntryCopy(
     const shortened = copy.action.kind === "split" && from !== undefined && copyStart <= from
       ? entries.filter((candidate) => candidate.id !== entryId)
       : entries;
-    return containsCopy ? insertByStart(shortened) : shortened;
-  }
-
-  function insertByStart(entries: MobileTimeEntry[]) {
-    const next = entries.findIndex((candidate) =>
-      candidate.startedAt < entry.startedAt ||
-      (candidate.startedAt === entry.startedAt && candidate.id < entry.id)
-    );
-    return next < 0 ? [...entries, entry] : [...entries.slice(0, next), entry, ...entries.slice(next)];
+    return containsCopy && !removedOnServer ? insertCompletedEntry(shortened, entry) : shortened;
   }
 
   const dayStart = range ? Date.parse(range.dayStart) : undefined;
   const dayEnd = range ? Date.parse(range.dayEnd) : undefined;
   return {
     ...projected,
-    entries: insertByStart(projected.entries),
+    entries: removedOnServer ? projected.entries : insertCompletedEntry(projected.entries, entry),
     historyEntries: inRange(projected.historyEntries, dayStart === undefined ? undefined : dayStart - 59 * DAY_MS, dayEnd),
     dayEntries: inRange(projected.dayEntries, dayStart, dayEnd),
     weekEntries: inRange(projected.weekEntries, range ? Date.parse(range.weekStart) : undefined, range ? Date.parse(range.weekEnd) : undefined)
+  };
+}
+
+function insertCompletedEntry(entries: MobileTimeEntry[], entry: MobileTimeEntry) {
+  if (entries.some((candidate) => candidate.id === entry.id)) return entries;
+  const next = entries.findIndex((candidate) =>
+    candidate.startedAt < entry.startedAt ||
+    (candidate.startedAt === entry.startedAt && candidate.id < entry.id)
+  );
+  return next < 0 ? [...entries, entry] : [...entries.slice(0, next), entry, ...entries.slice(next)];
+}
+
+function restoreCompletedEntryRanges(data: MobileBootstrap, entry: MobileTimeEntry) {
+  const range = data.dateRange;
+  if (!range || !entry.stoppedAt) return data;
+  const start = Date.parse(entry.startedAt);
+  const end = Date.parse(entry.stoppedAt);
+  const dayStart = Date.parse(range.dayStart);
+  const dayEnd = Date.parse(range.dayEnd);
+  const put = (items: MobileTimeEntry[] | undefined, from: number, until: number) =>
+    items && start < until && end > from ? insertCompletedEntry(items, entry) : items;
+  return {
+    ...data,
+    historyEntries: put(data.historyEntries, dayStart - 59 * DAY_MS, dayEnd),
+    dayEntries: put(data.dayEntries, dayStart, dayEnd),
+    weekEntries: put(data.weekEntries, Date.parse(range.weekStart), Date.parse(range.weekEnd))
   };
 }
 
@@ -93,30 +116,34 @@ export function rollbackRejectedCompletedCopy(
   const provisional = mobileTimeEntryById(data, copy.copyId);
   const wasProvisional = provisional !== null && !provisional.updatedAt;
   let next = wasProvisional ? optimisticDeleteTimeEntry(data, copy.copyId) ?? data : data;
-  if (copy.action.kind !== "split" || originalDeletedLocally || !baseline ||
-      data.user.id !== baseline.user.id || data.workspace.id !== baseline.workspace.id) {
-    return next;
-  }
-  const saved = mobileTimeEntryById(baseline, entryId);
+  if (copy.action.kind !== "split" || originalDeletedLocally) return next;
   const shown = mobileTimeEntryById(next, entryId);
   const matchesVersion = (entry: MobileTimeEntry) =>
     Date.parse(entry.updatedAt ?? "") === Date.parse(copy.expectedUpdatedAt);
-  if (!saved?.stoppedAt || !matchesVersion(saved)) return next;
   if (shown && (!matchesVersion(shown) || shown.stoppedAt !== copy.action.splitAt)) return next;
   if (!shown && !wasProvisional) return next;
-  next = optimisticPatchTimeEntry(next, entryId, { stoppedAt: saved.stoppedAt }) ?? next;
-  if (data.dateRange?.selectedDate === baseline.dateRange?.selectedDate) {
+  const scopedBaseline = baseline && data.user.id === baseline.user.id && data.workspace.id === baseline.workspace.id
+    ? baseline : null;
+  const saved = scopedBaseline ? mobileTimeEntryById(scopedBaseline, entryId) : null;
+  const matchingSaved = saved && matchesVersion(saved) ? saved : null;
+  const previousEnd = matchingSaved?.stoppedAt ?? copy.originalStoppedAt;
+  if (!previousEnd) return next;
+  next = optimisticPatchTimeEntry(next, entryId, { stoppedAt: previousEnd }) ?? next;
+  if (scopedBaseline && matchingSaved && data.dateRange?.selectedDate === scopedBaseline.dateRange?.selectedDate) {
     // A split exactly at a day boundary can remove the first half from that day's collection.
     const restored = mobileTimeEntryById(next, entryId);
     const preserveNewDrafts = (items: MobileTimeEntry[] | undefined) =>
       items?.map((item) => item.id === entryId && restored ? restored : item);
     next = optimisticRestoreTimeEntries(next, {
-      ...baseline,
-      entries: preserveNewDrafts(baseline.entries) ?? baseline.entries,
-      historyEntries: preserveNewDrafts(baseline.historyEntries),
-      dayEntries: preserveNewDrafts(baseline.dayEntries),
-      weekEntries: preserveNewDrafts(baseline.weekEntries)
+      ...scopedBaseline,
+      entries: preserveNewDrafts(scopedBaseline.entries) ?? scopedBaseline.entries,
+      historyEntries: preserveNewDrafts(scopedBaseline.historyEntries),
+      dayEntries: preserveNewDrafts(scopedBaseline.dayEntries),
+      weekEntries: preserveNewDrafts(scopedBaseline.weekEntries)
     }, [entryId]) ?? next;
+  } else {
+    const restored = mobileTimeEntryById(next, entryId);
+    if (restored) next = restoreCompletedEntryRanges(next, restored);
   }
   return next;
 }
