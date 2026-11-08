@@ -2,7 +2,7 @@
 
 import { completedEntriesChanged } from "@dayframe/shared";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import type { CalendarWeekData, TimeEntryRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { addCalendarDays, listRefreshWindow, parseTimelineDateKey, toTimelineDateKey, weekInListRefreshWindow } from "@/lib/timeline-view";
 
@@ -162,10 +162,10 @@ export function useCalendarListWeeks({
     const pending: PendingWeekRead = { generation: forGeneration };
     const reads = pendingReadsRef.current;
     reads.add(pending);
-    return clientFetch(`/api/bootstrap?date=${startKey}`, { cache: "no-store" })
+    return clientFetch(`/api/calendar/week?date=${startKey}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Unable to load the week of ${startKey}: ${response.status}`);
-        return (await response.json()) as BootstrapData;
+        return (await response.json()) as CalendarWeekData;
       })
       .then((payload) => {
         if (generationRef.current !== forGeneration || readSeqRef.current.get(seqKey) !== seq) return false;

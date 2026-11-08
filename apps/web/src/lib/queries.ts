@@ -28,7 +28,7 @@ import {
   missingRequiredColumnError,
   query
 } from "./db";
-import { getLocationGroups, withLocationGroups, type LocationGroup } from "./location/location-groups";
+import { getLocationGroups, isLocationGroupCandidate, locationGroupSources, withLocationGroups, type LocationGroup } from "./location/location-groups";
 import { placeDisplayNameSql } from "./place-display";
 import { reviewProposalHash } from "./review-proposal-hash";
 import { getDevSession, type RequestSession } from "./session";
@@ -385,6 +385,44 @@ export async function runBootstrapReads<const Reads extends readonly (() => Prom
   return results as { -readonly [Index in keyof Reads]: Awaited<ReturnType<Reads[Index]>> };
 }
 
+function bootstrapEntryScopes(dateRange: DashboardDateRange, capturedNow: string) {
+  return {
+    recent: { capturedNow, limit: 100 },
+    history: {
+      capturedNow,
+      overlappingFrom: addDays(new Date(dateRange.dayStart), -59).toISOString(),
+      startedBefore: dateRange.dayEnd,
+      limit: 2000
+    },
+    day: { capturedNow, overlappingFrom: dateRange.dayStart, startedBefore: dateRange.dayEnd, limit: 100 },
+    week: { capturedNow, overlappingFrom: dateRange.weekStart, startedBefore: dateRange.weekEnd, limit: 300 }
+  };
+}
+
+export type CalendarWeekData = {
+  user: { id: string };
+  workspace: { id: string };
+  weekEntries: TimeEntryRow[];
+};
+
+export async function getCalendarWeek(
+  session: RequestSession,
+  options: { selectedDate: string; timeZone?: string | null; now?: Date }
+): Promise<CalendarWeekData> {
+  const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
+  const scopes = bootstrapEntryScopes(dateRange, (options.now ?? new Date()).toISOString());
+  let weekEntries = await getTimeEntries(session, scopes.week);
+  if (weekEntries.some(isLocationGroupCandidate)) {
+    // A named trip can cross a week boundary. Match bootstrap's bounded group context without
+    // pulling full entry rows, catalogues or suggestions into this Calendar-only read.
+    const context = await Promise.all([scopes.recent, scopes.history, scopes.day]
+      .map((scope) => getLocationGroupContext(session, scope)));
+    const groups = await getLocationGroups({ query }, session, [...context.flat(), ...weekEntries]);
+    weekEntries = withLocationGroups(weekEntries, groups);
+  }
+  return { user: { id: session.userId }, workspace: { id: session.workspaceId }, weekEntries };
+}
+
 export async function getBootstrapData(
   session: RequestSession = getDevSession(),
   options: {
@@ -403,7 +441,7 @@ export async function getBootstrapData(
   const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
   const timeZone = options.timeZone ?? null;
   const capturedNow = new Date().toISOString();
-  const historyStart = addDays(new Date(dateRange.dayStart), -59).toISOString();
+  const entryScopes = bootstrapEntryScopes(dateRange, capturedNow);
   const [
     user,
     workspaces,
@@ -438,25 +476,10 @@ export async function getBootstrapData(
     () => getPlaces(session),
     () => getLearnedPlaces(session),
     () => getAutomationRules(session),
-    () => getTimeEntries(session, { capturedNow }),
-    () => getTimeEntries(session, {
-      overlappingFrom: historyStart,
-      startedBefore: dateRange.dayEnd,
-      limit: 2000,
-      capturedNow
-    }),
-    () => getTimeEntries(session, {
-      overlappingFrom: dateRange.dayStart,
-      startedBefore: dateRange.dayEnd,
-      limit: 100,
-      capturedNow
-    }),
-    () => getTimeEntries(session, {
-      overlappingFrom: dateRange.weekStart,
-      startedBefore: dateRange.weekEnd,
-      limit: 300,
-      capturedNow
-    }),
+    () => getTimeEntries(session, entryScopes.recent),
+    () => getTimeEntries(session, entryScopes.history),
+    () => getTimeEntries(session, entryScopes.day),
+    () => getTimeEntries(session, entryScopes.week),
     () => getActiveEntry(session),
     () => getReviewItems(session),
     () => getActivityEvents(session),
@@ -1046,14 +1069,18 @@ export type TimeEntryQueryOptions = {
   limit?: number;
 };
 
-export function buildTimeEntriesQuery(
+const capturedNowParam = "$3";
+
+function timeEntryQueryScope(
   session: RequestSession,
-  options: TimeEntryQueryOptions = {}
+  options: TimeEntryQueryOptions,
+  needsDuration: boolean
 ) {
   const where = ["te.workspace_id = $1", "te.user_id = $2"];
-  const capturedNow = options.capturedNow ?? new Date().toISOString();
-  const values: Array<string | number> = [session.workspaceId, session.userId, capturedNow];
-  const capturedNowParam = "$3";
+  const values: Array<string | number> = [session.workspaceId, session.userId];
+  if (needsDuration || options.overlappingFrom) {
+    values.push(options.capturedNow ?? new Date().toISOString());
+  }
   if (options.entryId) {
     values.push(options.entryId);
     where.push(`te.id = $${values.length}::uuid`);
@@ -1072,6 +1099,19 @@ export function buildTimeEntriesQuery(
   }
   values.push(options.limit ?? 100);
 
+  return {
+    text: `where ${where.join(" and ")}
+     order by te.started_at desc, te.id desc
+     limit $${values.length}`,
+    values
+  };
+}
+
+export function buildTimeEntriesQuery(
+  session: RequestSession,
+  options: TimeEntryQueryOptions = {}
+) {
+  const scope = timeEntryQueryScope(session, options, true);
   return {
     text: `select te.id,
             p.id as "projectId",
@@ -1128,11 +1168,24 @@ export function buildTimeEntriesQuery(
      left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
-     where ${where.join(" and ")}
-     order by te.started_at desc, te.id desc
-     limit $${values.length}`,
-    values
+     ${scope.text}`,
+    values: scope.values
   };
+}
+
+async function getLocationGroupContext(session: RequestSession, options: TimeEntryQueryOptions) {
+  const { text, values } = timeEntryQueryScope(session, options, false);
+  // Keep the original list's cap before filtering location candidates, including manual rows in that cap.
+  const result = await query<Pick<TimeEntryRow, "id" | "source" | "startedAt" | "stoppedAt">>(
+    `select id, source, "startedAt", "stoppedAt" from (
+       select te.id, te.source, te.started_at as "startedAt", te.stopped_at as "stoppedAt"
+       from time_entries te
+       ${text}
+     ) bounded_context
+     where source = any($${values.length + 1}::text[]) and "stoppedAt" is not null`,
+    [...values, locationGroupSources]
+  );
+  return result.rows;
 }
 
 async function getTimeEntries(

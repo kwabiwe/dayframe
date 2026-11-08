@@ -49,7 +49,7 @@ describe("useCalendarListWeeks (continuous days)", () => {
     const { result } = renderHook(() => useCalendarListWeeks({ anchorWeekStart: anchor, currentWeekStart: anchor, enabled: true, owner: "w1:u1", refreshToken: 0 }));
     expect(result.current.reachedLatest).toBe(true);
     act(() => result.current.load("earlier"));
-    expect(clientFetch).toHaveBeenCalledWith("/api/bootstrap?date=2026-10-12", { cache: "no-store" });
+    expect(clientFetch).toHaveBeenCalledWith("/api/calendar/week?date=2026-10-12", { cache: "no-store" });
     await waitFor(() => expect(result.current.entries.map((row) => row.id)).toEqual(["old"]));
     expect(result.current.rangeStart).toEqual(monday(2026, 10, 12));
     expect(result.current.rangeEnd).toEqual(monday(2026, 10, 26));

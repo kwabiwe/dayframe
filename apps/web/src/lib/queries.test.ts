@@ -6,6 +6,7 @@ import {
   confirmedInReviewSql,
   ownerAuthoredInReviewSql,
   getBootstrapData,
+  getCalendarWeek,
   getCategoryUsageRanks,
   getNormalizationContext,
   getTaskSuggestions,
@@ -34,6 +35,26 @@ const session: RequestSession = {
   authMode: "dev",
   scopes: ["app:read"]
 };
+
+describe("Calendar List week query", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("uses only the capped owner-scoped read for a week without completed Location blocks", async () => {
+    const entries = [{ id: "manual-block", source: "manual_app", stoppedAt: "2026-10-26T18:15:00Z" }];
+    mocks.query.mockResolvedValue({ rows: entries });
+    const now = new Date("2026-11-08T12:00:00Z");
+
+    await expect(getCalendarWeek(session, { selectedDate: "2026-10-26", timeZone: "Europe/London", now }))
+      .resolves.toEqual({ user: { id: session.userId }, workspace: { id: session.workspaceId }, weekEntries: entries });
+
+    expect(mocks.query).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("where te.workspace_id = $1 and te.user_id = $2"),
+      [session.workspaceId, session.userId, now.toISOString(), "2026-10-26T00:00:00.000Z",
+        "2026-11-02T00:00:00.000Z", 300]
+    );
+  });
+});
 
 describe("query normalization context", () => {
   beforeEach(() => {

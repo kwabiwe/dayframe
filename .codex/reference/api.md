@@ -22,6 +22,15 @@ Test real SQL with synthetic disposable-localhost fixtures and shared-workspace
 users, as well as malformed/auth/oversize failures. This does not change web
 Reports, ingest, timer mutations or bootstrap caps.
 
+## Calendar List week read
+
+`GET /api/calendar/week?date=YYYY-MM-DD` requires an app session with
+`app:read`. It returns the session's user and workspace IDs and up to 300
+`weekEntries`, ordered as in bootstrap. The web viewer's zone cookie defines the
+week bounds. Finished Location entries use the same bounded grouping context as
+bootstrap so named trips can retain their group across week boundaries. The
+response is private and uncached. This read has no timer reconciliation side effects.
+
 ## Review presentation read
 
 `POST /api/review/presentation` is a private, read-only app-session route for
