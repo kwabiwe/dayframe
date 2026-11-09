@@ -469,7 +469,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
                 serverBootstrap,
                 await readDurableLocalWork(owner)
               );
-              publication.publish(projected);
+              publication.publish(projected, serverBootstrap);
             } finally {
               publication.abandon();
             }

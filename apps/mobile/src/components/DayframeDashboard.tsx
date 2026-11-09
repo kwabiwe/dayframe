@@ -163,6 +163,7 @@ import {
   type DashboardRefreshGuard
 } from "@/lib/dashboardRefresh";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
+import { projectedLastStopIds } from "@/lib/entryLastStop";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
   configureLocationIntelligence
@@ -362,7 +363,6 @@ function DashboardBrandLockup({
     </View>
   );
 }
-const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Correlation pruning reads every durable store, so a refresh does it at most this often. */
 const TIMER_ID_CORRELATION_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 /**
@@ -580,6 +580,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
    */
   // Server bootstraps that completed (a load, a recovered refresh), counted apart from every local publication.
   const [bootstrapCompletions, setBootstrapCompletions] = useState(0);
+  // Keep the raw, accepted owner snapshot distinct from locally projected dashboard rows.
+  const lastStopServerBootstrap = useRef<MobileBootstrap | null>(null);
   function publishDashboardData(next: MobileBootstrap | null) {
     dropCancelledStopFlight(stopFlightLedger.published(latestData.current?.activeEntry?.id, next?.activeEntry?.id));
     latestData.current = next;
@@ -645,6 +647,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
     loadedBootstrap.current = null;
+    lastStopServerBootstrap.current = null;
     timerStateRef.current = null;
     setData(null);
     setReportsRangeRequest(null);
@@ -724,11 +727,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       queueDashboardRefreshAfterConflict();
       return;
     }
-    void applyRecoveredDashboardBootstrap(event.bootstrap, guard);
+    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard);
   }), []);
 
   async function applyRecoveredDashboardBootstrap(
     bootstrap: MobileBootstrap,
+    serverBootstrap: MobileBootstrap,
     guard: DashboardRefreshGuard
   ) {
     const current = latestData.current;
@@ -758,6 +762,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshQueued.current = false;
+    lastStopServerBootstrap.current = serverBootstrap;
     loadedBootstrap.current = next;
     publishDashboardData(next);
     // A server bootstrap landed (a recovered refresh): a completed load (Codex r6 on #615).
@@ -1123,6 +1128,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           serverNow: new Date().toISOString()
         };
       }
+      lastStopServerBootstrap.current = serverBootstrap;
       loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
       // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
@@ -1443,6 +1449,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           filtered,
           pendingDeletionIds
         ) as MobileBootstrap;
+        lastStopServerBootstrap.current = cached.bootstrap;
         loadedBootstrap.current = filtered;
         publishDashboardData(filtered);
         setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
@@ -1783,19 +1790,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
-  const historySourceEntries = useMemo(() => {
-    const shown = timerShownData;
-    if (!shown) return [];
-    return mergeActiveEntry(
-      dedupeEntriesById([
-        ...(shown.historyEntries ?? shown.entries ?? []),
-        ...(shown.entries ?? []),
-        ...(shown.weekEntries ?? []),
-        ...(shown.dayEntries ?? [])
-      ]),
-      shown.activeEntry
-    );
-  }, [timerShownData]);
+  const historySourceEntries = useMemo(() => dashboardHistoryEntries(timerShownData), [timerShownData]);
+  const lastStopBaseline = lastStopServerBootstrap.current;
+  const hasLastStopEditor = Boolean(manualEntryPresentation || activeEditPresentation || calendarEditPresentation);
+  const lastStopProjectedIds = useMemo(() => {
+    if (!hasLastStopEditor || !timerShownData || !lastStopBaseline ||
+        !sameTimerStopOwner(timerStopOwner(timerShownData), timerStopOwner(lastStopBaseline))) return undefined;
+    return projectedLastStopIds(dashboardHistoryEntries(lastStopBaseline), historySourceEntries);
+  }, [hasLastStopEditor, historySourceEntries, lastStopBaseline, timerShownData]);
   // Whole-minute consumers (history, day cards, native Calendar) rebuild once a minute, but never
   // fall behind a start or stop already shown, so a block from this minute is never clipped away.
   const newestShownMs = useMemo(
@@ -1935,10 +1937,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     timerEntryIdentity(stopFlight.entryId) === timerEntryIdentity(displayedActiveEntry.id)
       ? stopFlight.presentation.elapsedSeconds
       : undefined;
-  const recentStoppedAt = useMemo(
-    () => recentStoppedEntryTime(timerShownData?.entries ?? [], timerShownData?.activeEntry ?? null),
-    [timerShownData?.activeEntry, timerShownData?.entries]
-  );
   // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
   // today's last finished block ended, when that was 1 min–4 h before the block started.
   const previousEndForSheet = useMemo(() => {
@@ -4472,7 +4470,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
         entry={manualDraftEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         mode="add"
         onCancel={completeManualEntryExit}
         onCreateActivity={createSheetActivity}
@@ -4493,7 +4494,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={displayedActiveDurationSeconds}
         entry={retainedActiveEntryForSheet}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         onApplySuggestion={applyRunningTimerSuggestion}
         previousEnd={previousEndForSheet}
         onCancel={completeActiveEditorExit}
@@ -4519,7 +4523,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={null}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         mode="entry"
         dismissRequestId={calendarEditDismissRequestId}
         onCancel={completeCalendarEntryExit}
@@ -4638,6 +4645,16 @@ function PasswordVisibilityGlyph({
       ) : null}
     </Svg>
   );
+}
+
+function dashboardHistoryEntries(data: MobileBootstrap | null): TimeEntry[] {
+  if (!data) return [];
+  return mergeActiveEntry(dedupeEntriesById([
+    ...(data.historyEntries ?? data.entries ?? []),
+    ...(data.entries ?? []),
+    ...(data.weekEntries ?? []),
+    ...(data.dayEntries ?? [])
+  ]), data.activeEntry);
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {
@@ -4771,31 +4788,6 @@ function addDaysToDate(date: Date, days: number) {
 
 function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
   return left.userId === right.userId && left.workspaceId === right.workspaceId;
-}
-
-function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
-  if (!activeEntry) return null;
-  const activeStart = new Date(activeEntry.startedAt).getTime();
-  if (Number.isNaN(activeStart)) return null;
-
-  let recentStop: string | null = null;
-  let recentStopTime = 0;
-  for (const entry of entries) {
-    if (!entry.stoppedAt) continue;
-    const stoppedAt = new Date(entry.stoppedAt).getTime();
-    if (
-      Number.isNaN(stoppedAt) ||
-      stoppedAt > activeStart ||
-      activeStart - stoppedAt > RECENT_LAST_STOP_WINDOW_MS ||
-      stoppedAt <= recentStopTime
-    ) {
-      continue;
-    }
-    recentStop = entry.stoppedAt;
-    recentStopTime = stoppedAt;
-  }
-
-  return recentStop;
 }
 
 function pad2(value: number) {

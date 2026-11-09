@@ -24,12 +24,13 @@ describe("fixed timer-sheet layout contract", () => {
     expect(dial).toContain("One turn is an hour.");
     expect(dial).toContain('testID="time-entry-dial-shortcuts"');
     expect(dial).toContain('accessibilityState={{ disabled, expanded: showShortcuts }}');
-    expect(dial).toContain('testID: "time-entry-set-last-stop-time"');
+    expect(dial).not.toContain('testID: "time-entry-set-last-stop-time"');
+    expect(sheet).toContain('testID="time-entry-set-last-stop-time"');
     expect(dial).toContain('testID: "time-entry-round-stop-time"');
     expect(dial).toContain('testID: "time-entry-round-duration"');
-    // Rounding is for stopped blocks; the last stop only when it would move the start.
+    // Rounding stays in the stopped dial menu, while Last stop is beneath Start.
     expect(dial).toContain('if (mode === "stopped") {');
-    expect(dial).toContain("Math.abs(lastStopMs - startMs) >= 60_000");
+    expect(dial).not.toContain("Last stop");
     // A turn of the dial, a shortcut or a new presentation closes the shortcuts.
     expect(dial).toMatch(/phase === "began"\) \{\s*setShortcutsOpen\(false\)/);
     expect(dial).toContain("entering={localPresenceEntering(reduceMotion, \"fade\")}");

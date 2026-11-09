@@ -789,6 +789,10 @@ function createStyles(theme: MobileTheme) {
       shadowOffset: { width: 0, height: -8 },
       elevation: 8
     },
+    finishedEditSheetShadow: {
+      shadowOpacity: 0,
+      boxShadow: [{ offsetX: 0, offsetY: -8, blurRadius: 40, color: theme.shadow }]
+    },
     activeEditBody: {
       position: "relative",
       flexShrink: 1,

@@ -19,13 +19,14 @@ describe("entry sheet start-at-the-previous-end chip", () => {
     expect(dashboard).toMatch(/const startMs = Date\.parse\(active\.startedAt\);/);
     // Only the running sheet is given it.
     expect(dashboard.match(/previousEnd=\{previousEndForSheet\}/g)).toHaveLength(1);
-    expect(dashboard).toMatch(/lastStoppedAt=\{recentStoppedAt\}\s*onApplySuggestion=\{applyRunningTimerSuggestion\}\s*previousEnd=\{previousEndForSheet\}/);
+    expect(dashboard).toMatch(/onApplySuggestion=\{applyRunningTimerSuggestion\}\s*previousEnd=\{previousEndForSheet\}/);
   });
 
   it("is fixed for each presentation, so it never appears or leaves while the sheet is up", () => {
     expect(sheet).toContain("setPresentedPreviousEnd(previousEndRef.current);");
     expect(sheet).toMatch(/setStartTimeEdited\(false\);\s*\/\/ Only the running block's sheet is given one \(Dashboard\)\.\s*setPresentedPreviousEnd/);
-    expect(sheet).toContain("{presentedPreviousEnd ? (");
+    expect(sheet).toContain("const lastStopMatchesPreviousEnd =");
+    expect(sheet).not.toContain('testID="time-entry-previous-end"');
   });
 
   it("moves the draft start through the dial's path and toggles back to the block's own start", () => {
@@ -55,25 +56,22 @@ describe("entry sheet start-at-the-previous-end chip", () => {
     expect(sheet).toContain("const chipRowBudget = Math.max(1, ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity] - (presentedPreviousEnd ? 1 : 0));");
   });
 
-  it("is a compact filled pill under the START card: back arrow + time, the name spoken only (owner, 15 Oct)", () => {
-    const chip = sheet.slice(sheet.indexOf('testID="time-entry-previous-end"') - 1200, sheet.indexOf('testID="time-entry-previous-end"') + 900);
-    expect(chip).toContain("accessibilityLabel={`Start from ${formatClockTime(previousEndMs, clockFormat)}, after ${presentedPreviousEnd.previousName}`}");
-    expect(chip).toContain("accessibilityState={{ disabled: busy, selected: previousEndApplied }}");
+  it("uses one compact Last stop control with the existing previous-end toggle when they match", () => {
+    const id = 'testID="time-entry-set-last-stop-time"';
+    const chip = sheet.slice(sheet.indexOf(id) - 1800, sheet.indexOf(id) + 900);
+    expect(chip).toContain("`${lastStopLabel}, after ${presentedPreviousEnd.previousName}`");
+    expect(chip).toContain("accessibilityState={{ disabled: lastStopDisabled, selected: lastStopMatchesPreviousEnd && previousEndApplied }}");
     expect(chip).toContain("hitSlop={{ top: 6, bottom: 6 }}");
     expect(chip).toContain("{ backgroundColor: theme.surfaceMuted }");
-    // The registry's back arrow (a check once applied), then only "From HH:MM".
-    expect(chip).toContain("glyph={previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}");
-    expect(chip).toMatch(/>\s*From \{formatClockTime\(previousEndMs, clockFormat\)\}\s*<\/Text>/);
-    expect(chip).not.toContain("· after");
-    expect(chip).not.toMatch(/\{presentedPreviousEnd\.previousName\}\s*</);
-    expect(chip).not.toMatch(/theme\.(accent|primary|coral|live)/);
-    expect(sheet).toMatch(/previousEndPill: \{[^}]*borderRadius: 999[^}]*minHeight: 32, minWidth: 44/);
+    expect(chip).toContain("DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd");
+    expect(sheet).toContain('"No previous entry on this day"');
+    expect(sheet).toMatch(/lastStopPill: \{[^}]*borderRadius: 999[^}]*minHeight: 32, minWidth: 44/);
   });
 
   it("sits in the START card's column, directly under the card", () => {
     const column = sheet.slice(sheet.indexOf("sheetStyles.startColumn"), sheet.indexOf("{hasStoppedTime ? ("));
     expect(column).toContain('testID="time-entry-start-card"');
-    expect(column.indexOf('testID="time-entry-start-date"')).toBeLessThan(column.indexOf('testID="time-entry-previous-end"'));
+    expect(column.indexOf('testID="time-entry-start-date"')).toBeLessThan(column.indexOf('testID="time-entry-set-last-stop-time"'));
     expect(sheet).toContain("startColumn: { flex: 1, gap: 6, minWidth: 0 },");
   });
 });

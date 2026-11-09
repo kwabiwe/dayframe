@@ -12,12 +12,20 @@ describe("time-entry sheet head and actions", () => {
     expect(sheet).not.toContain("timeEntryHero");
   });
 
-  it("ends with Discard and Stop while running, Delete and Start again when stopped", () => {
+  it("keeps Discard and Stop while running and uses the header Actions menu for finished blocks", () => {
     const start = sheet.indexOf(`testID="time-entry-sheet-actions"`);
     const actions = sheet.slice(start, sheet.indexOf("<HistoricalSuggestionsOverlay", start));
     expect(actions.indexOf('testID="time-entry-sheet-delete"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-stop"'));
-    expect(actions.indexOf('testID="time-entry-sheet-stop"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-start-again"'));
-    expect(actions).toContain('{isRunningMode || isAddMode ? "Discard" : "Delete"}');
+    expect(actions).not.toContain('testID="time-entry-sheet-start-again"');
+    const menu = sheet.slice(sheet.indexOf('testID="time-entry-actions-options"'), start);
+    const options = ["time-entry-split", "time-entry-duplicate", "time-entry-sheet-start-again", "time-entry-sheet-delete"];
+    let after = -1;
+    for (const option of options) {
+      const index = menu.indexOf(`testID="${option}"`);
+      expect(index).toBeGreaterThan(after);
+      after = index;
+    }
+    expect(menu).toContain('label="Delete"');
     expect(sheet).toContain("const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);");
   });
 

@@ -38,7 +38,7 @@ import Reanimated, {
   withSpring,
   withTiming
 } from "react-native-reanimated";
-import { MOBILE_MOTION } from "@/lib/motion";
+import { localLayoutTransition, MOBILE_MOTION } from "@/lib/motion";
 import {
   backdropProgressForTranslation,
   canSettleSwipeGesture,
@@ -98,6 +98,7 @@ export function useSheetGestureExclusion() {
 
 type SwipeDismissSheetProps = {
   accessibilityLabel?: string;
+  animateContentSize?: boolean;
   backdropAccessibilityLabel: string;
   backdropStyle: StyleProp<ViewStyle>;
   children: ReactNode;
@@ -125,6 +126,7 @@ type SwipeDismissSheetProps = {
 export const SwipeDismissSheet = forwardRef<SwipeDismissSheetHandle, SwipeDismissSheetProps>(
 function SwipeDismissSheet({
   accessibilityLabel,
+  animateContentSize = false,
   backdropAccessibilityLabel,
   backdropStyle,
   children,
@@ -149,6 +151,7 @@ function SwipeDismissSheet({
   visible
 }, ref) {
   const { height: windowHeight } = useWindowDimensions();
+  const contentSizeTransition = useMemo(() => animateContentSize ? localLayoutTransition(reduceMotion) : undefined, [animateContentSize, reduceMotion]);
   const initialExitTarget = windowHeight + OFFSCREEN_PADDING;
   const translationY = useSharedValue(initialExitTarget);
   const exitTarget = useSharedValue(initialExitTarget);
@@ -638,6 +641,7 @@ function SwipeDismissSheet({
     <Reanimated.View
       accessibilityLabel={accessibilityLabel}
       accessibilityViewIsModal
+      layout={contentSizeTransition}
       onAccessibilityEscape={disabled ? undefined : requestBackdropDismiss}
       onLayout={(event) => {
         const measuredTarget = Math.max(
@@ -649,7 +653,7 @@ function SwipeDismissSheet({
         onLayout?.(event);
       }}
       pointerEvents={visible ? "auto" : "none"}
-      style={[style, sheetAnimatedStyle]}
+      style={[style, animateContentSize ? CLIP_RESIZING_CONTENT_STYLE : null, sheetAnimatedStyle]}
       testID={testID}
     >
       {dismissHandle}
@@ -683,6 +687,9 @@ function SwipeDismissSheet({
     </>
   );
 });
+
+// The incoming editor lays out at its final size before the animated sheet reaches it.
+const CLIP_RESIZING_CONTENT_STYLE: ViewStyle = { overflow: "hidden" };
 
 const BACKDROP_PRESSABLE_STYLE: ViewStyle = {
   flex: 1
