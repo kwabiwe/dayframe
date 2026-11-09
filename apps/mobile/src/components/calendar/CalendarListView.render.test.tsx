@@ -1,8 +1,10 @@
+import { useState, type ReactNode } from "react";
 import { act, create } from "react-test-renderer";
 import { reviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileReviewItem } from "../../lib/api";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime, type LocationTimeline } from "@dayframe/shared";
+import { useCalendarPlaceFilter } from "../../lib/calendarPreferences";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -27,14 +29,35 @@ vi.mock("react-native", async () => {
   View: "View",
   };
 });
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" }, runOnJS: (fn: unknown) => fn }));
+// The List's day swipe (a horizontal pan on the List).
+const swipe = vi.hoisted(() => ({ onEnd: null as null | ((event: { translationX: number; velocityX: number }, success: boolean) => void), tick: vi.fn() }));
+vi.mock("../../lib/daySwipeHaptic", () => ({ playDaySwipeTick: swipe.tick }));
+vi.mock("react-native-gesture-handler", () => {
+  function Pan() {
+    const pan: Record<string, unknown> = {};
+    for (const method of ["enabled", "activeOffsetX", "failOffsetY"]) pan[method] = () => pan;
+    pan.onEnd = (handler: unknown) => {
+      swipe.onEnd = handler as typeof swipe.onEnd;
+      return pan;
+    };
+    return pan;
+  }
+  return { Gesture: { Pan }, GestureDetector: ({ children }: { children: unknown }) => children };
+});
+// "All places" is remembered on this device (owner, 28 Oct 2026, concern 3).
+const storage = vi.hoisted(() => ({ values: new Map<string, string>(), getItem: vi.fn(), setItem: vi.fn() }));
+vi.mock("@react-native-async-storage/async-storage", () => ({ default: {
+  getItem: async (key: string) => storage.getItem(key) ?? storage.values.get(key) ?? null,
+  setItem: async (key: string, value: string) => { storage.setItem(key, value); storage.values.set(key, value); }
+} }));
 vi.mock("../../lib/motion", () => ({
   localLayoutTransition: () => undefined, localPresenceEntering: () => undefined, localPresenceExiting: () => undefined
 }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: (props: { glyph: string }) => `icon:${props.glyph}` }));
 
-import { CalendarListView } from "./CalendarListView";
+import { CalendarListView as List } from "./CalendarListView";
 
 // Location v4 step 9: a synthetic day in Exampleton, made-up names and ids.
 const at = (hour: number, minute = 0) => Date.UTC(2026, 9, 22, hour, minute);
@@ -61,13 +84,26 @@ const timeline: LocationTimeline = {
   ]
 };
 
-function render(props: Partial<Parameters<typeof CalendarListView>[0]> = {}) {
+type ListProps = Omit<Parameters<typeof List>[0], "showAllPlaces" | "onToggleShowAllPlaces">;
+
+function CalendarListView(props: ListProps) {
+  const [showAllPlaces, setShowAllPlaces] = useState(false);
+  return <List {...props} showAllPlaces={showAllPlaces} onToggleShowAllPlaces={() => setShowAllPlaces((current) => !current)} />;
+}
+
+function listProps(onOpenEntry = vi.fn()): ListProps {
+  return {
+    clockFormat: "24h", dayEndMs: at(24), dayStartMs: at(0),
+    entries: [block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)],
+    loggedLabel: "4h", nowMs: at(18), onOpenEntry, onRefresh: vi.fn(), reduceMotion: false, refreshing: false, theme, timeline
+  };
+}
+
+function render(props: Partial<ListProps> = {}) {
   let tree!: ReturnType<typeof create>;
   const onOpenEntry = vi.fn();
   act(() => {
-    tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
-      loggedLabel="4h" nowMs={at(18)} onOpenEntry={onOpenEntry} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
-      theme={theme} timeline={timeline} {...props} />);
+    tree = create(<CalendarListView {...listProps(onOpenEntry)} {...props} />);
   });
   return { tree, onOpenEntry };
 }
@@ -75,7 +111,111 @@ const labels = (tree: ReturnType<typeof create>) => tree.root.findAll((node) => 
   .map((node) => node.props.accessibilityLabel as string);
 const textOf = (tree: ReturnType<typeof create>) => JSON.stringify(tree.toJSON());
 
+function delayStoredPlacesFilter() {
+  let finish!: (value: string | null) => void;
+  const pending = new Promise<string | null>((resolve) => { finish = resolve; });
+  storage.getItem.mockReturnValueOnce(pending);
+  return finish;
+}
+
+function PlaceFilterOwner({ children }: { children: (filter: ReturnType<typeof useCalendarPlaceFilter>) => ReactNode }) {
+  return children(useCalendarPlaceFilter());
+}
+
+function renderPlacesFilter(visible = true, props: Partial<ListProps> = {}) {
+  let tree!: ReturnType<typeof create>;
+  let toggle!: () => void;
+  const defaults = listProps();
+  const screen = (showList: boolean) => (
+    <PlaceFilterOwner>
+      {(filter) => {
+        toggle = filter.onToggleShowAllPlaces;
+        return showList ? <List {...defaults} {...props} {...filter} /> : null;
+      }}
+    </PlaceFilterOwner>
+  );
+  act(() => { tree = create(screen(visible)); });
+  return { tree, setListVisible: (showList: boolean) => act(() => tree.update(screen(showList))), toggle: () => act(() => toggle()) };
+}
+
 describe("CalendarListView (location v4 step 9)", () => {
+  it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {
+    storage.getItem.mockClear();
+    const finish = delayStoredPlacesFilter();
+    const { tree, setListVisible } = renderPlacesFilter(false, { reduceMotion });
+    await act(async () => finish("1"));
+    for (let round = 0; round < 2; round += 1) {
+      setListVisible(true);
+      expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: true });
+      expect(textOf(tree)).toContain("Fewer places");
+      expect(textOf(tree)).toContain('"Home"');
+      expect(textOf(tree).indexOf('"Home"')).toBeLessThan(textOf(tree).indexOf('"Work"'));
+      setListVisible(false);
+    }
+    expect(storage.getItem).toHaveBeenCalledExactlyOnceWith("dayframe.calendar.showAllPlaces");
+    act(() => tree.unmount());
+  });
+
+  it("keeps a new filter choice after a stale saved preference resolves", async () => {
+    storage.values.clear();
+    const finish = delayStoredPlacesFilter();
+    const { tree, toggle } = renderPlacesFilter();
+    const filter = () => tree.root.findByProps({ testID: "calendar-list-show-all" });
+    toggle();
+    expect(filter().props.accessibilityState).toEqual({ selected: true });
+    await act(async () => finish("0"));
+    expect(filter().props.accessibilityState).toEqual({ selected: true });
+    expect(storage.values.get("dayframe.calendar.showAllPlaces")).toBe("1");
+    act(() => tree.unmount());
+  });
+
+  it("keeps the loading body and header on a cold entry until the filter is known", async () => {
+    const finish = delayStoredPlacesFilter();
+    const { tree } = renderPlacesFilter();
+    expect(tree.root.findByProps({ testID: "calendar-list-filter-slot" })).toBeTruthy();
+    expect(tree.root.findByProps({ testID: "calendar-list-loading" })).toBeTruthy();
+    expect(textOf(tree)).not.toContain('"Work"');
+    await act(async () => finish("1"));
+    expect(textOf(tree)).toContain("Fewer places");
+    expect(textOf(tree)).toContain('"Home"');
+    expect(textOf(tree)).toContain('"Work"');
+    act(() => tree.unmount());
+  });
+
+  it("keeps the default All places action available when the device read fails", async () => {
+    storage.getItem.mockRejectedValueOnce(new Error("Storage unavailable"));
+    const { tree } = renderPlacesFilter();
+    await act(async () => undefined);
+    expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: false });
+    expect(textOf(tree)).toContain("All places");
+    expect(textOf(tree)).not.toContain('"Home"');
+    act(() => tree.unmount());
+  });
+
+  it("shows the default after 800 ms and keeps real rows stable when a stalled read arrives", async () => {
+    vi.useFakeTimers();
+    storage.setItem.mockClear();
+    const finish = delayStoredPlacesFilter();
+    const { tree } = renderPlacesFilter();
+    try {
+      act(() => { vi.advanceTimersByTime(799); });
+      expect(tree.root.findByProps({ testID: "calendar-list-loading" })).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(1); });
+      const defaultList = textOf(tree);
+      expect(defaultList).toContain("All places");
+      expect(defaultList).not.toContain('"Home"');
+      await act(async () => finish("1"));
+      expect(textOf(tree)).toBe(defaultList);
+      const filter = tree.root.findByProps({ testID: "calendar-list-show-all" });
+      act(() => filter.props.onPress());
+      expect(textOf(tree)).toContain('"Home"');
+      expect(storage.setItem).toHaveBeenCalledExactlyOnceWith("dayframe.calendar.showAllPlaces", "1");
+    } finally {
+      act(() => tree.unmount());
+      vi.useRealTimers();
+    }
+  });
+
   it("lists the day's blocks oldest first, with an unlogged unknown place between them, and opens a block's editor", () => {
     const { tree, onOpenEntry } = render();
     const order = labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label));
@@ -114,30 +254,59 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(JSON.stringify(coffeeRow.props.children)).not.toContain("icon:map-pin");
   });
 
-  it("shows a trip block's route and modes, and opens its legs", () => {
+  it("shows a trip block's route on its own line and its modes under it, the modes opening its legs (owner items C, G)", () => {
     const { tree } = render();
     // VoiceOver reads the route and modes with the block itself (Codex r1 on #570).
     expect(labels(tree)).toContain("Commute. Home → Office. Legs: Walk, Bus?");
-    const toggle = tree.root.findByProps({ accessibilityLabel: "Show the legs of Commute" });
+    const route = tree.root.findAll((node) => node.type === ("Text" as never) && node.props.children === "Home → Office");
+    expect(route).toHaveLength(1);
+    // No right-hand chevron: the modes line is the legs' toggle.
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === "Show the legs of Commute")).toHaveLength(0);
+    const toggle = tree.root.findByProps({ accessibilityLabel: "Show the 2 legs" });
     expect(toggle.props.accessibilityState).toEqual({ expanded: false });
+    expect(JSON.stringify(toggle.props.children)).toContain("Bus?");
     act(() => { toggle.props.onPress(); });
     expect(tree.root.findByProps({ accessibilityLabel: "Legs" })).toBeTruthy();
-    expect(tree.root.findByProps({ accessibilityLabel: "Hide the legs of Commute" }).props.accessibilityState).toEqual({ expanded: true });
+    expect(tree.root.findByProps({ accessibilityLabel: "Hide the 2 legs" }).props.accessibilityState).toEqual({ expanded: true });
   });
 
-  it("adds Home and logged places as faint rows on request", () => {
-    const { tree } = render();
-    const toggle = tree.root.findAll((node) => node.type === ("Pressable" as never) && node.props.accessibilityState?.selected === false)[0];
-    act(() => { toggle.props.onPress(); });
+  it("adds Home as a quiet row with \"All places\" by the day's header, and remembers it on this device (concern 3)", async () => {
+    storage.values.clear();
+    storage.setItem.mockClear();
+    const { tree } = renderPlacesFilter();
+    await act(async () => undefined);
+    const filter = tree.root.findByProps({ testID: "calendar-list-show-all" });
+    expect(JSON.stringify(filter.props.children)).toContain("All places");
+    expect(filter.props.accessibilityState).toEqual({ selected: false });
+    act(() => { filter.props.onPress(); });
     const text = textOf(tree);
-    expect(text).toContain("Home");
-    expect(text).toContain("Hide Home and logged places");
+    expect(text).toContain("\"Home\"");
+    expect(text).toContain("Fewer places");
+    // The old filled toggle under the List is gone.
+    expect(text).not.toContain("Show Home and every place");
+    expect(text).not.toContain("Hide Home and logged places");
+    expect(storage.setItem).toHaveBeenCalledWith("dayframe.calendar.showAllPlaces", "1");
+    act(() => tree.unmount());
+    const { tree: reopened } = renderPlacesFilter();
+    await act(async () => undefined);
+    expect(textOf(reopened)).toContain('"Home"');
+    expect(reopened.root.findByProps({ testID: "calendar-list-show-all" }).props.accessibilityState).toEqual({ selected: true });
+    act(() => reopened.unmount());
+  });
+
+  it("never lists a place your blocks cover, even with All places (concern 2)", () => {
+    const { tree } = render();
+    act(() => { tree.root.findByProps({ testID: "calendar-list-show-all" }).props.onPress(); });
+    // Office (09:00–12:00) is all inside the Work block.
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-office")).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-home").length).toBeGreaterThan(0);
   });
 
   it("keeps the blocks when the day's places could not be read", () => {
     const { tree } = render({ timeline: null });
     expect(labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label))).toEqual(["Commute", "Work"]);
-    expect(textOf(tree)).not.toContain("Show Home and every place");
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-show-all")).toHaveLength(0);
+    expect(tree.root.findByProps({ testID: "calendar-list-filter-slot" }).props.style.minHeight).toBeGreaterThan(0);
   });
 
   it("reads the journey in progress whole: where from, since when and its legs so far (Codex r2 on #570)", () => {
@@ -150,104 +319,537 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
   });
 
-  it("answers a \"?\" where it sits: its question opens under the row, and the chip walks the questions (step 14 part 3b)", () => {
-    const onAnswerCheck = vi.fn();
-    const onOpenCheck = vi.fn();
-    const question = (text: string, more = false) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more, opens: false });
-    const { tree } = render({
-      checks: [
-        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
-        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
-      ],
-      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
-      checkQuestions: new Map([["c-unknown", question("Log Unknown place, 12:00–13:00?", true)], ["c-sleep", question("Log your sleep?")]]),
-      onAnswerCheck,
-      onOpenCheck
-    });
-    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
-    expect(questions()).toHaveLength(0);
-    // The place's "?" opens its question under its row, with More… for picking another place.
-    const placeCheck = tree.root.findByProps({ accessibilityLabel: "Check Unknown place" });
-    expect(placeCheck.props.accessibilityState).toEqual({ expanded: false });
-    act(() => { placeCheck.props.onPress(); });
-    expect(questions()).toHaveLength(1);
-    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place, 12:00–13:00?");
-    // Card D item 9: the inset surface, "Log it" a neutral dark pill (textPrimary, background text), the skip muted.
-    const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
-    expect(flat(questions()[0].props.style).backgroundColor).toBe("#0A0");
-    const log = tree.root.findByProps({ testID: "calendar-list-answer-log" });
-    expect(flat(log.props.style({ pressed: false })).backgroundColor).toBe("#FFF");
-    expect(flat(log.findByType("Text" as never).props.style).color).toBe("#000");
-    expect(flat(tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.style({ pressed: false })).backgroundColor).toBe("#222");
-    expect(tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.accessibilityState).toEqual({ expanded: true });
-    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-more" }).props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
-    // Answering closes the question and hands the answer to the caller (it holds it for Undo).
-    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-log" }).props.onPress(); });
-    expect(onAnswerCheck).toHaveBeenCalledWith("c-unknown", true);
-    expect(questions()).toHaveLength(0);
-    // "N to check" opens the next question, from the top, and scrolls to it; a second tap moves on.
-    const chip = tree.root.findByProps({ accessibilityHint: "Opens the next one" });
-    act(() => { chip.props.onPress(); });
-    expect(JSON.stringify(questions()[0].props.children)).toContain("Log your sleep?");
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
-    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
-    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place");
-    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.onPress(); });
-    expect(onAnswerCheck).toHaveBeenLastCalledWith("c-unknown", false);
-    // Without answers here a "?" still opens the suggestion, as before.
-    expect(onOpenCheck).toHaveBeenCalledTimes(1);
+  const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now" });
+  const questions = (tree: ReturnType<typeof create>) =>
+    tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
+  const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
+  // A compact pill: 32 points tall, 16 across, 14-point bold, its hitSlop making a 44-point target.
+  const expectCompactPill = (node: { props: Record<string, unknown> }) => {
+    const style = flat((node.props.style as (state: { pressed: boolean }) => unknown)({ pressed: false }));
+    expect(style).toMatchObject({ minHeight: 32, paddingHorizontal: 16 });
+    const slop = node.props.hitSlop as { top: number; bottom: number };
+    expect((style.minHeight as number) + slop.top + slop.bottom).toBeGreaterThanOrEqual(44);
+  };
+  const placeCheck = { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
+  const sleepCheck = { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) };
+  const visited = { question: "Visited Pret?", detail: null, logLabel: "Yes", skipLabel: "Not now" };
+
+  it.each([
+    ["a direct check", { openCheckRequest: { id: placeCheck.id, request: 1 } }],
+    ["Today's first check", { scrollToFirstCheck: 1 }]
+  ] as const)("opens %s once the cold filter and real rows are ready", async (_label, request) => {
+    const finish = delayStoredPlacesFilter();
+    const onOpenPlace = vi.fn();
+    const { tree } = renderPlacesFilter(true, { ...request, checks: [placeCheck], onOpenPlace });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    await act(async () => finish("1"));
+    expect(onOpenPlace).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "seg-unknown" }), "Unknown place");
+    act(() => tree.unmount());
   });
 
-  it("asks a trip Yes, Edit, Not now, and Edit opens the trip on its own screen (card A)", () => {
+  it("opens a place's sheet from its row, answers Yes from the row's compact pill, and never shows the question under it (owner, 28 Oct 2026)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenPlace = vi.fn();
+    const { tree } = render({
+      checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]),
+      checkQuestions: new Map([["c-unknown", visited]]), onAnswerCheck, onOpenCheck: vi.fn(), onOpenPlace
+    });
+    const row = tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" });
+    // Q7: an unnamed place reads its guess; the row says it needs a look (the one amber dot).
+    expect(row.props.accessibilityLabel).toContain("Pret?");
+    expect(row.props.accessibilityLabel).toContain("Needs a look");
+    act(() => { row.props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Pret?");
+    expect(questions(tree)).toHaveLength(0);
+    const yes = tree.root.findByProps({ testID: "calendar-list-yes-c-unknown" });
+    expectCompactPill(yes);
+    act(() => { yes.props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-unknown", true);
+    expect(questions(tree)).toHaveLength(0);
+    // No outlined "?" check button beside the row.
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === "Check Unknown place")).toHaveLength(0);
+  });
+
+  it("opens Apple Health's question under its row, with compact pills (card D item 9)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenCheck = vi.fn();
+    const { tree } = render({
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck, onOpenCheck, onOpenPlace: vi.fn()
+    });
+    expect(questions(tree)).toHaveLength(0);
+    const sleepRow = tree.root.findByProps({ testID: "calendar-list-check-c-sleep" });
+    expect(sleepRow.props.accessibilityState).toEqual({ expanded: false });
+    act(() => { sleepRow.props.onPress(); });
+    expect(questions(tree)).toHaveLength(1);
+    expect(JSON.stringify(questions(tree)[0].props.children)).toContain("Log your sleep?");
+    expect(tree.root.findByProps({ testID: "calendar-list-check-c-sleep" }).props.accessibilityState).toEqual({ expanded: true });
+    // The inset surface, "Log it" a neutral dark pill (textPrimary, background text), the skip muted; every pill compact.
+    expect(flat(questions(tree)[0].props.style).backgroundColor).toBe("#0A0");
+    const log = tree.root.findByProps({ testID: "calendar-list-answer-log" });
+    expect(flat(log.props.style({ pressed: false })).backgroundColor).toBe("#FFF");
+    expect(flat(log.findByType("Text" as never).props.style)).toMatchObject({ color: "#000", fontSize: 14, fontWeight: "700" });
+    const skip = tree.root.findByProps({ testID: "calendar-list-answer-skip" });
+    expect(flat(skip.props.style({ pressed: false })).backgroundColor).toBe("#222");
+    for (const pill of [log, skip]) expectCompactPill(pill);
+    // Step 15: no "More…" to a Review screen.
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    // Answering closes the question and hands the answer to the caller (it holds it for Undo).
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-sleep", false);
+    expect(questions(tree)).toHaveLength(0);
+  });
+
+  it("asks a sheetless trip Yes and Not now, with no Edit to a Review screen (card A; step 15)", () => {
     const onAnswerCheck = vi.fn();
     const onOpenCheck = vi.fn();
     const { tree } = render({
       checks: [{ id: "c-trip", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-trip", "Getting around"]]),
-      checkQuestions: new Map([["c-trip", { question: "Getting around, 12:00–13:00?", detail: null, logLabel: "Yes", skipLabel: "Not now",
-        more: true, moreLabel: "Edit", opens: false }]]),
+      checkQuestions: new Map([["c-trip", { question: "Getting around, 12:00–13:00?", detail: null, logLabel: "Yes", skipLabel: "Not now" }]]),
       onAnswerCheck,
       onOpenCheck
     });
-    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-trip" }).props.onPress(); });
     const answers = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-") &&
       typeof node.props.onPress === "function").map((node) => node.props.testID);
-    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-edit", "calendar-list-answer-skip"]);
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
-    const edit = tree.root.findByProps({ testID: "calendar-list-answer-edit" });
-    expect(edit.findByType("Text" as never).props.children).toBe("Edit");
-    act(() => { edit.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
-    expect(onAnswerCheck).not.toHaveBeenCalled();
+    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-skip"]);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-log" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-trip", true);
+    expect(onOpenCheck).not.toHaveBeenCalled();
   });
 
-  it("asks a place Visited {guess}? with Yes, Edit, Not now from the real question words (card B; Codex r1 on #594)", () => {
-    const onOpenCheck = vi.fn();
+  it("asks a place Visited {guess}? from the real question words, with the Yes pill on its row (card B; Codex r1 on #594)", () => {
     const place = { id: "c-place", title: "Exampleton Library", eventSource: "location_learning", eventType: "unknown_stay",
-      suggestedStartedAt: iso(12), suggestedStoppedAt: iso(13), rawPayload: { clientSegmentId: "seg-place" } } as unknown as MobileReviewItem;
+      suggestedStartedAt: iso(12), suggestedStoppedAt: iso(13), rawPayload: { clientSegmentId: "seg-unknown" } } as unknown as MobileReviewItem;
+    const asked = reviewAnswerQuestion(place, "24h");
+    const onOpenPlace = vi.fn();
     const { tree } = render({
-      checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
+      checks: [{ id: "c-place", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-place", "Exampleton Library"]]),
-      checkQuestions: new Map([["c-place", reviewAnswerQuestion(place, "24h")]]),
+      checkQuestions: new Map([["c-place", asked]]),
       onAnswerCheck: vi.fn(),
-      onOpenCheck
+      onOpenPlace
     });
-    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
-    const answers = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-") &&
-      typeof node.props.onPress === "function").map((node) => node.props.testID);
-    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-edit", "calendar-list-answer-skip"]);
-    const edit = tree.root.findByProps({ testID: "calendar-list-answer-edit" });
-    expect(edit.props.accessibilityHint).toBe("Opens it on its own screen to edit it");
-    act(() => { edit.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-place");
+    expect(asked.question).toMatch(/^Visited .+\?$/);
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-yes-c-place" && typeof node.props.onPress === "function")).toHaveLength(1);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" }).props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+  });
+
+  it("opens a requested \"?\" by id: a place's in its sheet, never the card; a trip's through onOpenCheck; Apple Health's under its row", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenCheck = vi.fn();
+    const common = {
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"], ["c-trip", "Getting around"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")], ["c-trip", question("Getting around?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace
+    };
+    const place = render({ ...common, checks: [placeCheck, sleepCheck], openCheckRequest: { id: "c-unknown", request: 1 } });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Pret?");
+    expect(questions(place.tree)).toHaveLength(0);
+    // A trip not in a block has its own row and sheet (the Dashboard routes onOpenCheck to it).
+    const freeTrip = { ...timeline, items: timeline.items.map((item) => item.kind === "trip" ? { ...item, blockIds: [] } : item) } as LocationTimeline;
+    const trip = render({ ...common, checks: [{ id: "c-trip", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) }],
+      entries: [block("work", "Work", 9, 12)], timeline: freeTrip, openCheckRequest: { id: "c-trip", request: 1 } });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
+    expect(questions(trip.tree)).toHaveLength(0);
+    // Tapping the trip's row opens it the same way, its modes stacked under its title.
+    onOpenCheck.mockClear();
+    act(() => { trip.tree.root.findByProps({ testID: "calendar-list-check-c-trip" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
+    expect(questions(trip.tree)).toHaveLength(0);
+    const health = render({ ...common, checks: [placeCheck, sleepCheck], openCheckRequest: { id: "c-sleep", request: 1 } });
+    expect(questions(health.tree)).toHaveLength(1);
+    expect(JSON.stringify(questions(health.tree)[0].props.children)).toContain("Log your sleep?");
+  });
+
+  it("clears the open question and a waiting request on a clear request, the same day included (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    const rerender = (tree: ReturnType<typeof create>, extra: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...extra} />);
+    });
+    // Another question is open (a decided item's link then lands on this same day).
+    const { tree } = render({ ...props, openCheckRequest: { id: "c-sleep", request: 1 } });
+    expect(questions(tree)).toHaveLength(1);
+    rerender(tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(questions(tree)).toHaveLength(0);
+    // A request still waiting for the day's places is dropped too: they arrive, and nothing opens.
+    const waiting = render({ ...props, timeline: null, openCheckRequest: { id: "c-unknown", request: 2 } });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    act(() => {
+      waiting.tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={null} {...props} openCheckRequest={null} clearSelectionRequest={1} />);
+    });
+    rerender(waiting.tree, { openCheckRequest: null, clearSelectionRequest: 1 });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(waiting.tree)).toHaveLength(0);
+  });
+
+  // Owner bug (29 Oct 2026; Codex r1 on #625): the Calendar tab's tap advances the selection clear, so a "?" row tapped
+  // while its places were still loading never opens once they arrive.
+  it("never opens a row tap still waiting for its places after the Calendar tab's tap", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenCheck = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace, openCheckRequest: null };
+    const view = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={null} {...props} {...extra} />
+    );
+    const { tree } = render({ ...props, timeline: null });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    // The tab's tap (the clear), then the places arrive, read after the tap.
+    act(() => { tree.update(view({ clearSelectionRequest: 1 })); });
+    act(() => { tree.update(view({ clearSelectionRequest: 1, timeline, timelineReadAt: Date.now() + 1_000 })); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(0);
+    // A tap after it opens as usual.
+    act(() => { tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" }).props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+  });
+
+  it("replays nothing when it mounts from the Grid after a cleared selection (Codex r3 on #615)", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [placeCheck, sleepCheck],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace
+    };
+    // The Dashboard's fallback cleared its request (null) and the scroll (0) before the List mounted again.
+    const { tree } = render({ ...props, openCheckRequest: null, scrollToFirstCheck: 0, clearSelectionRequest: 3 });
+    expect(questions(tree)).toHaveLength(0);
+    expect(onOpenPlace).not.toHaveBeenCalled();
+  });
+
+  it("holds a request for a place's \"?\" until the day's places are read, then opens its sheet, never the card (Codex r1 on #610)", () => {
+    const onOpenPlace = vi.fn();
+    const onOpenCheck = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace, openCheckRequest: { id: "c-unknown", request: 1 } };
+    const { tree } = render({ ...props, timeline: null });
+    // Its placeholder row is there, but what it is isn't known yet: nothing opens, under the row or elsewhere.
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-check-c-unknown").length).toBeGreaterThan(0);
+    expect(questions(tree)).toHaveLength(0);
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Pret?");
+    expect(questions(tree)).toHaveLength(0);
+    // Tapping the placeholder row before the places arrive waits too, then opens the sheet: never the card, never
+    // the Review screen (Codex r2 on #610).
+    onOpenPlace.mockClear();
+    const early = render({ ...props, openCheckRequest: null, timeline: null });
+    act(() => { early.tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(early.tree)).toHaveLength(0);
+    act(() => {
+      early.tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} openCheckRequest={null} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(onOpenCheck).not.toHaveBeenCalled();
+  });
+
+  // The header's Today pill on today (Codex r2 on #640).
+  it("cancels a tap still waiting for its places and leaves an open question open", () => {
+    const onOpenPlace = vi.fn();
+    const props = {
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkKinds: new Map([["c-sleep", "health"]]) as never,
+      checkTitles: new Map([["c-unknown", "Pret?"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenPlace, openCheckRequest: { id: "c-sleep", request: 1 }
+    };
+    const shown = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={null} {...props} {...extra} />
+    );
+    const { tree } = render({ ...props, timeline: null });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-unknown" }).props.onPress(); });
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(1);
+    act(() => { tree.update(shown({ cancelWaitingTapRequest: 1, timeline })); });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  // Codex r2 on #640: dropping the previous day's request mustn't clear the one that came with the new day.
+  it("keeps a first-check request that arrives with a new day, and opens it when its rows arrive", () => {
+    const sleep = { id: "c-sleep", segmentId: null, startedAt: new Date(at(25)).toISOString(), stoppedAt: new Date(at(30)).toISOString() };
+    const controls = {} as { show: (next: { day: number; checks: typeof sleep[] }) => void; ask: (request: number) => void };
+    function Parent() {
+      const [shown, setShown] = useState<{ day: number; checks: typeof sleep[] }>({ day: 0, checks: [] });
+      const [request, setRequest] = useState(1);
+      controls.show = setShown;
+      controls.ask = setRequest;
+      return (
+        <CalendarListView checkKinds={new Map([["c-sleep", "health"]]) as never} checkQuestions={new Map([["c-sleep", question("Log your sleep?")]])}
+          checkTitles={new Map([["c-sleep", "Sleep"]])} checks={shown.checks} clockFormat="24h" dayEndMs={at(24) * 1 + shown.day * 86_400_000} dayStartMs={at(0) + shown.day * 86_400_000}
+          entries={[]} loggedLabel="0m" nowMs={at(18)} onAnswerCheck={vi.fn()} onOpenEntry={vi.fn()} onRefresh={vi.fn()}
+          onScrolledToFirstCheck={(used) => setRequest((current) => (current === used ? 0 : current))} reduceMotion={false} refreshing={false}
+          scrollToFirstCheck={request} theme={theme} timeline={null} />
+      );
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Parent />); });
+    act(() => { controls.show({ day: 1, checks: [] }); controls.ask(2); });
+    act(() => { controls.show({ day: 1, checks: [sleep] }); });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("asks a place's or trip's \"?\" under its row when the day's places are read and lack its item, never Review (Codex r2 on #610)", () => {
+    const onOpenCheck = vi.fn();
+    const onOpenPlace = vi.fn();
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const { tree } = render({ checks: [missing], checkKinds: new Map([["c-missing", "trip"]]), checkTitles: new Map([["c-missing", "Getting around"]]),
+      checkQuestions: new Map([["c-missing", question("Getting around, 15:00–16:00?")]]), onAnswerCheck: vi.fn(), onOpenCheck, onOpenPlace,
+      openCheckRequest: { id: "c-missing", request: 1 } });
+    expect(questions(tree)).toHaveLength(1);
+    expect(onOpenCheck).not.toHaveBeenCalled();
+    expect(onOpenPlace).not.toHaveBeenCalled();
+  });
+
+  it("waits for the day's next read before asking a request's missing item under its row (Codex r3 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      openCheckRequest: { id: "c-missing", request: 1, at: 1_000 } };
+    // The places shown were read before the request: they may just be out of date.
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    expect(questions(tree)).toHaveLength(0);
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} timelineReadAt={1_200} />);
+    });
+    // Read again since, and still without it: it asks under its row, its only way to be answered (intended).
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("waits for a read newer than a tap before asking a missing item's \"?\" under its row (Codex r4 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onRequestFreshRead = vi.fn();
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      onRequestFreshRead };
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(questions(tree)).toHaveLength(0);
+    expect(onRequestFreshRead).toHaveBeenCalledOnce();
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} timelineReadAt={Date.now() + 1_000} />);
+    });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("lets a clear arriving with the day's fresh places drop a waiting tap and request in that same render (Codex r4 on #615)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onOpenPlace = vi.fn();
+    const props = { checks: [missing, sleepCheck], checkKinds: new Map([["c-missing", "place" as const], ["c-sleep", "health" as const]]),
+      checkTitles: new Map([["c-missing", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace, onRequestFreshRead: vi.fn() };
+    const view = (next: Partial<Parameters<typeof CalendarListView>[0]>) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} {...next} />
+    );
+    // A tap waits for a read newer than it.
+    const { tree } = render({ ...props, timelineReadAt: 500 });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(questions(tree)).toHaveLength(0);
+    // The fresh read lands in the same render as a clear: nothing opens, now or after.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 1_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, clearSelectionRequest: 1 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A caller's request the clear arrived with is dropped too, even while it is still passed in.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 7 }, clearSelectionRequest: 2 })); });
+    expect(questions(tree)).toHaveLength(0);
+    // A request made after the clear opens as usual.
+    act(() => { tree.update(view({ timeline, timelineReadAt: Date.now() + 2_000, openCheckRequest: { id: "c-sleep", request: 8 }, clearSelectionRequest: 2 })); });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("timestamps a tap while the day loads: a stale response lacking its item never opens it; a fresh one does (Codex r5 on #610)", () => {
+    const missing = { id: "c-missing", segmentId: "seg-not-in-the-day", startedAt: iso(15), stoppedAt: iso(16) };
+    const onRequestFreshRead = vi.fn();
+    const props = { checks: [missing], checkKinds: new Map([["c-missing", "place" as const]]), checkTitles: new Map([["c-missing", "Unknown place"]]),
+      checkQuestions: new Map([["c-missing", question("Visited Pret?")]]), onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn(),
+      onRequestFreshRead };
+    const rerender = (tree: ReturnType<typeof create>, next: { timeline: LocationTimeline | null; timelineReadAt: number | null }) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} {...props} {...next} />);
+    });
+    // Loading: the day's places aren't here yet.
+    const { tree } = render({ ...props, timeline: null, timelineReadAt: null });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-missing" }).props.onPress(); });
+    expect(onRequestFreshRead).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+    // The response in flight from before the tap lands, without the item: nothing opens.
+    rerender(tree, { timeline, timelineReadAt: Date.now() - 1_000 });
+    expect(questions(tree)).toHaveLength(0);
+    // The fresh read lands, still without it: it asks under its row (intended).
+    rerender(tree, { timeline, timelineReadAt: Date.now() + 1_000 });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("opens a trip's \"?\" in the trip's own sheet, at no leg", () => {
+    const onOpenTripLeg = vi.fn();
+    const onOpenCheck = vi.fn();
+    const freeTrip = { ...timeline, items: timeline.items.map((item) => item.kind === "trip" ? { ...item, blockIds: [] } : item) } as LocationTimeline;
+    const { tree } = render({ checks: [{ id: "c-trip", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) }], checkKinds: new Map([["c-trip", "trip"]]),
+      entries: [block("work", "Work", 9, 12)], timeline: freeTrip, onAnswerCheck: vi.fn(), onOpenCheck, onOpenTripLeg });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-trip" }).props.onPress(); });
+    expect(onOpenTripLeg).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-trip" }), null);
+    expect(onOpenCheck).not.toHaveBeenCalled();
+  });
+
+  it("opens Apple Health's requested question at once, even before the day's places are read", () => {
+    const { tree } = render({ checks: [sleepCheck], checkTitles: new Map([["c-sleep", "Sleep"]]), checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), openCheckRequest: { id: "c-sleep", request: 1 }, timeline: null });
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("holds Today's first request too until the day's places are read (Codex r1 on #610)", () => {
+    const onOpenPlace = vi.fn();
+    const props = { checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]), checkQuestions: new Map([["c-unknown", visited]]),
+      onAnswerCheck: vi.fn(), onOpenPlace, scrollToFirstCheck: 1 };
+    const { tree } = render({ ...props, timeline: null });
+    expect(onOpenPlace).not.toHaveBeenCalled();
+    expect(questions(tree)).toHaveLength(0);
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()}
+        onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} {...props} />);
+    });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+  });
+
+  it("offers the row's Yes for a confident named place's \"Visited X?\" and a trip's, not for Apple Health (Codex r1 on #610)", () => {
+    const named = { ...timeline, items: timeline.items.map((item) => item.id === "seg-unknown"
+      ? { ...item, name: "Exampleton Library", placeId: "p-lib", matchKind: "saved" } : item.kind === "trip" ? { ...item, blockIds: [] } : item) } as LocationTimeline;
+    const { tree } = render({
+      timeline: named, entries: [block("work", "Work", 9, 12)],
+      checks: [placeCheck, sleepCheck, { id: "c-trip", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) }],
+      checkTitles: new Map([["c-unknown", "Exampleton Library"], ["c-sleep", "Sleep"], ["c-trip", "Getting around"]]),
+      checkQuestions: new Map([["c-unknown", { ...visited, question: "Visited Exampleton Library?" }],
+        ["c-sleep", { ...question("Log your sleep, 01:00–06:00?"), logLabel: "Log as Sleep" }],
+        ["c-trip", { ...question("Getting around, 08:00–09:00?"), logLabel: "Yes" }]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn(), onOpenPlace: vi.fn()
+    });
+    const pills = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-yes-")
+      && typeof node.props.onPress === "function").map((node) => node.props.testID);
+    expect(pills.sort()).toEqual(["calendar-list-yes-c-trip", "calendar-list-yes-c-unknown"]);
+    // A place question that isn't a guess ("Where were you?") has no row pill.
+    const unsure = render({ checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]),
+      checkQuestions: new Map([["c-unknown", { ...visited, question: "Where were you?" }]]), onAnswerCheck: vi.fn(), onOpenPlace: vi.fn() });
+    expect(unsure.tree.root.findAll((node) => node.props.testID === "calendar-list-yes-c-unknown")).toHaveLength(0);
+  });
+
+  it("opens Today's first \"?\" in its sheet when it is a place's", () => {
+    const onOpenPlace = vi.fn();
+    const { tree } = render({ checks: [placeCheck], checkTitles: new Map([["c-unknown", "Unknown place"]]),
+      checkQuestions: new Map([["c-unknown", visited]]), onAnswerCheck: vi.fn(), onOpenPlace, scrollToFirstCheck: 1 });
+    expect(onOpenPlace).toHaveBeenCalledOnce();
+    expect(questions(tree)).toHaveLength(0);
+  });
+
+  it("\"N to check\" counts the last 7 days and asks the caller for the next one after the one last opened (concern 4)", () => {
+    const onNextCheck = vi.fn();
+    const { tree } = render({ checks: [placeCheck, sleepCheck], checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", visited], ["c-sleep", question("Log your sleep?")]]),
+      checkTotal: 5, onAnswerCheck: vi.fn(), onNextCheck, onOpenPlace: vi.fn() });
+    const chip = () => tree.root.findByProps({ testID: "calendar-list-checks-chip" });
+    expect(chip().props.accessibilityLabel).toBe("5 to check in the last 7 days");
+    expect(JSON.stringify(chip().props.children)).toContain("5");
+    act(() => { chip().props.onPress(); });
+    expect(onNextCheck).toHaveBeenLastCalledWith(null);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" }).props.onPress(); });
+    act(() => { chip().props.onPress(); });
+    expect(onNextCheck).toHaveBeenLastCalledWith("c-unknown");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-sleep" }).props.onPress(); });
+    act(() => { chip().props.onPress(); });
+    expect(onNextCheck).toHaveBeenLastCalledWith("c-sleep");
+    // The chip never opens a question by itself.
+    expect(questions(tree)).toHaveLength(1);
+  });
+
+  it("shows no day-only chip without the caller's 7-day count", () => {
+    const { tree } = render({ checks: [placeCheck, sleepCheck], checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      onAnswerCheck: vi.fn(), onOpenCheck: vi.fn() });
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-checks-chip")).toHaveLength(0);
+    expect(textOf(tree)).not.toContain("\" to check\"");
+  });
+
+  it("keeps the actions row and places filter at zero without a check control", () => {
+    const onNextCheck = vi.fn();
+    const chipId = "calendar-list-checks-chip";
+    const slotId = "calendar-list-filter-slot";
+    const scene = (checkTotal: number) => (
+      <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="0h"
+        checkTotal={checkTotal} onNextCheck={onNextCheck} nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()}
+        reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} />
+    );
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(scene(1)); });
+    const active = tree.root.findByProps({ testID: chipId });
+    const activeStyle = flat(active.props.style({ pressed: false }));
+    const slot = tree.root.findByProps({ testID: slotId });
+    expect(active.parent).toBe(slot);
+    expect(slot.props.style.minHeight).toBe(activeStyle.minHeight);
+    expect(labels(tree)).toContain("1 to check in the last 7 days");
+
+    act(() => { tree.update(scene(0)); });
+    expect(tree.root.findAllByProps({ testID: chipId })).toHaveLength(0);
+    expect(tree.root.findByProps({ testID: slotId })).toBe(slot);
+    expect(tree.root.findByProps({ testID: "calendar-list-show-all" }).parent).toBe(slot);
+    expect(labels(tree)).not.toContain("0 to check in the last 7 days");
+
+    act(() => { tree.update(scene(10)); });
+    expect(tree.root.findByProps({ testID: chipId }).parent).toBe(slot);
+    expect(labels(tree)).toContain("10 to check in the last 7 days");
+    act(() => { tree.root.findByProps({ testID: chipId }).props.onPress(); });
+    expect(onNextCheck).toHaveBeenCalledOnce();
   });
 
   it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
     const { AccessibilityInfo } = await import("react-native");
     vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
-    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false, opens: false });
-    const checks = [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }];
+    const checks = [sleepCheck];
     const props = {
       checks,
       checkTitles: new Map([["c-sleep", "Sleep"]]),
@@ -256,9 +858,8 @@ describe("CalendarListView (location v4 step 9)", () => {
       onOpenCheck: vi.fn()
     };
     const { tree } = render({ ...props, scrollToFirstCheck: 1 });
-    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
     // Today's chip opened it: VoiceOver hears the question, as when its "?" is tapped.
-    expect(questions()).toHaveLength(1);
+    expect(questions(tree)).toHaveLength(1);
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Log your sleep?");
     const rerender = (next: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
       tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
@@ -267,87 +868,79 @@ describe("CalendarListView (location v4 step 9)", () => {
     });
     // Its row leaves (another day, a refresh) and comes back: the question stays closed until asked again.
     rerender({ checks: [] });
-    expect(questions()).toHaveLength(0);
+    expect(questions(tree)).toHaveLength(0);
     rerender({ checks });
-    expect(questions()).toHaveLength(0);
+    expect(questions(tree)).toHaveLength(0);
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
     // An overnight "?" opened on one day, then the day before, which shows it too: it closes there (Codex r4 on #582).
     const overnight = [{ id: "c-sleep", segmentId: null, startedAt: new Date(at(0) - 2 * 3_600_000).toISOString(), stoppedAt: iso(6) }];
     rerender({ checks: overnight });
-    const sleepRow = () => tree.root.findAll((node) => typeof node.props.accessibilityLabel === "string"
-      && node.props.accessibilityLabel.startsWith("Check Sleep") && typeof node.props.onPress === "function");
+    const sleepRow = () => tree.root.findAll((node) => node.props.testID === "calendar-list-check-c-sleep" && typeof node.props.onPress === "function");
     act(() => { sleepRow()[0].props.onPress(); });
-    expect(questions()).toHaveLength(1);
+    expect(questions(tree)).toHaveLength(1);
     rerender({ checks: overnight, dayStartMs: at(0) - 86_400_000, dayEndMs: at(0), timeline: null });
     expect(sleepRow()).toHaveLength(1);
-    expect(questions()).toHaveLength(0);
+    expect(questions(tree)).toHaveLength(0);
   });
 
-  it("offers a suggestion without a complete time on its own screen, never answers the outbox would refuse (Codex r3 on #582)", () => {
+  it("says why a suggestion without a complete time can't be answered, and offers no answer the outbox would refuse (Codex r3 on #582; step 15)", () => {
     const onAnswerCheck = vi.fn();
     const onOpenCheck = vi.fn();
     const { tree } = render({
       checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: null }],
       checkTitles: new Map([["c-sleep", "Sleep"]]),
-      checkQuestions: new Map([["c-sleep", { question: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered here.",
-        logLabel: null, skipLabel: null, more: false, opens: true }]]),
+      checkQuestions: new Map([["c-sleep", { question: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered.",
+        logLabel: null, skipLabel: null }]]),
       onAnswerCheck,
       onOpenCheck
     });
-    act(() => { tree.root.find((node) => typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Check Sleep") && typeof node.props.onPress === "function").props.onPress(); });
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-log")).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-skip")).toHaveLength(0);
-    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-open" }).props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-sleep" }).props.onPress(); });
+    expect(JSON.stringify(questions(tree)[0].props.children)).toContain("It has no complete time yet, so it can't be answered.");
+    expect(tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-"))).toHaveLength(0);
+    expect(onOpenCheck).not.toHaveBeenCalled();
     expect(onAnswerCheck).not.toHaveBeenCalled();
   });
 
   it("marks Today's waiting request done when \"N to check\" moves on from it (Codex r12 on #582)", () => {
     const onScrolledToFirstCheck = vi.fn();
-    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false, opens: false });
     const { tree } = render({
-      checks: [
-        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
-        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
-      ],
+      checks: [placeCheck, sleepCheck],
       checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
       checkQuestions: new Map([["c-unknown", question("Log Unknown place?")], ["c-sleep", question("Log your sleep?")]]),
+      checkTotal: 2,
       onAnswerCheck: vi.fn(),
+      onNextCheck: vi.fn(),
       onOpenCheck: vi.fn(),
       onScrolledToFirstCheck,
       scrollToFirstCheck: 1
     });
     // Its row has not been measured yet (no native layout here): the request is still waiting.
     expect(onScrolledToFirstCheck).not.toHaveBeenCalled();
-    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-checks-chip" }).props.onPress(); });
     expect(onScrolledToFirstCheck).toHaveBeenCalledOnce();
   });
 
-  it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
+  it("puts each open suggestion on the row it is about, and opens one on its own screen without answers here (location v4 step 14)", () => {
     const onOpenCheck = vi.fn();
     const { tree } = render({
-      checks: [
-        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
-        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
-      ],
+      checks: [placeCheck, sleepCheck],
       checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
       onOpenCheck
     });
     // The place's suggestion sits on its row; Apple Health has a row of its own at its time.
-    expect(labels(tree)).toContain("Check Unknown place");
-    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
-    const chip = tree.root.findByProps({ accessibilityHint: "Opens the first one" });
-    expect(JSON.stringify(chip.props.children)).toContain("to check");
-    act(() => { chip.props.onPress(); });
-    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
-    act(() => { tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.onPress(); });
+    const placeRow = tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" });
+    expect(placeRow.props.accessibilityLabel).toContain("Needs a look");
+    expect(labels(tree).some((label) => label.startsWith("Sleep") && label.includes("Needs a look"))).toBe(true);
+    act(() => { placeRow.props.onPress(); });
     expect(onOpenCheck).toHaveBeenLastCalledWith("c-unknown");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-sleep" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenLastCalledWith("c-sleep");
+    expect(questions(tree)).toHaveLength(0);
   });
 
   it("shows a day's checks even before its places are read", () => {
-    const { tree } = render({ timeline: null, checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }],
-      checkTitles: new Map([["c-sleep", "Sleep"]]), onOpenCheck: vi.fn() });
-    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
+    const { tree } = render({ timeline: null, checks: [sleepCheck], checkTitles: new Map([["c-sleep", "Sleep"]]), onOpenCheck: vi.fn() });
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-check-c-sleep").length).toBeGreaterThan(0);
   });
 
   describe("the jump to the first \"?\" (Codex r1–r3 on #573)", () => {
@@ -403,12 +996,178 @@ describe("CalendarListView (location v4 step 9)", () => {
       expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 126, animated: false });
     });
 
+    // The header's Today pill on today (owner, 30 Oct 2026).
+    it("scrolls to the row for now, once per request, and never on mounting with an old request", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      const shown = (request: number, extra: Partial<Parameters<typeof CalendarListView>[0]> = {}) => (
+        <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h"
+          nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline}
+          scrollToNowRequest={request} {...extra} />
+      );
+      const tree = mount({ scrollToNowRequest: 4 });
+      expect(scrollTo).not.toHaveBeenCalled();
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 376, animated: true });
+      act(() => { tree.update(shown(5)); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      // A repeat goes again, and Reduce Motion jumps.
+      act(() => { tree.update(shown(6, { reduceMotion: true })); });
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(scrollTo.mock.calls[1][0]).toMatchObject({ y: 376, animated: false });
+    });
+
+    // Measurements that answer late (Codex r1 on #640). Each row's measureLayout waits here until the test answers it.
+    describe("with a late measurement", () => {
+      const answers: Array<(y: number) => void> = [];
+      const list = (extra: Partial<Parameters<typeof CalendarListView>[0]>) => (
+        <CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]} loggedLabel="4h"
+          nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline} {...extra} />
+      );
+      const mountLate = () => {
+        scrollTo.mockClear();
+        answers.length = 0;
+        let tree!: ReturnType<typeof create>;
+        act(() => {
+          tree = create(list({ scrollToNowRequest: 0 }), { createNodeMock: () => ({
+            measureLayout: (_relativeTo: unknown, done: (x: number, y: number) => void) => { answers.push((y) => done(0, y)); }
+          }) });
+        });
+        return tree;
+      };
+      const scroller = (tree: ReturnType<typeof create>) => tree.root.findByProps({ testID: "calendar-list" });
+
+      it("acts on the newest request only, even for the same row", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        const stale = answers.length;
+        act(() => { tree.update(list({ scrollToNowRequest: 2 })); });
+        expect(answers.length).toBeGreaterThan(stale);
+        // The first request's measurement answers now: it is not the newest, so nothing moves, and the newest stays.
+        answers[0](400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        answers[answers.length - 1](300);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 276 });
+      });
+
+      it("drops the scroll when the day changes before the measurement answers", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1, dayStartMs: at(24), dayEndMs: at(48) })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("drops the scroll when a drag starts before the measurement answers", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("uses up a request that arrives during a drag: no scroll, even once its measurement could answer", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        // It stays used up after the finger lifts, and the next request runs.
+        act(() => { scroller(tree).props.onScrollEndDrag(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+        act(() => { tree.update(list({ scrollToNowRequest: 2 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("acknowledges a first-check request that arrives during a drag, without scrolling", () => {
+        const onScrolled = vi.fn();
+        const tree = mountLate();
+        const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+        const shown = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { tree.update(list({ ...shown, scrollToFirstCheck: 3 })); });
+        expect(onScrolled).toHaveBeenCalledWith(3);
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it("runs again once the scroll has settled after momentum", () => {
+        const tree = mountLate();
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        act(() => { scroller(tree).props.onMomentumScrollEnd(); });
+        act(() => { tree.update(list({ scrollToNowRequest: 1 })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("keeps a request that arrives with the new day", () => {
+        const tree = mountLate();
+        act(() => { tree.update(list({ scrollToNowRequest: 1, dayStartMs: at(24), dayEndMs: at(48) })); });
+        answers[answers.length - 1](400);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it("reports a dropped \"first\" request as over, so nothing replays", () => {
+        const onScrolled = vi.fn();
+        const tree = mountLate();
+        const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+        const shown = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+        act(() => { tree.update(list({ ...shown, scrollToFirstCheck: 1 })); });
+        act(() => { scroller(tree).props.onScrollBeginDrag(); });
+        expect(onScrolled).toHaveBeenCalledTimes(1);
+        for (const answer of answers) answer(400);
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+    });
+
+    it("goes to the top of a day with no rows", () => {
+      scrollTo.mockClear();
+      const empty = { ...timeline, items: [] } as LocationTimeline;
+      const tree = mount({ entries: [], timeline: empty, scrollToNowRequest: 0 });
+      act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="0m" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} scrollToNowRequest={1} theme={theme} timeline={empty} />); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 0 });
+    });
+
     it("does not jump when shown again with the request cleared", () => {
       scrollTo.mockClear();
       positions.set("first", 400);
       mount({ ...base, scrollToFirstCheck: 0 });
       expect(scrollTo).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("the List's day swipe haptic", () => {
+  it("ticks once for each swipe that changes the day, and never for one too short", () => {
+    swipe.tick.mockClear();
+    const onSwipeDay = vi.fn();
+    render({ onSwipeDay });
+    swipe.onEnd?.({ translationX: -30, velocityX: 100 }, true);
+    expect(swipe.tick).not.toHaveBeenCalled();
+    expect(onSwipeDay).not.toHaveBeenCalled();
+    // Cancelled, however far it went: no day change and no haptic (Codex r1 on #641).
+    swipe.onEnd?.({ translationX: -200, velocityX: 900 }, false);
+    expect(swipe.tick).not.toHaveBeenCalled();
+    expect(onSwipeDay).not.toHaveBeenCalled();
+    swipe.onEnd?.({ translationX: -80, velocityX: 100 }, true);
+    expect(swipe.tick).toHaveBeenCalledTimes(1);
+    expect(onSwipeDay).toHaveBeenCalledWith(1);
+  });
+
+  it("does not tick on the day chip or a change of day from outside", () => {
+    swipe.tick.mockClear();
+    const { tree } = render({ checkTotal: 2, onNextCheck: vi.fn() });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-checks-chip" }).props.onPress(); });
+    act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24) + 86_400_000} dayStartMs={at(0) + 86_400_000} entries={[]} loggedLabel="0h"
+      nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={null} />); });
+    expect(swipe.tick).not.toHaveBeenCalled();
   });
 });
 
@@ -429,48 +1188,77 @@ describe("CalendarListView modes line (card D item 12)", () => {
 
 
 describe("CalendarListView correction sheets (location v4 step 12)", () => {
-  it("opens a place's sheet from its row when it has no question and no block, and a trip's at a leg", () => {
+  it("opens a place's sheet from its row, and a trip's at a leg", () => {
     const onOpenPlace = vi.fn();
     const onOpenTripLeg = vi.fn();
     const { tree } = render({ onOpenPlace, onOpenTripLeg });
     const unknown = tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" });
-    expect(unknown.props.accessibilityHint).toBe("Opens it to change the place or its times");
+    expect(unknown.props.accessibilityHint).toBe("Opens the place");
     act(() => { unknown.props.onPress(); });
     expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Unknown place");
-    // The commute's legs, opened: each opens its trip's sheet at that leg.
-    act(() => { tree.root.findByProps({ accessibilityLabel: "Show the legs of Commute" }).props.onPress(); });
+    // The commute's legs, opened from its modes line: each opens its trip's sheet at that leg.
+    act(() => { tree.root.findByProps({ accessibilityLabel: "Show the 2 legs" }).props.onPress(); });
     act(() => { tree.root.findByProps({ testID: "calendar-list-leg-1" }).props.onPress(); });
     expect(onOpenTripLeg).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-trip", route: "Home → Office" }), 1);
   });
 
-  it("never opens a sheet for a place in a block or one with a question", () => {
+  it("opens a place with a question in its sheet too (the sheet asks it at its top), and Home with All places", () => {
     const onOpenPlace = vi.fn();
-    const inBlock = { ...timeline, items: timeline.items.map((item) => item.id === "seg-unknown" ? { ...item, blockIds: ["b"] } : item) } as LocationTimeline;
-    const { tree } = render({ onOpenPlace, timeline: inBlock });
-    const showAll = tree.root.findAll((node) => node.props.accessibilityRole === "button" && typeof node.props.onPress === "function" &&
-      JSON.stringify(node.props.children ?? "").includes("Show Home and every place"));
-    if (showAll[0]) act(() => { showAll[0].props.onPress(); });
-    const rows = tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-unknown" && typeof node.props.onPress === "function");
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(row.props.disabled).toBe(true);
-    // Office is in a block too; Home has none and opens.
+    const { tree } = render({ onOpenPlace, checks: [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }],
+      checkTitles: new Map([["c-unknown", "Unknown place"]]), onAnswerCheck: vi.fn() });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-place-seg-unknown" }).props.onPress(); });
+    expect(onOpenPlace).toHaveBeenCalledWith(expect.objectContaining({ id: "seg-unknown" }), "Unknown place");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-show-all" }).props.onPress(); });
     const home = tree.root.findAll((node) => node.props.testID === "calendar-list-place-seg-home" && typeof node.props.onPress === "function");
     expect(home.map((node) => node.props.disabled)).toEqual([false]);
   });
 });
 
 describe("CalendarListView's open question (card B part 2)", () => {
-  it("says which question is open, so only that one looks for a place nearby", () => {
+  // A legacy location suggestion (before location v2) has no segment: nothing to open, so it is "none" and asks under
+  // its row (Codex r2 on #610).
+  it("says which question is open under its row, a legacy place \"?\" without a segment, so only that one looks for a place nearby", () => {
     const onOpenCheckChange = vi.fn();
     const { tree } = render({
+      checkKinds: new Map([["c-place", "none"]]),
       checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
       checkTitles: new Map([["c-place", "Unknown place"]]),
-      checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false }]]),
+      checkQuestions: new Map([["c-place", { question: "Where were you?", detail: null, logLabel: null, skipLabel: "Not now" }]]),
       onAnswerCheck: vi.fn(),
       onOpenCheckChange
     });
     expect(onOpenCheckChange).toHaveBeenLastCalledWith(null);
-    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-check-c-place" }).props.onPress(); });
     expect(onOpenCheckChange).toHaveBeenLastCalledWith("c-place");
+  });
+});
+
+// Location v4 design §7: "a block ran into your trip" asks on the block, never on a row of its own.
+describe("a block's own \"?\" in Calendar › List", () => {
+  const asking = { ...(block("work", "Work", 9, 12) as object), asking: true, accessibilityLabel: "Work, Needs a look" } as never;
+  const check = { id: "clash-1", segmentId: null, startedAt: iso(9), stoppedAt: iso(10, 42) };
+
+  it("puts the one amber dot on the block's row, reads \"Needs a look\", and shows no row of its own", () => {
+    const { tree } = render({ entries: [block("commute", "Commute", 8, 9), asking], checks: [check], checkTotal: 1,
+      blockChecks: new Map([["work", "clash-1"]]), checkKinds: new Map([["clash-1", "block"]]), checkTitles: new Map([["clash-1", "Work ran 18m into your trip"]]) });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-block-asking" })).toHaveLength(1);
+    expect(labels(tree)).toContain("Work, Needs a look");
+    expect(textOf(tree)).not.toContain("ran 18m into your trip");
+    expect(tree.root.findByProps({ accessibilityLabel: "Work, Needs a look" }).props.accessibilityHint).toBe("Opens the block with its question");
+  });
+
+  it("opens the block's sheet for \"N to check\" and a request by id, and steps on from it", () => {
+    const onNextCheck = vi.fn();
+    const props = { entries: [asking], checks: [check], checkTotal: 1, onNextCheck,
+      blockChecks: new Map([["work", "clash-1"]]), checkKinds: new Map([["clash-1", "block" as const]]) };
+    const { tree, onOpenEntry } = render({ ...props, openCheckRequest: { id: "clash-1", request: 1 } });
+    expect(onOpenEntry).toHaveBeenCalledWith(expect.objectContaining({ entryId: "work" }));
+    act(() => { tree.root.findByProps({ testID: "calendar-list-checks-chip" }).props.onPress(); });
+    expect(onNextCheck).toHaveBeenCalledWith("clash-1");
+  });
+
+  it("keeps the dot off a block whose question no longer asks (answered, or its block changed)", () => {
+    const { tree } = render({ entries: [block("work", "Work", 9, 12)], checks: [], blockChecks: new Map() });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-block-asking" })).toHaveLength(0);
   });
 });

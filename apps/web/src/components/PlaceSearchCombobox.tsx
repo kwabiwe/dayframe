@@ -2,6 +2,7 @@
 
 import { Search, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useKeyboardFocusRing } from "./useKeyboardFocusRing";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { WebPlaceSuggestion } from "@/lib/place-search";
 import {
@@ -29,6 +30,7 @@ export function PlaceSearchCombobox({
   onSelect: (suggestion: WebPlaceSuggestion) => void;
 }) {
   const listboxId = useId();
+  const searchFocusRing = useKeyboardFocusRing();
   const statusId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const getBiasRef = useRef(getBias);
@@ -86,7 +88,7 @@ export function PlaceSearchCombobox({
   return (
     <div className="place-search">
       <label className="place-search-label" htmlFor={`${listboxId}-input`}>Address or place</label>
-      <div className="ui-compound-control place-search-control">
+      <div className="ui-compound-control place-search-control" data-focus-ring={searchFocusRing.focusRing} {...searchFocusRing.handlers}>
         <Search aria-hidden="true" size={18} />
         <input
           ref={inputRef}

@@ -77,6 +77,14 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     expect(await blocks()).toHaveLength(1);
   });
 
+  it("keeps the active timer intact for a finished-only split", async () => {
+    const { splitFinishedEntry, TimeEntryValidationError } = await import("./event-service");
+    await expect(splitFinishedEntry(running, {
+      splitAt: ago(30), expectedUpdatedAt: await version(running), clientCommandId: "finished-only-1", durableCopy: true
+    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    expect(await blocks()).toMatchObject([{ id: running, stoppedAt: null }]);
+  });
+
   it("ends the block at the time and keeps the second part running with every detail; a repeat is answered", async () => {
     const { splitFinishedEntry } = await import("./event-service");
     const first = await splitFinishedEntry(running, {
@@ -132,9 +140,21 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     await database!.query("update time_entries set description = 'Draft chapter' where id = $1", [split.newEntryId]);
     await database!.query("delete from time_entry_tags where time_entry_id = $1", [split.newEntryId]);
     await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    // Both parts given the same new details still differ from the split (Codex r2 on #607), and so does the first
+    // part's own activity, place or one-time place name.
+    await database!.query("insert into time_entry_tags (workspace_id, time_entry_id, tag_id) select workspace_id, $1, tag_id from time_entry_tags where time_entry_id = $2", [split.newEntryId, running]);
+    await database!.query("update time_entries set description = 'Both renamed' where id = any($1::uuid[])", [[running, split.newEntryId]]);
+    await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    await database!.query("update time_entries set description = 'Draft chapter' where id = any($1::uuid[])", [[running, split.newEntryId]]);
+    for (const change of ["category_id = null", "place_label = 'Elsewhere'"]) {
+      await database!.query(`update time_entries set ${change} where id = $1`, [running]);
+      await expect(joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+      await database!.query("update time_entries set category_id = $2, place_label = 'Exampleton Library' where id = $1", [running, categoryId]);
+    }
+    // Unchanged again: the Undo goes through.
+    expect(await joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).toMatchObject({ running: true });
     // Put back as it was, for the next step.
-    await database!.query("delete from time_entries where id = $1", [split.newEntryId]);
-    await database!.query("update time_entries set stopped_at = null where id = $1", [running]);
+    if (!split.newEntryId) return;
   });
 
   it("refuses to join blocks a split did not make", async () => {
@@ -162,5 +182,41 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     const { joinSplitEntries } = await import("./event-service");
     expect(await joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).toMatchObject({ running: false });
     expect((await blocks()).map((row) => [row.id, row.stoppedAt?.toISOString()])).toEqual([[running, stoppedAt]]);
+  });
+
+  it("refuses stale iPhone splits and replays a committed receipt before checking running state", async () => {
+    const { processActivityEvent, splitRunningEntry, TimeEntryConflictError, TimeEntryValidationError } = await import("./event-service");
+    const initial = await blocks();
+    const splitAt = ago(2);
+    const targetStartedAt = ago(4);
+    const start = await processActivityEvent({
+      source: "mobile_app", type: "timer_start", occurredAt: targetStartedAt,
+      clientEventId: "mobile-start-fenced-split", rawPayload: { startedAt: targetStartedAt }
+    }, session);
+    const target = start.timeEntryId!;
+    await expect(splitRunningEntry(running, { splitAt: ago(20), clientCommandId: "stale-mobile-split" }, session))
+      .rejects.toBeInstanceOf(TimeEntryConflictError);
+    await expect(splitRunningEntry(target, { splitAt: new Date(Date.parse(splitAt) + 1000).toISOString(),
+      clientCommandId: "off-minute-mobile-split" }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    const command = { splitAt, clientCommandId: "fenced-mobile-split" };
+    const first = await splitRunningEntry(target, command, session);
+    const second = first.newEntryId!;
+    expect(first).toMatchObject({ id: target, running: true, replayed: false });
+    const stoppedAt = ago(1);
+    const stop = await processActivityEvent({
+      source: "mobile_app", type: "timer_stop", occurredAt: stoppedAt, clientEventId: "mobile-stop-fenced-split",
+      rawPayload: { origin: "mobile_timer_stop", stopScope: "entry", targetEntryId: second }
+    }, session);
+    expect(stop.timeEntryId).toBe(second);
+    await expect(splitRunningEntry(target, command, session)).resolves.toEqual({
+      id: target, newEntryId: second, replayed: true
+    });
+    await expect(splitRunningEntry(second, command, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    const rows = await blocks();
+    expect(rows).toHaveLength(initial.length + 2);
+    expect(rows.slice(0, initial.length)).toEqual(initial);
+    expect(rows.slice(-2).map((row) => [row.id, row.stoppedAt?.toISOString()])).toEqual([
+      [target, splitAt], [second, stoppedAt]
+    ]);
   });
 });

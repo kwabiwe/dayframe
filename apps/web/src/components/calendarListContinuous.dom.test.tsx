@@ -14,6 +14,9 @@ vi.mock("@/components/AppShellRuntime", () => ({
 }));
 const clientFetch = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
+// The viewer's today is 20 Oct (the List's focus day), so the 14th's "?" still ask: a "?" asks for today and the
+// 6 days before (owner, 28 Oct 2026).
+vi.mock("@/components/useCalendarClock", () => ({ useLocalDayStartMs: () => new Date(2026, 9, 20).getTime(), useMediaQuery: () => false }));
 
 const { useCalendarListWeeks, LIST_EMPTY_WEEKS_BEFORE_END } = await import("./useCalendarListWeeks");
 const { useLocationTimelines, LOCATION_TIMELINE_CONCURRENCY } = await import("./location/LocationListRows");
@@ -46,7 +49,7 @@ describe("useCalendarListWeeks (continuous days)", () => {
     const { result } = renderHook(() => useCalendarListWeeks({ anchorWeekStart: anchor, currentWeekStart: anchor, enabled: true, owner: "w1:u1", refreshToken: 0 }));
     expect(result.current.reachedLatest).toBe(true);
     act(() => result.current.load("earlier"));
-    expect(clientFetch).toHaveBeenCalledWith("/api/bootstrap?date=2026-10-12", { cache: "no-store" });
+    expect(clientFetch).toHaveBeenCalledWith("/api/calendar/week?date=2026-10-12", { cache: "no-store" });
     await waitFor(() => expect(result.current.entries.map((row) => row.id)).toEqual(["old"]));
     expect(result.current.rangeStart).toEqual(monday(2026, 10, 12));
     expect(result.current.rangeEnd).toEqual(monday(2026, 10, 26));
@@ -329,7 +332,9 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
   const listOf = (element: Element) => element.closest(".timeline-list-scroll");
   const rowsOf = (root: Element) => [...root.querySelectorAll("tbody > tr")];
   const CHIP = 52;
-  const above = (root: Element) => (root.querySelector(".timeline-checks-bar") ? CHIP : 0);
+  // The later edge's own height ("Loading later days…" wrapping, say; Codex r2 on #625): 0 unless a test grows it.
+  const layout = { edge: 0 };
+  const above = (root: Element) => (root.querySelector(".timeline-checks-bar") ? CHIP : 0) + layout.edge;
   let restore: () => void = () => undefined;
   beforeEach(() => {
     const rowRect = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
@@ -435,7 +440,7 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     expect(older().getBoundingClientRect().top).toBe(0);
   });
 
-  it("keeps an open question in place when its day's places replace its own row (Codex r8 on #584)", () => {
+  it("keeps a \"?\" in place when its day's places replace its own row (Codex r8 on #584)", () => {
     const iso = (hour: number) => new Date(2026, 9, 14, hour).toISOString();
     const cafe = { kind: "place" as const, id: "seg-cafe", status: "finalised" as const, startedAt: iso(10), stoppedAt: iso(11), placeId: null,
       learnedPlaceId: null, name: null, role: null, matchKind: "unknown" as const, confidence: "medium" as const, blockIds: [] };
@@ -454,10 +459,11 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
         entries={days(10, 20)} reviewItems={[question]} onChanged={vi.fn(async () => undefined)}
         onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
-    // Before the 14th's places arrive, the suggestion is a "?" row of its own; open its question.
+    // Before the 14th's places arrive, the suggestion is a "?" row of its own.
     const { rerender } = render(view([]));
-    fireEvent.click(screen.getByRole("button", { name: "Check Exampleton cafe" }));
-    const open = () => document.querySelector<HTMLElement>('tr[data-question-for="q-cafe"]')!;
+    expect(screen.getByRole("button", { name: /^Exampleton cafe, .+\. Needs a look$/ })).toBeTruthy();
+    const open = () => document.querySelector<HTMLElement>('tr[data-suggestion-id="q-cafe"]')!;
+    expect(open().dataset.locationRow).toBe("check-q-cafe");
     const root = document.querySelector(".timeline-list-scroll")!;
     root.scrollTop += open().getBoundingClientRect().top;
     rerender(view([]));
@@ -465,6 +471,7 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     // The places arrive: the "?" moves onto the cafe's place row, and another place shows above it.
     rerender(view([{ date: "2026-10-14", timeZone: "", dayStart: fourteenth.start.toISOString(), dayEnd: fourteenth.end.toISOString(), gaps: [],
       items: [cafe, library], openTrip: null }]));
+    expect(open().dataset.locationRow).toBe("seg-cafe");
     expect(open().getBoundingClientRect().top).toBe(0);
   });
 
@@ -484,6 +491,128 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     );
     expect(document.querySelector(".timeline-checks-bar")).not.toBeNull();
     expect(headingTop(20)).toBe(0);
+  });
+
+  // Owner bug (29 Oct 2026): the header read "Fri, 23 Oct" while the List's top was Thu 29 Oct. The List reports the
+  // day at its top and the header shows that day, so the two agree however the List got there.
+  it("reports the day at its top: the selected day once it lands, the clamped top when it can't, and as it scrolls", async () => {
+    const landed = vi.fn();
+    render(list(days(7, 20), { onVisibleDay: landed }));
+    expect(headingTop(14)).toBe(0);
+    expect(landed).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    cleanup();
+
+    // Too little below the selected day to bring it up, and no earlier week can come: the top day is reported.
+    const clamped = vi.fn();
+    render(list(days(14, 20), { onVisibleDay: clamped, reachedEarliest: true }));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    const topDay = [20, 19, 18, 17, 16, 15, 14].filter((day) => headingTop(day) <= 48).at(-1)!;
+    expect(clamped).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime());
+    expect(topDay).not.toBe(14);
+
+    // The person scrolls back to the top: the List says the 20th, newest first.
+    fireEvent.wheel(root);
+    root.scrollTop = 0;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(clamped).toHaveBeenLastCalledWith(new Date(2026, 9, 20).getTime()));
+  });
+
+  it("names the selected day while the top is where it would be: today with nothing listed yet, not the day before", async () => {
+    // Today is the 20th (this file's clock) with no block; the List's newest heading is the 19th.
+    const today = vi.fn();
+    render(list(days(7, 19), { focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20", onVisibleDay: today }));
+    expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, 20).getTime());
+    // Scrolled down to an earlier day's heading: that day.
+    const root = document.querySelector(".timeline-list-scroll")!;
+    fireEvent.wheel(root);
+    root.scrollTop = 600;
+    fireEvent.scroll(root);
+    const topDay = [19, 18, 17, 16, 15, 14, 13, 12].filter((day) => headingTop(day) <= 48).at(-1)!;
+    expect(topDay).toBeLessThan(19);
+    await waitFor(() => expect(today).toHaveBeenLastCalledWith(new Date(2026, 9, topDay).getTime()));
+  });
+
+  it("names the day really at the top when an earlier selected day loses its last block (Codex r5 on #625)", async () => {
+    // The 14th is selected (not today) and at the top; its only block is deleted elsewhere, nothing scrolls.
+    const report = vi.fn();
+    const { rerender } = render(list(days(7, 19), { onVisibleDay: report }));
+    expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    const scrolled = document.querySelector(".timeline-list-scroll")!.scrollTop;
+    rerender(list(days(7, 19).filter((row) => row.id !== "d14"), { onVisibleDay: report }));
+    expect(document.querySelector(".timeline-list-scroll")!.scrollTop).toBe(scrolled);
+    // The 13th now sits at the top, and the header says so.
+    expect(headingTop(13)).toBeLessThanOrEqual(48);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 13).getTime()));
+  });
+
+  it("re-reads the top day after a layout change with no scroll: the shown day's last row removed (Codex r1 on #625)", async () => {
+    const report = vi.fn();
+    const { rerender } = render(list(days(7, 20), { onVisibleDay: report }));
+    expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+    // The person scrolls on to the 12th (a heading and a block a day, 100 px each, newest first).
+    const root = document.querySelector(".timeline-list-scroll")!;
+    fireEvent.wheel(root);
+    root.scrollTop = (20 - 12) * 2 * ROW;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 12).getTime()));
+    const scrolled = root.scrollTop;
+    // The 12th's only block is deleted elsewhere (a refresh): the 11th now sits at the top, nothing scrolled.
+    rerender(list(days(7, 20).filter((row) => row.id !== "d12"), { onVisibleDay: report }));
+    expect(root.scrollTop).toBe(scrolled);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 11).getTime()));
+  });
+
+  it("re-measures when what sits above the table grows: \"Loading later days…\" (Codex r2 on #625)", async () => {
+    // A ResizeObserver that reports only the elements it watches, as the browser does.
+    const watchers: Array<{ callback: () => void; watched: Set<Element> }> = [];
+    const realObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+    Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: class {
+      watched = new Set<Element>();
+      constructor(callback: () => void) { watchers.push({ callback, watched: this.watched }); }
+      observe(element: Element) { this.watched.add(element); }
+      unobserve(element: Element) { this.watched.delete(element); }
+      disconnect() { this.watched.clear(); }
+    } });
+    try {
+      const report = vi.fn();
+      const { rerender } = render(list(days(7, 20), { onVisibleDay: report, reachedLatest: false }));
+      expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+      // The later edge grows by 200 px with no row added or removed, and the List keeps the 14th in place.
+      layout.edge = 200;
+      rerender(list(days(7, 20), { onVisibleDay: report, reachedLatest: false }));
+      expect(headingTop(14)).toBe(0);
+      const edge = document.querySelector('[data-list-edge="later"]')!;
+      act(() => { for (const watcher of watchers) if (watcher.watched.has(edge)) watcher.callback(); });
+      // A one-pixel scroll: the 14th is still the day at the top.
+      const root = document.querySelector(".timeline-list-scroll")!;
+      fireEvent.wheel(root);
+      root.scrollTop += 1;
+      fireEvent.scroll(root);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
+      expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 14).getTime());
+      expect(report).not.toHaveBeenCalledWith(new Date(2026, 9, 13).getTime());
+    } finally {
+      layout.edge = 0;
+      if (realObserver) Object.defineProperty(globalThis, "ResizeObserver", realObserver);
+      else delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    }
+  });
+
+  it("finds the top day on a scroll without measuring every day heading (Codex r1 on #625)", async () => {
+    const report = vi.fn();
+    // 30 days loaded, newest first.
+    render(list(days(1, 30), { focusDayStartMs: new Date(2026, 9, 30).getTime(), focusRequest: "2026-10-30", onVisibleDay: report }));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    const headingsMeasured = () => measure.mock.contexts.filter((element) => (element as HTMLElement).dataset?.dayStartMs).length;
+    fireEvent.wheel(root);
+    root.scrollTop = 1_000;
+    fireEvent.scroll(root);
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(new Date(2026, 9, 25).getTime()));
+    // The scroll anchor's binary search may touch a few rows; the day lookup itself uses the cached offsets.
+    expect(headingsMeasured()).toBeLessThanOrEqual(Math.ceil(Math.log2(60)) + 1);
+    expect(headingsMeasured()).toBeLessThan(30);
+    measure.mockRestore();
   });
 
   it("stops at the person's own scrolling, and when no earlier week can come", () => {
@@ -580,5 +709,32 @@ describe("SegmentedControl unavailable options", () => {
     expect(week.getAttribute("data-tip")).toBe("Not used in List");
     fireEvent.click(week);
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("Calendar › List week that couldn't be refreshed (Codex r2 on #634)", () => {
+  afterEach(cleanup);
+
+  it("says so on its own quiet line above the week's first day, once, with Try again; other weeks and rows are unchanged", () => {
+    const onRetryWeek = vi.fn();
+    // 21–23 Oct are in the week of 19 Oct (failed); 14 Oct is in the week before (fine).
+    const weekStart = new Date(2026, 9, 19);
+    render(
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay
+        entries={[entry("friday", new Date(2026, 9, 23, 9)), entry("wednesday", new Date(2026, 9, 21, 9)), entry("before", new Date(2026, 9, 14, 9))]}
+        continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 23).getTime(), focusRequest: "2026-10-23", loading: null, onLoad: vi.fn(),
+          reachedEarliest: false, reachedLatest: true, onRetryWeek,
+          staleWeeks: [{ key: "2026-10-19", startMs: weekStart.getTime(), endMs: new Date(2026, 9, 26).getTime() }] }}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    const notices = document.querySelectorAll("tr.timeline-list-week-stale");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].textContent).toContain("Couldn't refresh this week.");
+    // Its own row, right above the week's newest day heading (23 Oct), not inside a block row.
+    expect((notices[0].nextElementSibling as HTMLElement).dataset.dayStartMs).toBe(String(new Date(2026, 9, 23).getTime()));
+    expect(screen.getByText("Block friday")).toBeTruthy();
+    expect(screen.getByText("Block before")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetryWeek).toHaveBeenCalledWith("2026-10-19");
   });
 });

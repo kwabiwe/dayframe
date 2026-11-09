@@ -2,12 +2,9 @@ import { formatDuration } from "@dayframe/shared";
 import { DAYFRAME_ACTIVITY_ICON_GROUPS, activityGroupFor } from "@dayframe/shared";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
-// Web Library › Activities (Blocks parity step 14a-1): activity cards grouped the way the iPhone
-// Activities page and the All activities picker group them (your own first, then by icon group),
-// with six rolling weeks of time for each card's sparkline. Mirrors apps/mobile/src/lib/activitiesPage.ts.
+// The web and iPhone Libraries group activities the same way, with time from the last seven days.
 
 export const QUICK_START_PIN_LIMIT = 6;
-export const SPARK_WEEKS = 6;
 const WEEK_MS = 7 * 24 * 3_600_000;
 
 const GROUP_ORDER: ReadonlyArray<{ id: string | null; label: string }> = [
@@ -47,29 +44,22 @@ export function activityNameProblem(activities: readonly { id: string; name: str
 }
 
 /**
- * Seconds per activity in each of the last six rolling weeks (oldest first; the last is "the last
- * 7 days"), from every entry list the bootstrap carries, each entry counted once and clipped to the
- * week. A running entry counts up to now.
+ * Seconds per activity in the last seven days, from every entry list the bootstrap carries.
+ * Each entry counts once and is clipped to the window. A running entry counts up to now.
  */
-export function activityWeeks(lists: readonly (readonly TimeEntryRow[] | null | undefined)[], nowMs: number) {
+export function activityWeekSeconds(lists: readonly (readonly TimeEntryRow[] | null | undefined)[], nowMs: number) {
   const byId = new Map<string, TimeEntryRow>();
   for (const list of lists) for (const entry of list ?? []) if (entry) byId.set(entry.id, entry);
-  const start = nowMs - SPARK_WEEKS * WEEK_MS;
-  const weeks = new Map<string, number[]>();
+  const start = nowMs - WEEK_MS;
+  const seconds = new Map<string, number>();
   for (const entry of byId.values()) {
     if (!entry.categoryId) continue;
     const from = Math.max(Date.parse(entry.startedAt), start);
     const to = Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs);
     if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) continue;
-    const series = weeks.get(entry.categoryId) ?? Array.from({ length: SPARK_WEEKS }, () => 0);
-    for (let index = 0; index < SPARK_WEEKS; index += 1) {
-      const weekStart = start + index * WEEK_MS;
-      const overlap = Math.min(to, weekStart + WEEK_MS) - Math.max(from, weekStart);
-      if (overlap > 0) series[index] += overlap / 1000;
-    }
-    weeks.set(entry.categoryId, series);
+    seconds.set(entry.categoryId, (seconds.get(entry.categoryId) ?? 0) + (to - from) / 1000);
   }
-  return weeks;
+  return seconds;
 }
 
 /** "2h 30m in the last 7 days", or a plain line when the activity wasn't used. */

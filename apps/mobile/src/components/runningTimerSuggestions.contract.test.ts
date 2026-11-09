@@ -13,7 +13,6 @@ const overlaySource = source("./HistoricalSuggestionsOverlay.tsx");
 const swipeSource = source("./SwipeDismissSheet.tsx");
 const themeSource = source("../lib/mobileTheme.ts");
 const dashboardSource = source("./DayframeDashboard.tsx");
-const reviewSource = source("../../app/review.tsx");
 const qaSource = source("../../app/sheet-qa.tsx");
 const qaHarnessSource = source("../../ios/DayframeSheetQATests/SheetQAHarness.swift");
 
@@ -157,14 +156,13 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(swipeSource).toContain("onPresented?: (presentationId: number) => void");
     expect(dashboardSource).toContain('presentActiveEditor("blank_timer_started", true)');
     expect(dashboardSource).toContain('presentActiveEditor("existing_active_timer")');
-    expect(reviewSource).toContain('reason: "review_edit"');
     expect(editSheetSource).not.toContain("focusDescriptionOnShow");
   });
 
   it("resolves Reduce Motion before mounting the first sheet generation", () => {
     expect(editSheetSource).toContain("reduceMotion: boolean;");
     expect(editSheetSource).not.toContain("useReduceMotionPreference");
-    for (const callerSource of [dashboardSource, reviewSource, qaSource]) {
+    for (const callerSource of [dashboardSource, qaSource]) {
       expect(callerSource).toContain("useResolvedReduceMotionPreference");
       expect(callerSource).toContain("reduceMotionPreferenceResolved");
       expect(callerSource).toContain("reduceMotion={reduceMotion}");
@@ -177,9 +175,6 @@ describe("time-entry sheet historical Suggestions contract", () => {
     );
     expect(dashboardSource).toContain(
       "calendarEditPresentation && reduceMotionPreferenceResolved ? <ActiveTimerEditSheet"
-    );
-    expect(reviewSource).toContain(
-      "editPresentation && reduceMotionPreferenceResolved ? ("
     );
     expect(qaSource).toContain(
       "reduceMotionPreferenceResolved ? <ActiveTimerEditSheet"

@@ -7,6 +7,8 @@ const reports = readFileSync("src/components/reports/ReportsTab.tsx", "utf8");
 const orb = readFileSync("src/components/today/PlayOrb.tsx", "utf8");
 const liveBlock = readFileSync("src/components/today/TodayLiveBlock.tsx", "utf8");
 const motion = readFileSync("src/lib/blocksMotion.ts", "utf8");
+const ring = readFileSync("src/components/today/TodayLiveRing.ios.tsx", "utf8");
+const nativeRing = readFileSync("modules/dayframe-today-ring/ios/DayframeTodayRingModule.swift", "utf8");
 const hotPaths = [
   "src/components/reports/ReportsBlocks.tsx",
   "src/lib/reportsRanges.ts",
@@ -50,16 +52,30 @@ describe("idle and background clock work", () => {
     // Coming back reads the time in that same render.
     expect(clock).toMatch(/if \(inFront !== wasInFront\) \{\s*setWasInFront\(inFront\);\s*if \(inFront\) setNow\(Date\.now\(\)\);/);
   });
-  it("runs the live block's ring and digits on React Native's native driver (iPhone 17, 13 Oct: Reanimated committed the whole tree every frame)", () => {
+  it("composites the iPhone odometer and ring on their own layers", () => {
     const odometer = readFileSync("src/components/today/LiveOdometer.tsx", "utf8");
     expect(odometer).not.toContain("react-native-reanimated");
-    expect(odometer).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
+    const strip = readFileSync("src/components/today/LiveDigitStrip.ios.tsx", "utf8");
+    const fallback = readFileSync("src/components/today/LiveDigitStrip.tsx", "utf8");
+    const nativeStrip = readFileSync("modules/dayframe-today-ring/ios/DayframeTodayDigitStrip.swift", "utf8");
+    expect(odometer).toContain("<LiveDigitStrip");
+    expect(strip).not.toContain("Animated.spring");
+    expect(nativeStrip).toContain('CASpringAnimation(keyPath: "transform.translation.y")');
+    expect(nativeStrip).toContain("layer.presentation()?.transform.m42");
+    expect(fallback).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
+    expect(motion).toContain("restDisplacementThreshold: 0.08, restSpeedThreshold: 0.5");
     expect(motion).toMatch(/export function useBreathingRing[\s\S]*?useNativeDriver: true[\s\S]*?resetBeforeIteration: false/);
-    expect(liveBlock).toContain("style={[styles.ring, { borderColor: colors.text, opacity: ringOpacity }]}");
+    expect(liveBlock).toContain("<TodayLiveRing");
+    expect(ring).not.toContain("useBreathingRing");
+    expect(nativeRing).toContain('CAKeyframeAnimation(keyPath: "opacity")');
+    expect(nativeRing).toContain('ring.add(pulse, forKey: "pulse")');
   });
   it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
     expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground \|\| paused\) \{\s*opacity\.setValue\(BREATHING_RING\.reducedOpacity\);/);
     expect(motion).toContain("}, [foreground, live, opacity, paused, reduceMotion]);");
+    expect(nativeRing).toContain("UIApplication.willResignActiveNotification");
+    expect(nativeRing).toContain("let canAnimate = appActive && window != nil");
+    expect(nativeRing).toContain("ring.removeAllAnimations()");
   });
   it("gives Reports and Today's presentation minute time unless a live block needs seconds", () => {
     expect(dashboard).toContain("nowMs={isFocused ? now : minuteFloorNow}");
@@ -82,10 +98,11 @@ describe("idle and background clock work", () => {
   // other tabs), and the ring's border was redrawn on the CPU on every opacity change.
   it("holds the live block's looping motion still while Today is covered", () => {
     expect(dashboard).toContain("motionPaused={!isFocused}");
-    expect(liveBlock).toContain("useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion })");
+    expect(liveBlock).toContain("paused={motionPaused}");
+    expect(ring).toContain('paused || reduceMotion ? "resting" : "live"');
     expect(liveBlock).toContain("reduceMotion={reduceMotion || motionPaused}");
   });
   it("lets Core Animation draw the ring's border (a bordered view that does not clip is drawn on the CPU)", () => {
-    expect(liveBlock).toMatch(/ {2}ring: \{[^}]*overflow: "hidden"/);
+    expect(nativeRing).toContain("ring.masksToBounds = true");
   });
 });

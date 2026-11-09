@@ -41,6 +41,7 @@ import {
   readActiveMobileAccount,
   type MobileAccountOwner
 } from "../mobileAccount";
+import { armLocationAdmissionGuard } from "./admissionGuard";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { readLocationCaptureConsent } from "./captureConsent";
 import { fetchLocationSync, locationResponseDiagnostics, LocationHttpResponseError } from "./network";
@@ -125,7 +126,10 @@ let captureRevision = 0;
 let captureAdmissionSuspended = false;
 export function invalidateLocationCaptureOwnership() {
   captureAdmissionSuspended = true;
-  return ++captureRevision;
+  const revision = ++captureRevision;
+  // The accuracy trial (card K): a burst whose capture this ends is stopped at once, storage or not (Codex r28 on #619).
+  armLocationAdmissionGuard();
+  return revision;
 }
 export function locationCaptureRevision() { return captureRevision; }
 export function isLocationCaptureAdmissionSuspended() { return captureAdmissionSuspended; }
@@ -352,11 +356,6 @@ async function updateOwnedDiagnostics(key: string, patch: Partial<LocationStoreD
       replayAttempt: mergeAttempt("replay", patch.replayAttempt, previous.replayAttempt),
       diagnosticBinding: {version:1, backend:DAYFRAME_API_BASE, account:key}}), transaction);
   } catch { /* Keep the original operation result; no logging of metadata. */ }
-}
-/** Hands the Review count a location reply carried to the evening reminder. Never blocks or throws. */
-function noteLocationReviewCount(owner: MobileAccountOwner, count: unknown) {
-  if (typeof count !== "number") return;
-  void import("../reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
 }
 
 async function recordLocationAttempt(owner: MobileAccountOwner, session: AuthenticatedSessionSnapshot,
@@ -1288,7 +1287,6 @@ async function uploadLocationEvidenceBatch(
     });
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     attemptOutcome = partition.retryIds.length ? "partial" : "success";
-    noteLocationReviewCount(owner, (body as { reviewCount?: unknown }).reviewCount);
     return { status: "success", acknowledgedCount: acknowledged.length,warnings:payload.warnings };
   } catch (error) {
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
@@ -1414,7 +1412,6 @@ async function requestServerLocationReplay(
       };
     }
     attemptOutcome = "success";
-    noteLocationReviewCount(owner, payload.reviewCount);
     return {
       ok: true as const,
       finalisedSegmentCount: payload.finalisedSegmentCount,

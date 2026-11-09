@@ -41,9 +41,12 @@ describe("Today Blocks feedback", () => {
     // "tick" is the selection haptic for tapping a day in "Earlier this week" and for tapping
     // "Where today went" (user actions).
     // The second "start" is the sheet's Start again for a bare block (a committed user action).
-    // The second undoRestore is Calendar › List's answer Undo (location v4 step 14 part 3b), a person's tap.
-    // The third is the running block's split Undo (owner 28 Oct 2026), a person's tap.
-    expect(calls.sort()).toEqual(["delete", "delete", "start", "start", "stop", "tick", "tick", "undoRestore", "undoRestore", "undoRestore"]);
+    // The second undoRestore is Calendar › List's answer Undo (location v4 step 14 part 3b), the third a place's
+    // Logs as Undo (step 12 part 4b), and the fourth is Undo of a running Split.
+    expect(calls.sort()).toEqual([
+      "delete", "delete", "start", "start", "stop", "tick", "tick",
+      "undoRestore", "undoRestore", "undoRestore", "undoRestore"
+    ]);
     expect(body("const openCalendarDay = useCallback(")).toContain('playHaptic("tick")');
     expect(body("const openReportsToday = useCallback(")).toContain('playHaptic("tick")');
     for (const path of ["function rejectOptimisticTimerStart(", "async function syncQueuedEventsAndReload("]) {

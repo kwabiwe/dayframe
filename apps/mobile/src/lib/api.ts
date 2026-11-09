@@ -212,6 +212,12 @@ export type MobileTimeEntry = {
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
+  /** The version received from the server. A locally projected copy has no version yet. */
+  updatedAt?: string;
+  /** Local only. A split part or duplicate awaiting canonical data must not be edited. */
+  pendingCompletedCopy?: true;
+  /** Local only. The timer whose Live Activity a pending running Split replaces. */
+  runningSplitSourceEntryId?: string;
   durationSeconds: number;
   tagNames?: string[];
   tags?: MobileTag[];
@@ -239,6 +245,11 @@ export type MobileReviewItem = {
   createdAt: string;
   /** Needs-review entries created from this suggestion (newer servers only). */
   linkedEntryIds?: string[];
+  /**
+   * "A block ran into your trip" only (location v4 design §7; newer servers): the proposal End it is sent with
+   * (`expectedProposalHash`).
+   */
+  proposalHash?: string;
 };
 
 /**
@@ -253,8 +264,9 @@ export type MobileOpenTrip = {
 };
 
 export type MobileBootstrap = {
+  completedEntryRevision?: string;
   openTrip?: MobileOpenTrip | null;
-  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number};
+  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean;completedEntryCopy?:boolean;runningEntrySplit?:boolean};
   user: {
     id: string;
     email: string;
@@ -461,6 +473,10 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   userId: string;
   workspaceId: string;
   healthOwner?: HealthCaptureOwner;
+  /** Local delivery dependencies. A Start admitted after a running Split cannot replace its source first. */
+  afterRunningSplitIds?: string[];
+  /** Local receipt for the exact active second block this Start replaced. */
+  runningSplitPredecessorId?: string;
   failedAt?: string;
   failureCount?: number;
   lastError?: string;
@@ -581,6 +597,7 @@ type ActivityEventDraft = {
   owner?: MobileAccountOwner;
   healthOwner?: HealthCaptureOwner;
   requestImmediateDelivery?: boolean;
+  replacesRunningSplitEntryId?: string;
 };
 
 type ApiErrorPayload = {
@@ -600,12 +617,6 @@ type ApiErrorPayload = {
 type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
-
-/** Hands a Review count from any Dayframe reply to the evening reminder. Never blocks or throws. */
-function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown) {
-  if (typeof count !== "number") return;
-  void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
-}
 
 export function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   return withJsTask("bootstrap", () => fetchBootstrapNow(options));
@@ -688,7 +699,6 @@ async function fetchBootstrapNow(options: { date?: string; signal?: AbortSignal;
     requireBootstrapCurrent();
     await activateMobileAccount(owner);
     requireBootstrapCurrent();
-    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCardCount ?? bootstrap.stats?.reviewCount);
   }
   const reviewStore = await reviewSyncStore();
   requireLogoutAllowsResponse();
@@ -837,14 +847,13 @@ export async function logout() {
     // failed delete fails logout while still signed in (Codex r2 on #552).
     await purgeStorageQuarantineContents({ removal: "logout" });
     requireCurrent();
+    // Finish removing the departing owner's unconfirmed Review choices before revoking its session.
+    const { clearActiveReviewAccountData } = await import("./reviewSyncStore");
+    await clearActiveReviewAccountData({ owner: logoutOwner, requireCurrent });
+    requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
       method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
-    }).catch(() => undefined);
-    requireCurrent();
-    await import("./reviewSyncStore").then(({ clearActiveReviewAccountData }) => {
-      requireCurrent();
-      return clearActiveReviewAccountData();
     }).catch(() => undefined);
     requireCurrent();
     // Location timeline corrections the phone still holds leave with the account (step 12).
@@ -944,6 +953,7 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
           owner: _owner,
           healthOwner: _healthOwner,
           requestImmediateDelivery,
+          replacesRunningSplitEntryId,
           ...eventInput
         } = input;
         const parsed = ActivityEventInputSchema.parse({
@@ -972,12 +982,16 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
           lastOwner = owner;
           continue;
         }
+        const runningSplitOrdering = parsed.type === "timer_start"
+          ? await runningSplitOrderingForStart(owner, queuedLocalId, replacesRunningSplitEntryId)
+          : {};
         const nextItem: QueuedEvent = {
           ...queuedEventFromParsedEvent(parsed),
           localId: queuedLocalId,
           queuedAt: new Date().toISOString(),
           userId: owner.userId,
           workspaceId: owner.workspaceId,
+          ...runningSplitOrdering,
           ...(healthOwner ? {healthOwner} : {})
         };
         // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
@@ -1614,6 +1628,12 @@ async function syncQueueItems(
     const attemptedAt = new Date().toISOString();
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
+      if (item.type === "timer_start" && item.afterRunningSplitIds?.length &&
+        !await deliverRunningSplitDependencies(item.afterRunningSplitIds, owner, options)) {
+        remaining.push(item, ...queue.slice(index + 1));
+        stopped = true;
+        break;
+      }
       const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
       if (sessionRead.status !== "authenticated") {
         remaining.push(item, ...queue.slice(index + 1));
@@ -1695,6 +1715,13 @@ async function syncQueueItems(
           localId: item.localId,
           timeEntryId: payload.timeEntryId
         });
+        if (item.runningSplitPredecessorId) {
+          await settleRunningSplitSwitchReceipt(owner, item.runningSplitPredecessorId, options.signal);
+        }
+      }
+      if (item.type === "timer_stop" && item.rawPayload?.stopScope === "entry" &&
+        typeof item.rawPayload.targetEntryId === "string") {
+        await settleRunningSplitSecondReceipt(owner, item.rawPayload.targetEntryId, options.signal);
       }
       if (item.source === "health_sleep" || item.source === "health_workout") {
         if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
@@ -1709,7 +1736,6 @@ async function syncQueueItems(
           throw new Error("The Health acknowledgement backend is not verified.");
         }
       }
-      noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount);
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
@@ -1754,6 +1780,46 @@ async function syncQueueItems(
     stopped,
     timerEntryIdCorrelations
   );
+}
+
+async function runningSplitOrderingForStart(owner: MobileAccountOwner, localId: string, replacesEntryId?: string) {
+  const { readPendingTimeEntryCommands } = await import("./timeEntryOutbox");
+  const commands = await readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+  const afterRunningSplitIds: string[] = [];
+  for (const command of commands) {
+    if (!command.split || command.failureKind === "permanent") continue;
+    // A recovered native Start can be admitted after the Split that depends on it.
+    if (command.optimisticEntryId === localId) break;
+    if (!command.split.receipt || command.split.receipt.correlationPending) {
+      afterRunningSplitIds.push(command.clientCommandId);
+    }
+  }
+  const predecessor = replacesEntryId && commands.find((command) => command.split &&
+    (command.split.secondLocalId === replacesEntryId || command.split.receipt?.secondEntryId === replacesEntryId));
+  return {
+    ...(afterRunningSplitIds.length ? { afterRunningSplitIds } : {}),
+    ...(predecessor ? { runningSplitPredecessorId: predecessor.clientCommandId } : {})
+  };
+}
+
+async function deliverRunningSplitDependencies(
+  commandIds: readonly string[],
+  owner: MobileAccountOwner,
+  options: SyncQueueOptions
+) {
+  const { readPendingTimeEntryCommands, synchroniseTimeEntryCommands } = await import("./timeEntryOutbox");
+  const ids = new Set(commandIds);
+  const stillWaiting = async () => (await readPendingTimeEntryCommands(owner)).some((command) =>
+    command.split && command.failureKind !== "permanent" && ids.has(command.clientCommandId)
+  );
+  if (!await stillWaiting()) return true;
+  await synchroniseTimeEntryCommands({
+    owner,
+    correlations: await readTimerEntryIdCorrelations(owner),
+    force: options.forceRetry,
+    signal: options.signal
+  });
+  return !options.signal?.aborted && !await stillWaiting();
 }
 
 export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner };
@@ -1915,6 +1981,7 @@ export async function deliverPendingTimerStop(
       return { status: "session_changed", pendingStop };
     }
     if (response.ok) {
+      await settleRunningSplitSecondReceipt(owner, pendingStop.targetEntryId, signal);
       await removePendingTimerStop(pendingStop.clientEventId);
       return { status: "delivered", pendingStop };
     }
@@ -1943,6 +2010,93 @@ export async function deliverPendingTimerStop(
       pendingStop: updated ?? pendingStop,
       error: failure
     };
+  }
+}
+
+export type EntryLastStop = { id: string; stoppedAt: string };
+export type EntryLastStopPage = { rows: EntryLastStop[]; truncated: boolean };
+
+export async function fetchEntryLastStops(input: {
+  owner: MobileAccountOwner;
+  fromMs: number;
+  throughMs: number;
+  excludeId?: string;
+  signal: AbortSignal;
+}): Promise<EntryLastStopPage> {
+  const { owner, fromMs, throughMs, excludeId, signal } = input;
+  const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const params = new URLSearchParams({ from: new Date(fromMs).toISOString(), through: new Date(throughMs).toISOString() });
+  // Local provisional IDs never address server rows. The editor still excludes them locally.
+  if (excludeId && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(excludeId)) params.set("exclude", excludeId);
+  const { response, body } = await mobileJsonRequest<EntryLastStopPage | null>(
+    `${DAYFRAME_API_BASE}/api/time-entries/last-stops?${params}`,
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal },
+    { timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS, timeoutMessage: "Previous blocks are taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (value, response) => {
+        if (!response.ok) return null;
+        const page = value as EntryLastStopPage | null;
+        if (!Array.isArray(page?.rows) || typeof page.truncated !== "boolean" || page.rows.length > 128 ||
+          page.rows.some((row) => {
+            if (typeof row?.id !== "string" || typeof row.stoppedAt !== "string") return true;
+            const stop = Date.parse(row.stoppedAt);
+            return !Number.isFinite(stop) || stop < fromMs || stop > throughMs;
+          })) throw new InvalidMobileAcknowledgementError();
+        return page;
+      }
+    }
+  );
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Couldn't load previous blocks.");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
+}
+
+export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner, signal?: AbortSignal): Promise<MobileTimeEntry> {
+  const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const { response, body } = await mobileJsonRequest<MobileTimeEntry | null>(
+    `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal },
+    { timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS, timeoutMessage: "This block is taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (value, response) => {
+        if (!response.ok) return null;
+        const entry = (value as { entry?: MobileTimeEntry } | null)?.entry;
+        if (entry?.id !== id || typeof entry.startedAt !== "string") throw new InvalidMobileAcknowledgementError();
+        return entry;
+      } }
+  );
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Couldn't open this block.");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
+}
+
+/** Settle only the exact Split second block that was active when the user tapped Switch. */
+async function settleRunningSplitSwitchReceipt(owner: MobileAccountOwner, commandId: string, signal?: AbortSignal) {
+  const { readPendingTimeEntryCommands } = await import("./timeEntryOutbox");
+  const commands = await readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+  const receipt = commands.find((command) => command.clientCommandId === commandId)?.split?.receipt;
+  if (receipt) await settleRunningSplitSecondReceipt(owner, receipt.secondEntryId, signal);
+}
+
+/** Keep the canonical state for a retained Split receipt before dropping the operation that ended it. */
+async function settleRunningSplitSecondReceipt(owner: MobileAccountOwner, entryId: string, signal?: AbortSignal) {
+  const { hasRunningSplitReceiptForSecondEntry, recordRunningSplitSecondState } = await import("./timeEntryOutbox");
+  if (!await hasRunningSplitReceiptForSecondEntry(owner, entryId)) return;
+  try {
+    const entry = await fetchOwnedTimeEntry(entryId, owner, signal);
+    const updatedAt = validIsoString(entry.updatedAt);
+    const stoppedAt = entry.stoppedAt === null ? null : validIsoString(entry.stoppedAt);
+    if (!updatedAt || stoppedAt === undefined) throw new InvalidMobileAcknowledgementError();
+    await recordRunningSplitSecondState(owner, entryId, { updatedAt, stoppedAt });
+  } catch (error) {
+    if (!(error instanceof MobileHttpResponseError) || error.statusCode !== 404) throw error;
+    await recordRunningSplitSecondState(owner, entryId, { removed: true });
   }
 }
 
@@ -2113,41 +2267,6 @@ export async function fetchTimelineItemEvidence(
   return body;
 }
 
-/**
- * Tell the server which Apple venue the ranker was confident about for an open card's unsaved stay
- * (location v3 PR 8, design §6.3): its Place ID only. Best effort and foreground only, while
- * Location evidence is on screen; any failure (offline, a decided card) is dropped quietly, since
- * the suggestion is recomputed the next time the stay is opened. Sent only under the session of
- * `owner`, the account the evidence was read for, and only while the app is active, both checked
- * again right before the request starts (Codex r1 on #522).
- */
-export async function reportVenueSuggestion(reviewItemId: string, placeId: string, owner: MobileAccountOwner): Promise<boolean> {
-  try {
-    if (AppState.currentState !== "active") return false;
-    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
-    if (session.status !== "authenticated") return false;
-    if (AppState.currentState !== "active" || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return false;
-    const { response } = await mobileJsonRequest<null>(
-      `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(reviewItemId)}/venue`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.snapshot.token}` },
-        body: JSON.stringify({ placeId })
-      },
-      {
-        timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
-        timeoutMessage: "Saving the suggested place took too long.",
-        isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
-        handleAuthentication: false,
-        validate: () => null
-      }
-    );
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 export function normaliseLocationReviewRequestError(
   error: unknown,
   kind: "evidence" | "action"
@@ -2192,12 +2311,28 @@ export function dismissReviewItem(id: string) {
   return resolveReviewItem(id, "ignore_once");
 }
 
+/** A Health reprocess batch its callers no longer want, stopped before it was sent or while in flight (Codex r5 on #615). */
+export class HealthReprocessCancelledError extends Error {
+  constructor() {
+    super("Health processing was stopped.");
+    this.name = "HealthReprocessCancelledError";
+  }
+}
+
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number } = {}
+  options: {
+    limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number;
+    /**
+     * Read synchronously after the session read, immediately before the request is sent: false stops it there
+     * (every caller's abort and foreground predicate; Codex r5 on #615). `signal` cancels it in flight.
+     */
+    beforeSend?: () => boolean;
+  } = {}
 ): Promise<HealthReviewReprocessResult> {
   const session = await readAuthenticatedSessionSnapshot();
   if(session.status!=="authenticated") throw new AuthRequiredError();
+  if(options.signal?.aborted || (options.beforeSend && !options.beforeSend())) throw new HealthReprocessCancelledError();
   const {response,body} = await mobileJsonRequest<Record<string,unknown> | null>(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.snapshot.token}`},signal:options.signal,
     body:JSON.stringify({preferences,limit:options.limit,force:options.force,mappings:options.mappings,cursor:options.cursor})
@@ -2454,12 +2589,26 @@ export type NewPlaceRole = {
  * Creates a place in one request that returns it, so an accepted save never depends on a later
  * read (a retry after a failed follow-up read would add the place twice).
  */
-export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole) {
+export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole,
+  /**
+   * The account the place is for: it is sent under that account's own session, or not at all, however the
+   * session changes meanwhile (step 12 part 4b, Codex r1 on #606).
+   */
+  owner?: MobileAccountOwner) {
+  let headers: Record<string, string>;
+  if (owner) {
+    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+    if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+    if (session.status !== "authenticated") throw new AuthRequiredError();
+    headers = { Authorization: `Bearer ${session.snapshot.token}` };
+  } else {
+    headers = await authHeaders();
+  }
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(await authHeaders())
+      ...headers
     },
     body: JSON.stringify({
       name: input.name.trim(),
@@ -2720,6 +2869,8 @@ function migrateQueuedEvent(
   delete queueItem.workspaceId;
   delete queueItem.userId;
   delete queueItem.clientEventId;
+  delete queueItem.afterRunningSplitIds;
+  delete queueItem.runningSplitPredecessorId;
   const userId = optionalQueueOwnerText(item.userId) ?? legacyOwner?.userId;
   const workspaceId = optionalQueueOwnerText(item.workspaceId) ?? legacyOwner?.workspaceId;
   if (!userId || !workspaceId) return null;
@@ -2744,6 +2895,9 @@ function migrateQueuedEvent(
     : lastStatusCode && permanentStatusCodes.has(lastStatusCode)
       ? "permanent"
       : undefined;
+  const afterRunningSplitIds = item.type === "timer_start" && Array.isArray(item.afterRunningSplitIds)
+    ? item.afterRunningSplitIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
 
   return {
     ...queueItem,
@@ -2755,6 +2909,9 @@ function migrateQueuedEvent(
     queuedAt,
     userId,
     workspaceId,
+    ...(afterRunningSplitIds.length ? { afterRunningSplitIds } : {}),
+    ...(item.type === "timer_start" && typeof item.runningSplitPredecessorId === "string" && item.runningSplitPredecessorId
+      ? { runningSplitPredecessorId: item.runningSplitPredecessorId } : {}),
     failedAt: unscopedLegacyTimerStop
       ? validIsoString(item.failedAt) ?? queuedAt
       : validIsoString(item.failedAt),

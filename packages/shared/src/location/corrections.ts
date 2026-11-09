@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mergeSameModeLegs } from "./legs";
+import { ReviewEntryEditSchema } from "./schemas";
 import type { CommuteSegment, LocationSegment, StaySegment, TripLeg, TripLegMode } from "./types";
 
 /**
@@ -34,9 +35,30 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     subject: z.literal("place"),
     itemId,
     clientCorrectionId,
+    visitStartedAt: instant.optional(),
     placeId: z.string().uuid().nullable(),
-    learnedPlaceId: z.string().uuid().nullable()
-  }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." }),
+    learnedPlaceId: z.string().uuid().nullable(),
+    // A place to save with the correction, in one transaction: a refused correction leaves no place behind, and a
+    // retry under the same clientCorrectionId never saves it twice.
+    newPlace: z.object({
+      name: z.string().trim().min(1).max(120),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      radiusMeters: z.number().int().min(25).max(1000)
+    }).optional()
+  }).refine((value) => !(value.placeId && value.learnedPlaceId), { message: "Choose a saved place or a learned place, not both." })
+    .refine((value) => !(value.newPlace && (value.placeId || value.learnedPlaceId)), { message: "Choose a place or a new one, not both." }),
+  // Mobile can keep the intent in its outbox without storing coordinates. Older servers reject this
+  // kind instead of treating it as a correction to an unknown place.
+  z.object({
+    kind: z.literal("save_visit_place"),
+    subject: z.literal("place"),
+    itemId,
+    clientCorrectionId: z.string().uuid(),
+    visitStartedAt: instant,
+    name: z.string().trim().min(1).max(120),
+    radiusMeters: z.number().int().min(25).max(1000)
+  }),
   z.object({
     kind: z.literal("times"),
     subject: z.enum(["place", "trip"]),
@@ -49,9 +71,15 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("delete"), subject: z.enum(["place", "trip"]), itemId, clientCorrectionId }),
   // "I didn't leave": the trip between two visits to one place, which become one stay (step 12 part 4).
   z.object({ kind: z.literal("merge"), subject: z.literal("trip"), itemId, clientCorrectionId }),
-  // "Logs as" (step 12 part 4): a place with no question and no block, logged with this activity for the time
-  // the person's own blocks don't cover. Blocks, not a stored correction: replay never applies it again.
-  z.object({ kind: z.literal("log_place"), subject: z.literal("place"), itemId, clientCorrectionId, categoryId: z.string().uuid() }),
+  // "Log activity": log the uncovered part of a visit with a description, a category, or both.
+  // This resolves the open question and creates blocks through an event receipt.
+  z.object({
+    kind: z.literal("log_place"), subject: z.literal("place"), itemId, clientCorrectionId,
+    categoryId: z.string().uuid().optional(), description: ReviewEntryEditSchema.shape.description,
+    visitOnly: z.literal(true).optional()
+  }).refine(({ categoryId, description }) => Boolean(categoryId || description), {
+    message: "Enter what you did or choose an activity."
+  }),
   z.object({
     kind: z.literal("leg_mode"),
     subject: z.literal("leg"),

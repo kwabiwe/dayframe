@@ -5,6 +5,7 @@ import {
   REVIEW_PRESENTATION_OUTING_COUNT_FEATURE,
   REVIEW_PRESENTATION_LEARNED_NAME_FEATURE,
   REVIEW_PRESENTATION_VENUE_FEATURE,
+  REVIEW_PRESENTATION_TIMER_TRIP_CLASH_FEATURE,
   REVIEW_PRESENTATION_OUTING_FEATURE,
   REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
   ReviewPresentationRequestSchema
@@ -55,7 +56,8 @@ export async function POST(request: Request) {
       outing: features.includes(REVIEW_PRESENTATION_OUTING_FEATURE),
       outingCount: features.includes(REVIEW_PRESENTATION_OUTING_COUNT_FEATURE),
       learnedName: features.includes(REVIEW_PRESENTATION_LEARNED_NAME_FEATURE),
-      venue: features.includes(REVIEW_PRESENTATION_VENUE_FEATURE)
+      venue: features.includes(REVIEW_PRESENTATION_VENUE_FEATURE),
+      timerTripClash: features.includes(REVIEW_PRESENTATION_TIMER_TRIP_CLASH_FEATURE)
     });
     return privateJson(presentation);
   } catch (error) {

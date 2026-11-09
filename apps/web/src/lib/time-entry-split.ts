@@ -1,4 +1,4 @@
-import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER } from "@dayframe/shared";
+import { clampSplit, splitBounds, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, type SplitBounds } from "@dayframe/shared";
 import type { TimeEntryRow } from "./queries";
 
 /**
@@ -10,18 +10,7 @@ import type { TimeEntryRow } from "./queries";
 
 const MINUTE_MS = 60_000;
 
-export type SplitBounds = { startMs: number; stopMs: number; minMs: number; maxMs: number };
-
-/** Where a finished block can be split: on whole minutes, leaving each half a minute or more. Null when it can't. */
-export function splitBounds(entry: Pick<TimeEntryRow, "startedAt" | "stoppedAt">): SplitBounds | null {
-  if (!entry.stoppedAt) return null;
-  const startMs = Date.parse(entry.startedAt);
-  const stopMs = Date.parse(entry.stoppedAt);
-  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return null;
-  const minMs = Math.ceil((startMs + MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
-  const maxMs = Math.floor((stopMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
-  return maxMs >= minMs ? { startMs, stopMs, minMs, maxMs } : null;
-}
+export { clampSplit, defaultSplit, splitBounds, type SplitBounds } from "@dayframe/shared";
 
 /**
  * Where a running block can be split (owner 28 Oct 2026, as Toggl): on whole minutes, never within its first
@@ -33,17 +22,6 @@ export function runningSplitBounds(entry: Pick<TimeEntryRow, "startedAt">, nowMs
   const minMs = Math.ceil((startMs + MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
   const maxMs = Math.floor((nowMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS;
   return maxMs >= minMs ? { startMs, stopMs: nowMs, minMs, maxMs } : null;
-}
-
-/** A split time snapped to the minute and kept inside the bounds. */
-export function clampSplit(bounds: SplitBounds, atMs: number) {
-  const snapped = Math.round(atMs / MINUTE_MS) * MINUTE_MS;
-  return Math.min(bounds.maxMs, Math.max(bounds.minMs, snapped));
-}
-
-/** The middle of the block, on a minute: where the line starts. */
-export function defaultSplit(bounds: SplitBounds) {
-  return clampSplit(bounds, (bounds.startMs + bounds.stopMs) / 2);
 }
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -102,10 +80,13 @@ export function newBlockCommandId(mode: string) {
 }
 
 /**
- * `running`: the second part runs. False when the block had stopped by the time the split arrived: the server
- * then split it as a finished block, and nothing runs.
+ * `entries`: both blocks as the server has them now, so the timer shows them at once. The second part runs
+ * unless the block had stopped by the time the split arrived (then it was split as a finished block).
  */
-export type RunningSplitOutcome = { ok: true; newEntryId: string; running: boolean } | { ok: false; error: string; changed?: boolean };
+export type RunningSplitOutcome =
+  /** `newEntryId` null: a repeat of a split whose second part has gone since (an Undo joined it back). */
+  | { ok: true; newEntryId: string | null; entries: TimeEntryRow[] }
+  | { ok: false; error: string; changed?: boolean };
 
 /**
  * Splits the running block `entryId` at `atMs` (already snapped by the dialog): it ends there and its second
@@ -121,8 +102,11 @@ export async function splitRunningTimeEntry(
   }, "Couldn't split this block.");
   if (!outcome.ok) return outcome;
   const newEntryId = outcome.body?.newEntryId;
-  return typeof newEntryId === "string"
-    ? { ok: true, newEntryId, running: outcome.body?.running !== false }
+  const entries = Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [];
+  if (typeof newEntryId === "string") return { ok: true, newEntryId, entries };
+  // Done before and undone since: still reconciled from the blocks it names (Codex r4 on #607).
+  return newEntryId === null && outcome.body?.replayed === true
+    ? { ok: true, newEntryId: null, entries }
     : { ok: false, error: UNKNOWN, changed: true };
 }
 
@@ -130,10 +114,13 @@ export async function splitRunningTimeEntry(
 export async function joinSplitTimeEntries(
   fetcher: Fetch,
   input: { entryId: string; splitEntryId: string; commandId?: string }
-): Promise<BlockMutationOutcome> {
-  return plain(await send(
+): Promise<{ ok: true; entry: TimeEntryRow | null } | { ok: false; error: string; changed?: boolean }> {
+  const outcome = await send(
     fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input.commandId
-  ));
+  );
+  if (!outcome.ok) return outcome;
+  const entry = outcome.body?.entry;
+  return { ok: true, entry: entry && typeof entry === "object" ? entry as TimeEntryRow : null };
 }
 
 /** Duplicates a finished block: a new block with the same details, starting where the original ends. */

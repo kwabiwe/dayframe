@@ -161,7 +161,7 @@ describe("rankVenues: input hygiene", () => {
   });
 
   it("returns nothing for nothing, and shares that sum to one", () => {
-    expect(rankVenues([], stay(10))).toEqual({ venues: [], suggestion: null });
+    expect(rankVenues([], stay(10))).toEqual({ venues: [], suggestion: null, guess: null });
     const ranking = rankVenues([place("Alder Books", null, 10, 0), place("Birch Café", "Cafe", 30, 0)], stay(30));
     expect(ranking.venues.reduce((sum, venue) => sum + venue.share, 0)).toBeCloseTo(1, 10);
   });
@@ -241,5 +241,58 @@ describe("rankVenues: Codex r2 on #517", () => {
     expect(venueKind(carPark)).toBe("parking");
     expect(ranking.venues.find((venue) => venue.candidate.id === carPark.id)).toMatchObject({ kind: "parking", insideArea: false, children: [] });
     expect(ranking.suggestion?.candidate.id).not.toBe(carPark.id);
+  });
+});
+
+describe("rankVenues: the near guess (PRD D23, owner 29 Oct 2026)", () => {
+  // The owner's case, as a 10-minute weekday stay in a town centre: two shops 10 m away and one 30 m away.
+  const ownersCase = () => [
+    place("Holland & Barrett", "Store", 8, 6),
+    place("Transylvania Sweet", "Bakery", -6, 8),
+    place("Hotel Chocolat", "Store", 18, -24),
+    place("Home Made Bakery", "Bakery", -12, -16),
+    place("Falafel Street", "Restaurant", 24, 18)
+  ];
+
+  it("guesses one near venue where the strict suggestion finds none", () => {
+    const ranking = rankVenues(ownersCase(), stay(10, 12));
+    expect(ranking.suggestion).toBeNull();
+    expect(ranking.guess).not.toBeNull();
+    expect(ranking.guess!.candidate.distanceMeters).toBeLessThanOrEqual(50);
+  });
+
+  it("guesses nothing when no destination is within 50 m", () => {
+    const far = [place("Alder Books", null, 60, 40), place("Birch Books", null, -60, 40), place("Elm Books", null, 0, -72),
+      place("Market Street (Stop K)", "PublicTransport", 5, 5)];
+    const ranking = rankVenues(far, stay(12, 13));
+    expect(ranking.suggestion).toBeNull();
+    expect(ranking.guess).toBeNull();
+  });
+
+  it("never guesses a stop or car park, however near", () => {
+    const ranking = rankVenues([place("Market Street (Stop K)", "PublicTransport", 3, 3), place("Alder Books", null, 80, 0)], stay(12, 13));
+    expect(ranking.guess).toBeNull();
+  });
+
+  it("keeps the strict suggestion as the guess when there is one, even beyond 50 m", () => {
+    const store = place("Freshway Superstore", "FoodMarket", 45, 40);
+    const ranking = rankVenues([store, place("Dock Nails", "Beauty", 20, 30)], stay(25));
+    expect(ranking.suggestion?.candidate.title).toBe("Freshway Superstore");
+    expect(ranking.guess).toBe(ranking.suggestion);
+  });
+
+  it("breaks a tie by distance, then by a past pick here, then by how well its usual length fits", () => {
+    // Two of the same kind, equally scored: the nearer one.
+    const nearer = place("Alder Gifts", "Store", 6, 0);
+    const farther = place("Birch Gifts", "Store", 0, 9);
+    expect(rankVenues([farther, nearer], stay(10, 12)).guess?.candidate.title).toBe("Alder Gifts");
+    // Same distance: the one picked here before (its score is raised too, so it leads outright).
+    const a = place("Cedar Gifts", "Store", 10, 0, { placeId: "I.cedar" });
+    const b = place("Dock Gifts", "Store", 0, 10, { placeId: "I.dock" });
+    expect(rankVenues([a, b], stay(10, 12, { pickedBefore: (candidate) => candidate.placeId === "I.dock" })).guess?.candidate.title).toBe("Dock Gifts");
+    // Same distance, neither picked, equal share: the one whose usual length fits a 70-minute stay (a gym over a shop).
+    const gym = place("Elm Fitness", "FitnessCenter", 10, 0);
+    const shop = place("Fern Gifts", "Store", 0, 10);
+    expect(rankVenues([shop, gym], stay(70, 12)).guess?.candidate.title).toBe("Elm Fitness");
   });
 });

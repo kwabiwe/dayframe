@@ -4,27 +4,27 @@ import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
+import { requestCalendarToday } from "@/lib/calendar-today-request";
 import { SHELL_SECTIONS, type ShellSectionId } from "@/lib/shell-nav";
 
-function reviewLabel(count: number) {
-  return `Review, ${count} to review`;
-}
-
+/**
+ * The badge is a count only (owner, 29 Oct 2026): Calendar always opens on today, badge or not, with no `date=` carried
+ * over. The "N to check" chip in Calendar › List, and a link to one "?", step to a question's day.
+ */
 function checkLabel(count: number) {
-  return `Calendar, ${count} to check`;
+  return `Calendar, ${count} to check in the last 7 days`;
 }
 
 /**
- * The sidebar's five sections with one sliding neutral thumb. The thumb is the only animated
+ * The sidebar's four sections with one sliding neutral thumb. The thumb is the only animated
  * element: its first placement is still, later moves use the `snap` spring as a CSS transition
  * (which retargets from wherever it is when the route changes again), and Reduce Motion moves it
- * without travel. Pages outside the five sections (Settings) fade the thumb out.
+ * without travel. Pages outside the four sections (Settings) fade the thumb out.
  */
-export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
+export function ShellSidebarNav({ activeId, checkCount = 0 }: {
   activeId: ShellSectionId | null;
-  /** Things to check today and the 7 days before, on Calendar (location v4 step 14). */
+  /** Things to check today and the 6 days before, on Calendar. */
   checkCount?: number;
-  reviewCount: number;
 }) {
   const navRef = useRef<HTMLElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
@@ -73,14 +73,15 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
       <span ref={thumbRef} className="df-nav-thumb" aria-hidden="true" />
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
-        const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
+        const count = section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
             href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
+            aria-label={count > 0 ? checkLabel(count) : undefined}
           >
             <DayframeIcon glyph={section.glyph} size={19} />
             <span>{section.label}</span>
@@ -93,18 +94,21 @@ export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
 }
 
 /** Below 860 px the sections move to a glass bar along the bottom edge. */
-export function ShellTabBar({ activeId, checkCount = 0, reviewCount }: { activeId: ShellSectionId | null; checkCount?: number; reviewCount: number }) {
+export function ShellTabBar({ activeId, checkCount = 0 }: {
+  activeId: ShellSectionId | null; checkCount?: number;
+}) {
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
-        const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
+        const count = section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
             href={section.href}
+            onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
+            aria-label={count > 0 ? checkLabel(count) : undefined}
           >
             <span className="df-tab-icon">
               <DayframeIcon glyph={section.glyph} size={22} />

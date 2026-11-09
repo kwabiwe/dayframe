@@ -12,12 +12,20 @@ describe("time-entry sheet head and actions", () => {
     expect(sheet).not.toContain("timeEntryHero");
   });
 
-  it("ends with Discard and Stop while running, Delete and Start again when stopped", () => {
+  it("keeps Discard and Stop while running and uses the header Actions menu for finished blocks", () => {
     const start = sheet.indexOf(`testID="time-entry-sheet-actions"`);
     const actions = sheet.slice(start, sheet.indexOf("<HistoricalSuggestionsOverlay", start));
     expect(actions.indexOf('testID="time-entry-sheet-delete"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-stop"'));
-    expect(actions.indexOf('testID="time-entry-sheet-stop"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-start-again"'));
-    expect(actions).toContain('{isRunningMode || isAddMode ? "Discard" : "Delete"}');
+    expect(actions).not.toContain('testID="time-entry-sheet-start-again"');
+    const menu = sheet.slice(sheet.indexOf('testID="time-entry-actions-options"'), start);
+    const options = ["time-entry-split", "time-entry-duplicate", "time-entry-sheet-start-again", "time-entry-sheet-delete"];
+    let after = -1;
+    for (const option of options) {
+      const index = menu.indexOf(`testID="${option}"`);
+      expect(index).toBeGreaterThan(after);
+      after = index;
+    }
+    expect(menu).toContain('label="Delete"');
     expect(sheet).toContain("const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);");
   });
 
@@ -37,7 +45,8 @@ describe("time-entry sheet head and actions", () => {
     expect(start).toMatch(/if \(categoryId \|\| description\) \{\s*startFromToday\(categoryId, description, tagNames\);/);
     expect(start).toContain('void startTaskWith({ categoryId: null, description: "", startedAt: null, tagNames })');
     // A stale request never fires: a new completed-entry sheet and logout both clear it.
-    expect(dashboard.slice(dashboard.indexOf("function presentCompletedEntry("), dashboard.indexOf("function presentCompletedEntry(") + 400)).toContain("pendingStartAgain.current = null;");
+    const present = dashboard.slice(dashboard.indexOf("function presentCompletedEntry("), dashboard.indexOf("function completeActiveEditorExit("));
+    expect(present).toContain("pendingStartAgain.current = null;");
     expect(dashboard.slice(dashboard.indexOf("const transitionToSignedOut = useCallback("), dashboard.indexOf("const syncQueuedEvents = useCallback("))).toContain("pendingStartAgain.current = null;");
   });
 });

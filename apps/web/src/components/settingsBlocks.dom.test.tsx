@@ -132,13 +132,12 @@ describe("Settings in Blocks", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens the shell's keyboard shortcuts and links to Review from Help", async () => {
+  it("opens the shell's keyboard shortcuts from Help, with no Review link (location v4 step 15)", async () => {
     const userEvents = userEvent.setup();
     const opened = vi.fn();
     window.addEventListener(OPEN_SHORTCUTS_EVENT, opened);
-    render(<HelpSettings authMode="provider" reviewCount={2} />);
-    expect(screen.getByText("2 moments waiting.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open Review" }).getAttribute("href")).toBe("/review");
+    render(<HelpSettings authMode="provider" />);
+    expect(screen.queryByRole("link", { name: /Review/ })).toBeNull();
     await userEvents.click(screen.getByRole("button", { name: "Show" }));
     expect(opened).toHaveBeenCalledTimes(1);
     window.removeEventListener(OPEN_SHORTCUTS_EVENT, opened);

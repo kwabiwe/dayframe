@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { DayframeDashboardProvider, useDashboardCheckCount } from "@/components/DayframeDashboard";
+import { DayframeDashboardProvider, useDashboardCheckCount, useDashboardOpenCalendarToday } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
@@ -37,6 +37,8 @@ function DashboardTabs() {
   const timerRunning = usePlayOrbRunning();
   // Things to check today and the 7 days before (location v4 step 14).
   const checkCount = useDashboardCheckCount();
+  // Owner bug (29 Oct 2026): the Calendar tab always opens today, badge or not; the badge is a count only.
+  const openCalendarToday = useDashboardOpenCalendarToday();
 
   return (
     <>
@@ -67,10 +69,16 @@ function DashboardTabs() {
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.today} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.today.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
-        <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.calendar.route}>
+        <NativeTabs.Trigger
+          listeners={{ tabPress: () => openCalendarToday?.() }}
+          name={DAYFRAME_NATIVE_TABS.calendar.route}
+        >
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.calendar} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.calendar.label}</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Badge hidden={checkCount <= 0}>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>
+          {/* The native trigger prefers badge text over hidden, so zero must have no badge child. */}
+          {checkCount > 0 ? (
+            <NativeTabs.Trigger.Badge>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>
+          ) : null}
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.reports.route}>
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />

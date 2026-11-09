@@ -5,11 +5,10 @@ import { SHELL_SECTIONS, activeLibraryTab, activeShellSection, goToTarget, start
 const bare = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
 describe("Blocks shell sections", () => {
-  it("lists Today, Calendar, Review, Reports and Library with their G letters", () => {
+  it("lists Today, Calendar, Reports and Library with their G letters (no Review, location v4 step 15)", () => {
     expect(SHELL_SECTIONS.map((section) => `${section.letter} ${section.label}`)).toEqual([
       "t Today",
       "c Calendar",
-      "r Review",
       "p Reports",
       "l Library"
     ]);
@@ -18,7 +17,8 @@ describe("Blocks shell sections", () => {
   it("maps every existing page to its section, and Settings to none", () => {
     expect(activeShellSection("/")?.id).toBe("today");
     expect(activeShellSection("/timeline")?.id).toBe("calendar");
-    expect(activeShellSection("/review")?.id).toBe("review");
+    // /review only redirects to Calendar › List now.
+    expect(activeShellSection("/review")).toBeNull();
     expect(activeShellSection("/reports")?.id).toBe("reports");
     for (const path of ["/categories", "/tags", "/places"]) expect(activeShellSection(path)?.id).toBe("library");
     expect(activeShellSection("/settings")).toBeNull();
@@ -41,6 +41,7 @@ describe("Blocks shell sections", () => {
     expect(goToTarget({ ...bare, key: "s" })).toBe("/settings");
     expect(goToTarget({ ...bare, key: "1" })).toBeNull();
     expect(goToTarget({ ...bare, key: "x" })).toBeNull();
+    expect(goToTarget({ ...bare, key: "r" })).toBeNull();
     expect(goToTarget({ ...bare, key: "t", ctrlKey: true })).toBeNull();
   });
 });

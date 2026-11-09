@@ -18,23 +18,19 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { File, Paths } from "expo-file-system";
-import type { MobileReviewItem, MobileTimeEntry } from "../src/lib/api";
+import type { MobileTimeEntry } from "../src/lib/api";
 import { TodayTimerSurface } from "../src/components/accessibility/TodayTimerSurface";
 import { TodayGoalFrame } from "../src/components/today/TodayGoalFrame";
 import { TodayBlockRows } from "../src/components/today/TodayBlockRows";
-import { TodayReviewNudge } from "../src/components/today/TodayReviewNudge";
 import { groupHistoryDayEntries } from "../src/lib/historyPresentation";
 import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
-import { reviewDeckCardForItem } from "../app/review";
-import { ReviewDeckStack } from "../src/components/review/ReviewDeck";
 import { SettingsBlockGroup, SettingsBlockRow } from "../src/components/settings/SettingsBlocks";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
 import { mobileTextProps } from "../src/lib/mobileTypography";
 
 const frames: Record<string, unknown> = {};
 const widths = [320, 375, 390, 430];
-const reviewCounts = [0, 1, 2, 99, 999, 10_000];
 
 function syntheticTime(day: number, hour: number, minute: number) {
   return new Date(2026, 8, day, hour, minute).toISOString();
@@ -118,26 +114,6 @@ function repeatedGroup(count: number, prefix: string, categoryName: string) {
   }));
 }
 
-const reviewFixture: MobileReviewItem = {
-  id: "V01-synthetic-review",
-  type: "activity_suggestion",
-  title: "Synthetic detected activity with a deliberately long proposal title",
-  eventSource: "healthkit",
-  eventType: "workout_summary",
-  categoryName: "Synthetic category",
-  categoryColor: "#6B8E73",
-  placeName: null,
-  suggestedCategoryId: "qa-category",
-  suggestedPlaceId: null,
-  suggestedStartedAt: syntheticTime(12, 7, 0),
-  suggestedStoppedAt: syntheticTime(12, 8, 25),
-  confidence: "medium",
-  status: "open",
-  notes: "Synthetic review reason. This longer explanation verifies that policy and safety copy wraps rather than disappearing below a fixed line limit.",
-  rawPayload: null,
-  createdAt: syntheticTime(12, 8, 25),
-};
-
 function Probe() {
   const { styles, theme } = useMobileTheme();
   const { width: deviceWidth, height: deviceHeight } = useWindowDimensions();
@@ -145,13 +121,10 @@ function Probe() {
   const [hostWidth, setHostWidth] = useState(() =>
     deviceWidth >= 390 ? 390 : deviceWidth >= 375 ? 375 : 320,
   );
-  const [reviewCountIndex, setReviewCountIndex] = useState(3);
   const [boldText, setBoldText] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [showRunningTimer, setShowRunningTimer] = useState(false);
   const [actionResult, setActionResult] = useState("No probe action has run.");
-  const reviewCount = reviewCounts[reviewCountIndex];
-  const reviewNudgeVisible = reviewCount > 0;
   const reportWriterRef = useRef<() => void>(() => {});
   const reportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleReportWrite = () => {
@@ -161,7 +134,7 @@ function Probe() {
       reportWriterRef.current();
     }, 200);
   };
-  const previousVisibility = useRef({ reviewNudgeVisible, showRunningTimer });
+  const previousVisibility = useRef({ showRunningTimer });
   if (previousVisibility.current.showRunningTimer !== showRunningTimer) {
     const hiddenTimerPrefix = showRunningTimer ? "today.timer.idle" : "today.timer.running";
     for (const key of Object.keys(frames)) {
@@ -169,12 +142,7 @@ function Probe() {
     }
     if (showRunningTimer) delete frames["today.timer.composer.frame"];
   }
-  if (previousVisibility.current.reviewNudgeVisible !== reviewNudgeVisible && !reviewNudgeVisible) {
-    for (const key of Object.keys(frames)) {
-      if (key.startsWith("review-nudge.")) delete frames[key];
-    }
-  }
-  previousVisibility.current = { reviewNudgeVisible, showRunningTimer };
+  previousVisibility.current = { showRunningTimer };
   useEffect(() => {
     void AccessibilityInfo.isBoldTextEnabled().then(setBoldText);
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -233,18 +201,11 @@ function Probe() {
         "settings.value.frame",
         "settings.value.text",
         "settings.chevron",
-        "review-deck.card",
-        "review-deck.body",
-        "review-deck.title.frame",
-        "review-deck.reason.frame",
       ];
       if (showRunningTimer) {
         requiredMeasurements.push("today.timer.running", "today.timer.title.frame", "today.timer.title.text", "today.timer.elapsed.frame");
       } else {
         requiredMeasurements.push("today.timer.idle", "today.timer.composer.frame");
-      }
-      if (reviewCount > 0) {
-        requiredMeasurements.push("review-nudge.card", "review-nudge.title.frame", "review-nudge.title.text", "review-nudge.detail.frame", "review-nudge.detail.text");
       }
       const missingMeasurementIds = [...new Set(requiredMeasurements)].filter((id) => !(id in frames));
       const result = {
@@ -258,7 +219,6 @@ function Probe() {
         reduceMotion,
         appearance: theme.mode,
         visibleState: {
-          reviewNudge: reviewCount > 0,
           timer: showRunningTimer ? "running" : "idle",
         },
         platform: Platform.OS,
@@ -272,8 +232,6 @@ function Probe() {
           "today.goal.total.frame": "today.goal",
           "today.goal.of.frame": "today.goal",
           "today.goal.cells": "today.goal",
-          "review-nudge.title.frame": "review-nudge.card",
-          "review-nudge.detail.frame": "review-nudge.card",
           "today.timer.title.frame": "today.timer.running",
           "today.timer.elapsed.frame": "today.timer.running",
           "today-blocks.card": "qa.host; the card clips rows (overflow hidden), so rows must stay within it",
@@ -284,10 +242,6 @@ function Probe() {
           "settings.row": "qa.host; settingsGroupRows has rounded-corner overflow clipping and rows grow intrinsically",
           "settings.label.frame": "settings.text-column",
           "settings.value.frame": "settings.text-column",
-          "review-deck.card": "qa.host; the deck card fills a fixed height and clips its body",
-          "review-deck.body": "review-deck.card",
-          "review-deck.title.frame": "review-deck.body",
-          "review-deck.reason.frame": "review-deck.body",
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
@@ -301,7 +255,7 @@ function Probe() {
   useEffect(() => {
     const timer = setTimeout(() => reportWriterRef.current(), 2_000);
     return () => clearTimeout(timer);
-  }, [deviceWidth, deviceHeight, hostWidth, boldText, reduceMotion, theme.mode, reviewCount, showRunningTimer]);
+  }, [deviceWidth, deviceHeight, hostWidth, boldText, reduceMotion, theme.mode, showRunningTimer]);
 
   useEffect(() => () => {
     if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
@@ -317,9 +271,6 @@ function Probe() {
               <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>{width} pt</Text>
             </Pressable>
           ))}
-          <Pressable accessibilityLabel={`Advance synthetic Review count to ${reviewCounts[(reviewCountIndex + 1) % reviewCounts.length]}`} accessibilityRole="button" onPress={() => setReviewCountIndex((index) => (index + 1) % reviewCounts.length)} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 8 }}>
-            <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>Review count {reviewCount}</Text>
-          </Pressable>
           <Pressable accessibilityLabel={showRunningTimer ? "Show idle timer fixture" : "Show running timer fixture"} accessibilityRole="button" accessibilityState={{ selected: showRunningTimer }} onPress={() => setShowRunningTimer((current) => !current)} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 8 }}>
             <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>{showRunningTimer ? "Running timer" : "Idle timer"}</Text>
           </Pressable>
@@ -372,13 +323,6 @@ function Probe() {
               runningActivityId={showRunningTimer ? "qa-activity" : null}
               theme={theme}
             />
-            <TodayReviewNudge
-              diagnostic={diagnostic}
-              fallback={{ value: reviewCount, exact: true }}
-              onOpenReview={() => setActionResult("Local Review navigation callback")}
-              reduceMotion={reduceMotion}
-              theme={theme}
-            />
             <TodayBlockRows
               activeTimerRunning={showRunningTimer}
               activityIconFor={() => null}
@@ -404,26 +348,6 @@ function Probe() {
                   title="Location"
                 />
               </SettingsBlockGroup>
-            </View>
-            <View style={{ height: 520 }}>
-              <ReviewDeckStack
-                cards={[reviewDeckCardForItem("review:qa", reviewFixture, {
-                  clockFormat: "24h",
-                  menuOpen: false,
-                  mode: theme.mode,
-                  neutral: theme.textSecondary,
-                  now,
-                  overlapCount: 0,
-                  syncState: null
-                })]}
-                diagnostic={diagnostic}
-                onEdit={() => setActionResult("Local Review edit callback")}
-                onMore={() => setActionResult("Local Review menu callback")}
-                onThrow={() => setActionResult("Local Review throw callback")}
-                onThrowStart={() => setActionResult("Local Review throw started")}
-                reduceMotion={reduceMotion}
-                theme={theme}
-              />
             </View>
             <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary, fontSize: 12 }}>{actionResult}</Text>
           </View>

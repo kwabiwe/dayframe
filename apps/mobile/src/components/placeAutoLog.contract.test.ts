@@ -9,7 +9,7 @@ const editor = readFileSync(fileURLToPath(new URL("../../app/place-editor.tsx", 
 describe("Places editor Log automatically", () => {
   it("is a switch under Suggest visits here, disabled while visits aren't suggested", () => {
     expect(editor).toContain('title="Log automatically"');
-    expect(editor).toContain('subtitle="Visits here become blocks without a Review card."');
+    expect(editor).toContain('subtitle="Visits here become blocks without asking in Calendar."');
     expect(editor).toContain("disabled={!loggingEnabled}");
     expect(editor).toContain("value={loggingEnabled && autoLog}");
     // Turning Suggest visits off turns it off too.

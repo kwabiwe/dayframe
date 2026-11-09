@@ -107,7 +107,7 @@ async function openBar() {
   }
   const view = render(<AppShellRuntimeProvider><Shell /></AppShellRuntimeProvider>);
   const chip = await waitFor(() => {
-    const button = view.container.querySelector<HTMLButtonElement>(".df-cmd-from");
+    const button = view.container.querySelector<HTMLButtonElement>(".df-cmd-from-text");
     expect(button).not.toBeNull();
     return button!;
   });

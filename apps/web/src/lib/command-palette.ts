@@ -1,12 +1,13 @@
 import { DAYFRAME_APP_ICONS, resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
 import type { GlobalSearchResult } from "./global-search";
+import { reviewCheckHref } from "./calendar-checks";
 import { SHELL_SECTIONS } from "./shell-nav";
 import { toTimelineDateKey } from "./timeline-view";
 import type { TimerDraft } from "./timer-runtime";
 
 // The ⌘K palette (prototype `openPalette`): Start an activity, Go to a section, Add a block,
 // switch theme, open the shortcuts, and — once two characters are typed — past work from
-// /api/search (Start again, entries, places, tags, Review items).
+// /api/search (Start again, entries, places, tags, things to check).
 
 export type PaletteGroup = "Start" | "Go to" | "Add" | "Settings" | "Start again" | "Found";
 
@@ -110,7 +111,8 @@ export function searchResultCommand(result: GlobalSearchResult): PaletteCommand 
   const href = result.kind === "entry" && result.entryId && date
     ? `/timeline?date=${date}&scope=day&view=list&entry=${result.entryId}`
     : result.kind === "review"
-      ? `/review#review-${result.id.slice("review:".length)}`
+      // Step 15: a "?" is answered in Calendar › List, on its own day when known.
+      ? reviewCheckHref(result.id.slice("review:".length), date)
       : result.kind === "place"
         ? `/places#place-${result.placeId}`
         : result.kind === "tag"
@@ -132,7 +134,7 @@ export function searchResultCommand(result: GlobalSearchResult): PaletteCommand 
     place: "Place",
     category: "Activity",
     tag: "Tag",
-    review: "Review"
+    review: "To check"
   };
   return {
     id: `found:${result.id}`,

@@ -29,6 +29,7 @@ vi.mock("@/lib/ingest-auth", () => ({
 
 vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
+  TimeEntryValidationError: class TimeEntryValidationError extends Error {},
   TimerMutationBusyError: class TimerMutationBusyError extends Error {
     code = "timer_busy";
     status = 503;

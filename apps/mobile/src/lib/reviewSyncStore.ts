@@ -16,6 +16,9 @@ import {
   ReviewReconciliationResponseSchema,
   validReviewAcknowledgement,
   ReviewMutationSchema,
+  isTimerTripClashItem,
+  timerTripClashQuestion,
+  ReviewTimerTripClashPresentationSchema,
   type LocationReviewEvidenceDto,
   type ReviewPresentationSnapshot,
   type ReviewProposalPresentation,
@@ -45,8 +48,21 @@ import { isLocationReviewItem } from "./review";
 import { withJsTask } from "./jsTasks";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 9;
+const DATABASE_VERSION = 11;
 const ACTIVE_ACCOUNT_KEY = "active_account";
+// Effects must be removed before their outbox row. Expo opens a separate SQLite connection for
+// exclusive transactions, so the main connection's foreign-key cascades do not cover this work.
+const REVIEW_ACCOUNT_TABLES = [
+  "review_mutation_effects",
+  "review_mutation_outbox",
+  "review_item_cache",
+  "review_category_cache",
+  "dashboard_snapshot_cache",
+  "location_review_evidence_cache",
+  "review_presentation_context",
+  "review_presentation_terminal_source",
+  "review_source_open_observation"
+] as const;
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
 const SETTLED_ELSEWHERE_COUNT_KEY = "settled_elsewhere_count";
@@ -409,7 +425,9 @@ const serialiseReviewMutation = createSerialMutationQueue();
 const listeners = new Set<() => void>();
 
 async function database() {
+  let opened: SQLite.SQLiteDatabase | undefined;
   databasePromise ??= SQLite.openDatabaseAsync(DATABASE_NAME).then(async (db) => {
+    opened = db;
     await db.execAsync(
       "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"
     );
@@ -527,11 +545,36 @@ async function database() {
             );
           `);
         }
-        await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
+        if ((version?.user_version ?? 0) < 5) await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
         if ((version?.user_version ?? 0) < 7) await transaction.execAsync(REVIEW_PRESENTATION_V7_SQL);
         await transaction.execAsync(REVIEW_OBSERVATION_V8_SQL);
         if ((version?.user_version ?? 0) < 9) await transaction.execAsync(REVIEW_SAVE_PLACE_V9_SQL);
+        // A prior sign-out or replacement may have deleted the account but left its children.
+        // Remove those orphans before login can recreate the parent and replay an old choice.
+        if ((version?.user_version ?? 0) < 10) {
+          for (const table of REVIEW_ACCOUNT_TABLES) {
+            await transaction.runAsync(`delete from ${table} where not exists (
+              select 1 from review_account_context where account_key = ${table}.account_key
+            )`);
+          }
+        }
+        if ((version?.user_version ?? 0) < 11) {
+          // Enforce effect retirement even on Expo's connections without foreign keys enabled.
+          await transaction.execAsync(`
+            delete from review_mutation_effects where not exists (
+              select 1 from review_mutation_outbox
+              where client_mutation_id = review_mutation_effects.client_mutation_id
+                and account_key = review_mutation_effects.account_key
+            );
+            create trigger if not exists review_mutation_retire_effects
+            after delete on review_mutation_outbox
+            begin
+              delete from review_mutation_effects
+              where client_mutation_id = old.client_mutation_id and account_key = old.account_key;
+            end;
+          `);
+        }
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -544,6 +587,11 @@ async function database() {
       new Date().toISOString()
     );
     return db;
+  }).catch(async (error) => {
+    // A failed open or migration must leave sign-out retryable in this process.
+    if (opened) await opened.closeAsync().catch(() => undefined);
+    databasePromise = null;
+    throw error;
   });
   return databasePromise;
 }
@@ -596,6 +644,14 @@ async function activeAccount(transaction?: SQLite.SQLiteDatabase) {
   );
 }
 
+async function removeReviewAccountData(transaction: SQLite.SQLiteDatabase, key: string) {
+  for (const table of REVIEW_ACCOUNT_TABLES) {
+    await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
+  }
+  await transaction.runAsync("delete from review_account_context where account_key = ?", key);
+  await transaction.runAsync("delete from review_store_metadata where key like ?", `%:${key}`);
+}
+
 export async function getActiveReviewAccountIdentity() {
   const account = await activeAccount();
   return account
@@ -644,14 +700,7 @@ async function processReviewBootstrapNow(bootstrap: MobileBootstrap) {
         resetProcessReviewDiagnostics();
       }
       if (previousAccount && previousAccount.account_key !== key) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          previousAccount.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${previousAccount.account_key}`
-        );
+        await removeReviewAccountData(transaction, previousAccount.account_key);
       }
       await transaction.runAsync(
         `insert into review_account_context (
@@ -777,14 +826,7 @@ export async function activateReviewAccount(input: {
         resetProcessReviewDiagnostics();
       }
       if (previousAccount && previousAccount.account_key !== key) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          previousAccount.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${previousAccount.account_key}`
-        );
+        await removeReviewAccountData(transaction, previousAccount.account_key);
       }
       await transaction.runAsync(
         `insert into review_account_context (
@@ -1738,6 +1780,11 @@ function presentationReviewItems(response: ReviewPresentationSnapshot) {
 }
 
 export function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): MobileReviewItem {
+  // The block a clash asks on and its trip (the timer-trip-clash feature, #621), so a clash read past the bootstrap's
+  // 100 items is put on its block and counted like any "?". Only a valid one: otherwise it has no block, and no count.
+  const clash = isTimerTripClashItem(record) && record.timerTripClash
+    ? ReviewTimerTripClashPresentationSchema.safeParse(record.timerTripClash) : null;
+  const clashPayload = clash?.success ? clash.data : null;
   return {
     id: record.reviewItemId,
     type: record.sourceKind === "location_v2" ? "location" : "review",
@@ -1759,7 +1806,7 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     notes: null,
     // Coordinate-free subtype and a Move's route line only, so time away keeps its labels and no
     // Commute fallback, and a Move keeps its second line (PRD D19).
-    rawPayload: record.timeAway || record.routeLabel || record.outing || record.learnedName ? {
+    rawPayload: clashPayload ? { ...clashPayload } : record.timeAway || record.routeLabel || record.outing || record.learnedName ? {
       ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
       ...(record.routeLabel ? { routeLabel: record.routeLabel } : {}),
       // One card per outing (PRD D19): which outing it belongs to and its part in it.
@@ -1769,7 +1816,10 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
       // A learned name, offered in Location evidence's Name (Codex r1 on #481).
       ...(record.learnedName ? { nameSource: "learned" } : {})
     } : null,
-    createdAt: record.createdAt
+    createdAt: record.createdAt,
+    // "A block ran into your trip" (location v4 design §7): End it is sent with this proposal, so a presentation read
+    // replacing the cached copy keeps it (Codex r1 on #618).
+    ...(isTimerTripClashItem(record) && record.status === "open" && record.proposalHash ? { proposalHash: record.proposalHash } : {})
   };
 }
 
@@ -1914,7 +1964,10 @@ async function materialiseAcknowledgedReviewHandover(
       // receipt. It must first follow the server's explicit source-to-entry
       // link; ordinary merge/split structural receipts already identify their
       // canonical outcome (or have no time-entry outcome at all).
-      if (requiresLinkedResult && !sourceEntryIds.length) {
+      // A venue's Stay (the outing's own card) rightly has none when your blocks cover it (Codex r1 on #642).
+      const mayLogNothing = envelope.mutation.action === "confirm_outing" && Boolean(envelope.mutation.venue) &&
+        effect.review_item_id === row.review_item_id;
+      if (requiresLinkedResult && !sourceEntryIds.length && !mayLogNothing) {
         missingAcceptedProof = true;
       }
     }
@@ -2202,7 +2255,17 @@ export async function enqueueReviewMutation(input: {
     const expectedProposalHash = stored.mutation.action === "accept" || stored.mutation.action === "confirm"
       ? stored.mutation.expectedProposalHash
       : undefined;
-    if (expectedProposalHash) {
+    if (expectedProposalHash && isTimerTripClashItem(input.item)) {
+      // A block that ran into a trip is answered from the bootstrap's own copy (location v4 design §7): End it is
+      // sent with the proposal the block's sheet showed, which must still be the newest this iPhone has read.
+      const cachedClash = await transaction.getFirstAsync<{ snapshot_json: string }>(
+        "select snapshot_json from review_item_cache where account_key = ? and review_item_id = ?", key, input.item.id
+      );
+      const cachedHash = cachedClash ? (parseReviewSnapshot(cachedClash.snapshot_json)?.proposalHash ?? null) : null;
+      if (input.item.proposalHash !== expectedProposalHash || cachedHash !== expectedProposalHash) {
+        throw new Error("This question changed. Check it again.");
+      }
+    } else if (expectedProposalHash) {
       if (!input.presentation?.backendId) {
         throw new Error("Refresh Review before saving this confirmation.");
       }
@@ -2409,6 +2472,14 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
         continue;
       }
+      // "A block ran into your trip" that changed before End it arrived (a correction moved the trip, the block was
+      // edited): nothing was saved, and the question stays to be asked again as the server has it now. The answer is
+      // let go (no Sync help issue) and the day is read again (location v4 design §7).
+      if(timerTripClashProposalChanged(response.status,responseBody,row)) {
+        await settleResolvedElsewhere(row,[],reviewResponseServerTime(response),isCurrent);
+        notifyTimerTripClashChanged(row.review_item_id);
+        continue;
+      }
       const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id),
         {outing:isOutingMutation(envelope.mutation)});
       if(settlement) {await settleResolvedElsewhere(row,settlement.retired,reviewResponseServerTime(response),isCurrent);continue;}
@@ -2551,10 +2622,6 @@ async function settleResolvedElsewhere(
         source.status, checkedAt
       );
     }
-    await transaction.runAsync(
-      "delete from review_mutation_effects where client_mutation_id = ? and account_key = ?",
-      row.client_mutation_id, row.account_key
-    );
     await transaction.runAsync(
       "delete from review_mutation_outbox where client_mutation_id = ? and account_key = ?",
       row.client_mutation_id, row.account_key
@@ -2903,27 +2970,27 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
   return removed;
 }
 
-export async function clearActiveReviewAccountData() {
+export async function clearActiveReviewAccountData({
+  owner,
+  requireCurrent = () => {}
+}: {
+  owner?: { workspaceId: string; userId: string } | null;
+  requireCurrent?: () => void;
+} = {}) {
+  requireCurrent();
   presentationReads.clear();
   resetProcessReviewDiagnostics();
   const db = await database();
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
-      const account = await activeAccount(transaction);
-      if (account) {
-        await transaction.runAsync(
-          "delete from review_account_context where account_key = ?",
-          account.account_key
-        );
-        await transaction.runAsync(
-          "delete from review_store_metadata where key like ?",
-          `%:${account.account_key}`
-        );
+      const activeKey = await metadata(ACTIVE_ACCOUNT_KEY, transaction);
+      const key = owner ? accountKey(owner) : activeKey;
+      requireCurrent();
+      if (key) await removeReviewAccountData(transaction, key);
+      if (activeKey === key) {
+        await transaction.runAsync("delete from review_store_metadata where key = ?", ACTIVE_ACCOUNT_KEY);
       }
-      await transaction.runAsync(
-        "delete from review_store_metadata where key = ?",
-        ACTIVE_ACCOUNT_KEY
-      );
+      requireCurrent();
     })
   );
   // Again once cleared: an operation that started before the clear finished never lands.
@@ -2941,6 +3008,74 @@ export function subscribeReviewSync(listener: () => void) {
 
 function emitChange() {
   for (const listener of listeners) listener();
+}
+
+/** Whether a direct response refused a clash's End it because its question changed (409 `proposal_changed`). */
+export function timerTripClashProposalChanged(
+  status: number,
+  body: Record<string, unknown> | null,
+  row: Pick<MutationRow, "original_snapshot_json">
+) {
+  if (status !== 409 || body?.code !== "proposal_changed") return false;
+  try {
+    return isTimerTripClashItem(JSON.parse(row.original_snapshot_json) as MobileReviewItem);
+  } catch {
+    return false;
+  }
+}
+
+const clashChangedListeners = new Set<(reviewItemId: string) => void>();
+function notifyTimerTripClashChanged(reviewItemId: string) {
+  for (const listener of clashChangedListeners) listener(reviewItemId);
+}
+
+/** Called when a clash's End it was refused because its question changed: the day is then read again. */
+export function subscribeTimerTripClashChanged(listener: (reviewItemId: string) => void) {
+  clashChangedListeners.add(listener);
+  return () => {
+    clashChangedListeners.delete(listener);
+  };
+}
+
+/** An End it saved on this iPhone for a block that ran into a trip, and where it ends the block. */
+export type PendingTimerTripClashEnd = {
+  clientMutationId: string;
+  reviewItemId: string;
+  timeEntryId: string;
+  tripStartedAt: string;
+  acknowledged: boolean;
+  /** The acknowledgement says it stopped the running block. */
+  stoppedRunningTimer: boolean;
+};
+
+/**
+ * The account's End it answers still on this iPhone (location v4 design §7): waiting to be sent, or acknowledged and
+ * not yet retired. The Calendar shows their blocks ended at the trip's start until the server's own data does.
+ * Rejected ones (Sync help) are left out: their block is as the server has it.
+ */
+export async function readPendingTimerTripClashEnds(owner: { workspaceId: string; userId: string }): Promise<PendingTimerTripClashEnd[]> {
+  const db = await database();
+  const rows = await db.getAllAsync<{ client_mutation_id: string; review_item_id: string; original_snapshot_json: string; state: string;
+    acknowledgement_json: string | null }>(
+    `select client_mutation_id, review_item_id, original_snapshot_json, state, acknowledgement_json
+     from review_mutation_outbox
+     where account_key = ? and action_kind = 'accept' and state <> 'needs_attention'
+     order by created_at, client_mutation_id`,
+    accountKey(owner)
+  );
+  return rows.flatMap((row) => {
+    let question: ReturnType<typeof timerTripClashQuestion> = null;
+    try {
+      question = timerTripClashQuestion(JSON.parse(row.original_snapshot_json) as MobileReviewItem);
+    } catch {
+      question = null;
+    }
+    if (!question) return [];
+    const acknowledgement = row.acknowledgement_json ? parseAcknowledgement(row.acknowledgement_json) : null;
+    return [{ clientMutationId: row.client_mutation_id, reviewItemId: row.review_item_id, timeEntryId: question.timeEntryId,
+      tripStartedAt: question.tripStartedAt, acknowledged: row.state === "acknowledged",
+      stoppedRunningTimer: acknowledgement?.stoppedRunningTimer === true }];
+  });
 }
 
 function assertActionableReviewItem(item: MobileReviewItem) {
@@ -3008,7 +3143,14 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "nameSource",
     // One card per outing (PRD D19): an opaque outing id and the card's part in it.
     OUTING_KEY_PAYLOAD_KEY,
-    OUTING_ROLE_PAYLOAD_KEY
+    OUTING_ROLE_PAYLOAD_KEY,
+    // "A block ran into your trip" (location v4 design §7): the block it asks on and the trip's times (no
+    // coordinates), so a cached bootstrap still puts its "?" on its block.
+    "timeEntryId",
+    "tripId",
+    "tripStartedAt",
+    "tripStoppedAt",
+    "overlapSeconds"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

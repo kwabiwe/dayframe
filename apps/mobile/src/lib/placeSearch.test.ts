@@ -228,7 +228,7 @@ describe("nearby point of interest controller", () => {
     expect(states.at(-1)?.places.map((place) => place.title)).toEqual(["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]);
     // Only opaque ids, titles, address lines, distances and the ranking reach the screen: no coordinates.
     for (const place of states.at(-1)?.places ?? []) {
-      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "inArea", "inside", "kind", "requestId", "share", "subtitle", "suggested", "title"]);
+      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "guessed", "id", "inArea", "inside", "kind", "requestId", "share", "subtitle", "suggested", "title"]);
     }
     controller.dispose();
   });
@@ -322,6 +322,39 @@ describe("nearby point of interest controller", () => {
     ];
     expect(rankedNearbyPlaces(cafes, [], venueStayFromEvidence(evidence([])))[0].title).toBe("Birch Café");
     expect(rankedNearbyPlaces(cafes, [], venueStayFromEvidence(evidence(["IALDER"])))[0].title).toBe("Alder Café");
+  });
+
+  it("guesses the one picked here before when two are equally near, through the evidence the server sends (PRD D23)", () => {
+    const evidence = (history: string[]) => ({
+      segment: { startedAt: "2026-10-21T11:00:00.000Z", stoppedAt: "2026-10-21T11:10:00.000Z" },
+      map: { centre: { type: "Point", coordinates: [0, 50] }, stayRadiusMeters: 120, acceptedSamples: [] },
+      venue: { confirmedPlaceId: null, suggestedPlaceId: null, historyPlaceIds: history }
+    }) as unknown as Parameters<typeof venueStayFromEvidence>[0];
+    const shops = [
+      { ...poi("Cedar Gifts", 10), category: "Store", offsetEastMeters: 10, offsetNorthMeters: 0, placeId: "ICEDAR" },
+      { ...poi("Dock Gifts", 10), category: "Store", offsetEastMeters: 0, offsetNorthMeters: 10, placeId: "IDOCK" },
+      { ...poi("Elm Gifts", 12), category: "Store", offsetEastMeters: -12, offsetNorthMeters: 0, placeId: "IELM" }
+    ];
+    const guessOf = (history: string[]) => rankedNearbyPlaces(shops, [], venueStayFromEvidence(evidence(history))).find((place) => place.guessed)?.title;
+    expect(guessOf([])).toBe("Cedar Gifts");
+    expect(guessOf(["IDOCK"])).toBe("Dock Gifts");
+  });
+
+  it("carries the ranking's guess apart from the five rows it shows (Codex r1 on #620)", async () => {
+    // Five gyms 60–64 m away fill the list; the only place within 50 m, a shop at 10 m, ranks sixth.
+    const gyms = Array.from({ length: 5 }, (_, index) => ({ ...poi(`Gym ${index}`, 60 + index), category: "FitnessCenter",
+      offsetEastMeters: 60 + index, offsetNorthMeters: 0 }));
+    const shop = { ...poi("Corner Shop", 10), category: "Store", offsetEastMeters: 0, offsetNorthMeters: 10 };
+    const states: NearbyPointOfInterestState[] = [];
+    const controller = new NearbyPointOfInterestController(
+      { search: answering([...gyms, shop]), resolve: vi.fn(), cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => states.push(state), () => [],
+      () => ({ startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T11:10:00.000Z", now: new Date("2026-10-21T12:00:00.000Z") })
+    );
+    await controller.load({ latitude: 10, longitude: 20 });
+    expect(states.at(-1)?.places.map((place) => place.title)).not.toContain("Corner Shop");
+    expect(states.at(-1)?.guess?.title).toBe("Corner Shop");
+    controller.dispose();
   });
 
   it("resolves a picked place from the current list only", async () => {

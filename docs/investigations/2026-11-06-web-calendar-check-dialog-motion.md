@@ -1,0 +1,16 @@
+# Desktop Calendar check dialog motion, Trello #281
+
+6 Nov 2026. All three original Trello PNG attachments opened in Arc. The visible path is desktop web Calendar List and its “N to check” control. One image has Calendar headings and row text painted over the place dialog while the map is loading. The other two show the same place question with a taller placeholder list and a shorter resolved list. The selected Calendar day is not enough to identify the question’s actual date in the dialog. The screenshots establish the surface and symptoms. The disposable browser reproduction establishes the timing. No screenshot containing the owner's places or activities was saved.
+
+Current production main is `9e563e1a`. Its exact Vercel deployment is Ready. The two current code paths to test are:
+
+- The List starts a document view transition for the focused check, opens the native dialog independently and schedules scroll. The transition layer is a plausible cause of stale rows drawing over the entering modal. Instrument a real-browser click on the chip. Compare the view-transition invocation and rendered frame sequence against a modal opening without the document transition. Retain the existing inline Review transition and Reduce Motion path.
+- The place sheet starts at five result rows and replaces that height when evidence and Nearby settle. Fewer results can shrink the panel after first paint. Reproduce with delayed evidence and sparse results and measure the dialog, map, results and footer before and after. Compare against the same fixture with one result-height reservation per opening. Verify desktop and phone-width bounds, selection and scroll.
+
+The first-render date work in #672 covered iPhone. Verify the web dialog's date independently before closing the date issue on this card. The web path was reproduced against the existing stable staging API and UI with a disposable outing. Normal-motion runs at 1440 and 390 px recorded 18 frames with both an active List transition and an open dialog. The dialog height changed after evidence arrived even with Reduce Motion. All three focused regression cases failed on main, including a sparse results pane shrinking from 240 px to 96 px and a cross-year visit without dates. The account and fixture were removed.
+
+The dialog now owns entrance and exit. An older List snapshot is skipped and any queued List update is applied once before the modal changes focus. Inline questions still use the existing List motion. The map and the results have stable slots through loading and settlement. Search scrolls within the pane, and More options still expands deliberately. The dialog date comes from the item’s local times before evidence loads. The change keeps the existing focus restore, mutation, Undo and Reduce Motion paths.
+
+[Card](https://trello.com/c/Gjf7FjHt)
+
+Local Chrome on the exact source passed at 1440 and 390 px, including Reduce Motion. With delayed evidence and the MapKit fallback, there were zero overlapping List transition frames. The map held at 189 px and the results at 240 px. Dialog height and footer position held within each viewport. The date was visible, focus returned to the chip, and the disposable container was removed.

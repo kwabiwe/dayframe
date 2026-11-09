@@ -13,7 +13,7 @@ describe("recovered dashboard bootstrap publication", () => {
 
     publication.abandon();
     publication.abandon();
-    publication.publish({} as MobileBootstrap);
+    publication.publish({} as MobileBootstrap, {} as MobileBootstrap);
     unsubscribe();
 
     expect(listener).toHaveBeenCalledTimes(2);
@@ -31,10 +31,11 @@ describe("recovered dashboard bootstrap publication", () => {
     const unsubscribe = subscribeRecoveredDashboardBootstrap(listener);
     const publication = beginRecoveredDashboardBootstrapPublication();
     const bootstrap = {} as MobileBootstrap;
+    const serverBootstrap = {} as MobileBootstrap;
 
-    publication.publish(bootstrap);
+    publication.publish(bootstrap, serverBootstrap);
     publication.abandon();
-    publication.publish(bootstrap);
+    publication.publish(bootstrap, serverBootstrap);
     unsubscribe();
 
     expect(listener).toHaveBeenCalledTimes(2);
@@ -43,5 +44,6 @@ describe("recovered dashboard bootstrap publication", () => {
       "completed"
     ]);
     expect(listener.mock.calls[1]?.[0].bootstrap).toBe(bootstrap);
+    expect(listener.mock.calls[1]?.[0].serverBootstrap).toBe(serverBootstrap);
   });
 });

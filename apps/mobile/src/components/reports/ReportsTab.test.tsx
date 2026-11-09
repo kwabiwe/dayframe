@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   haptic: vi.fn(),
   announce: vi.fn(),
   fontScale: 1,
+  width: 390,
   subscriber: null as null | (() => void),
 }));
 vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
@@ -37,7 +38,7 @@ vi.mock("react-native", () => ({
   findNodeHandle: () => 1,
   useWindowDimensions: () => ({
     fontScale: mocks.fontScale,
-    width: 390,
+    width: mocks.width,
     height: 844,
   }),
 }));
@@ -57,6 +58,7 @@ vi.mock("@/lib/haptics", () => ({ playHaptic: mocks.haptic }));
 vi.mock("./ReportsBlocks", () => ({
   ReportGoalStreak: "ReportGoalStreak",
   ReportHero: "ReportHero",
+  ReportLoadingFrame: "ReportLoadingFrame",
   ReportMonthGrid: "ReportMonthGrid",
   ReportRangeSwitch: "ReportRangeSwitch",
   ReportWeekColumns: "ReportWeekColumns",
@@ -186,7 +188,11 @@ describe("Revision 3 Reports owner", () => {
       maxFontSizeMultiplier: 1.5,
     });
     const rangeSwitch = () => tree.root.findByType("ReportRangeSwitch" as never);
-    // More keeps its word; the hero names the range, so the header never reflows (UIA-002).
+    const header = () => tree.root.findByProps({ testID: "reports-header" }).props.style;
+    const initialStyle = header();
+    expect(initialStyle).toContainEqual(expect.objectContaining({ flexDirection: "column" }));
+    expect(rangeSwitch().props.stretch).toBe(true);
+    // The viewport owns the header layout. Changing the range keeps the same controls.
     expect(rangeSwitch().props.moreLabel).toBe("More");
     expect(rangeSwitch().props.moreAccessibilityLabel).toBe(
       "Choose report dates, Today",
@@ -195,8 +201,20 @@ describe("Revision 3 Reports owner", () => {
     expect(rangeSwitch().props.moreLabel).not.toContain("–");
     expect(rangeSwitch().props.moreAccessibilityLabel).toContain("–");
     expect(rangeSwitch().props.moreAccessibilityLabel).toContain("2026");
+    expect(header()).toEqual(initialStyle);
+    expect(rangeSwitch().props.stretch).toBe(true);
     act(() => tree.unmount());
   });
+  it.each([[320, true], [375, false], [430, false]])(
+    "chooses the default-text header on the first render at %i points",
+    async (width, stretch) => {
+      mocks.width = width;
+      const tree = await render();
+      const rangeSwitch = tree.root.findByType("ReportRangeSwitch" as never);
+      expect(rangeSwitch.props.stretch).toBe(stretch);
+      act(() => tree.unmount());
+    },
+  );
   it("preserves seconds after Stop while replacing a cached active contribution", async () => {
     const startedAt = new Date(nowMs - 3600000).toISOString();
     mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
@@ -273,6 +291,7 @@ describe("Revision 3 Reports owner", () => {
       .mockReset()
       .mockImplementation(async (input: ReportSummaryRequest) => result(input));
     mocks.fontScale = 1;
+    mocks.width = 390;
   });
   it("renders selected-only slices and preserves all/some/none recovery", async () => {
     const tree = await render();
@@ -405,6 +424,23 @@ describe("Revision 3 Reports owner", () => {
     expect(tree.root.findByType("ReportDonutCard" as never).props.totalSeconds).toBe(3600);
     act(() => tree.unmount());
   });
+  it("shows a Month-shaped frame until the uncached Month is ready", async () => {
+    const tree = await render();
+    let finishMonth!: () => void;
+    mocks.fetch.mockImplementation((input: ReportSummaryRequest) =>
+      input.buckets.length === 30
+        ? new Promise((resolve) => { finishMonth = () => resolve(result(input)); })
+        : Promise.resolve(result(input)),
+    );
+    await act(async () => tree.root.findByType("ReportRangeSwitch" as never).props.onChoose("month"));
+    expect(tree.root.findByType("ReportLoadingFrame" as never).props.range.axisLayout).toBe("month");
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
+    await act(async () => finishMonth());
+    expect(tree.root.findAllByType("ReportLoadingFrame" as never)).toHaveLength(0);
+    expect(tree.root.findByType("ReportMonthGrid" as never).props.days).toHaveLength(30);
+    act(() => tree.unmount());
+  });
+
   it("ignores late Year after Month and never reuses numbers for uncached failed range", async () => {
     const tree = await render();
     let resolveYear!: (value: ReportSummary) => void;
@@ -451,7 +487,7 @@ describe("Revision 3 Reports owner", () => {
     );
     await act(async () => offline.props.onAction());
     expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(1);
-    expect(JSON.stringify(tree.toJSON())).not.toContain("Loading report range");
+    expect(tree.root.findAllByType("ReportLoadingFrame" as never)).toHaveLength(0);
     expect(pending.length).toBeGreaterThan(0);
     await act(async () => pending.forEach((finish) => finish()));
     expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(0);

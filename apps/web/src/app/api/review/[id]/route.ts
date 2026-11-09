@@ -8,6 +8,7 @@ import {
 } from "@dayframe/shared";
 import { isLocationSegmentReview, resolveLocationReviewAction } from "@/lib/location/location-review-service";
 import { resolveIdempotentReviewMutation } from "@/lib/review-mutation-service";
+import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 export const maxDuration = 15;
 
@@ -27,6 +28,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         session,
         operation
       );
+      // End it stopped a running timer (design §7): the Lock Screen's Live Activity follows, as for any Stop.
+      if (isRecord(result) && result.stoppedRunningTimer === true) scheduleLiveActivityNotification(session);
       return NextResponse.json({ ...result as Record<string, unknown>,
         clientMutationId: reviewMutation.data.clientMutationId, reviewItemId: id, requestId });
     }

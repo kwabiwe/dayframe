@@ -55,12 +55,17 @@ struct DayframeCalendarEntryRecord: Codable {
   /// never as a block. Absent from an older bundle (a block, as before).
   var isMoment: Bool?
   var isReview = false
+  /// Location v4 design §7: the block has a "?" of its own (a block that ran into a trip): the amber dot.
+  /// Absent from an older bundle (no dot).
+  var asking: Bool?
   var isUncategorized = false
   var laneCount = 1
   var laneIndex = 0
   var layoutMode = "full"
   /// The whole entry's length, printed after the title: "11m", "1h 45m".
   var lengthLabel: String?
+  /// Step 16: a trip block's legs. Absent from an older bundle (no strip).
+  var legs: [DayframeCalendarLegRecord]?
   var meta = ""
   var offsetFraction: Double = 0
   var overlapCount = 0
@@ -79,6 +84,27 @@ struct DayframeCalendarEntryRecord: Codable {
   var warningOverlapCount = 0
   var widthFraction: Double = 1
   var zIndex = 0
+}
+
+/// Step 16: one leg of a trip block, drawn in the strip down the block's leading edge.
+struct DayframeCalendarLegRecord: Codable, Equatable {
+  var startedAtMs: Double = 0
+  var stoppedAtMs: Double = 0
+  /// The leg mode's registry glyph ("footprints", "train-front", …).
+  var glyph = "route"
+  var unsure = false
+}
+
+/// Step 17: a place or trip in the Places lane. React decides what it is and whether it asks.
+struct DayframeCalendarLaneItemRecord: Codable, Equatable {
+  var id = ""
+  var kind = "place"
+  var startedAtMs: Double = 0
+  var stoppedAtMs: Double = 0
+  var glyph = "map-pin"
+  /// The open "?" this item asks, when it still asks: a tap opens it in the List.
+  var checkId: String?
+  var accessibilityLabel = ""
 }
 
 struct DayframeCalendarDetailLineRecord: Codable, Equatable {
@@ -110,11 +136,16 @@ struct DayframeCalendarPresentationRecord: Codable {
   /// "12h" or "24h" (PRD D18); a model without it (an older bundle) keeps 24-hour.
   var clockFormat: String?
   var modelVersion = 4
+  /// Step 17: the day's places and trips for the Places lane; absent or empty, no lane.
+  var placesLane: [DayframeCalendarLaneItemRecord]?
   var monthTitle = ""
   var nowMs: Double = 0
   var reduceMotion = false
   var reduceTransparency = false
   var refreshing = false
+  /// A new number from the app scrolls the Grid to now (the Today pill on today). Absent from an
+  /// older bundle (never scrolls).
+  var scrollToNowRequest: Int?
   var selectedDayKey = ""
   var selectedDayTitle = "Calendar"
   var theme = DayframeCalendarThemeRecord()

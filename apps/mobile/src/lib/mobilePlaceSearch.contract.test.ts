@@ -44,7 +44,7 @@ describe("mobile place editor contract", () => {
 
   it("preserves review-first visit preferences and native-unavailable controls", () => {
     expect(editorSource).toContain("Suggest visits here");
-    expect(editorSource).toContain("Show detected visits in Review.");
+    expect(editorSource).toContain("Ask about detected visits in Calendar.");
     expect(editorSource).toContain("Place search is unavailable in this build");
     expect(editorSource).toContain("Current location");
     expect(editorSource).toContain("Advanced coordinates");
@@ -53,6 +53,7 @@ describe("mobile place editor contract", () => {
   it("uses the Blocks groups, the shared activity picker and one-request place creation (Blocks 7b)", () => {
     expect(editorSource).toContain("<SettingsBlockGroup");
     expect(editorSource).toContain("<ActivityPickerSheet");
+    expect(editorSource).toContain("<AllActivitiesChip canCreate={false} count={categories.length}");
     expect(editorSource).toContain('title="Logs as"');
     expect(editorSource).toContain('testID: "place-editor-save"');
     // The horizontal chip scroller is gone; every activity is one search away.

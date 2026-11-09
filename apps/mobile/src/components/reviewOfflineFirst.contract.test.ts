@@ -1,30 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const reviewSource = readFileSync("app/review.tsx", "utf8");
-const detailSource = readFileSync("app/review/[id].tsx", "utf8");
 const storeSource = readFileSync("src/lib/reviewSyncStore.ts", "utf8");
 
-describe("offline-first Review screen contracts", () => {
-  it("hydrates the Review list locally and keeps Health reprocessing separate", () => {
-    expect(reviewSource).toContain("hydrateReviewFromCache");
-    expect(reviewSource).toContain("startHealthReviewReprocess");
-    expect(reviewSource).not.toContain("reprocessRunning && isHealthReviewItem(item)");
-    expect(reviewSource).not.toContain("setReprocessDiagnostics");
-    expect(reviewSource).toContain("evidencePrefetcher.start");
-    expect(reviewSource).toContain("recoverReviewAfterReconnect");
-    expect(reviewSource).toContain("skipReprocess: true");
-  });
-
-  it("only stops presentation work after navigation actually begins", () => {
-    expect(reviewSource).toContain('navigation.addListener("beforeRemove", stopReviewPresentationWork)');
-    expect(reviewSource).toContain('if (event.data.closing) stopReviewPresentationWork();');
-    // The Review deck's "‹ Today" back (Blocks step 5a) only navigates; beforeRemove stops the work.
-    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel=\{backLabel\}[\s\S]*?backTestID="review-deck-back"[\s\S]*?onBack=\{\(\) => router\.back\(\)\}/);
-    expect(reviewSource).not.toContain("stopReviewPresentationWork(); router.back()");
-    expect(reviewSource).not.toContain('onPress={() => { stopReviewPresentationWork(); router.back(); }}');
-  });
-
+// The Review screen and its evidence screen are gone (location v4 step 15); the outbox they used stays, for
+// Calendar › List's answers.
+describe("offline-first Review outbox", () => {
   it("hides mutations after the local transaction and preserves restore anchors", () => {
     // Every action hides its card in the same local transaction, except "Save this place" (PRD D19),
     // which keeps it open and owns no source effect.
@@ -35,32 +16,8 @@ describe("offline-first Review screen contracts", () => {
     expect(storeSource).toContain("restoreReviewItemsWithAnchors");
   });
 
-  it("renders cached evidence before revalidation and routes safe actions to the outbox", () => {
-    expect(detailSource).toContain("loadCachedLocationReviewEvidence(id)");
-    expect(detailSource).toContain("buildDurableLocationReviewCommand(action, reviewItem, data)");
-    expect(detailSource).toContain("await enqueueReviewMutation");
-    expect(detailSource).toContain("void synchroniseReviewMutations().catch");
-    expect(detailSource).not.toContain("key={evidence.reviewItemId}");
-    expect(detailSource).toContain("recoverEvidenceAfterReconnect");
-    expect(detailSource).toContain("Showing evidence saved on this iPhone");
-    expect(detailSource.indexOf("await enqueueReviewMutation")).toBeLessThan(
-      detailSource.indexOf("router.back();")
-    );
-  });
-
-  it("uses the Blocks nav titles and delays cold evidence feedback", () => {
-    // Both use the shared Blocks navigation bar (UIA-001): text back, centred compact title.
-    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel=\{backLabel\}[\s\S]*?title="Review"/);
-    expect(detailSource).toMatch(/<BlocksNavHeader[\s\S]*?title="Location evidence" \/>/);
-    expect(reviewSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');
-    expect(detailSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');
-    expect(reviewSource).not.toContain("DayframeBrand");
-    expect(detailSource).not.toContain("DayframeBrand");
-    expect(detailSource).toContain("scheduleLocationEvidenceLoadingFeedback");
-    expect(detailSource).toContain("showHydrationFeedback ? (");
-    expect(detailSource).toContain("hydrationFeedbackCancelRef.current?.();");
-    expect(detailSource).toMatch(
-      /if \(cachedEvidence\) \{[\s\S]*?finishHydrationFeedback\(generation\);[\s\S]*?const contextRequest/
-    );
+  it("has no Review screens left to route to", () => {
+    expect(() => readFileSync("app/review.tsx", "utf8")).toThrow();
+    expect(() => readFileSync("app/review/[id].tsx", "utf8")).toThrow();
   });
 });

@@ -387,6 +387,16 @@ describe("the Tags button opens the shared Tags list", () => {
     await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
   });
 
+  it("returns focus to the description when a narrow bar hides the Tags button (Codex r2 on #629)", async () => {
+    renderBar({ activeEntry: running() });
+    const { user } = await openTags();
+    // The phone row hides the button with CSS; jsdom has no checkVisibility, so this also covers the fallback.
+    tagsButton().style.display = "none";
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector("#persistent-timer-description")));
+  });
+
   it("handles Escape in its search, so a surrounding dialog (Add time) never takes it and closes", async () => {
     renderBar();
     const { search } = await openTags();

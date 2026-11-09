@@ -8,7 +8,9 @@ import {
   projectedSwipeEndpoint,
   shouldDismissSwipe,
   swipeSheetExitPlan,
-  swipeSheetPresentationPlan
+  swipeSheetPresentationPlan,
+  exclusionAfterTouchesDown,
+  touchStartsInRegion
 } from "./swipeDismissMotion";
 
 const BASE_RELEASE = {
@@ -344,5 +346,54 @@ describe("presentation lifecycle", () => {
     expect(coordinator.begin(42, "slide")).toBe("start");
     expect(coordinator.complete(41)).toBe("stale");
     expect(coordinator.complete(42)).toBe("accepted");
+  });
+});
+
+describe("touchStartsInRegion (a swipe that starts in a time wheel)", () => {
+  const wheel = { pageX: 16, pageY: 400, width: 361, height: 200 };
+  const touch = (absoluteX: number, absoluteY: number) => ({ absoluteX, absoluteY });
+
+  it("keeps a touch that lands inside the region, edges included", () => {
+    expect(touchStartsInRegion(touch(200, 500), wheel)).toBe(true);
+    expect(touchStartsInRegion(touch(16, 400), wheel)).toBe(true);
+    expect(touchStartsInRegion(touch(377, 600), wheel)).toBe(true);
+  });
+
+  it("leaves a touch outside it to the sheet", () => {
+    expect(touchStartsInRegion(touch(200, 399), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(200, 601), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(15, 500), wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(378, 500), wheel)).toBe(false);
+  });
+
+  it("leaves the sheet draggable when there is nothing to measure", () => {
+    expect(touchStartsInRegion(undefined, wheel)).toBe(false);
+    expect(touchStartsInRegion(touch(200, 500), null)).toBe(false);
+  });
+});
+
+describe("exclusionAfterTouchesDown (fingers on a time wheel)", () => {
+  const wheel = { pageX: 16, pageY: 400, width: 361, height: 200 };
+  const inside = { absoluteX: 200, absoluteY: 500 };
+  const outside = { absoluteX: 200, absoluteY: 100 };
+  const down = (allTouches: unknown[], changedTouches: typeof inside[]) => ({ allTouches, changedTouches });
+
+  it("excludes fingers landing together, inside and outside, in both orders", () => {
+    expect(exclusionAfterTouchesDown(false, down([inside, outside], [inside, outside]), wheel)).toBe(true);
+    expect(exclusionAfterTouchesDown(false, down([outside, inside], [outside, inside]), wheel)).toBe(true);
+  });
+
+  it("leaves a gesture with no finger inside to the sheet", () => {
+    expect(exclusionAfterTouchesDown(false, down([outside], [outside]), wheel)).toBe(false);
+    expect(exclusionAfterTouchesDown(false, down([inside], [inside]), null)).toBe(false);
+  });
+
+  it("keeps the decision when a later finger lands outside, and takes it when a later finger lands inside", () => {
+    expect(exclusionAfterTouchesDown(true, down([inside, outside], [outside]), wheel)).toBe(true);
+    expect(exclusionAfterTouchesDown(false, down([outside, inside], [inside]), wheel)).toBe(true);
+  });
+
+  it("starts afresh with a new gesture", () => {
+    expect(exclusionAfterTouchesDown(true, down([outside], [outside]), wheel)).toBe(false);
   });
 });

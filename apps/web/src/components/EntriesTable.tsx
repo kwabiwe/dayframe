@@ -29,6 +29,7 @@ import { duplicateTimeEntry, splitTimeEntry } from "@/lib/time-entry-split";
 import { timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, ReviewItemRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
+import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
 import {
   dateTimeLocal,
   formatDate,
@@ -50,18 +51,21 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
-import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { addCalendarDays, resolveTimelineRanges, toTimelineDateKey } from "@/lib/timeline-view";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, hasLocationPlaces, visitedGuess, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TimelineTrip, type TripLeg } from "@dayframe/shared";
+import { useLocalDayStartMs, useMediaQuery } from "@/components/useCalendarClock";
+import { PLACES_COLUMN_STORAGE_KEY, readStoredFlag, SHOW_ALL_PLACES_STORAGE_KEY, storeFlag } from "@/lib/calendar-preferences";
+import { PlacesColumn } from "@/components/location/PlacesColumn";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
-import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
-import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { hasV2Evidence, reviewPicture } from "@/lib/review-deck";
+import { blockQuestionWords, CheckQuestionRow, checkQuestionWords, CheckRowView, ChecksChip, useEndedBlocks, useListChecks } from "@/components/location/ListChecks";
+import { checkBlockId, clashBlocksFrom, clashStillAsks, drawsAsOwnCheck, oldestCheckHref, todaysChecks } from "@/lib/calendar-checks";
+import { reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
 import { blockRowHeight } from "@/lib/today-view";
 import {
   LocationListRowView,
-  ShowEveryPlaceToggle,
   TripLegRows,
   TripLegsToggle,
   TripModesLine
@@ -80,10 +84,6 @@ type TimelineInlineEditTarget = {
   entryIds: string[];
   groupKey: string | null;
   kind: "entry" | "group";
-};
-
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => void) => unknown;
 };
 
 type OptimisticDescription = {
@@ -115,14 +115,40 @@ async function saveGroupedTimeEntryDescription(entryIds: string[], description: 
   }
 }
 
+let finishTimelineRegroup: (() => void) | undefined;
+
+function settleTimelineRegroup() {
+  const finish = finishTimelineRegroup;
+  finishTimelineRegroup = undefined;
+  finish?.();
+}
+
 function applyTimelineRegroup(update: () => void) {
-  const documentWithTransitions = document as ViewTransitionDocument;
+  settleTimelineRegroup();
   if (typeof window.matchMedia !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
-    !documentWithTransitions.startViewTransition) {
+    typeof document.startViewTransition !== "function" || document.querySelector("dialog[open]")) {
     update();
     return;
   }
-  documentWithTransitions.startViewTransition(() => flushSync(update));
+  // A skipped snapshot still runs its update callback. Apply it once before a later modal's focus update.
+  let applied = false;
+  const apply = () => {
+    if (applied) return;
+    applied = true;
+    update();
+  };
+  const transition = document.startViewTransition(() => flushSync(apply));
+  const finish = () => {
+    transition?.skipTransition();
+    apply();
+  };
+  finishTimelineRegroup = finish;
+  const clear = () => {
+    if (finishTimelineRegroup === finish) finishTimelineRegroup = undefined;
+  };
+  // Skipping before the animation starts rejects ready even when its update succeeds.
+  void transition?.ready?.catch(() => undefined);
+  void transition?.finished?.then(clear, clear);
 }
 
 function TimelineInlineTimeControl({
@@ -236,8 +262,21 @@ export type ContinuousListProps = {
   onLoad: (direction: "earlier" | "later") => void;
   /** The selected day: the List scrolls its heading (or the nearest earlier one) to the top on each request. */
   focusDayStartMs: number;
+  /** An arrow reached this date even when the nearest heading belongs to an earlier day. */
+  focusEmptyDay?: boolean;
   /** A new value asks for the scroll again (the selected day's key). */
   focusRequest: string;
+  /**
+   * The day whose heading is at (or last passed) the top of the List, as it changes: the header's date follows it, so
+   * the two always agree however the List got there (scrolling, a "?" link, the chip; owner bug, 29 Oct 2026).
+   */
+  onVisibleDay?: (dayStartMs: number | null) => void;
+  /**
+   * Weeks whose newest read again failed (Codex r2 on #634): their old copy shows, with a quiet line at the week's start
+   * saying it couldn't be refreshed, and Try again.
+   */
+  staleWeeks?: readonly { key: string; startMs: number; endMs: number }[];
+  onRetryWeek?: (key: string) => void;
 };
 
 /** How far ahead of either end the List starts loading the next week. */
@@ -248,8 +287,28 @@ function emptyDayTimeline(day: DateRange): LocationTimeline {
   return { date: "", timeZone: "", dayStart: day.start.toISOString(), dayEnd: day.end.toISOString(), items: [], openTrip: null, gaps: [] };
 }
 
+/** What a save in the List changed: the blocks (their days before it) and their new times (their days after it). */
+export type ListChange = {
+  entryIds?: readonly string[];
+  times?: readonly (string | null | undefined)[];
+  moved?: { entryId: string; updatedAt: string };
+};
+
+function savedListChange(entry: TimeEntryRow, plan: CalendarEntryCompactSavePlan, outcome: { ok: true; updatedAt?: string }): ListChange {
+  const { startedAt, stoppedAt } = plan.resolved;
+  const change: ListChange = { entryIds: [entry.id], times: [startedAt, stoppedAt] };
+  if (entry.stoppedAt && outcome.updatedAt && (plan.payload.startedAt || plan.payload.stoppedAt)) {
+    const startWeek = resolveTimelineRanges({ date: toTimelineDateKey(new Date(entry.startedAt)), scope: "week", view: "list" }).week;
+    // Refresh uses the dates of both endpoints, so a Monday midnight end still leaves the preceding week in between.
+    if (Date.parse(entry.stoppedAt) >= +addCalendarDays(startWeek.end, 7)) {
+      change.moved = { entryId: entry.id, updatedAt: outcome.updatedAt };
+    }
+  }
+  return change;
+}
+
 export function EntriesTable({
-  entries,
+  entries: loadedEntries,
   categories,
   tags = [],
   groupByDay = false,
@@ -265,14 +324,16 @@ export function EntriesTable({
   reviewItems = NO_REVIEW_ITEMS,
   checksDay = null,
   checksDays,
-  continuous
+  continuous,
+  noticeStackedAbove = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
   tags?: TagRow[];
   groupByDay?: boolean;
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
-  onChanged?: () => Promise<void>;
+  /** Reload the changed blocks' days. Returns true when the shell published its fresh snapshot. */
+  onChanged?: (change?: ListChange) => Promise<boolean | void>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   displayRange?: DateRange;
@@ -294,13 +355,25 @@ export function EntriesTable({
   checksDays?: readonly DateRange[];
   /** Calendar › List's continuous days: loads weeks at either end as the List scrolls. */
   continuous?: ContinuousListProps;
+  /** Another toast (a delete's Undo) holds the bottom place: the "?" answer's Undo sits above it (Codex r2 on #618). */
+  noticeStackedAbove?: "above" | "above-tall" | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
   const searchParams = useSearchParams();
+  // End it held, saving or saved here: the block shows ended at its trip's start (the running one too) until the
+  // data says so itself; Undo puts it back (location v4 design §7).
+  const endedBlocks = useEndedBlocks();
+  const entries = useMemo(() => endedBlocks.size ? loadedEntries.map((entry) => {
+    const endsAt = endedBlocks.get(entry.id);
+    return endsAt && (entry.stoppedAt === null || Date.parse(entry.stoppedAt) > Date.parse(endsAt))
+      ? { ...entry, stoppedAt: endsAt, durationSeconds: Math.max(0, Math.round((Date.parse(endsAt) - Date.parse(entry.startedAt)) / 1000)) }
+      : entry;
+  }) : loadedEntries, [endedBlocks, loadedEntries]);
   const {
     clearTimerError,
     createCategory,
+    isDateLoading,
     isTimerBusy,
     shellData,
     startEntryAgain,
@@ -314,6 +387,8 @@ export function EntriesTable({
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  // The block whose "?" was opened last (it ran into a trip): its group of repeats shows opened, as for `entry=`.
+  const [revealedEntryId, setRevealedEntryId] = useState<string | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const inlineEditorRef = useRef<TimelineInlineEditorState | null>(null);
   const [openInlineDatePickerKey, setOpenInlineDatePickerKey] = useState<string | null>(null);
@@ -324,33 +399,83 @@ export function EntriesTable({
   // empty list; the rows appear once the page has hydrated, without motion (React #418).
   const localTimeReady = useIsHydrated();
   const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
-  const [showEveryPlace, setShowEveryPlace] = useState(false);
+  // "All places" is remembered on this device (owner, 28 Oct 2026, concern 3). The List's
+  // location rows draw only after hydration, so reading storage on the first client render is safe.
+  const [showEveryPlace, setShowEveryPlaceState] = useState(() => typeof window !== "undefined"
+    ? readStoredFlag(SHOW_ALL_PLACES_STORAGE_KEY, false) : false);
+  // Card F (owner, 28 Oct 2026): on wide web a "Places and trips" column sits beside the blocks, remembered on this device.
+  const [placesColumn, setPlacesColumnState] = useState(() => typeof window === "undefined" || readStoredFlag(PLACES_COLUMN_STORAGE_KEY, true));
+  const wide = useMediaQuery("(min-width: 1200px)");
+  const setPlacesColumn = (next: boolean) => {
+    setPlacesColumnState(next);
+    storeFlag(PLACES_COLUMN_STORAGE_KEY, next);
+  };
+  const columnShown = wide && placesColumn && localTimeReady;
+  // The day at the top of the List, whose places the column shows.
+  const [columnDayStartMs, setColumnDayStartMs] = useState<number | null>(null);
+  // The day the header names: the top heading's, or the selected day when the top is where it would be (see trackColumnDay).
+  const [topDayStartMs, setTopDayStartMs] = useState<number | null>(null);
+  const setShowEveryPlace = (update: (current: boolean) => boolean) => setShowEveryPlaceState((current) => {
+    const next = update(current);
+    storeFlag(SHOW_ALL_PLACES_STORAGE_KEY, next);
+    return next;
+  });
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
   const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
+  // Where focus goes if a saved correction (Logs as, Save this place, a fix) removes the row that opened its
+  // dialog: the next "?" down the List from that row, else the chip, else the List (Codex r4 on #609).
+  const correctionFocus = useRef<{ nextKey: string | null; saved: boolean } | null>(null);
+  const [pendingCheckDialog, setPendingCheckDialog] = useState<{ id: string; focusRequest: string | null; link: string | null } | null>(null);
+  const cancelPendingCheckDialog = () => setPendingCheckDialog(null);
+  const openCorrection = (next: LocationCorrectionTarget) => {
+    cancelPendingCheckDialog();
+    settleTimelineRegroup();
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const following = opener ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")]
+      .find((element) => element !== opener && Boolean(opener.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) : undefined;
+    correctionFocus.current = { nextKey: following?.dataset.checkKey ?? null, saved: false };
+    setCorrection(next);
+  };
+  // The "?" the open dialog asks at its top, if it was opened from one (owner item A).
+  const [correctionCheckId, setCorrectionCheckId] = useState<string | null>(null);
   // A place a trip comes into and another leaves: "I wasn't here" joins those trips (step 12 part 4).
   const correctPlace = (place: TimelinePlace, label: string) => {
     const trips = (locationTimelines ?? (locationTimeline ? [locationTimeline] : []))
       .flatMap((timeline) => timeline.items.filter((item) => item.kind === "trip"));
     const joinsTrips = trips.some((trip) => trip.toId === place.id) && trips.some((trip) => trip.fromId === place.id);
-    setCorrection({ kind: "place", place, label, joinsTrips });
+    openCorrection({ kind: "place", place, label, joinsTrips });
   };
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
-    setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
+    openCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
-  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  // The List's own blocks, as shown (a local edit or Stop): a block that no longer runs into its trip stops asking here.
+  const listBlocks = useMemo(() => clashBlocksFrom(entries, categories), [categories, entries]);
+  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, blocks: listBlocks, categories,
+    refresh: async () => { await onChanged?.(); }, reviewItems });
+  // Owner concern 4 (28 Oct 2026): only "?" from today and the 6 days before ask; an older one's place stays a
+  // plain row. The chip counts and steps through all of them, oldest first, across days.
+  const todayStartMs = useLocalDayStartMs();
+  const askingStartMs = todayStartMs === null ? null : checkAskingStartMs(todayStartMs);
+  const shownChecks = useMemo(() => askingStartMs !== null ? listChecks.checks.filter((check) => {
+    const item = listChecks.itemsById.get(check.id);
+    return checkStillAsks(check, askingStartMs) && (!item || clashStillAsks(item, listBlocks, nowMs, "asks"));
+  }) : [], [askingStartMs, listBlocks, listChecks.checks, listChecks.itemsById, nowMs]);
+  // A block that ran into a trip asks on its block's row (design §7), never on a row of its own.
+  const rowChecks = useMemo(() => shownChecks.filter((check) => {
+    const item = listChecks.itemsById.get(check.id);
+    return !item || drawsAsOwnCheck(item);
+  }), [listChecks.itemsById, shownChecks]);
+  const blockChecks = useMemo(() => new Map(shownChecks.flatMap((check) => {
+    const blockId = checkBlockId(listChecks.itemsById.get(check.id));
+    return blockId ? [[blockId, check.id] as const] : [];
+  })), [listChecks.itemsById, shownChecks]);
+  const checkBlocks = useMemo(() => new Map([...blockChecks].map(([blockId, checkId]) => [checkId, blockId] as const)), [blockChecks]);
+  const askingOrder = useMemo(() => checksOldestFirst(shownChecks), [shownChecks]);
   // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
   // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setOpenCheck] = useState<string | null>(null);
-  // A trip's editor under its question ("Edit", card A); one at a time, closed with its question.
-  const [editingCheck, setEditingCheck] = useState<string | null>(null);
-  // The question open now, for a trip editor's save that finishes after the person moved on (Codex r2 on #590).
-  const openCheckNow = useRef<string | null>(null);
-  useEffect(() => { openCheckNow.current = focusedCheck; }, [focusedCheck]);
-  /** Opening, closing or answering a question closes any trip editor (Codex r1 on #590). */
-  const setFocusedCheck = (next: string | null | ((current: string | null) => string | null)) => {
-    setOpenCheck(next);
-    setEditingCheck(null);
-  };
+  const setFocusedCheck = setOpenCheck;
+  const pendingInlineCheck = useRef<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   // One timeline per shown day: the day's location read, or (without it) an empty day so its checks still
   // show on rows of their own (Codex r1 on #568).
@@ -369,7 +494,7 @@ export function EntriesTable({
       .map((timeline) => ({
         dayStartMs: Date.parse(timeline.dayStart),
         dayLabel: formatDate(timeline.dayStart),
-        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks })
+        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace && !columnShown, checks: rowChecks, hideCovered: true })
       }))
       .sort((a, b) => b.dayStartMs - a.dayStartMs);
     const onPlace = new Set<string>();
@@ -400,7 +525,7 @@ export function EntriesTable({
       }
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
-  }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
+  }, [columnShown, dayTimelines, entries, localTimeReady, nowMs, rowChecks, showEveryPlace]);
   // A trip read on two days (it spans midnight): the freshest copy wins. `locationTimelines` come in
   // read order (oldest read first), so the last one read is last here (Codex r2, r5 on #584).
   const tripByBlock = useMemo(
@@ -432,6 +557,7 @@ export function EntriesTable({
   }, [continuousError, continuousLoading, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
   // The selected day's positioning request (see below); while it is pending, anchoring waits.
   const focusDoneRef = useRef<string | null>(null);
+  const focusReleasedByUser = useRef<string | null>(null);
   const focusRequest = continuous?.focusRequest ?? null;
   const focusDayStartMs = continuous?.focusDayStartMs ?? null;
   const focusCanGrow = Boolean(continuous && !continuous.reachedEarliest);
@@ -462,6 +588,102 @@ export function EntriesTable({
       : null;
   };
   const anchorFrameRef = useRef<number | null>(null);
+  // Each day heading's offset within the List's content, in top order (Codex r1 on #625): measured once per layout
+  // change (rows added, removed or resized; see the observers below), so a scroll only binary-searches them and the
+  // work per frame stays the same however much history is loaded.
+  const headingOffsetsRef = useRef<Array<{ dayStart: number; top: number }> | null>(null);
+  const measureHeadingOffsets = (root: HTMLElement) => {
+    const rootTop = root.getBoundingClientRect().top;
+    const offsets = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")]
+      .map((heading) => ({ dayStart: Number(heading.dataset.dayStartMs), top: heading.getBoundingClientRect().top - rootTop + root.scrollTop }))
+      .filter((heading) => Number.isFinite(heading.dayStart));
+    headingOffsetsRef.current = offsets;
+    return offsets;
+  };
+  // Only while the List (or its places column) is shown.
+  const tracksTopDay = Boolean(continuous) || columnShown;
+  /**
+   * Card F: the column, and the header's date, follow the day whose heading is at (or last passed) the top of the List.
+   * `remeasure` after a layout change; a scroll uses the cached offsets.
+   */
+  const trackColumnDay = (remeasure = false) => {
+    const root = listScrollRef.current;
+    if (!root || !tracksTopDay) return;
+    const offsets = (remeasure ? null : headingOffsetsRef.current) ?? measureHeadingOffsets(root);
+    if (!offsets.length) {
+      // No day listed: no top day to name, so the header falls back to the requested day (Codex r3 on #625).
+      setColumnDayStartMs(null);
+      setTopDayStartMs(null);
+      return;
+    }
+    const line = root.scrollTop + 48;
+    let low = 0;
+    let high = offsets.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (offsets[mid].top <= line) low = mid + 1;
+      else high = mid;
+    }
+    const index = Math.max(0, low - 1);
+    const dayStart = offsets[index].dayStart;
+    // An arrow owns the selected day until the person scrolls, even when a gap or the end of the
+    // List makes the browser stop on another heading. Without an arrow, keep the empty Today rule.
+    const newerStart = index > 0 ? offsets[index - 1].dayStart : Infinity;
+    const arrowOwnsDay = continuous?.focusEmptyDay && focusReleasedByUser.current !== focusRequest;
+    const emptyToday = todayStartMs !== null && focusDayStartMs === todayStartMs && dayStart <= todayStartMs && todayStartMs < newerStart;
+    const shown = focusDayStartMs !== null && (arrowOwnsDay || emptyToday) ? focusDayStartMs : dayStart;
+    const columnDay = arrowOwnsDay ? shown : dayStart;
+    setColumnDayStartMs((current) => current === columnDay ? current : columnDay);
+    setTopDayStartMs((current) => current === shown ? current : shown);
+  };
+  const trackColumnDayRef = useRef(trackColumnDay);
+  useLayoutEffect(() => {
+    trackColumnDayRef.current = trackColumnDay;
+  });
+  // A layout change re-measures and re-reads the top day, also when nothing scrolls (Codex r1 and r2 on #625): rows
+  // added or removed (a MutationObserver), and anything in the List's content changing size — the table, and what sits
+  // above it (the "N to check" chip, the places filter, "Loading later days…") — or coming and going, which moves every
+  // heading (a ResizeObserver on each of the List's own children). At most once a frame.
+  useEffect(() => {
+    const root = listScrollRef.current;
+    if (!root || !tracksTopDay) return;
+    let frame: number | null = null;
+    const observed = new Set<Element>();
+    const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => schedule());
+    const observeContent = () => {
+      if (!resize) return;
+      const children = new Set(root.children);
+      for (const element of observed) {
+        if (children.has(element)) continue;
+        resize.unobserve(element);
+        observed.delete(element);
+      }
+      for (const element of children) {
+        if (observed.has(element)) continue;
+        resize.observe(element);
+        observed.add(element);
+      }
+    };
+    const schedule = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        observeContent();
+        trackColumnDayRef.current(true);
+      });
+    };
+    const rowNode = (node: Node) => node.nodeName === "TR" || node.nodeName === "TBODY" || node.nodeName === "TABLE";
+    const mutations = typeof MutationObserver === "undefined" ? null : new MutationObserver((records) => {
+      if (records.some((record) => record.target === root || [...record.addedNodes, ...record.removedNodes].some(rowNode))) schedule();
+    });
+    mutations?.observe(root, { childList: true, subtree: true });
+    observeContent();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      mutations?.disconnect();
+      resize?.disconnect();
+    };
+  }, [tracksTopDay]);
   useEffect(() => () => {
     if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current);
   }, []);
@@ -487,6 +709,7 @@ export function EntriesTable({
   // It ends when it lands, when no earlier week can come, or at the person's own scrolling (wheel, touch,
   // a key or the scrollbar), which always wins (Codex r3 on #584).
   const endFocusOnUserScroll = () => {
+    if (continuous?.focusEmptyDay) focusReleasedByUser.current = focusRequest;
     if (!focusPending()) return;
     focusDoneRef.current = focusRequest;
     recordScrollAnchor();
@@ -495,7 +718,11 @@ export function EntriesTable({
     const root = listScrollRef.current;
     if (!root || focusRequest === null || focusDayStartMs === null || focusDoneRef.current === focusRequest || !localTimeReady) return;
     const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
-    if (!headings.length) return;
+    if (!headings.length) {
+      // Nothing listed for this request (yet): the day an earlier request reported is no longer the top day.
+      trackColumnDay(true);
+      return;
+    }
     const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
     if (!target) {
       // Every shown day is later than the selected one: rest at the bottom, where earlier weeks load,
@@ -510,59 +737,178 @@ export function EntriesTable({
       if (Math.abs(off) < 1 || !focusCanGrow) focusDoneRef.current = focusRequest;
     }
     recordScrollAnchor();
+    // A programmatic scroll that moves nothing (already there, or clamped) fires no scroll event: report the day now.
+    trackColumnDay(true);
   });
+  const onVisibleDay = continuous?.onVisibleDay;
+  useEffect(() => {
+    onVisibleDay?.(topDayStartMs);
+  }, [topDayStartMs, onVisibleDay]);
   /** The open suggestion a location row's "?" is about, if any. */
   const checkOf = (row: LocationListRow) => {
     const id = row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
     return id ? listChecks.itemsById.get(id) : undefined;
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
-  /** "N to check": the next "?" down the List opens, and comes into view. Returns its suggestion's id. */
-  const nextCheck = () => {
-    if (!checkRows.length) return null;
-    const at = checkRows.findIndex((row) => checkOf(row)?.id === focusedCheck);
-    const next = checkRows[(at + 1) % checkRows.length];
+  /** Whether a "?" row opens a dialog (a place, or a trip) rather than its question under it. */
+  const opensDialog = (row: LocationListRow) => row.kind === "place" || (row.kind === "check" && Boolean(row.trip || row.place));
+  /** Opens a "?" by its row and brings the row into view. */
+  const openCheckRow = (next: LocationListRow) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
     const nextId = checkOf(next)!.id;
-    applyTimelineRegroup(() => setFocusedCheck(nextId));
+    const opensModal = opensDialog(next);
+    settleTimelineRegroup();
+    // A check can be listed before its place or trip. Keep the selection through that first read.
+    setPendingCheckDialog(opensModal ? null : { id: nextId, focusRequest, link: checkParam });
+    if (opensModal) {
+      setFocusedCheck(nextId);
+    } else {
+      pendingInlineCheck.current = nextId;
+      applyTimelineRegroup(() => {
+        pendingInlineCheck.current = null;
+        setFocusedCheck(nextId);
+      });
+    }
+    // Owner item A: a place or a trip opens its dialog with the "?" at the top; Apple Health opens under its row.
+    if (next.kind === "place") openPlaceDialog(next.place, next.checkIds[0] ?? null);
+    else if (next.kind === "check" && next.place) openPlaceDialog(next.place, next.checkId);
+    else if (next.kind === "check" && next.trip) openTripDialog(next.checkId, next.trip);
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
       .find((element) => element.dataset.locationRow === anchor)
-      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+      ?.scrollIntoView({ block: "center", behavior: opensModal || prefersReducedMotion() ? "instant" : "smooth" }));
     return nextId;
   };
-  /** A location row, its "?" and, while open, its question. */
+  const openColumnCheck = (checkId: string) => {
+    const row = checkRows.find((other) => checkOf(other)?.id === checkId);
+    if (row) openCheckRow(row);
+  };
+  /**
+   * Owner concern 4 (28 Oct 2026): "N to check" steps oldest first through every "?" that still asks, across
+   * days. A "?" on a day the List hasn't loaded opens that day (the List then opens it, see `check=` below).
+   */
+  // Each chip press is a step with its own token; a step that goes to an unloaded day remembers the token its link
+  // was made with, so a slow earlier navigation arriving after a newer step never reopens its "?" (Codex r8 on #609).
+  const chipSteps = useRef({ latest: 0, links: new Map<string, number>() });
+  const nextAskingCheck = (fromChip = false) => {
+    if (fromChip) chipSteps.current.latest += 1;
+    if (!askingOrder.length) return null;
+    // A rapid press can arrive before the previous inline question has painted.
+    const previous = pendingInlineCheck.current ?? focusedCheck;
+    cancelPendingCheckDialog();
+    settleTimelineRegroup();
+    const at = askingOrder.findIndex((check) => check.id === previous);
+    const next = askingOrder[(at + 1) % askingOrder.length];
+    const row = checkRows.find((other) => checkOf(other)?.id === next.id);
+    if (row) return openCheckRow(row);
+    const block = blockOfCheck(next.id);
+    if (block) return openBlockCheck(block, next.id);
+    const day = new Date(next.startedAt ?? nowMs);
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    // Remembered as the current one, so the next press goes on from it even before (or without) the day loading.
+    setFocusedCheck(next.id);
+    if (fromChip) chipSteps.current.links.set(next.id, chipSteps.current.latest);
+    router.push(`/timeline?view=list&scope=day&date=${key}&check=${encodeURIComponent(next.id)}`);
+    return next.id;
+  };
+  /**
+   * `check=first` (Today's chip, an old /review?check=first): today's first "?" in the viewer's own day, never an
+   * earlier day's (Codex r1 on #613). On another loaded day it goes to the day the "?" starts, by its id.
+   */
+  const firstTodayCheck = () => {
+    if (todayStartMs === null) return null;
+    const first = todaysChecks(askingOrder, todayStartMs)[0];
+    if (!first) return null;
+    const row = checkRows.find((other) => checkOf(other)?.id === first.id);
+    if (row) return openCheckRow(row);
+    const block = blockOfCheck(first.id);
+    if (block) return openBlockCheck(block, first.id);
+    router.replace(oldestCheckHref([first]));
+    return null;
+  };
+  /** The block a block's "?" asks on (a block that ran into a trip), when this List has it. */
+  const blockOfCheck = (checkId: string) => {
+    const blockId = checkBlocks.get(checkId);
+    return blockId ? entries.find((entry) => entry.id === blockId) : undefined;
+  };
+  /**
+   * A block's "?" (location v4 design §7): its editor opens with the question at the top, and its row (in its group,
+   * opened) comes into view. The editor's own entrance is the motion; with Reduce Motion the scroll is instant.
+   */
+  const openBlockCheck = (entry: TimeEntryRow, checkId: string) => {
+    if (continuous?.focusEmptyDay) endFocusOnUserScroll();
+    settleTimelineRegroup();
+    setFocusedCheck(checkId);
+    // A block inside a group of repeats shows with its group opened.
+    setRevealedEntryId(entry.id);
+    openFullEditor(entry);
+    requestAnimationFrame(() => document.getElementById(`timeline-entry-${entry.id}`)
+      ?.scrollIntoView({ block: "center", behavior: "instant" }));
+    return checkId;
+  };
+  /** A block's "?" answered from its editor: held for Undo like any answer; the editor closes, focus moves on. */
+  const answerBlockCheck = (checkId: string, yes: boolean, label: string) => {
+    applyTimelineRegroup(() => {
+      listChecks.answer(checkId, yes ? "log" : "skip", label);
+      setFocusedCheck(null);
+    });
+    setEditingEntry(null);
+    focusCheck(null);
+  };
+  /** "N to check": the next "?", oldest first across days, opens and comes into view. */
+  const pressChip = () => nextAskingCheck(true);
+  /** A place's dialog (owner item A): its "?" at the top, and logging it there closes the "?". */
+  const openPlaceDialog = (place: TimelinePlace, checkId: string | null) => {
+    setCorrectionCheckId(checkId);
+    correctPlace(place, place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+  };
+  const openTripDialog = (checkId: string | null, trip: TimelineTrip & { route: string }) => {
+    setCorrectionCheckId(checkId);
+    openCorrection({ kind: "trip", trip, route: trip.route });
+  };
+  /**
+   * A block's mark: when the block asks (it ran into a trip), the mark is the control that opens its editor with the
+   * question at the top, read as "…, Needs a look" (design §7); otherwise the mark alone.
+   */
+  const renderBlockMark = (asking: TimeEntryRow | undefined, mark: ReactNode) => {
+    const checkId = asking ? blockChecks.get(asking.id) : undefined;
+    const item = checkId ? listChecks.itemsById.get(checkId) : undefined;
+    if (!asking || !checkId || !item) return mark;
+    const words = blockQuestionWords(item, timeEntryTitle(asking), clock);
+    return (
+      <button aria-label={`${timeEntryTitle(asking)}: ${words.question}, Needs a look`} className="timeline-block-ask"
+        data-check-key={`block-${asking.id}`} data-tip="Needs a look" onClick={() => openBlockCheck(asking, checkId)} type="button">
+        {mark}
+      </button>
+    );
+  };
+  /** A location row, its "?" and, while open, an Apple Health question (no dialog) under it. */
   const renderLocationRow = (row: LocationListRow) => {
     const item = checkOf(row);
     const expanded = Boolean(item) && focusedCheck === item?.id;
     // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
-    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id)) }
-      : undefined;
+    const check = item ? { expanded, onToggle: () => {
+      cancelPendingCheckDialog();
+      applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id));
+    } } : undefined;
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
-          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
-          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
-        {item && expanded ? (
+          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row}
+            // A covered place's "?" keeps its place: its dialog, map and Save this place (Codex r2 on #609).
+            onOpen={row.place ? () => openPlaceDialog(row.place!, item.id) : row.trip ? () => openTripDialog(item.id, row.trip!) : undefined}
+            onYes={checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />
+            : null
+          : <LocationListRowView check={check} clock={clock} guess={item && reviewPicture(item) === "place" ? visitedGuess(item.title) : null}
+            nowMs={nowMs} row={row}
+            onCorrect={row.kind === "place" ? () => openPlaceDialog(row.place, row.checkIds[0] ?? null) : undefined}
+            onYes={item && checkQuestionWords(item, clock).confident ? () => answerFromDialog(item.id, true) : undefined} />}
+        {/* Owner final change 1 (28 Oct 2026): a row that opens a dialog shows no question under it (the dialog asks
+            it); Apple Health, which has no dialog, asks here with the compact pills. */}
+        {item && expanded && row.kind === "check" && !row.trip && !row.place ? (
           <CheckQuestionRow clock={clock} item={item}
-            editor={editingCheck === item.id ? (
-              <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
-                // Only its own editor: a late save closes after resolving, by then perhaps over another trip's
-                // editor (Codex r3 on #590).
-                onClose={() => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : current))}
-                onResolved={() => {
-                  void onChanged?.();
-                  // Saved after the person opened another question: that one, and its editor, stay as they are.
-                  if (openCheckNow.current !== item.id) return;
-                  // Saved in the editor: as an answer, focus goes to the next "?" down the List.
-                  const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
-                  applyTimelineRegroup(() => setFocusedCheck(null));
-                  focusCheck(following?.key ?? null);
-                }}
-                reviewItemId={item.id} />
-            ) : undefined}
-            onEdit={hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
-              ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
             onAnswer={(kind) => {
+              cancelPendingCheckDialog();
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
               const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
               applyTimelineRegroup(() => {
@@ -588,6 +934,21 @@ export function EntriesTable({
     pendingRestore.current = null;
     pendingFocus.current = key;
   };
+  // Only while it still asks (the asking list): past midnight on its 7th day the dialog stops asking it (Codex r2 on #609).
+  const dialogCheck = correctionCheckId && shownChecks.some((check) => check.id === correctionCheckId)
+    ? listChecks.itemsById.get(correctionCheckId) : undefined;
+  const dialogWords = dialogCheck ? checkQuestionWords(dialogCheck, clock) : null;
+  /**
+   * A dialog's "?" (or a row's Yes pill, Codex r6 on #609) answered: held for Undo like an inline answer; focus then goes to the next "?" down the List,
+   * else the chip, else the List, as there (Codex r1 on #609: the row that opened the dialog is gone).
+   */
+  const answerFromDialog = (checkId: string, yes: boolean) => {
+    cancelPendingCheckDialog();
+    const at = checkRows.findIndex((other) => checkOf(other)?.id === checkId);
+    const following = at < 0 ? undefined : checkRows.slice(at + 1).find((other) => other.key !== checkRows[at].key);
+    applyTimelineRegroup(() => listChecks.answer(checkId, yes ? "log" : "skip"));
+    focusCheck(following?.key ?? null);
+  };
   const restoredItemId = listChecks.state.restored?.itemId ?? null;
   const restoredSequence = listChecks.state.restored?.sequence ?? 0;
   useEffect(() => {
@@ -597,9 +958,11 @@ export function EntriesTable({
     if (pendingRestore.current) {
       const restoredId = pendingRestore.current;
       const restoredRow = locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === restoredId);
-      if (!restoredRow) return;
+      // A block's "?" comes back on its block's row.
+      const restoredKey = restoredRow?.key ?? (checkBlocks.has(restoredId) ? `block-${checkBlocks.get(restoredId)}` : null);
+      if (!restoredKey) return;
       pendingRestore.current = null;
-      pendingFocus.current = restoredRow.key;
+      pendingFocus.current = restoredKey;
     }
     const key = pendingFocus.current;
     if (key === undefined) {
@@ -612,20 +975,45 @@ export function EntriesTable({
     }
     const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
     // Wait while the "?" it moves to has not rendered yet.
-    if (key && !row && checkRows.some((other) => other.key === key)) return;
+    if (key && !row && (checkRows.some((other) => other.key === key) || [...blockChecks.keys()].some((blockId) => `block-${blockId}` === key))) return;
     pendingFocus.current = undefined;
     (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
   });
-  // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
-  // (location v4 step 14), once per visit.
-  const openFirstCheck = searchParams.get("check") === "first";
-  const openedFromLink = useRef(false);
+  // Today's "N to check today" links here with `check=first`: today's first "?" opens once the day's rows are in
+  // (location v4 step 14), once per visit — never an earlier day's (Codex r1 on #613).
+  const checkParam = searchParams.get("check");
+  const openFirstCheck = checkParam === "first";
+  // The badge and the chip link to one "?" by its id (owner concern 4); it opens once its row is in.
+  const linkedCheckRow = checkParam && !openFirstCheck ? checkRows.find((row) => checkOf(row)?.id === checkParam) : undefined;
+  // A link to a block's "?" opens its block's editor once the block is listed.
+  const linkedBlock = checkParam && !openFirstCheck && !linkedCheckRow ? blockOfCheck(checkParam) : undefined;
+  const openedFromLink = useRef<string | null>(null);
+  // A link leaving the URL ends that visit: coming back to it on purpose opens its "?" again, while a refresh
+  // with the link still there never does (Codex r2 on #609).
   useEffect(() => {
-    if (!openFirstCheck || openedFromLink.current || !checkRows.length) return;
+    if (checkParam) return;
+    openedFromLink.current = null;
+    // Leaving a link also ends any chip step's claim on it: only the navigation pending then is suppressed.
+    chipSteps.current.links.clear();
+  }, [checkParam]);
+  useEffect(() => {
+    if (!checkParam || openedFromLink.current === checkParam || (!checkRows.length && !blockChecks.size)) return;
+    if (!openFirstCheck && !linkedCheckRow && !linkedBlock) return;
+    // The link a chip step made that a newer step has passed: consumed without opening or moving focus.
+    const stepToken = chipSteps.current.links.get(checkParam);
+    if (stepToken !== undefined && stepToken !== chipSteps.current.latest) {
+      openedFromLink.current = checkParam;
+      // Consumed: the step's claim ends here, so a later deliberate visit to this "?" opens it (Codex r9 on #609).
+      chipSteps.current.links.delete(checkParam);
+      return;
+    }
     const frame = requestAnimationFrame(() => {
-      openedFromLink.current = true;
+      openedFromLink.current = checkParam;
+      // Consumed by opening: its step's token retires too, so suppression only ever applies to a link still pending
+      // (Codex r10 on #609).
+      chipSteps.current.links.delete(checkParam);
       // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
-      const opened = nextCheck();
+      const opened = linkedCheckRow ? openCheckRow(linkedCheckRow) : linkedBlock ? openBlockCheck(linkedBlock, checkParam) : firstTodayCheck();
       if (opened) {
         pendingFocus.current = undefined;
         pendingRestore.current = opened;
@@ -633,6 +1021,44 @@ export function EntriesTable({
     });
     return () => cancelAnimationFrame(frame);
   });
+  useEffect(() => {
+    const pending = pendingCheckDialog;
+    if (!pending) return;
+    if (isDateLoading || pending.focusRequest !== focusRequest || pending.link !== checkParam ||
+      (focusedCheck !== pending.id && pendingInlineCheck.current !== pending.id) ||
+      !askingOrder.some((check) => check.id === pending.id)) {
+      cancelPendingCheckDialog();
+      return;
+    }
+    const row = checkRows.find((other) => checkOf(other)?.id === pending.id);
+    if (!row || !opensDialog(row)) return;
+    const frame = requestAnimationFrame(() => {
+      // The person may have opened a date picker while the location read was pending.
+      if (document.querySelector('dialog[open], [role="dialog"][aria-hidden="false"]') ||
+        document.activeElement?.closest('[role="dialog"]')) {
+        cancelPendingCheckDialog();
+        return;
+      }
+      openCheckRow(row);
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+  useEffect(() => {
+    const pending = correctionFocus.current;
+    if (correction || !pending) return;
+    if (!pending.saved) {
+      correctionFocus.current = null;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      correctionFocus.current = null;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const next = pending.nextKey ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === pending.nextKey) : null;
+      (next ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [correction]);
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -804,6 +1230,7 @@ export function EntriesTable({
     const current = inlineEditorRef.current;
     if (current?.entryId === entry.id && current.field === field) return;
     if (isPending || current?.isSaving || (isTimerBusy && !entry.stoppedAt)) return;
+    cancelPendingCheckDialog();
     const next: TimelineInlineEditorState = {
       ...createTimelineInlineEditDraft(entry, field, displayInterval),
       entryId: entry.id,
@@ -826,6 +1253,8 @@ export function EntriesTable({
   }
 
   function openFullEditor(entry: TimeEntryRow) {
+    cancelPendingCheckDialog();
+    settleTimelineRegroup();
     setOpenInlineDatePickerKey(null);
     inlineEditorRef.current = null;
     setInlineEditor(null);
@@ -955,9 +1384,9 @@ export function EntriesTable({
         }
       });
       setInlineStatus(`Updated ${current.target.entryIds.length} grouped blocks.`);
-      await onChanged?.();
+      const shellRefreshed = await onChanged?.({ entryIds: current.target.entryIds });
       if (nextGroupKey) focusGroupedDescription(nextGroupKey);
-      startTransition(() => router.refresh());
+      refreshRouteIfNeeded(shellRefreshed);
       return;
     }
 
@@ -965,8 +1394,11 @@ export function EntriesTable({
       inlineEditorRef.current = null;
       setInlineEditor(null);
     }
-    await onChanged?.();
-    startTransition(() => router.refresh());
+    refreshRouteIfNeeded(await onChanged?.(savedListChange(entry, plan, outcome)));
+  }
+
+  function refreshRouteIfNeeded(shellRefreshed: boolean | void) {
+    if (!shellRefreshed) startTransition(() => router.refresh());
   }
 
   function focusGroupedDescription(groupKey: string) {
@@ -1122,7 +1554,7 @@ export function EntriesTable({
         </span>
         {interval.stoppedAt
           ? timeInput("finish", interval.stoppedAt)
-          : <span className="timeline-inline-running">Running</span>}
+          : <span className="timeline-inline-running"><span className="sr-only">Running, </span>now</span>}
       </span>
     );
   }
@@ -1143,6 +1575,24 @@ export function EntriesTable({
     return formatDuration(editor?.draft.durationSeconds ?? fallbackSeconds);
   }
 
+  // A failed week's line, once, above the first day heading shown in it (newest first, so at the week's start).
+  const noticedStaleWeeks = new Set<string>();
+  const staleWeekNotice = (dayStartMs: number | undefined) => {
+    if (dayStartMs === undefined || !continuous?.staleWeeks?.length) return null;
+    const week = continuous.staleWeeks.find((each) => dayStartMs >= each.startMs && dayStartMs < each.endMs);
+    if (!week || noticedStaleWeeks.has(week.key)) return null;
+    noticedStaleWeeks.add(week.key);
+    const retry = continuous.onRetryWeek;
+    return (
+      <tr className="timeline-list-week-stale" data-stale-week={week.key} key={`stale-${week.key}`}>
+        <td colSpan={4}>
+          <span role="status">Couldn&apos;t refresh this week.</span>
+          {retry ? <button className="timeline-list-edge-retry" onClick={() => retry(week.key)} type="button">Try again</button> : null}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <section className="timeline-list-workspace">
       {actionError ? (
@@ -1150,6 +1600,7 @@ export function EntriesTable({
       ) : null}
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
+      <div className={`timeline-list-body${columnShown ? " has-places-column" : ""}`}>
       <div
         aria-busy={localTimeReady && !continuousLoading ? undefined : true}
         className="timeline-list-scroll"
@@ -1169,6 +1620,7 @@ export function EntriesTable({
             anchorFrameRef.current = requestAnimationFrame(() => {
               anchorFrameRef.current = null;
               recordScrollAnchor();
+              trackColumnDay();
             });
           }
           onScroll(event);
@@ -1180,7 +1632,16 @@ export function EntriesTable({
           scrollContainerRef(element);
         }}
       >
-        {localTimeReady ? <ChecksChip count={checkRows.length} onNext={nextCheck} /> : null}
+        {localTimeReady ? <ChecksChip count={askingOrder.length} onNext={pressChip} /> : null}
+        {/* Owner item H: a quiet filter at the top of the List, not a filled pill under it. */}
+        {localTimeReady && !columnShown && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
+          <div className="timeline-places-filter">
+            <button aria-pressed={showEveryPlace} onClick={() => setShowEveryPlace((current) => !current)} type="button">
+              {showEveryPlace ? "Fewer places" : "All places"}
+            </button>
+            {wide ? <button onClick={() => setPlacesColumn(true)} type="button">Places beside the List</button> : null}
+          </div>
+        ) : null}
         {continuous && localTimeReady ? (
           <ContinuousEdge direction="later" error={continuousError === "later"} loading={continuousLoading === "later"}
             onRetry={() => continuous.onLoad("later")} reachedEnd={continuous.reachedLatest} sentinelRef={laterSentinelRef} />
@@ -1212,7 +1673,7 @@ export function EntriesTable({
               const isGrouped = group.entries.length > 1;
               const isExpanded = isGrouped && (
                 expandedGroups.has(group.key) ||
-                group.entries.some((occurrence) => occurrence.id === highlightedEntryId)
+                group.entries.some((occurrence) => occurrence.id === highlightedEntryId || occurrence.id === revealedEntryId)
               );
               const overlappingOccurrences = group.entries.filter(
                 (occurrence) => (overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0
@@ -1231,8 +1692,9 @@ export function EntriesTable({
                     ? extraDays
                       .filter((day) => day.dayStartMs > (dayTotals.get(group.day)?.dayStartMs ?? 0) &&
                         (previousDate === null || day.dayStartMs < (dayTotals.get(previousDate)?.dayStartMs ?? Infinity)))
-                      .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
+                      .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} notice={staleWeekNotice(day.dayStartMs)} renderRow={renderLocationRow} />)
                     : null}
+                  {shouldShowDate ? staleWeekNotice(dayTotals.get(group.day)?.dayStartMs) : null}
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading"
                       data-day-start-ms={dayTotals.get(group.day)?.dayStartMs}>
@@ -1271,9 +1733,15 @@ export function EntriesTable({
                           {group.entries.length}
                         </button>
                       ) : null}
-                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). */}
-                      <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
-                        seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
+                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). A block that
+                          ran into a trip carries its one "?" on its mark, which opens its editor (design §7); a group's
+                          row carries it while it is closed. */}
+                      {renderBlockMark(
+                        isGrouped ? isExpanded ? undefined : group.entries.find((occurrence) => blockChecks.has(occurrence.id)) : entry,
+                        <ListBlockMark asking={isGrouped ? !isExpanded && group.entries.some((occurrence) => blockChecks.has(occurrence.id)) : blockChecks.has(entry.id)}
+                          category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
+                          seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
+                      )}
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}
@@ -1330,7 +1798,7 @@ export function EntriesTable({
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="timeline-list-actions">
+                    <div className="timeline-list-actions" data-grouped={isGrouped || undefined} data-running={!entry.stoppedAt || undefined}>
                       <button
                         className="df-icon-action"
                         data-tip={entry.stoppedAt ? "Start again" : "Restart"}
@@ -1388,8 +1856,10 @@ export function EntriesTable({
                     >
                       <td className="px-3 py-3">
                         <div className="timeline-task-cell timeline-occurrence-task">
-                          <ListBlockMark category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence}
-                            seconds={intervalSeconds(occurrenceInterval, capturedNow)} />
+                          {renderBlockMark(occurrence,
+                            <ListBlockMark asking={blockChecks.has(occurrence.id)}
+                              category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence}
+                              seconds={intervalSeconds(occurrenceInterval, capturedNow)} />)}
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
@@ -1473,7 +1943,7 @@ export function EntriesTable({
             {groupByDay
               ? extraDays
                 .filter((day) => !grouped.length || day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
-                .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
+                .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} notice={staleWeekNotice(day.dayStartMs)} renderRow={renderLocationRow} />)
               : extraDays.flatMap((day) => day.rows).map((row) => renderLocationRow(row))}
           </tbody>
         </table>
@@ -1481,25 +1951,51 @@ export function EntriesTable({
           <ContinuousEdge direction="earlier" error={continuousError === "earlier"} loading={continuousLoading === "earlier"}
             onRetry={() => continuous.onLoad("earlier")} reachedEnd={continuous.reachedEarliest} sentinelRef={earlierSentinelRef} />
         ) : null}
-        {localTimeReady && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
-          <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
-        ) : null}
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
-            message={listChecks.state.notice.label} onAction={listChecks.undo}
+            message={listChecks.state.notice.label} onAction={listChecks.undo} stacked={noticeStackedAbove}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>
+      {columnShown ? (() => {
+        const dayStart = columnDayStartMs ?? continuous?.focusDayStartMs ?? (dayTimelines[0] ? Date.parse(dayTimelines[0].dayStart) : null);
+        const timeline = dayTimelines.find((candidate) => Date.parse(candidate.dayStart) === dayStart) ?? null;
+        const askingBySegment = new Map(shownChecks.flatMap((check) => check.segmentId ? [[check.segmentId, check.id] as const] : []));
+        return (
+          <PlacesColumn askingBySegment={askingBySegment} blocks={entries} clock={clock} nowMs={nowMs}
+            onCorrectLeg={(trip, index) => correctLeg(trip.id, trip.legs)(index)} onCorrectPlace={correctPlace}
+            onCorrectTrip={(trip, route) => openCorrection({ kind: "trip", trip, route })}
+            onHide={() => setPlacesColumn(false)}
+            onOpenCheck={openColumnCheck}
+            timeline={timeline} />
+        );
+      })() : null}
+      </div>
       {correction ? (
-        <LocationCorrectionDialog clock={clock} onClose={() => setCorrection(null)}
-          onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
+        <LocationCorrectionDialog activities={categories} clock={clock} onClose={() => { setCorrection(null); setCorrectionCheckId(null); }}
+          // Held for Undo like an inline answer; focus then moves on. "Logs as" is log_place, which closes the "?" itself.
+          question={dialogCheck && dialogWords ? { text: dialogWords.question, yesLabel: dialogWords.yesLabel, noLabel: "Not now",
+            onAnswer: (yes: boolean) => answerFromDialog(dialogCheck.id, yes) } : null}
+          onCorrected={async () => {
+            if (correctionFocus.current) correctionFocus.current.saved = true;
+            await onChanged?.();
+          }} onReceiptAfterClose={listChecks.refreshAfterReceipt} onResolved={listChecks.settleResolved} places={places} target={correction} />
       ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal
           capturedNow={capturedNow}
           categories={categories}
           entry={editingEntry}
+          // A block that ran into a trip asks at the top of its editor (design §7): End it / Keep it, held for Undo.
+          question={(() => {
+            const checkId = blockChecks.get(editingEntry.id);
+            const item = checkId ? listChecks.itemsById.get(checkId) : undefined;
+            if (!checkId || !item) return null;
+            const words = blockQuestionWords(item, timeEntryTitle(editingEntry), clock);
+            return { text: words.question, yesLabel: words.yesLabel, noLabel: words.noLabel,
+              onAnswer: (yes: boolean) => answerBlockCheck(checkId, yes, yes ? words.endedLabel : words.keptLabel) };
+          })()}
           isTimerBusy={isTimerBusy}
           onClose={() => setEditingEntry(null)}
           onCreateCategory={createCategory}
@@ -1513,8 +2009,7 @@ export function EntriesTable({
               ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
               : await updateActiveEntryFromCalendar({ plan });
             if (outcome.ok) {
-              await onChanged?.();
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.(savedListChange(editingEntry, plan, outcome)));
             }
             return outcome;
           }}
@@ -1523,8 +2018,7 @@ export function EntriesTable({
             const outcome = await splitTimeEntry(clientFetch, editingEntry, atMs);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.();
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id] }));
             }
             return outcome;
           }}
@@ -1532,8 +2026,7 @@ export function EntriesTable({
             const outcome = await duplicateTimeEntry(clientFetch, editingEntry);
             // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
             if (outcome.ok || outcome.changed) {
-              await onChanged?.();
-              startTransition(() => router.refresh());
+              refreshRouteIfNeeded(await onChanged?.({ entryIds: [editingEntry.id] }));
             }
             return outcome;
           }}
@@ -1626,9 +2119,10 @@ type ExtraListDay = { label: string; dayStartMs: number; seconds: number; contin
  * A day without a group of its own: its heading (with its total when a block continues into it, and its
  * start for scrolling to it), a note when it only continues an earlier block, and its places and checks.
  */
-function ExtraDayRows({ day, renderRow }: { day: ExtraListDay; renderRow: (row: DayLocationRow) => ReactNode }) {
+function ExtraDayRows({ day, notice = null, renderRow }: { day: ExtraListDay; notice?: ReactNode; renderRow: (row: DayLocationRow) => ReactNode }) {
   return (
     <>
+      {notice}
       <tr className="timeline-list-day-heading" data-day-start-ms={day.dayStartMs}>
         <td colSpan={4}>
           <span>{day.label}</span>
@@ -1650,18 +2144,20 @@ function ExtraDayRows({ day, renderRow }: { day: ExtraListDay; renderRow: (row: 
  * never a thin colour bar): 36 px wide, its height following the block's length (`blockRowHeight`), X3
  * corners; no activity is a neutral block.
  */
-function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | null; entry: TimeEntryRow; seconds: number }) {
+function ListBlockMark({ asking = false, category, entry, seconds }: { asking?: boolean; category: CategoryRow | null; entry: TimeEntryRow; seconds: number }) {
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
   return (
     <span
       aria-hidden="true"
-      className={`timeline-task-block${entry.categoryId ? " df-block" : ""}`}
+      className={`timeline-task-block${entry.categoryId ? " df-block" : ""}${asking ? " is-asking" : ""}`}
       style={{
         ...(entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
         height: blockRowHeight(seconds * 1000)
       }}
     >
       <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={16} />
+      {/* The one amber "?" dot, as on location rows (design §7). */}
+      {asking ? <span className="timeline-location-dot" /> : null}
     </span>
   );
 }
@@ -1672,7 +2168,9 @@ function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | n
  * colour and icon carry the activity, and the row's name says it).
  */
 function ListSecondaryLine({ entry }: { entry: TimeEntryRow }) {
-  if (entry.placeName) {
+  // Owner item F (28 Oct 2026): a place line that only repeats the title ("PureGym" / "📍 PureGym") is dropped.
+  const repeatsTitle = entry.placeName?.trim().toLowerCase() === timeEntryTitle(entry).trim().toLowerCase();
+  if (entry.placeName && !repeatsTitle) {
     return (
       <span className="timeline-task-secondary-line">
         <DayframeIcon glyph={entry.automaticMoveEventId ? "route" : "map-pin"} size={12} />

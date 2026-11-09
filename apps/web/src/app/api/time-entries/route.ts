@@ -7,12 +7,14 @@ import {
   processActivityEvent,
   splitActiveEntry,
   splitFinishedEntry,
+  splitRunningEntry,
   TimeEntryConflictError,
   TimeEntryNotFoundError,
   TimeEntryValidationError,
   TimerMutationBusyError,
   TimerReplacementWindowError,
-  TimerStopBeforeStartError
+  TimerStopBeforeStartError,
+  TimerSwitchConflictError
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -31,11 +33,12 @@ export async function POST(request: Request) {
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate", "join"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, split, duplicate, or join.");
+      throw new BadRequestError("mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed.");
     }
-    const mode = modeResult.data;
+    const durableCopy = modeResult.data === "copy-completed";
+    const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
     const tagNames = optionalTagNames(body.tagNames);
@@ -88,24 +91,45 @@ export async function POST(request: Request) {
       if (!entryId || !splitEntryId) throw new BadRequestError("entryId and splitEntryId are required.");
       const result = await joinSplitEntries(entryId, { splitEntryId, clientCommandId: requestClientCommandId(request) }, session);
       scheduleLiveActivityNotification(session);
-      return NextResponse.json({ ok: true, ...result }, { status: 200 });
+      // The joined block as it is now, so the timer shows it without waiting for the day to load again.
+      return NextResponse.json({ ok: true, ...result, entry: await getTimeEntryById(session, entryId) }, { status: 200 });
     }
 
     // Card G: Split (at `splitAt`) or Duplicate a block, `entryId`, with every detail, in one transaction;
     // `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id header makes
     // a retry safe. A running block splits too: its second part keeps running (owner 28 Oct 2026).
-    const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
-    if (finishedEntryId) {
-      entryId = finishedEntryId;
+    const splitRunning = mode === "split-running";
+    const copyEntryId = (mode === "split" || mode === "duplicate" || splitRunning)
+      ? optionalUuid(body.entryId, "entryId")
+      : undefined;
+    if ((durableCopy || splitRunning) && !copyEntryId) throw new BadRequestError("entryId is required.");
+    if (copyEntryId) {
+      entryId = copyEntryId;
       const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
       const clientCommandId = requestClientCommandId(request);
-      const result = mode === "split"
-        ? await splitFinishedEntry(finishedEntryId, {
-          splitAt: requiredTimestamp(body.splitAt, "splitAt"), expectedUpdatedAt, clientCommandId, source: eventSource
-        }, session)
-        : await duplicateFinishedEntry(finishedEntryId, { expectedUpdatedAt, clientCommandId }, session);
+      if (durableCopy && (!expectedUpdatedAt || !clientCommandId)) {
+        throw new BadRequestError("A durable copy requires the block version and a client command ID.");
+      }
+      const command = { expectedUpdatedAt, clientCommandId, ...(durableCopy ? { durableCopy } : {}) };
+      let result;
+      if (splitRunning) {
+        if (!clientCommandId) throw new BadRequestError("A running split requires a client command ID.");
+        result = await splitRunningEntry(copyEntryId, {
+          clientCommandId, splitAt: requiredTimestamp(body.splitAt, "splitAt")
+        }, session);
+      } else if (mode === "split") {
+        result = await splitFinishedEntry(copyEntryId, {
+          ...command, splitAt: requiredTimestamp(body.splitAt, "splitAt"), source: eventSource
+        }, session);
+      } else {
+        result = await duplicateFinishedEntry(copyEntryId, command, session);
+      }
       scheduleLiveActivityNotification(session);
-      return NextResponse.json({ ok: true, ...result }, { status: result.replayed ? 200 : 201 });
+      // Both blocks as they are now (on a repeat too): whether the second part runs is read from them.
+      const reader = session;
+      const entries = (await Promise.all([copyEntryId, result.newEntryId].map((id) => id ? getTimeEntryById(reader, id) : null)))
+        .filter((entry) => entry !== null);
+      return NextResponse.json({ ok: true, ...result, entries }, { status: result.replayed ? 200 : 201 });
     }
     if (mode === "duplicate") throw new BadRequestError("entryId is required.");
 
@@ -116,6 +140,10 @@ export async function POST(request: Request) {
     }
 
     const startedAt = optionalTimestamp(body.startedAt, "startedAt");
+    const expectedRunningEntryId = optionalUuid(body.expectedRunningEntryId, "expectedRunningEntryId");
+    if (expectedRunningEntryId && (eventSource !== "manual_app" || startedAt)) {
+      throw new BadRequestError("Switch activity must use the current time on the web.");
+    }
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
     const rawPayload = {
       ...(startedAt ? { origin, startedAt } : { origin }),
@@ -133,7 +161,8 @@ export async function POST(request: Request) {
         description: optionalString(body.description),
         rawPayload
       },
-      session
+      session,
+      ...(expectedRunningEntryId ? [{ expectedRunningEntryId }] : [])
     );
     scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: 201 });
@@ -153,7 +182,7 @@ export async function POST(request: Request) {
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof TimerStopBeforeStartError) {
+    if (error instanceof TimerStopBeforeStartError || error instanceof TimerSwitchConflictError) {
       return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
     }
     if (error instanceof TimerMutationBusyError) {

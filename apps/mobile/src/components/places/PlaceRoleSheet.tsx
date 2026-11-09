@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
-import { AccessibilityInfo, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import Reanimated, { LayoutAnimationConfig } from "react-native-reanimated";
+import { InsetDivider } from "../InsetDivider";
+import { useRef, useState, type RefObject } from "react";
+import { AccessibilityInfo, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import Reanimated, { LayoutAnimationConfig, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   DAYFRAME_APP_ICONS,
@@ -19,6 +20,7 @@ import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismiss
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { SettingsBlockRow, SettingsSwitch } from "../settings/SettingsBlocks";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { useContentSizedSheetKeyboard } from "../../lib/contentSizedSheetKeyboard";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 import { replacePreviousNote, replacePreviousOffered } from "../../lib/placesPage";
@@ -68,6 +70,10 @@ export function PlaceRoleSheet({
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollContentRef = useRef<View>(null);
+  const renameGroupRef = useRef<View>(null);
+  const renameFocused = useRef(false);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const clearing = mode === "clear";
@@ -81,6 +87,29 @@ export function PlaceRoleSheet({
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const done = useRef(false);
+  const sheetKeyboard = useContentSizedSheetKeyboard({
+    bottomInset: insets.bottom,
+    onReveal: () => {
+      const group = renameGroupRef.current;
+      const content = scrollContentRef.current;
+      if (!group || !content || !renameFocused.current || done.current) return;
+      group.measureLayout(content, (_x, y) => {
+        if (renameFocused.current && !done.current && renameGroupRef.current === group) {
+          scrollRef.current?.scrollTo({ y: Math.max(0, y - 6), animated: !reduceMotion });
+        }
+      }, () => undefined);
+    },
+    reduceMotion,
+    windowHeight
+  });
+  const restingHeight = Math.round(windowHeight * (clearing ? 0.5 : 0.8));
+  const restingPadding = shared.activeEditSheet.paddingBottom;
+  const { keyboardSpace, sheetMaxHeight } = sheetKeyboard;
+  // Grow upward as the same space is reserved below the form. The sheet stays at its usual height while idle.
+  const keyboardLayout = useAnimatedStyle(() => ({
+    height: Math.min(restingHeight + keyboardSpace.value, sheetMaxHeight),
+    paddingBottom: restingPadding + keyboardSpace.value
+  }));
   const pendingAddNew = useRef(false);
   const label = slot.label;
   const otherRole = target?.role && target.role !== slot.role ? target.role : null;
@@ -154,6 +183,7 @@ export function PlaceRoleSheet({
           backdropAccessibilityLabel="Close without saving"
           backdropStyle={shared.sheetBackdrop}
           handleStyle={shared.sheetHandle}
+          keyboardInset={sheetKeyboard.keyboardInset}
           onDismiss={() => {
             if (pendingAddNew.current) onAddNew(slot.role);
             onClose();
@@ -162,9 +192,12 @@ export function PlaceRoleSheet({
           onDismissStart={() => {
             if (busy.current) return false;
             done.current = true;
+            sheetKeyboard.freezeForDismissal();
+            Keyboard.dismiss();
           }}
+          onGestureStart={() => Keyboard.dismiss()}
           reduceMotion={reduceMotion}
-          style={[shared.activeEditSheet, { height: Math.round(windowHeight * (clearing ? 0.5 : 0.8)), paddingTop: 8 }]}
+          style={[shared.activeEditSheet, keyboardLayout]}
           testID="place-role-sheet"
           visible
         >
@@ -184,10 +217,12 @@ export function PlaceRoleSheet({
           </View>
 
           <ScrollView
-            automaticallyAdjustKeyboardInsets
+            ref={scrollRef}
+            innerViewRef={scrollContentRef as RefObject<View>}
             contentContainerStyle={[sheetStyles.body, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
+            onLayout={sheetKeyboard.onScrollLayout}
             style={sheetStyles.scroll}
           >
             {/* What the sheet opens with arrives with the sheet's own entrance; only later changes fade. */}
@@ -213,7 +248,6 @@ export function PlaceRoleSheet({
                         onPress={() => choose(place)}
                         style={({ pressed }) => [
                           sheetStyles.choice,
-                          index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
                           pressed ? { backgroundColor: theme.surfaceMuted } : null
                         ]}
                         testID={`place-role-choice-${place.id}`}
@@ -233,6 +267,7 @@ export function PlaceRoleSheet({
                         >
                           {selected ? <DayframeIcon color={theme.surface} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
                         </View>
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" /> : null}
                       </Pressable>
                     );
                   })}
@@ -262,6 +297,7 @@ export function PlaceRoleSheet({
               {holder && roleLeavesHolder ? (
                 // Enters and leaves with the Replace row below it, so the two never mix a fade and a jump.
                 <Reanimated.View
+                  ref={renameGroupRef}
                   entering={localPresenceEntering(reduceMotion)}
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
@@ -275,9 +311,14 @@ export function PlaceRoleSheet({
                     accessibilityHint="Its past blocks keep this name. Leave it as it is to keep the current name."
                     accessibilityLabel={clearing ? "Name for this place" : `Rename the old ${label.toLowerCase()}`}
                     maxLength={120}
+                    onBlur={() => { renameFocused.current = false; }}
                     onChangeText={(value) => {
                       renameTouched.current = true;
                       setPreviousName(value);
+                    }}
+                    onFocus={() => {
+                      renameFocused.current = true;
+                      sheetKeyboard.revealWhenSettled();
                     }}
                     placeholder={holder.name}
                     placeholderTextColor={theme.textMuted}
@@ -346,7 +387,7 @@ const sheetStyles = StyleSheet.create({
   addNew: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
   addNewText: { fontSize: 15, fontWeight: "700" },
   renameGroup: { gap: 6 },
-  input: { borderRadius: 14, fontSize: 16, minHeight: 48, paddingHorizontal: 14 },
+  input: { borderRadius: 14, fontSize: 16, minHeight: 44, paddingHorizontal: 14 },
   problem: { fontSize: 14 },
   pressed: { opacity: 0.7 }
 });

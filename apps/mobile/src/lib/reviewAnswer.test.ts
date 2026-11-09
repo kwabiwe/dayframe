@@ -54,19 +54,19 @@ describe("reviewAnswerMutation (the deck's and the List's one rule, step 14 part
 describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
   it("asks whether you visited the place, with its times, and Yes / Edit / Not now (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, categoryName: "Reading" }, "24h")).toEqual({
-      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
   });
 
   it("keeps Log it for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
     expect(reviewAnswerQuestion(item({ eventType: "unknown_stay", eventSource: "geofence_specific", title: "Unknown place" }), "24h")).toEqual({
-      question: "Where were you?", detail: "10:00–11:30", logLabel: "Log it", skipLabel: "Not now", more: false, opens: false
+      question: "Where were you?", detail: "10:00–11:30", logLabel: "Log it", skipLabel: "Not now"
     });
   });
 
   it("asks where you were when it cannot name the place: Edit names it, there is no Yes (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, title: "Unknown place" }, "24h")).toEqual({
-      question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now"
     });
   });
 
@@ -74,19 +74,37 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     const venue = { name: "Exampleton Bakery", street: "12 Example Street", applePlaceId: "I1234567890ABCDEF" };
     const unnamed = { ...locationV2, title: "Unknown place" };
     expect(reviewAnswerQuestion(unnamed, "24h", { venue })).toEqual({
-      question: "Visited Exampleton Bakery?", detail: "12 Example Street · 10:00–11:30", logLabel: "Yes", skipLabel: "Not now",
-      more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Bakery?", detail: "12 Example Street · 10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
     expect(reviewAnswerMutation(unnamed, true, { venue })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" });
     expect(reviewAnswerMutation(unnamed, true, { venue: { ...venue, applePlaceId: null } })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery" });
-    // Not now leaves it, as ever; an outing keeps its own question and answer.
+    // With a Logs as pick (Codex r1 on #620): recorded there once, as that activity.
+    expect(reviewAnswerMutation(unnamed, true, { venue, logAsCategoryId: "cat-1" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
+      applePlaceId: "I1234567890ABCDEF", edit: { categoryId: "cat-1" } });
+    expect(reviewAnswerMutation(unnamed, true, { venue, logAsDescription: "Read a book" })).toEqual({ action: "record_poi_once", name: "Exampleton Bakery",
+      applePlaceId: "I1234567890ABCDEF", edit: { categoryId: null, description: "Read a book" } });
+    // Not now leaves it, as ever.
     expect(reviewAnswerMutation(unnamed, false, { venue })).toEqual({ action: "ignore_once_location" });
-    expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true }).question).toBe("Where were you?");
+  });
+
+  it("asks an outing's stay about its guess and keeps the venue on confirm_outing, only with an Apple Place ID (#642)", () => {
+    const venue = { name: "Exampleton Bakery", street: null, applePlaceId: "I1234567890ABCDEF" };
+    const noId = { ...venue, applePlaceId: null };
+    const unnamed = item({ eventType: "unknown_stay", title: "Unknown place", rawPayload: { algorithmVersion: "location-v2.0" }, suggestedPlaceId: null });
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue, outing: true })).toMatchObject({ question: "Visited Exampleton Bakery?", logLabel: "Yes", skipLabel: "Not now" });
+    expect(reviewAnswerQuestion(unnamed, "24h", { venue: noId, outing: true }).question).toBe("Where were you?");
+    const outing = { outingMemberIds: ["m1"] };
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"],
+      venue: { name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" } });
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue, logAsCategoryId: "cat-1" })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"],
+      edit: { categoryId: "cat-1" }, venue: { name: "Exampleton Bakery", applePlaceId: "I1234567890ABCDEF" } });
+    expect(reviewAnswerMutation(unnamed, false, { ...outing, venue })).toEqual({ action: "ignore_outing", memberReviewItemIds: ["m1"] });
+    expect(reviewAnswerMutation(unnamed, true, { ...outing, venue: noId })).toEqual({ action: "confirm_outing", memberReviewItemIds: ["m1"] });
   });
 
   it("asks Apple Health in its own words", () => {
     expect(reviewAnswerQuestion(item({ eventType: "health_sleep_import", title: "Sleep" }), "24h")).toMatchObject({
-      question: "Log your sleep, 10:00–11:30?", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false
+      question: "Log your sleep, 10:00–11:30?", logLabel: "Log as Sleep", skipLabel: "Not sleep"
     });
     expect(reviewAnswerQuestion(item({ eventType: "health_workout_import", categoryName: "Running" }), "12h")).toMatchObject({
       question: "Log the workout, 10:00 AM–11:30 AM?", logLabel: "Log as Running", skipLabel: "Not a workout"
@@ -97,30 +115,29 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     // Card A: "Getting around, 14:44–16:31?" with Yes / Edit, and Not now.
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Getting around",
       categoryName: "Getting around" }), "24h"))
-      .toEqual({ question: "Getting around, 10:00–11:30?", detail: "As Getting around.", logLabel: "Yes", skipLabel: "Not now",
-        more: true, moreLabel: "Edit", opens: false });
+      .toEqual({ question: "Getting around, 10:00–11:30?", detail: "As Getting around.", logLabel: "Yes", skipLabel: "Not now" });
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Commute" }), "24h").question)
       .toBe("Commute, 10:00–11:30?");
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: undefined }), "24h").question)
       .toBe("Getting around, 10:00–11:30?");
     // An outing asks about its place alone; its trips there and back are decided with it (card B).
     expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toEqual({
-      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
+      question: "Visited Exampleton Library?", detail: "10:00–11:30", logLabel: "Yes", skipLabel: "Not now"
     });
   });
 
-  it("asks without times when the suggestion has none, and offers its own screen instead of answers", () => {
-    // Without a whole window the outbox refuses every answer (Codex r3 on #582): it opens instead.
+  it("asks without times when the suggestion has none, and offers no answers", () => {
+    // Without a whole window the outbox refuses every answer (Codex r3 on #582): it only says why.
     expect(reviewAnswerQuestion(item({ suggestedStartedAt: null, suggestedStoppedAt: null }), "24h")).toEqual({
-      question: "Log Exampleton Library?", detail: "It has no complete time yet, so it can't be answered here.",
-      logLabel: null, skipLabel: null, more: false, opens: true
+      question: "Log Exampleton Library?", detail: "It has no complete time yet, so it can't be answered.",
+      logLabel: null, skipLabel: null
     });
   });
 
-  it("opens, never answers, a suggestion with a waiting or rejected change of its own (Codex r10 on #582)", () => {
+  it("never answers a suggestion with a waiting or rejected change of its own, and says why (Codex r10 on #582)", () => {
     expect(reviewAnswerQuestion(locationV2, "24h", { pendingChange: true })).toMatchObject({
-      detail: "A change to it is waiting or wasn't accepted, so it can't be answered here.",
-      logLabel: null, skipLabel: null, more: false, opens: true
+      detail: "A change to it is waiting or wasn't accepted, so it can't be answered yet.",
+      logLabel: null, skipLabel: null
     });
   });
 });

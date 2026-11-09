@@ -62,7 +62,7 @@ export function LandingPage() {
             <span>Workout summary</span>
           </div>
           <div className="landing-preview-block block-review">
-            <strong>Review item</strong>
+            <strong>Asked in Calendar</strong>
             <span>Suggested from place</span>
           </div>
         </div>

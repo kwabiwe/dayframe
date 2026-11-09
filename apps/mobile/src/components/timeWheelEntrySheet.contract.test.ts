@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 // (TF122 staging test): every minute always, no Type time, no Done.
 const sheet = readFileSync(fileURLToPath(new URL("./ActiveTimerEditSheet.tsx", import.meta.url)), "utf8");
 const panel = readFileSync(fileURLToPath(new URL("./TimeWheelPanel.tsx", import.meta.url)), "utf8");
+const splitPanel = readFileSync(fileURLToPath(new URL("./EntrySplitPanel.tsx", import.meta.url)), "utf8");
 const swift = readFileSync(fileURLToPath(new URL("../../modules/dayframe-time-wheel/ios/DayframeTimeWheelExpoView.swift", import.meta.url)), "utf8");
 
 describe("entry sheet time wheel (A11b)", () => {
@@ -55,6 +56,9 @@ describe("entry sheet time wheel (A11b)", () => {
 
   it("gives VoiceOver adjustable cards that open and close the wheel, with Change date (owner, 16 Oct 2026)", () => {
     expect((sheet.match(/accessibilityRole="adjustable"/g) ?? []).length).toBe(2);
+    expect(splitPanel).toContain('accessibilityRole="adjustable"');
+    expect(splitPanel).toContain('accessibilityLabel="Split time"');
+    expect(splitPanel).toContain('testIDPrefix="time-entry-split-wheel"');
     expect(sheet).toContain('{ name: "changeDate", label: "Change date" }');
     // Swipes stay at 5 minutes; exact minutes through the Plus / Minus 1 minute actions (owner, 16 Oct 2026).
     expect(sheet).toContain('{ name: "plusMinute", label: "Plus 1 minute" }');

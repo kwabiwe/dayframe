@@ -1,3 +1,4 @@
+import { InsetDivider } from "../InsetDivider";
 import { memo, useEffect, useRef, useState } from "react";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from "react-native";
@@ -223,7 +224,6 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 style={[
                   styles.row,
                   { gap: numberWidths.gap },
-                  index ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
                   isHot ? { backgroundColor: theme.surfaceMuted } : null,
                 ]}
                 testID={`reports-activity-${segment.key}`}
@@ -247,6 +247,7 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 >
                   {percent}
                 </Text>
+                {index ? <InsetDivider color={theme.border} edge="top" /> : null}
               </Pressable>
             );
           })}

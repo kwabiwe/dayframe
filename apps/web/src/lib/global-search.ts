@@ -1,3 +1,4 @@
+import { TIMER_TRIP_CLASH_REVIEW_TYPE } from "@dayframe/shared";
 import { query } from "./db";
 import { placeDisplayNameSql } from "./place-display";
 import type { RequestSession } from "./session";
@@ -58,7 +59,15 @@ export async function searchDayframe(
            or coalesce(cat.name, '') ilike '%' || $3 || '%'
            or coalesce(${placeDisplayNameSql("pl")}, te.place_label, '') ilike '%' || $3 || '%'
            or coalesce(pl.name, '') ilike '%' || $3 || '%'
-           or coalesce(tag.name, '') ilike '%' || $3 || '%'
+           -- Match the block without filtering the tags carried into Start again.
+           or exists (
+             select 1
+             from time_entry_tags link
+             join tags matched_tag on matched_tag.id = link.tag_id and matched_tag.workspace_id = link.workspace_id
+             where link.time_entry_id = te.id
+               and link.workspace_id = te.workspace_id
+               and matched_tag.name ilike '%' || $3 || '%'
+           )
          )
        group by te.id, cat.id, cat.name, cat.color, pl.id, pl.name, te.place_label
      ),
@@ -149,6 +158,9 @@ export async function searchDayframe(
        from review_items r
        left join categories c on c.id = r.suggested_category_id and c.workspace_id = r.workspace_id
        where r.workspace_id = $1 and r.user_id = $2 and r.status = 'open'
+         -- A timer that ran into a trip asks on its block with its own UI later; until then ⌘K never offers it as an
+         -- ordinary "?" the List would not show (Codex r1 on #613).
+         and r.type <> $5
          and r.title ilike '%' || $3 || '%'
      )
      select id, kind, label, detail,
@@ -160,7 +172,7 @@ export async function searchDayframe(
      from candidates
      order by rank desc, occurred_at desc nulls last, label
      limit $4`,
-    [session.workspaceId, session.userId, normalized, Math.min(Math.max(limit, 1), 40)]
+    [session.workspaceId, session.userId, normalized, Math.min(Math.max(limit, 1), 40), TIMER_TRIP_CLASH_REVIEW_TYPE]
   );
 
   return result.rows.map((row) => {

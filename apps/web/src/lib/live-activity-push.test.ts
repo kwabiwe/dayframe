@@ -12,7 +12,14 @@ const database = vi.hoisted(() => ({
   query: vi.fn()
 }));
 
-vi.mock("./db", () => ({ query: database.query }));
+vi.mock("./db", () => ({
+  query: database.query,
+  isLockNotAvailableError: (error: unknown) => (error as { code?: string })?.code === "55P03"
+}));
+vi.mock("./sync-transaction", () => ({
+  withSyncTransaction: (_operation: string, work: (transaction: unknown) => unknown) =>
+    work({ client: { query: database.query }, phase: vi.fn() })
+}));
 
 const http2Mocks = vi.hoisted(() => ({
   calls: [] as Array<{ authority: string; headers?: Record<string, string>; body?: string }>,
@@ -90,14 +97,25 @@ describe("Live Activity durable remote sync", () => {
       if (sql.includes('t.user_id as "userId"')) {
         return Promise.resolve({ rows: database.controlRows, rowCount: database.controlRows.length });
       }
+      if (sql.includes("pg_try_advisory_xact_lock")) {
+        return Promise.resolve({ rows: [{ acquired: true }], rowCount: 1 });
+      }
       if (sql.includes("group by workspace_id, user_id")) {
         return Promise.resolve({ rows: database.ownerRows, rowCount: database.ownerRows.length });
       }
-      if (sql.includes("from live_activity_push_tokens") && sql.includes('activity_id as "activityId"')) {
-        return Promise.resolve({ rows: database.tokenRows, rowCount: database.tokenRows.length });
+      if (sql.includes("select 1 from live_activity_push_tokens")) {
+        return Promise.resolve({ rows: [], rowCount: database.tokenRows.length });
       }
       if (sql.includes("from time_entries te") && sql.includes('as "startedAt"')) {
-        return Promise.resolve({ rows: database.activeRows, rowCount: database.activeRows.length });
+        return Promise.resolve({
+          rows: [{
+            active: database.activeRows[0] ?? null,
+            registrations: database.tokenRows.map(row => ({
+              id: row.id, active_entry_id: row.activeEntryId, activity_id: row.activityId, environment: row.environment
+            }))
+          }],
+          rowCount: 1
+        });
       }
       if (sql.includes("with due as")) {
         const rows = database.claimRows;
@@ -253,7 +271,7 @@ describe("Live Activity durable remote sync", () => {
     expect(outboxWrite?.sql).toContain("revision = live_activity_delivery_outbox.revision + 1");
     expect(outboxWrite?.sql).toContain("live_activity_delivery_outbox.payload #>> '{aps,timestamp}'");
     expect(outboxWrite?.sql).toContain("payload #> '{aps,content-state}'");
-    expect(JSON.parse(String(outboxWrite?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(outboxWrite?.params[3]))).toMatchObject({
       aps: {
         event: "update",
         // Both palettes' fills: the Live Activity follows the phone's appearance (UIA-028).
@@ -294,7 +312,7 @@ describe("Live Activity durable remote sync", () => {
 
     await retryLiveActivityDeliveryBestEffort(session);
     const recovered = database.writes.find((write) => write.sql.includes("live_activity_delivery_outbox"));
-    expect(JSON.parse(String(recovered?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(recovered?.params[3]))).toMatchObject({
       aps: { "content-state": { title: "Recovered timer", isRunning: true } }
     });
     expect(log).toHaveBeenCalledWith(
@@ -326,7 +344,7 @@ describe("Live Activity durable remote sync", () => {
     expect(result.missingConfiguration).toContain("APNS_KEY_ID");
     expect(database.writes.some((write) =>
       write.sql.includes("insert into live_activity_delivery_outbox") &&
-      String(write.params[4]).includes("Cron recovery")
+      String(write.params[3]).includes("Cron recovery")
     )).toBe(true);
   });
 
@@ -360,21 +378,21 @@ describe("Live Activity durable remote sync", () => {
     const writes = database.writes.filter((write) =>
       write.sql.includes("insert into live_activity_delivery_outbox")
     );
-    const oldWrite = writes.find((write) => write.params[0] === "token-old");
-    const newWrite = writes.find((write) => write.params[0] === "token-new");
-    expect(oldWrite?.params[3]).toBe("end");
-    expect(JSON.parse(String(oldWrite?.params[4]))).toMatchObject({
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.params.slice(0, 3)).toEqual([
+      session.workspaceId, session.userId, "80000000-0000-4000-8000-000000000002"
+    ]);
+    expect(writes[0]?.sql).toContain("case when observed.active_entry_id = $3::uuid then 'update' else 'end' end");
+    expect(JSON.parse(String(writes[0]?.params[4]))).toMatchObject({
       aps: { event: "end", "content-state": { isRunning: false, canStop: false } }
     });
-    expect(newWrite?.params[3]).toBe("update");
-    expect(JSON.parse(String(newWrite?.params[4]))).toMatchObject({
+    expect(JSON.parse(String(writes[0]?.params[3]))).toMatchObject({
       aps: {
         event: "update",
         "content-state": { title: "New timer", isRunning: true, canStop: true }
       }
     });
   });
-
   it("delivers a due sandbox update and marks the exact revision delivered", async () => {
     configureApns();
     database.claimRows = [outboxRow({ environment: "development", event: "update" })];
@@ -387,8 +405,8 @@ describe("Live Activity durable remote sync", () => {
     expect(request.headers?.["apns-collapse-id"]).toBe("activity-1");
     expect(request.headers?.["apns-id"]).toMatch(/^[0-9a-f-]{36}$/);
     expect(JSON.parse(String(request.body)).aps.event).toBe("update");
-    const delivered = database.writes.find((write) => write.sql.includes("status = 'delivered'"));
-    expect(delivered?.params.slice(0, 2)).toEqual(["outbox-row", "7"]);
+    const delivered = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(delivered?.params.slice(0, 4)).toEqual(["outbox-row", "7", "2026-08-07 04:01:00.123456+00", "delivered"]);
   });
 
   it("schedules retryable APNs failures using Retry-After without invalidating the token", async () => {
@@ -402,14 +420,10 @@ describe("Live Activity durable remote sync", () => {
     const result = await drainLiveActivityOutbox({ session });
 
     expect(result).toMatchObject({ claimed: 1, retryScheduled: 1, permanentFailures: 0 });
-    const tokenFailure = database.writes.find((write) =>
-      write.sql.includes("consecutive_failures = consecutive_failures + 1")
-    );
-    expect(tokenFailure?.params).toEqual(["token-row", 503, "Shutdown", false]);
-    const retry = database.writes.find((write) => write.sql.includes("set status = $3"));
-    expect(retry?.params[2]).toBe("pending");
-    expect(new Date(String(retry?.params[3])).getTime()).toBeGreaterThanOrEqual(before + 8_900);
-    expect(retry?.params[6]).toBe("apns-request-1");
+    const retry = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(retry?.params[3]).toBe("pending");
+    expect(new Date(String(retry?.params[4])).getTime()).toBeGreaterThanOrEqual(before + 8_900);
+    expect(retry?.params.slice(5, 9)).toEqual([503, "Shutdown", "apns-request-1", false]);
   });
 
   it("records permanent configuration failures without retrying or invalidating a good token", async () => {
@@ -421,12 +435,9 @@ describe("Live Activity durable remote sync", () => {
     const result = await drainLiveActivityOutbox({ session });
 
     expect(result).toMatchObject({ permanentFailures: 1, retryScheduled: 0, invalidatedTokens: 0 });
-    const tokenFailure = database.writes.find((write) =>
-      write.sql.includes("consecutive_failures = consecutive_failures + 1")
-    );
-    expect(tokenFailure?.params).toEqual(["token-row", 403, "InvalidProviderToken", false]);
-    const outboxFailure = database.writes.find((write) => write.sql.includes("set status = $3"));
-    expect(outboxFailure?.params[2]).toBe("permanent_failure");
+    const settlement = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(settlement?.params.slice(5, 9)).toEqual([403, "InvalidProviderToken", expect.any(String), false]);
+    expect(settlement?.params[3]).toBe("permanent_failure");
   });
 
   it("keeps the token, and so the Lock Screen Stop, when APNs says the topic is another app's", async () => {
@@ -439,12 +450,9 @@ describe("Live Activity durable remote sync", () => {
     const result = await drainLiveActivityOutbox({ session });
 
     expect(result).toMatchObject({ permanentFailures: 1, retryScheduled: 0, invalidatedTokens: 0 });
-    const tokenFailure = database.writes.find((write) =>
-      write.sql.includes("consecutive_failures = consecutive_failures + 1")
-    );
-    expect(tokenFailure?.params).toEqual(["token-row", 400, "DeviceTokenNotForTopic", false]);
-    const outboxFailure = database.writes.find((write) => write.sql.includes("set status = $3"));
-    expect(outboxFailure?.params[2]).toBe("permanent_failure");
+    const settlement = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(settlement?.params.slice(5, 9)).toEqual([400, "DeviceTokenNotForTopic", expect.any(String), false]);
+    expect(settlement?.params[3]).toBe("permanent_failure");
     expect(error).toHaveBeenCalledWith(
       "Dayframe Live Activity APNs topic does not match the app: check APNS_BUNDLE_ID",
       { environment: "production", event: expect.any(String) }
@@ -464,10 +472,8 @@ describe("Live Activity durable remote sync", () => {
     const result = await drainLiveActivityOutbox({ session });
 
     expect(result).toMatchObject({ permanentFailures: 1, retryScheduled: 0 });
-    const tokenFailure = database.writes.find((write) =>
-      write.sql.includes("consecutive_failures = consecutive_failures + 1")
-    );
-    expect(tokenFailure?.params).toEqual(["token-row", 400, "DeviceTokenNotForTopic", true]);
+    const settlement = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(settlement?.params.slice(5, 9)).toEqual([400, "DeviceTokenNotForTopic", expect.any(String), true]);
   });
 
   it("invalidates expired tokens and never logs token or provider secrets", async () => {
@@ -480,10 +486,8 @@ describe("Live Activity durable remote sync", () => {
     const result = await drainLiveActivityOutbox({ session });
 
     expect(result.invalidatedTokens).toBe(1);
-    const tokenFailure = database.writes.find((write) =>
-      write.sql.includes("consecutive_failures = consecutive_failures + 1")
-    );
-    expect(tokenFailure?.params).toEqual(["token-row", 410, "Unregistered", true]);
+    const settlement = database.writes.find(write => write.sql.includes("with settled as"));
+    expect(settlement?.params.slice(5, 9)).toEqual([410, "Unregistered", expect.any(String), true]);
     const serialized = JSON.stringify(warning.mock.calls);
     expect(serialized).not.toContain("c".repeat(64));
     expect(serialized).not.toContain(process.env.APNS_PRIVATE_KEY);
@@ -524,11 +528,12 @@ describe("Live Activity durable remote sync", () => {
 function outboxRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "outbox-row",
-    tokenId: "token-row",
     token: "c".repeat(64),
     activityId: "activity-1",
     environment: "production",
     revision: "7",
+    leaseUntil: "2026-08-07 04:01:00.123456+00",
+    activeEntryId: "80000000-0000-4000-8000-000000000001",
     event: "update",
     payload: {
       aps: {

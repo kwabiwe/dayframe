@@ -64,8 +64,39 @@ function uninstall() {
   modality = "unknown";
 }
 
+/**
+ * Page-wide (UI review round 2): while mounted, every focused element gets `data-kb-focus` when the focus didn't come
+ * from a pointer, so CSS can ring any field for keyboard focus only (`:has([data-kb-focus])` on a compound control).
+ * The mark is fixed when focus arrives, as the hook's is, and removed when focus leaves.
+ */
+export function useKeyboardFocusMarks() {
+  useEffect(() => {
+    install();
+    const onFocusIn = (event: globalThis.FocusEvent) => {
+      if (event.target instanceof HTMLElement) event.target.toggleAttribute("data-kb-focus", modality !== "pointer");
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // A press on the focused field drops its ring at once, even if focus doesn't move.
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && event.target instanceof Node && focused.contains(event.target)) focused.removeAttribute("data-kb-focus");
+    };
+    const onFocusOut = (event: globalThis.FocusEvent) => {
+      if (event.target instanceof HTMLElement) event.target.removeAttribute("data-kb-focus");
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      uninstall();
+    };
+  }, []);
+}
+
 /** Spread `handlers` on the wrapper and expose `focusRing` as `data-focus-ring`. */
-export function useKeyboardFocusRing() {
+export function useKeyboardFocusRing({ keyboardOnly = false }: { keyboardOnly?: boolean } = {}) {
   const [keyboardFocus, setKeyboardFocus] = useState(false);
 
   useEffect(() => {
@@ -78,7 +109,8 @@ export function useKeyboardFocusRing() {
     handlers: {
       // A press inside the field hides the ring at once, even if focus does not move.
       onPointerDownCapture: () => setKeyboardFocus(false),
-      onFocus: () => setKeyboardFocus(modality !== "pointer"),
+      // keyboardOnly: a field a panel focuses as it opens rings only after a key, never on a click's late hand-off.
+      onFocus: () => setKeyboardFocus(keyboardOnly ? modality === "keyboard" : modality !== "pointer"),
       onBlur: (event: FocusEvent<HTMLElement>) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         setKeyboardFocus(false);

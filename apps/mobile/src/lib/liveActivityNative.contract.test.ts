@@ -34,7 +34,7 @@ describe("native Live Activity presentation contract", () => {
       shortcuts.indexOf("struct DayframeShortcutEvent")
     );
     const ordinaryStop = shortcuts.slice(
-      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopRunning:\n      guard DayframeNativeShortcutQueue.append(event)"),
       shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
     );
 
@@ -51,6 +51,11 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).toContain("localId = clientEventId");
     expect(stopCase).toContain("DayframeLiveActivityController.immediatePushToken(");
     expect(stopCase).toContain("DayframeShortcutDirectEventClient.submitLiveActivityStop(");
+    const beforeActionDispatch = shortcuts.slice(
+      shortcuts.indexOf("private enum DayframeShortcutPerformer"),
+      shortcuts.indexOf("switch action {")
+    );
+    expect(beforeActionDispatch).not.toContain("DayframeNativeShortcutQueue.append(event)");
     // Optimistic once durable (owner decision 24 Oct 2026, option A): the token is read while the Activity
     // still runs, the Activity shows stopped (an update, which cannot end this process) only when the Stop
     // is queued, the Stop is delivered, and the Activity ends after delivery, delivered or queued.
@@ -61,6 +66,7 @@ describe("native Live Activity presentation contract", () => {
       "guard DayframeLiveActivityStopClaims.claim(claim) else {\n        return\n      }",
       "defer { DayframeLiveActivityStopClaims.release(claim) }",
       "guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {\n        return\n      }",
+      "let queued = DayframeNativeShortcutQueue.append(event)",
       "let pushToken = DayframeLiveActivityController.immediatePushToken(",
       "if queued {\n        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)",
       "delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(",
@@ -68,7 +74,7 @@ describe("native Live Activity presentation contract", () => {
     ].map((line) => stopCase.indexOf(line));
     expect(order.every((index) => index >= 0), String(order)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(stopCase).not.toMatch(/end\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
+    expect(stopCase).not.toMatch(/\bend\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
     // No await between the start of the case and the claim.
     expect(stopCase.slice(0, stopCase.indexOf("DayframeLiveActivityStopClaims.claim(claim)"))).not.toContain("await");
     const claims = shortcuts.slice(shortcuts.indexOf("private enum DayframeLiveActivityStopClaims"), shortcuts.indexOf("/// Whether a Shortcut Stop for this event's account ran at or after it."));
@@ -141,7 +147,7 @@ describe("native Live Activity presentation contract", () => {
     // A Stop records its moment before delivery and before reading Activities; a Start whose Activity
     // appeared later ends it (Codex r7 on #403).
     const ordinaryStop = shortcuts.slice(
-      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopRunning:\n      guard DayframeNativeShortcutQueue.append(event)"),
       shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
     );
     expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeGreaterThan(-1);
@@ -160,7 +166,10 @@ describe("native Live Activity presentation contract", () => {
   it("a Shortcut Start delivers first, then starts its Live Activity for that block and registers its push token", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
-    const start = shortcuts.slice(shortcuts.indexOf("case .start(_, let categoryName, _):"), shortcuts.indexOf("case .stopRunning:\n      guard queued"));
+    const start = shortcuts.slice(
+      shortcuts.indexOf("case .start(_, let categoryName, _):"),
+      shortcuts.indexOf("case .stopRunning:\n      guard DayframeNativeShortcutQueue.append(event)")
+    );
     const order = [
       "let delivery = await DayframeShortcutDirectEventClient.submitStart(event)",
       "_ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])",

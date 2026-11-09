@@ -64,6 +64,7 @@ export function InlineTagInput({
   onSelectedTagNamesChange,
   placeholder,
   portal = false,
+  tagButtonFirst = false,
   selectedTagNames,
   tags,
   value
@@ -100,6 +101,8 @@ export function InlineTagInput({
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
   portal?: boolean;
+  /** The Tags button before the field instead of after it (the timer bar, UI review round 2: activity, tags, description). */
+  tagButtonFirst?: boolean;
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -109,6 +112,17 @@ export function InlineTagInput({
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Where focus goes back when the Tags list closes: the Tags button, or the field itself when a
+  // narrow timer bar hides the button (Codex r1 on #629).
+  const pickerReturnRef = useMemo<RefObject<HTMLElement | null>>(() => ({
+    get current() {
+      const trigger = pickerTriggerRef.current;
+      const shown = trigger && (typeof trigger.checkVisibility === "function"
+        ? trigger.checkVisibility()
+        : window.getComputedStyle(trigger).display !== "none");
+      return shown ? trigger : localInputRef.current;
+    }
+  }), []);
   const pickerPanelRef = useRef<HTMLDivElement | null>(null);
   const suggestionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(false);
@@ -272,9 +286,9 @@ export function InlineTagInput({
     if (!pickerScopeHandoff) return;
     const activeElement = document.activeElement;
     if (!activeElement || activeElement === document.body || pickerPanelRef.current?.contains(activeElement)) {
-      pickerTriggerRef.current?.focus();
+      pickerReturnRef.current?.focus();
     }
-  }, [pickerScopeHandoff]);
+  }, [pickerReturnRef, pickerScopeHandoff]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -304,19 +318,20 @@ export function InlineTagInput({
     if (!effectivePickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (editorRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
+      // Only its own button and panel keep it open: a click in the description closes it too (owner, 31 Oct 2026).
+      if (pickerTriggerRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
       // Focus goes where the press puts it, or back to the Tags button when that is nowhere
       // (non-focusable content, or a button WebKit does not focus), never the page (Codex r5).
       const hadFocus = Boolean(pickerPanelRef.current?.contains(document.activeElement));
       setPickerOpen(false);
-      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerTriggerRef.current), 0);
+      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerReturnRef.current), 0);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         pickerInputRef.current?.blur();
         setPickerOpen(false);
-        window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
+        window.setTimeout(() => pickerReturnRef.current?.focus(), 0);
       }
     }
     document.addEventListener("mousedown", closeOnOutside);
@@ -325,7 +340,7 @@ export function InlineTagInput({
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [effectivePickerOpen]);
+  }, [effectivePickerOpen, pickerReturnRef]);
 
   useLayoutEffect(() => {
     if (!portal || (!shouldOpen && !effectivePickerOpen && !activityOpen)) return undefined;
@@ -395,7 +410,7 @@ export function InlineTagInput({
   /** Closes the Tags button's list; Escape, Close and Tab put focus back on the button. */
   function closePicker(restoreFocus: boolean) {
     setPickerOpen(false);
-    if (restoreFocus) window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
+    if (restoreFocus) window.setTimeout(() => pickerReturnRef.current?.focus(), 0);
   }
 
   function pickPickerAction(action: (typeof pickerActions)[number] | undefined) {
@@ -556,9 +571,30 @@ export function InlineTagInput({
     return portal && typeof document !== "undefined" ? createPortal(panel, document.body) : panel;
   }
 
+  const tagButton = (
+    <button
+      aria-controls={tagPickerListId}
+      aria-expanded={effectivePickerOpen}
+      aria-haspopup="listbox"
+      aria-label="Add or filter tags"
+      className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
+      disabled={disabled}
+      onClick={() => {
+        // Focus ends on the button (WebKit leaves a clicked button unfocused).
+        if (effectivePickerOpen) closePicker(true);
+        else openPicker();
+      }}
+      ref={pickerTriggerRef}
+      type="button"
+    >
+      <TagIcon size={15} />
+    </button>
+  );
+
   return (
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
       <div className="ui-compound-control inline-tag-input-anchor" ref={anchorRef}>
+        {tagButtonFirst ? tagButton : null}
         <input
           aria-activedescendant={activityOpen && activityMatches.length
             ? `${name}-activity-option-${activeActivityIndex}`
@@ -649,23 +685,7 @@ export function InlineTagInput({
             </span>
           ))}
         </span>
-        <button
-          aria-controls={tagPickerListId}
-          aria-expanded={effectivePickerOpen}
-          aria-haspopup="listbox"
-          aria-label="Add or filter tags"
-          className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
-          disabled={disabled}
-          onClick={() => {
-            // Focus ends on the button (WebKit leaves a clicked button unfocused).
-            if (effectivePickerOpen) closePicker(true);
-            else openPicker();
-          }}
-          ref={pickerTriggerRef}
-          type="button"
-        >
-          <TagIcon size={15} />
-        </button>
+        {tagButtonFirst ? null : tagButton}
         {maybePortal(<FloatingList
           activeId={actions.length ? `${name}-tag-option-${Math.min(highlightedIndex, actions.length - 1)}` : undefined}
           anchorRef={anchorRef}
@@ -739,7 +759,7 @@ export function InlineTagInput({
           multiselectable
           onClose={() => closePicker(true)}
           panelRef={pickerPanelRef}
-          returnFocusRef={pickerTriggerRef}
+          returnFocusRef={pickerReturnRef}
           search={(
             <FloatingListSearch
               activeDescendant={pickerActions.length ? `${tagPickerListId}-option-${activePickerIndex}` : undefined}

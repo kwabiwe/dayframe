@@ -23,9 +23,10 @@ On-demand references:
 - `mobile-permissions.md`: iOS permission states and placement.
 - `debugging-playbook.md`: screenshot, production, and regression triage before coding.
 - `health-review-pipeline.md`: HealthKit, Review, auto-log, Confirm/Dismiss, and diagnostics.
-- `location-learning.md`: Location V2 evidence, segmentation, rollout, privacy, and Review policy.
+- `location-learning.md`: Location V2 evidence, segmentation, rollout, privacy, automatic logging, timeline corrections and "?" policy.
 - `offline-review-mutations.md`: durable Review resolving/structural-action outbox and reconciliation.
 - `motion.md`: motion ownership, continuity, accessibility, and PR evidence.
+- `performance.md`: CPU, memory and render budgets, the device measurement method, automated guards and the release gate.
 - `release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
 - `validation-matrix.md`: canonical validation commands and manual evidence by feature area.
 - `process-improvement.md`: lightweight retrospective and guardrail updates.

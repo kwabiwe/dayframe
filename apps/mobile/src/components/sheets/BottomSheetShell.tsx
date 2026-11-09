@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type KeyboardEvent,
   useWindowDimensions,
@@ -19,11 +20,15 @@ import {
   type SwipeDismissSheetHandle,
 } from "@/components/SwipeDismissSheet";
 import { keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
+import { MOBILE_MOTION } from "../../lib/motion";
+import { createSheetScroller, type SheetScroller } from "../../lib/sheetScroller";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 
 type BottomSheetOutcome = "commit" | "discard";
+
+export type BottomSheetScroller = Pick<SheetScroller, "reveal" | "top">;
 // Expo Router's iOS NativeTabs host reserves a 52-point presentation strip
 // below React sheet content, even though window/screen metrics remain full-size.
 // A root-hosted overlay is attached to UIWindow, so it can safely settle through
@@ -67,16 +72,22 @@ export function BottomSheetShell({
   inline = false,
   title,
   calendarLayout = false,
+  automaticallyAdjustKeyboardInsets = true,
   presentationId,
   theme,
   reduceMotion,
   onApply,
+  onDismissStart,
   onDismissed,
   action,
   disabled = false,
   fixedHeader,
+  overSheet,
   testID,
   commitRef,
+  discardRef,
+  scrollerRef,
+  secondaryAction,
   actionTone,
   children,
 }: {
@@ -88,14 +99,20 @@ export function BottomSheetShell({
   inline?: boolean;
   title: string;
   calendarLayout?: boolean;
+  /** When the shell alone lifts for the keyboard, reveal the focused field within its resized scroll viewport. */
+  automaticallyAdjustKeyboardInsets?: boolean;
   presentationId: number;
   theme: MobileTheme;
   reduceMotion: boolean;
   onApply: () => boolean | void;
+  /** Signals exit before work can hand off. When supplied, an iOS Modal completes after native dismissal. */
+  onDismissStart?: (presentationId: number) => void;
   onDismissed: (presentationId: number) => void;
   action: string;
   disabled?: boolean;
   fixedHeader?: React.ReactNode;
+  /** A child picker presents from the same native host and owns focus and keyboard until it leaves. */
+  overSheet?: React.ReactNode;
   /** The sheet's test id; its body, scroll and action are `${testID}-body`, `-scroll`, `-action`. */
   testID: string;
   /**
@@ -103,12 +120,39 @@ export function BottomSheetShell({
    * close it as the action does: `onApply` runs, then the sheet leaves with its usual exit.
    */
   commitRef?: { current: (() => void) | null };
+  /** Set to the sheet's own discard (its usual exit, no change), for a close control inside it. */
+  discardRef?: { current: (() => void) | null };
+  /** Set to the sheet's own scroller, for content that opens below the fold. */
+  scrollerRef?: { current: BottomSheetScroller | null };
+  /** A quiet action beside the primary one (the place sheet's "Don't log"): it does its own work; the sheet stays until told. */
+  secondaryAction?: { disabled?: boolean; label: string; onPress: () => void; testID: string };
   /** The action's fill: coral for a filter's primary "Show", neutral for a Done (the date sheet's). Defaults by layout. */
-  actionTone?: "accent" | "neutral";
+  /** "quiet" (owner item O, 28 Oct 2026): a secondary-looking Done while nothing has changed. */
+  actionTone?: "accent" | "neutral" | "quiet";
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const scrollView = useRef<ScrollView | null>(null);
+  const scrollMetrics = useRef({ offset: 0, viewport: 0, content: 0 });
+  const [scrollRoom, setScrollRoom] = useState(0);
+  useEffect(() => {
+    if (!scrollerRef) return;
+    const scroller = createSheetScroller({
+      afterScrollBackMs: MOBILE_MOTION.sheet,
+      inner: () => (scrollView.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.() ?? null,
+      metrics: scrollMetrics.current,
+      nextFrame: (run) => { requestAnimationFrame(run); },
+      reduceMotion,
+      room: setScrollRoom,
+      scrollTo: (y, animated) => scrollView.current?.scrollTo({ y, animated }),
+    });
+    scrollerRef.current = scroller;
+    return () => {
+      scroller.dispose();
+      scrollerRef.current = null;
+    };
+  }, [reduceMotion, scrollerRef]);
   const compactCalendarLayout = calendarLayout && windowHeight <= 700;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const outcome = useRef<{
@@ -116,8 +160,12 @@ export function BottomSheetShell({
     value: BottomSheetOutcome;
   } | null>(null);
   const [closing, setClosing] = useState(false);
+  const [nativeExitId, setNativeExitId] = useState<number | null>(null);
   const neutralAction = (actionTone ?? (calendarLayout ? "neutral" : "accent")) === "neutral";
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [systemKeyboardInset, setKeyboardInset] = useState(0);
+  const covered = Boolean(overSheet);
+  const keyboardInset = covered ? 0 : systemKeyboardInset;
+  const inactive = closing || covered;
   const bottomGeometry = bottomSheetGeometry({
     rootHosted,
     safeAreaBottom: insets.bottom,
@@ -165,6 +213,12 @@ export function BottomSheetShell({
     };
   }, [windowHeight]);
 
+  useEffect(() => {
+    if (automaticallyAdjustKeyboardInsets || !keyboardInset) return;
+    const focusedField = TextInput.State.currentlyFocusedInput();
+    if (focusedField) scrollerRef?.current?.reveal(focusedField, "whole");
+  }, [automaticallyAdjustKeyboardInsets, keyboardInset, scrollerRef]);
+
   const claimDiscard = useCallback(() => {
     if (outcome.current?.presentationId !== presentationId)
       outcome.current = null;
@@ -177,14 +231,14 @@ export function BottomSheetShell({
   const requestCommit = () => {
     if (outcome.current?.presentationId !== presentationId)
       outcome.current = null;
-    if (disabled || outcome.current) return;
+    if (disabled || covered || outcome.current) return;
     if (onApply() === false) return;
     outcome.current = { presentationId, value: "commit" };
     setClosing(true);
     sheetRef.current?.dismiss();
   };
 
-  const requestDiscard = () => sheetRef.current?.dismiss();
+  const requestDiscard = () => { if (!covered) sheetRef.current?.dismiss(); };
   useEffect(() => {
     if (!commitRef) return;
     commitRef.current = requestCommit;
@@ -192,6 +246,59 @@ export function BottomSheetShell({
       if (commitRef.current === requestCommit) commitRef.current = null;
     };
   });
+  useEffect(() => {
+    if (!discardRef) return;
+    discardRef.current = requestDiscard;
+    return () => {
+      if (discardRef.current === requestDiscard) discardRef.current = null;
+    };
+  });
+
+  const primaryAction = (
+    <Pressable
+      testID={`${testID}-action`}
+      accessibilityRole="button"
+      accessibilityLabel={action}
+      accessibilityState={{ disabled: disabled || inactive }}
+      disabled={disabled || inactive}
+      onPress={requestCommit}
+      style={[
+        s.apply,
+        calendarLayout ? s.dateAction : s.filterAction,
+        compactCalendarLayout ? s.compactDateAction : null,
+        {
+          // The filter's "Show N activities" is the sheet's primary action (coral); a
+          // date sheet's Done is neutral (UIA-026). Both are full width.
+          backgroundColor:
+            disabled || closing || actionTone === "quiet"
+              ? theme.surfaceMuted
+              : neutralAction
+                ? theme.textPrimary
+                : theme.accent,
+        },
+        secondaryAction ? s.footerPrimary : null,
+      ]}
+    >
+      <Text
+        maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+        style={[
+          s.actionText,
+          {
+            color:
+              disabled || closing
+                ? theme.textSecondary
+                : actionTone === "quiet"
+                  ? theme.textPrimary
+                  : neutralAction
+                  ? theme.background
+                  : theme.onAccent,
+          },
+        ]}
+      >
+        {action}
+      </Text>
+    </Pressable>
+  );
 
   const overlay = (
     <View style={s.modal}>
@@ -206,19 +313,23 @@ export function BottomSheetShell({
             bottom: bottomGeometry.backdropBottom,
           },
         ]}
-        disabled={closing}
+        disabled={inactive}
         gestureHandleOnly
         handleStyle={[s.handle, { backgroundColor: theme.borderStrong }]}
         keyboardInset={keyboardInset}
         onDismiss={(dismissedPresentationId) => {
           if (dismissedPresentationId !== presentationId) return;
-          onDismissed(dismissedPresentationId);
+          if (onDismissStart && !inline && !rootHosted && Platform.OS === "ios") {
+            setNativeExitId(dismissedPresentationId);
+          } else {
+            onDismissed(dismissedPresentationId);
+          }
         }}
         onDismissStart={(dismissedPresentationId) => {
           if (dismissedPresentationId !== presentationId) return false;
-          return outcome.current?.presentationId === presentationId
-            ? true
-            : claimDiscard();
+          if (outcome.current?.presentationId !== presentationId && !claimDiscard()) return false;
+          onDismissStart?.(dismissedPresentationId);
+          return true;
         }}
         onGestureStart={() => Keyboard.dismiss()}
         presentationId={presentationId}
@@ -239,9 +350,9 @@ export function BottomSheetShell({
         visible
       >
         <View
-          accessibilityElementsHidden={closing}
-          importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
-          pointerEvents={closing ? "none" : "auto"}
+          accessibilityElementsHidden={inactive}
+          importantForAccessibility={inactive ? "no-hide-descendants" : "auto"}
+          pointerEvents={inactive ? "none" : "auto"}
           style={[
             s.sheetContent,
             calendarLayout ? s.dateSheetContent : s.filterSheetContent,
@@ -263,55 +374,37 @@ export function BottomSheetShell({
           ) : (
             <ScrollView
               testID={`${testID}-scroll`}
+              ref={scrollView}
+              onContentSizeChange={(_width, height) => { scrollMetrics.current.content = height; }}
+              onLayout={(event) => { scrollMetrics.current.viewport = event.nativeEvent.layout.height; }}
+              onScroll={(event) => { scrollMetrics.current.offset = event.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={32}
               keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets
+              automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets && !covered}
               contentContainerStyle={s.body}
               showsVerticalScrollIndicator={false}
               style={s.scroll}
             >
               {children}
+              {scrollRoom ? <View style={{ height: scrollRoom }} /> : null}
             </ScrollView>
           )}
-          <Pressable
-            testID={`${testID}-action`}
-            accessibilityRole="button"
-            accessibilityLabel={action}
-            accessibilityState={{ disabled: disabled || closing }}
-            disabled={disabled || closing}
-            onPress={requestCommit}
-            style={[
-              s.apply,
-              calendarLayout ? s.dateAction : s.filterAction,
-              compactCalendarLayout ? s.compactDateAction : null,
-              {
-                // The filter's "Show N activities" is the sheet's primary action (coral); a
-                // date sheet's Done is neutral (UIA-026). Both are full width.
-                backgroundColor:
-                  disabled || closing
-                    ? theme.surfaceMuted
-                    : neutralAction
-                      ? theme.textPrimary
-                      : theme.accent,
-              },
-            ]}
-          >
-            <Text
-              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-              style={[
-                s.actionText,
-                {
-                  color:
-                    disabled || closing
-                      ? theme.textSecondary
-                      : neutralAction
-                        ? theme.background
-                        : theme.onAccent,
-                },
-              ]}
-            >
-              {action}
-            </Text>
-          </Pressable>
+          {secondaryAction ? (
+            <View style={s.footerRow}>
+              <Pressable
+                testID={secondaryAction.testID}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(secondaryAction.disabled) || inactive }}
+                disabled={Boolean(secondaryAction.disabled) || inactive}
+                hitSlop={4}
+                onPress={secondaryAction.onPress}
+                style={({ pressed }) => [s.secondary, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.actionText, { color: theme.textSecondary }]}>{secondaryAction.label}</Text>
+              </Pressable>
+              {primaryAction}
+            </View>
+          ) : primaryAction}
         </View>
       </SwipeDismissSheet>
     </View>
@@ -325,6 +418,7 @@ export function BottomSheetShell({
         style={StyleSheet.absoluteFill}
       >
         {overlay}
+        {overSheet}
       </View>
     );
   }
@@ -332,17 +426,22 @@ export function BottomSheetShell({
   return rootHosted ? (
     <FullWindowOverlay unstable_accessibilityContainerViewIsModal>
       {overlay}
+      {overSheet}
     </FullWindowOverlay>
   ) : (
     <Modal
       transparent
       animationType="none"
+      onDismiss={() => {
+        if (nativeExitId === presentationId) onDismissed(presentationId);
+      }}
       onRequestClose={requestDiscard}
       presentationStyle="overFullScreen"
       statusBarTranslucent
-      visible
+      visible={nativeExitId !== presentationId}
     >
       {overlay}
+      {overSheet}
     </Modal>
   );
 }
@@ -382,4 +481,8 @@ const s = StyleSheet.create({
   dateAction: { marginTop: 16, marginHorizontal: 10 },
   filterAction: { alignSelf: "stretch", width: "100%", maxWidth: "100%" },
   compactDateAction: { marginTop: 6 },
+  // A quiet action to the left of the primary one, which keeps the rest of the row.
+  footerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  footerPrimary: { flex: 1, width: undefined, alignSelf: "auto" },
+  secondary: { minHeight: 48, minWidth: 88, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
 });

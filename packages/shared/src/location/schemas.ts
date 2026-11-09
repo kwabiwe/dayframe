@@ -202,11 +202,13 @@ export const SEMANTIC_CHANGE_COUNT_REQUEST_HEADER = "x-dayframe-semantic-change-
  */
 export const ApplePlaceIdSchema = z.string().trim().min(1).max(200).regex(/^[\x21-\x7e]+$/);
 
+export const REVIEW_DESCRIPTION_MAX_LENGTH = 500;
+
 export const ReviewEntryEditSchema = z
   .object({
     categoryId: z.string().uuid().nullable().optional(),
     placeId: z.string().uuid().nullable().optional(),
-    description: z.string().trim().max(500).optional(),
+    description: z.string().trim().max(REVIEW_DESCRIPTION_MAX_LENGTH).optional(),
     /**
      * The person typed this description themselves (sent by apps whose Move editors start empty,
      * PRD D19). Without it, a Move description equal to a Dayframe title is treated as an older app's
@@ -276,12 +278,23 @@ export const MergeLocationReviewSchema = z.object({
 }).strict();
 
 /**
+ * The venue a "Visited {name}?" Yes names on an outing's Stay: its name and Apple Place ID, recorded as
+ * `record_poi_once` records them (a one-time name, never a saved place or a rule).
+ */
+export const OutingVenueSchema = z.object({ name: z.string().trim().min(1).max(120), applePlaceId: ApplePlaceIdSchema }).strict();
+/**
  * One card per outing (PRD D19): logs (`confirm_outing`) or skips (`ignore_outing`) an unknown Stay's
  * card and the Move cards either side of it together, in one transaction. Sent on the Stay's card
- * with the other members' ids; `edit` ("Log as" on the grouped card) applies to the Stay only.
+ * with the other members' ids; `edit` ("Log as" on the grouped card) and `venue` apply to the Stay only.
  */
-export const OutingLocationReviewSchema = z.object({
-  action: z.enum(["confirm_outing", "ignore_outing"]),
+export const ConfirmOutingLocationReviewSchema = z.object({
+  action: z.literal("confirm_outing"),
+  memberReviewItemIds: z.array(z.string().uuid()).min(1).max(3),
+  edit: ReviewEntryEditSchema.optional(),
+  venue: OutingVenueSchema.optional()
+}).strict();
+export const IgnoreOutingLocationReviewSchema = z.object({
+  action: z.literal("ignore_outing"),
   memberReviewItemIds: z.array(z.string().uuid()).min(1).max(3),
   edit: ReviewEntryEditSchema.optional()
 }).strict();
@@ -294,7 +307,7 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
   }).strict(),
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
   SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema,
-  OutingLocationReviewSchema
+  ConfirmOutingLocationReviewSchema, IgnoreOutingLocationReviewSchema
 ]);
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;

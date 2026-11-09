@@ -30,7 +30,7 @@ describe("Don't log trips like this (PRD D19, A4)", () => {
     }
     render(<Harness />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Don’t log trips like this" }));
-    await waitFor(() => expect(screen.getByText("Trips like this will wait in Review.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Trips like this will be asked in Calendar.")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Don’t log trips like this" })).toBeNull();
     expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
     expect(mocks.fetch).toHaveBeenCalledWith("/api/location/name-patterns", expect.objectContaining({
@@ -57,7 +57,7 @@ describe("Don't log trips like this (PRD D19, A4)", () => {
     const button = screen.getByRole("button", { name: "Don’t log trips like this" });
     button.focus();
     await userEvent.setup().keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByText("Trips like this will wait in Review.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Trips like this will be asked in Calendar.")).toBeTruthy());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Undo" }));
   });
 });

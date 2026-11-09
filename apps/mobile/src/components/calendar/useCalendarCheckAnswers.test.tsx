@@ -1,6 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
+import { currentMobileAccountEpoch } from "../../lib/mobileAccount";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -27,13 +28,45 @@ const store = vi.hoisted(() => ({
     (await store.reviewItemsDecidedLocally(bootstrap, ids)) ? new Set(ids) : new Set())
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
+const waiting = vi.hoisted(() => {
+  const mock = {
+    commitAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    cancelAnswerAfterCorrections: vi.fn(async (_id: string) => undefined),
+    // The store's settle, as its commit goes (its recovery runner is the store's own, tested there).
+    settleOutcome: null as null | "committed" | "committing" | "abandoned",
+    // The store's shared withdraw, as its deletion goes.
+    // The store's one completion path, over the mocked settle and withdraw.
+    finishWaitingStart: (owner: unknown, id: string, checks: { sameAccount: () => boolean; present: () => boolean; start: () => boolean; valid?: () => boolean }) => {
+      if (!checks.sameAccount() || (checks.valid && !checks.valid())) { void mock.withdrawAnswerAfterCorrections(owner, id); return "withdrawn"; }
+      if (!checks.present()) { void mock.settleAnswerAfterCorrections(owner, id, { inFront: false }); return "settled"; }
+      if (checks.start()) return "started";
+      void mock.withdrawAnswerAfterCorrections(owner, id);
+      return "withdrawn";
+    },
+    withdrawAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string) => { await mock.cancelAnswerAfterCorrections(id).catch(() => undefined); }),
+    settleAnswerAfterCorrections: vi.fn(async (_owner: unknown, id: string, _options: { inFront: boolean }) => {
+      try {
+        await mock.commitAnswerAfterCorrections(id);
+        return mock.settleOutcome ?? "committed";
+      } catch {
+        return mock.settleOutcome ?? "committing";
+      }
+    })
+  };
+  return mock;
+});
+vi.mock("../../lib/reviewAnswersAfterCorrections", () => waiting);
+// The one gate every answer goes through (Codex r7 on #610): by default nothing is queued for its item.
+const gate = vi.hoisted(() => ({ waitForItemCorrections: vi.fn(async (..._args: unknown[]): Promise<unknown> => null) }));
+vi.mock("../../lib/afterCorrections", () => gate);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { calendarCheckOutings, settledCheckBase, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { earlierDayReviewCounts } from "../../lib/earlierThisWeek";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
@@ -58,11 +91,12 @@ const outing = (stayStart: string | null = "2026-10-17T10:10:00.000Z") => [
 
 type Hook = ReturnType<typeof useCalendarCheckAnswers>;
 const NONE: ReadonlySet<string> = new Set();
+const waitingHiddenNow = { current: { ids: new Set<string>() as ReadonlySet<string>, segments: new Set<string>() as ReadonlySet<string> } };
 function mount(data: MobileBootstrap) {
   const result: { current: Hook } = { current: null as unknown as Hook };
   let props = { value: data, decided: NONE, owner: "owner-a" as string | null, states: NONE };
   function Harness({ value, decided, owner, states }: typeof props) {
-    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states });
+    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states, waitingHidden: waitingHiddenNow });
     return null;
   }
   let tree!: ReturnType<typeof create>;
@@ -100,6 +134,408 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     // Saved, not yet in the outbox's own record: still out of the List.
     expect(result.current.held).toBeNull();
     expect(result.current.hiddenIds.has("a")).toBe(true);
+  });
+
+  it("lets an answer after corrections go only through its waiting record, after Undo; Undo removes the record (Codex r2 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    waiting.cancelAnswerAfterCorrections.mockClear();
+    // Its data says its account: a waiting record is written only for its own account (Codex r15 on #610).
+    const { result } = mount({ ...bootstrap([suggestion("a"), suggestion("b")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
+    let taken = false;
+    act(() => { taken = result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(taken).toBe(true);
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-1");
+    // Never into the Review outbox from here: the record goes once its corrections are acknowledged. Its record now
+    // keeps the "?" out (the Dashboard's waiting set, Codex r11 on #610), not this hook.
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.held).toBeNull();
+    act(() => { result.current.answer("b", false, null, { afterCorrections: "m-2" }); });
+    act(() => { result.current.undo(); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("m-2");
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalledWith("m-2");
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("brings a dropped waiting answer's “?” back at once, its saving copy too (Codex r3 on #610)", async () => {
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+  });
+
+  it("ends a waiting answer's Undo too when its change is refused before Undo runs out, so the “?” stays back (Codex r4 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    const { result } = mount({ ...bootstrap([suggestion("a")]), user: { id: "user-a" }, workspace: { id: "ws-a" } } as unknown as MobileBootstrap);
+    act(() => { result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    act(() => { result.current.restoreAnswered(["a"]); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(result.current.held).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    expect(waiting.commitAnswerAfterCorrections).not.toHaveBeenCalled();
+  });
+
+  it("makes a row's Yes wait for a correction still queued for its place: no confirmation until it is accepted (Codex r7 on #610)", async () => {
+    waiting.commitAnswerAfterCorrections.mockClear();
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // A correction saved offline for its place, the sheet closed: the gate makes it wait.
+    gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+    const { result } = mount(withAccount([suggestion("a")]));
+    await act(async () => { result.current.answer("a", true); await Promise.resolve(); });
+    expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" },
+      expect.objectContaining({ itemId: "segment-a", newIds: [], action: { kind: "answer", reviewItemId: "a", logged: true } }));
+    const recordId = (gate.waitForItemCorrections.mock.calls[0][1] as { id: string }).id;
+    expect(result.current.held).toMatchObject({ itemId: "a", afterCorrections: recordId });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    // Its Undo ended: only its waiting record lets it go, once the correction is accepted; never the Review outbox now.
+    expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith(recordId);
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    // Nothing queued for its place: held at once, and saved as before.
+    const second = mount(withAccount([suggestion("b")]));
+    await act(async () => { second.result.current.answer("b", false); await Promise.resolve(); });
+    expect(second.result.current.held).toMatchObject({ itemId: "b" });
+    expect((second.result.current.held as { afterCorrections?: string }).afterCorrections).toBeUndefined();
+  });
+
+  describe("while the gate answers (Codex r8 on #610)", () => {
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // The gate's registration, finished by hand.
+    const deferGate = () => {
+      let finish!: (record: unknown) => void;
+      gate.waitForItemCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      return (record: unknown) => act(async () => { finish(record); await Promise.resolve(); await Promise.resolve(); });
+    };
+
+    it("never confirms a proposal that changed while it registered: Yes for 10–11, a refresh brings 10–13", async () => {
+      waiting.cancelAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      rerender(withAccount([suggestion("a", { suggestedStoppedAt: at(13) })]));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Waiting for a correction too: its record goes, never confirmed.
+      const finishWaiting = deferGate();
+      const other = mount(withAccount([suggestion("b")]));
+      act(() => { other.result.current.answer("b", true); });
+      other.rerender(withAccount([suggestion("b", { suggestedStoppedAt: at(13) })]));
+      await finishWaiting({ id: "client-id" });
+      expect(other.result.current.held).toBeNull();
+      expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("queues Yes to a guess on an outing's stay as confirm_outing with its venue; Not now and Undo carry none (#642)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
+        store.enqueueReviewMutation.mockClear();
+        const { result } = mount(items);
+        await act(async () => { result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1", logAsDescription: "Picked up supplies" }); });
+        expect(result.current.held?.itemId).toBe("stay");
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: ["there", "back"],
+          edit: { categoryId: "cat-1", description: "Picked up supplies" }, venue: { name: "Holland & Barrett", applePlaceId: "IHB" } });
+        store.enqueueReviewMutation.mockClear();
+        const no = mount(items);
+        await act(async () => { no.result.current.answer("stay", false, venue); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation.mock.calls[0][0].mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: ["there", "back"] });
+        store.enqueueReviewMutation.mockClear();
+        const undone = mount(items);
+        await act(async () => { undone.result.current.answer("stay", true, venue); });
+        act(() => { undone.result.current.undo(); });
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      }
+    });
+
+    it("keeps the venue on an outing's waiting record, with its trips (#642)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const withSegment = outing().map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      gate.waitForItemCorrections.mockClear();
+      const { result } = mount(withAccount(withSegment));
+      await act(async () => { result.current.answer("stay", true, venue); });
+      expect(gate.waitForItemCorrections.mock.calls[0][1]).toMatchObject({ action: { kind: "answer", reviewItemId: "stay", logged: true, venue, outingMemberIds: ["there", "back"] } });
+      gate.waitForItemCorrections.mockClear();
+      const no = mount(withAccount(withSegment));
+      await act(async () => { no.result.current.answer("stay", false, venue); });
+      expect((gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown> }).action).not.toHaveProperty("venue");
+    });
+
+    describe("an outing answered from the edited sheet (Codex r1 on #643)", () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: "IHB" };
+      const data = () => withAccount(outing().map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item));
+      const input = (logged: boolean, withVenue = false) => ({ itemId: "stay", segmentId: "segment-stay", logged, newIds: ["cid-1"], generation: currentMobileAccountEpoch(),
+        venue: withVenue ? venue : null, logAsCategoryId: null, owner: { userId: "u", workspaceId: "w" }, ownerKey: "owner-a" });
+      const held = async (result: { current: Hook }, logged: boolean, withVenue = false) => {
+        gate.waitForItemCorrections.mockClear();
+        gate.waitForItemCorrections.mockResolvedValueOnce({ id: "client-id" });
+        let waiting_!: Awaited<ReturnType<Hook["answerAfterCorrections"]>>;
+        await act(async () => { waiting_ = await result.current.answerAfterCorrections(input(logged, withVenue)); });
+        return waiting_;
+      };
+
+      it("keeps the trips with Not now, with no venue, and with Yes, with its venue", async () => {
+        const { result } = mount(data());
+        const no = await held(result, false);
+        const action = (gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown>; newIds: string[] }).action;
+        expect(action).toMatchObject({ kind: "answer", reviewItemId: "stay", logged: false, outingMemberIds: ["there", "back"] });
+        expect(action).not.toHaveProperty("venue");
+        act(() => { no.start(); });
+        expect(result.current.held?.itemId).toBe("stay");
+        expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
+        act(() => { result.current.undo(); });
+        const { result: other } = mount(data());
+        await held(other, true, true);
+        expect(gate.waitForItemCorrections.mock.calls[0][1]).toMatchObject({ action: { logged: true, venue, outingMemberIds: ["there", "back"] } });
+      });
+
+      it("drops the answer when a captured trip's proposal or the membership changes during registration", async () => {
+        const moved = (items: MobileBootstrap) => ({ ...items, reviewItems: items.reviewItems.map((item) => item.id === "there"
+          ? { ...item, suggestedStartedAt: "2026-10-17T09:30:00.000Z" } : item) });
+        const gone = (items: MobileBootstrap) => ({ ...items, reviewItems: items.reviewItems.filter((item) => item.id !== "back") });
+        for (const change of [moved, gone]) {
+          waiting.cancelAnswerAfterCorrections.mockClear();
+          store.enqueueReviewMutation.mockClear();
+          const { result, rerender } = mount(data());
+          const answer = await held(result, true, true);
+          rerender(change(data()));
+          act(() => { answer.start(); });
+          expect(result.current.held).toBeNull();
+          expect(waiting.cancelAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+          await act(async () => { vi.advanceTimersByTime(10_000); });
+          expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+        }
+      });
+
+      it("leaves out a trip another waiting answer hides, by id or segment, and still starts once its own record hides the stay (Codex r2 on #643)", async () => {
+        const withTripSegment = data();
+        withTripSegment.reviewItems = withTripSegment.reviewItems.map((item) => item.id === "there"
+          ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-there" } } : item);
+        for (const hidden of [{ ids: new Set(["there"]), segments: new Set<string>() }, { ids: new Set<string>(), segments: new Set(["segment-there"]) }]) {
+          waitingHiddenNow.current = hidden;
+          const { result } = mount(withTripSegment);
+          const answer = await held(result, true, true);
+          const call = gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown>; itemId: string };
+          expect(call.action).toMatchObject({ outingMemberIds: ["back"], venue });
+          // Its own record now hides the stay and its other trip: the set captured at the tap still stands.
+          waitingHiddenNow.current = { ids: new Set(["there", "stay", "back"]), segments: new Set(["segment-stay"]) };
+          act(() => { answer.start(); });
+          expect(result.current.held?.itemId).toBe("stay");
+          act(() => { result.current.undo(); });
+          waitingHiddenNow.current = { ids: new Set(), segments: new Set() };
+        }
+      });
+
+      it("leaves a plain place's answer alone, as its corrections reshape it", async () => {
+        const { result } = mount(withAccount([suggestion("a", { rawPayload: { clientSegmentId: "segment-a" } } as never)]));
+        gate.waitForItemCorrections.mockClear();
+        gate.waitForItemCorrections.mockResolvedValueOnce({ id: "client-id" });
+        await act(async () => { await result.current.answerAfterCorrections({ ...input(false), itemId: "a", segmentId: "segment-a" }); });
+        expect((gate.waitForItemCorrections.mock.calls[0][1] as { action: Record<string, unknown> }).action).not.toHaveProperty("outingMemberIds");
+      });
+    });
+
+    it("refuses Yes to a guess with no Apple Place ID on an outing's stay rather than dropping the venue (Codex r2 on #620)", async () => {
+      const venue = { name: "Holland & Barrett", street: null, applePlaceId: null };
+      // Through the gate (the stay has its segment) and without it: refused, nothing held or saved.
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      for (const items of [withAccount(withSegment(outing())), bootstrap(outing())]) {
+        const { result } = mount(items);
+        let taken = true;
+        act(() => { taken = result.current.answer("stay", true, venue, { logAsCategoryId: "cat-1" }); });
+        expect(taken).toBe(false);
+        expect(result.current.held).toBeNull();
+        await act(async () => { vi.advanceTimersByTime(10_000); });
+        expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      }
+    });
+
+    it("never queues confirm_outing when an outing's trip changed while it registered (Codex r9 on #610)", async () => {
+      // The outing's stay has its segment, so its Yes goes through the gate.
+      const withSegment = (items: MobileReviewItem[]) => items.map((item) => item.id === "stay"
+        ? { ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: "segment-stay" } } : item);
+      const finish = deferGate();
+      const { result, rerender } = mount(withAccount(withSegment(outing())));
+      act(() => { result.current.answer("stay", true); });
+      // The inbound trip's start moves 10:04 → 09:30 meanwhile.
+      rerender(withAccount(withSegment(outing()).map((item) => item.id === "there" ? { ...item, suggestedStartedAt: "2026-10-17T09:30:00.000Z" } : item)));
+      await finish(null);
+      expect(result.current.held).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+      // Unchanged, the same tap decides the outing as the deck does.
+      const again = deferGate();
+      const steady = mount(withAccount(withSegment(outing())));
+      act(() => { steady.result.current.answer("stay", true); });
+      await again(null);
+      expect(steady.result.current.held).toMatchObject({ itemId: "stay", outing: { key: "outing:a" } });
+    });
+
+    it("an edited sheet's answer settling while away or gone is saved at once, with nothing said (Codex r9 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      // Away: committed at once, no hold, no haptic, nothing said.
+      const away = mount(withAccount([suggestion("a")]));
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      act(() => { away.result.current.answer("a", true, null, { afterCorrections: "m-away" }); });
+      expect(away.result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-away");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+      // Gone: the same.
+      const gone = mount(withAccount([suggestion("b")]));
+      const answer = gone.result.current.answer;
+      act(() => { gone.tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      act(() => { answer("b", false, null, { afterCorrections: "m-gone" }); });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("m-gone");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    });
+
+    it("says nothing through the save of an answer the gate settles while the app is away (Codex r9 on #610)", async () => {
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish(null);
+      await act(async () => { for (let index = 0; index < 5; index += 1) await Promise.resolve(); });
+      expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+      expect(result.current.held).toBeNull();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+    });
+
+    it("gates an outing on its trips' queued corrections too, and its record answers the trips with it (Codex r10 on #610)", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      gate.waitForItemCorrections.mockClear();
+      const segments = (items: MobileReviewItem[]) => items.map((item) => ({ ...item, rawPayload: { ...(item.rawPayload as object), clientSegmentId: `segment-${item.id}` } }));
+      // The inbound trip was corrected offline: the gate makes the outing wait.
+      gate.waitForItemCorrections.mockImplementationOnce(async (_owner, input) => ({ id: (input as { id: string }).id }));
+      const { result } = mount(withAccount(segments(outing())));
+      await act(async () => { result.current.answer("stay", true); await Promise.resolve(); await Promise.resolve(); });
+      expect(gate.waitForItemCorrections).toHaveBeenCalledWith({ userId: "user-a", workspaceId: "ws-a" }, expect.objectContaining({
+        itemId: "segment-stay", memberItemIds: ["segment-there", "segment-back"],
+        action: { kind: "answer", reviewItemId: "stay", logged: true, outingMemberIds: ["there", "back"] }
+      }));
+      expect(result.current.held).toMatchObject({ itemId: "stay", afterCorrections: "client-id", outing: { key: "outing:a" } });
+      expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      // Only its record lets confirm_outing go, once every correction is accepted; never the Review outbox now.
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    });
+
+    it("leaves a waiting answer's recovery to the store, and says not-saved in front when the store gives it up (Codex r10 and r11 on #610)", async () => {
+      const flush = () => act(async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); });
+      vi.mocked(Alert.alert).mockClear();
+      waiting.settleAnswerAfterCorrections.mockClear();
+      // Still being tried: nothing said, nothing held; its record (not this hook) keeps the "?" out.
+      waiting.settleOutcome = "committing";
+      const retried = mount(withAccount([suggestion("a")]));
+      act(() => { retried.result.current.answer("a", true, null, { afterCorrections: "m-1" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(waiting.settleAnswerAfterCorrections).toHaveBeenCalledWith(expect.anything(), "m-1", { inFront: true });
+      expect(retried.result.current.held).toBeNull();
+      expect(Alert.alert).not.toHaveBeenCalled();
+      // Given up in front: the not-saved words.
+      waiting.settleOutcome = "abandoned";
+      const given = mount(withAccount([suggestion("b")]));
+      act(() => { given.result.current.answer("b", true, null, { afterCorrections: "m-2" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      await flush();
+      expect(given.result.current.hiddenIds.has("b")).toBe(false);
+      expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
+      waiting.settleOutcome = null;
+    });
+
+    it("says nothing when the store gives an answer up after Dayframe left during its slow write (Codex r12 on #610)", async () => {
+      vi.mocked(Alert.alert).mockClear();
+      let finish!: () => void;
+      waiting.settleAnswerAfterCorrections.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve("abandoned"); }));
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true, null, { afterCorrections: "m-slow" }); });
+      await act(async () => { vi.advanceTimersByTime(4_800); });
+      act(() => { appState.listener?.("background"); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      await act(async () => { finish(); await Promise.resolve(); await Promise.resolve(); });
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      act(() => { appState.listener?.("active"); });
+    });
+
+    it("saves at once, with no Undo hold, when the app went to the background while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { appState.listener?.("background"); });
+      await finish({ id: "client-id" });
+      expect(result.current.held).toBeNull();
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+    });
+
+    it("saves at once and says nothing when the List went away while it registered", async () => {
+      waiting.commitAnswerAfterCorrections.mockClear();
+      const finish = deferGate();
+      const { result, tree } = mount(withAccount([suggestion("a")]));
+      act(() => { result.current.answer("a", true); });
+      act(() => { tree.unmount(); });
+      vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+      haptics.playHaptic.mockClear();
+      await finish({ id: "client-id" });
+      expect(waiting.commitAnswerAfterCorrections).toHaveBeenCalledWith("client-id");
+      expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+      expect(haptics.playHaptic).not.toHaveBeenCalled();
+    });
+  });
+
+  it("refuses at once an answer the List can't take here, never registering it (Codex r16 on #610)", () => {
+    gate.waitForItemCorrections.mockClear();
+    const withAccount = (items: MobileReviewItem[]) => ({ user: { id: "user-a" }, workspace: { id: "ws-a" }, reviewItems: items } as unknown as MobileBootstrap);
+    // An incomplete suggestion (no complete window), and one with a rejected change of its own.
+    const { result, update } = mount(withAccount([suggestion("a", { suggestedStoppedAt: null }), suggestion("b")]));
+    update({ states: new Set(["b"]) });
+    let taken = true;
+    act(() => { taken = result.current.answer("a", true); });
+    expect(taken).toBe(false);
+    act(() => { taken = result.current.answer("b", false); });
+    expect(taken).toBe(false);
+    expect(result.current.canAnswer("a")).toBe(false);
+    expect(result.current.canAnswer("b")).toBe(false);
+    expect(gate.waitForItemCorrections).not.toHaveBeenCalled();
+    expect(result.current.held).toBeNull();
+  });
+
+  it("says nothing when a held answer's suggestion changed and the List goes away (Codex r16 on #610)", async () => {
+    const { result, rerender, tree } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    rerender(bootstrap([suggestion("a", { suggestedStoppedAt: at(13) })]));
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    act(() => { tree.unmount(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 
   it("Undo brings the “?” back and saves nothing", async () => {
@@ -422,13 +858,140 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
+});
 
-  it("opens a place's evidence on its details screen and anything else on the deck, focused on it (Codex r10 on #582)", () => {
-    const place = suggestion("a");
-    expect(calendarCheckRoute(place, "a")).toEqual({ pathname: "/review/[id]", params: { id: "a" } });
-    const sleep = suggestion("s", { eventSource: "health_sleep", eventType: "health_sleep_import", rawPayload: null });
-    expect(calendarCheckRoute(sleep, "s")).toEqual({ pathname: "/review", params: { focusReviewId: "s" } });
-    // Not loaded here (paged out): the deck finds it.
-    expect(calendarCheckRoute(undefined, "x")).toEqual({ pathname: "/review", params: { focusReviewId: "x" } });
+// Location v4 design §7: "a block ran into your trip", answered on its block's sheet through the same gate and hold.
+describe("a block that ran into a trip, answered on its block", () => {
+  const HASH = "c".repeat(64);
+  const clash = (overrides: Partial<MobileReviewItem> = {}) => suggestion("clash", {
+    type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Team sync ran 18m into your trip",
+    suggestedStartedAt: at(9), suggestedStoppedAt: at(10, 42),
+    rawPayload: { timeEntryId: "block-1", tripId: "trip-1", tripStartedAt: at(10, 42), tripStoppedAt: at(11, 10), overlapSeconds: 1080 },
+    proposalHash: HASH, ...overrides
+  });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store.enqueueReviewMutation.mockReset();
+    store.enqueueReviewMutation.mockImplementation(async () => undefined);
+    store.reviewItemsDecidedLocally.mockReset();
+    store.reviewItemsDecidedLocally.mockImplementation(async () => false);
+    gate.waitForItemCorrections.mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds End it for Undo (the block shows ended meanwhile), then saves accept with the proposal it showed", async () => {
+    const { result } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    // No location segment: never waits for a place's corrections.
+    expect(gate.waitForItemCorrections).not.toHaveBeenCalled();
+    expect(result.current.answeredYesIds.has("clash")).toBe(true);
+    expect(vi.mocked(AccessibilityInfo.announceForAccessibility)).toHaveBeenCalledWith(expect.stringMatching(/^Ended Team sync/));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ mutation: { action: "accept", expectedProposalHash: HASH } });
+    // Saving, not yet the outbox's own record: still ended here.
+    expect(result.current.answeredYesIds.has("clash")).toBe(true);
+  });
+
+  it("saves Keep it as ignore_once, and Undo brings the question back with the block as it was", async () => {
+    const { result } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    act(() => { result.current.undo(); });
+    expect(result.current.answeredYesIds.size).toBe(0);
+    expect(result.current.hiddenIds.has("clash")).toBe(false);
+    act(() => { result.current.answer("clash", false); });
+    expect(result.current.answeredYesIds.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ mutation: { action: "ignore_once" } });
+  });
+
+  it("never sends End it without a proposal (an older server's item): only Keep it is taken", () => {
+    const { result } = mount(bootstrap([clash({ proposalHash: undefined })]));
+    let taken = true;
+    act(() => { taken = result.current.answer("clash", true); });
+    expect(taken).toBe(false);
+    expect(result.current.held).toBeNull();
+    act(() => { taken = result.current.answer("clash", false); });
+    expect(taken).toBe(true);
+  });
+
+  it("drops a held End it unsaved on another account, and nothing of it stays ended there", async () => {
+    const { result, update } = mount(bootstrap([clash()]));
+    act(() => { result.current.answer("clash", true); });
+    update({ owner: "owner-b" });
+    expect(result.current.held).toBeNull();
+    expect(result.current.answeredYesIds.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+});
+
+describe("the settled \"?\" the Calendar and Today's Earlier this week chips count (Codex r1 on #617)", () => {
+  const none = { decided: NONE, answering: NONE, resolved: NONE, waitingIds: NONE, waitingSegments: NONE, syncStateIds: NONE };
+  // Today's Earlier this week chip for the outing's day (17 Oct), counted as the Dashboard counts it.
+  const chip = (base: ReturnType<typeof settledCheckBase>) => earlierDayReviewCounts([{ dayKey: "2026-10-17", date: new Date(2026, 9, 17) }],
+    base.open.filter((item) => !base.folded.has(item.id))).get("2026-10-17") ?? 0;
+
+  it("counts an outing once, and drops it, trips and all, once an acknowledged Logs as resolved them", () => {
+    const items = outing();
+    expect(chip(settledCheckBase(items, none))).toBe(1);
+    // The receipt resolved the stay and both trips: the chip clears before the bootstrap lists them decided.
+    const settled = settledCheckBase(items, { ...none, resolved: new Set(["stay", "there", "back"]) });
+    expect(settled.open).toEqual([]);
+    expect(chip(settled)).toBe(0);
+    // Without trips in the receipt (a place that is no outing's stay), only its own "?" leaves.
+    const plain = [suggestion("cafe", { suggestedStartedAt: "2026-10-17T12:00:00.000Z", suggestedStoppedAt: "2026-10-17T13:00:00.000Z" })];
+    expect(chip(settledCheckBase([...plain, ...items], { ...none, resolved: new Set(["cafe"]) }))).toBe(1);
+  });
+
+  it("leaves out the \"?\" decided here, held, or waiting for a sheet's corrections by id or by segment", () => {
+    const items = [suggestion("a"), suggestion("b"), suggestion("c"), suggestion("d"), suggestion("e")];
+    const base = settledCheckBase(items, { ...none, decided: new Set(["a"]), answering: new Set(["b"]), waitingIds: new Set(["c"]),
+      waitingSegments: new Set(["segment-d"]) });
+    expect(base.open.map((item) => item.id)).toEqual(["e"]);
+  });
+
+  it("counts a block that ran into a trip, on the Calendar and its day's chip, only while it still asks on its block (#618)", () => {
+    const clash = suggestion("clash", { type: "location_timer_trip_clash", suggestedStartedAt: "2026-10-17T12:00:00.000Z",
+      suggestedStoppedAt: "2026-10-17T13:00:00.000Z" } as Partial<MobileReviewItem>);
+    // The one predicate the Dashboard passes (clashStillAsksHere): asking, it counts once on its day with the outing.
+    expect(chip(settledCheckBase([clash, ...outing()], { ...none, stillAsks: () => true }))).toBe(2);
+    // Its block shortened or deleted here, or no payload to put it on its block: gone from the chip with the badge.
+    const gone = settledCheckBase([clash, ...outing()], { ...none, stillAsks: (item) => item.id !== "clash" });
+    expect(gone.open.map((item) => item.id)).not.toContain("clash");
+    expect(chip(gone)).toBe(1);
+  });
+});
+
+// Codex r1 on #622: a clash counts and asks only on a block the Calendar can open — count and surface agree.
+describe("a block that ran into a trip counts only with its block to answer on", () => {
+  it("counts 0 with no surface while its block isn't loaded, and 1 with its dot once the block arrives", async () => {
+    const { clashChecksByBlock, clashStillAsksHere, bootstrapBlocksById } = await import("../../lib/timerTripClashBlocks");
+    const { buildNativeCalendarBridgeState } = await import("../../lib/nativeCalendarPresentation");
+    const { DAYFRAME_THEME } = await import("@dayframe/shared");
+    const day = (hour: number, minute = 0) => new Date(2026, 9, 22, hour, minute).toISOString();
+    const clash = suggestion("clash", { type: "location_timer_trip_clash", eventType: "timer_trip_clash", title: "Team sync ran 18m into your trip",
+      suggestedStartedAt: day(9), suggestedStoppedAt: day(10, 42), proposalHash: "f".repeat(64),
+      rawPayload: { timeEntryId: "block-1", tripId: "trip-1", tripStartedAt: day(10, 42), tripStoppedAt: day(11, 10), overlapSeconds: 1080 } });
+    const block = { id: "block-1", projectId: null, projectName: null, projectColor: null, clientName: null, categoryId: null, categoryName: null,
+      placeName: null, source: "mobile_app", confidence: "high", reviewStatus: "confirmed", description: "Team sync",
+      startedAt: day(9), stoppedAt: day(11), durationSeconds: 7_200 };
+    const none = { decided: NONE, answering: NONE, resolved: NONE, waitingIds: NONE, waitingSegments: NONE, syncStateIds: NONE };
+    const now = Date.parse(day(18));
+    // The Dashboard's pipeline: the one filter → the count; its blocks → the Grid's dots and the List's rows.
+    const surfaces = (data: MobileBootstrap) => {
+      const blocks = bootstrapBlocksById(data);
+      const base = settledCheckBase(data.reviewItems, { ...none, stillAsks: (item) => clashStillAsksHere(item, data, now, blocks) });
+      const asking = clashChecksByBlock(base.open);
+      const grid = buildNativeCalendarBridgeState({ data, now, askingEntryIds: new Set(asking.keys()), reduceMotion: false, reduceTransparency: false,
+        refreshing: false, selectedDayKey: "2026-10-22", theme: { ...DAYFRAME_THEME.dark, mode: "dark", pressed: DAYFRAME_THEME.dark.accentPressed } as never,
+        transitionDirection: 1 });
+      return { count: base.open.length, dots: grid.model.entries.filter((entry) => entry.asking).map((entry) => entry.entryId) };
+    };
+    const base = { user: { id: "u", name: "U", email: "u@example.test" }, workspace: { id: "w", name: "W" }, categories: [], projects: [],
+      places: [], activeEntry: null, reviewItems: [clash] };
+    expect(surfaces({ ...base, entries: [] } as unknown as MobileBootstrap)).toEqual({ count: 0, dots: [] });
+    expect(surfaces({ ...base, entries: [block] } as unknown as MobileBootstrap)).toEqual({ count: 1, dots: ["block-1"] });
   });
 });

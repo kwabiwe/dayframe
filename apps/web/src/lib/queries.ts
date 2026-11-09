@@ -18,7 +18,8 @@ import {
   buildCategoryUsageRanks,
   buildHistoricalSuggestionCandidates,
   buildRecentActivitySuggestions,
-  LOCATION_ENGINE_V2_CONFIG
+  LOCATION_ENGINE_V2_CONFIG,
+  TIMER_TRIP_CLASH_REVIEW_TYPE
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -27,10 +28,12 @@ import {
   missingRequiredColumnError,
   query
 } from "./db";
-import { getLocationGroups, withLocationGroups, type LocationGroup } from "./location/location-groups";
+import { getLocationGroups, isLocationGroupCandidate, locationGroupSources, withLocationGroups, type LocationGroup } from "./location/location-groups";
 import { placeDisplayNameSql } from "./place-display";
+import { reviewProposalHash } from "./review-proposal-hash";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
+import { getCompletedEntryRevision } from "./timer-state";
 import { addDaysToDateKey, mondayOfDateKey, zonedDateKey, zonedStartOfDay, zonedWallHour } from "./viewer-time-zone";
 
 export type ClientRow = {
@@ -191,6 +194,11 @@ export type ReviewItemRow = {
    * presentation uses), so a calendar draws that moment once. Only the bootstrap list sets it.
    */
   linkedEntryIds?: string[];
+  /**
+   * "A block ran into your trip" only (location v4 design §7): the proposal its End it is sent with
+   * (`expectedProposalHash`), so an answer to a question that changed meanwhile is refused (409 `proposal_changed`).
+   */
+  proposalHash?: string;
 };
 
 export type ActivityRow = {
@@ -252,6 +260,7 @@ export type DashboardSeriesPoint = {
 };
 
 export type BootstrapData = {
+  completedEntryRevision?: string;
   authMode?: RequestSession["authMode"];
   /**
    * The zone whose midnights built `dateRange` and the series: the web viewer's (`dayframe_tz`)
@@ -376,6 +385,44 @@ export async function runBootstrapReads<const Reads extends readonly (() => Prom
   return results as { -readonly [Index in keyof Reads]: Awaited<ReturnType<Reads[Index]>> };
 }
 
+function bootstrapEntryScopes(dateRange: DashboardDateRange, capturedNow: string) {
+  return {
+    recent: { capturedNow, limit: 100 },
+    history: {
+      capturedNow,
+      overlappingFrom: addDays(new Date(dateRange.dayStart), -59).toISOString(),
+      startedBefore: dateRange.dayEnd,
+      limit: 2000
+    },
+    day: { capturedNow, overlappingFrom: dateRange.dayStart, startedBefore: dateRange.dayEnd, limit: 100 },
+    week: { capturedNow, overlappingFrom: dateRange.weekStart, startedBefore: dateRange.weekEnd, limit: 300 }
+  };
+}
+
+export type CalendarWeekData = {
+  user: { id: string };
+  workspace: { id: string };
+  weekEntries: TimeEntryRow[];
+};
+
+export async function getCalendarWeek(
+  session: RequestSession,
+  options: { selectedDate: string; timeZone?: string | null; now?: Date }
+): Promise<CalendarWeekData> {
+  const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
+  const scopes = bootstrapEntryScopes(dateRange, (options.now ?? new Date()).toISOString());
+  let weekEntries = await getTimeEntries(session, scopes.week);
+  if (weekEntries.some(isLocationGroupCandidate)) {
+    // A named trip can cross a week boundary. Match bootstrap's bounded group context without
+    // pulling full entry rows, catalogues or suggestions into this Calendar-only read.
+    const context = await Promise.all([scopes.recent, scopes.history, scopes.day]
+      .map((scope) => getLocationGroupContext(session, scope)));
+    const groups = await getLocationGroups({ query }, session, [...context.flat(), ...weekEntries]);
+    weekEntries = withLocationGroups(weekEntries, groups);
+  }
+  return { user: { id: session.userId }, workspace: { id: session.workspaceId }, weekEntries };
+}
+
 export async function getBootstrapData(
   session: RequestSession = getDevSession(),
   options: {
@@ -388,10 +435,13 @@ export async function getBootstrapData(
     timeZone?: string | null;
   } = {}
 ): Promise<BootstrapData> {
+  // Read the revision before the entries. A concurrent commit may appear in the data ahead of
+  // its marker, which causes a harmless refresh. The reverse would acknowledge a change we missed.
+  const completedEntryRevision = await getCompletedEntryRevision(session);
   const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
   const timeZone = options.timeZone ?? null;
   const capturedNow = new Date().toISOString();
-  const historyStart = addDays(new Date(dateRange.dayStart), -59).toISOString();
+  const entryScopes = bootstrapEntryScopes(dateRange, capturedNow);
   const [
     user,
     workspaces,
@@ -426,25 +476,10 @@ export async function getBootstrapData(
     () => getPlaces(session),
     () => getLearnedPlaces(session),
     () => getAutomationRules(session),
-    () => getTimeEntries(session, { capturedNow }),
-    () => getTimeEntries(session, {
-      overlappingFrom: historyStart,
-      startedBefore: dateRange.dayEnd,
-      limit: 2000,
-      capturedNow
-    }),
-    () => getTimeEntries(session, {
-      overlappingFrom: dateRange.dayStart,
-      startedBefore: dateRange.dayEnd,
-      limit: 100,
-      capturedNow
-    }),
-    () => getTimeEntries(session, {
-      overlappingFrom: dateRange.weekStart,
-      startedBefore: dateRange.weekEnd,
-      limit: 300,
-      capturedNow
-    }),
+    () => getTimeEntries(session, entryScopes.recent),
+    () => getTimeEntries(session, entryScopes.history),
+    () => getTimeEntries(session, entryScopes.day),
+    () => getTimeEntries(session, entryScopes.week),
     () => getActiveEntry(session),
     () => getReviewItems(session),
     () => getActivityEvents(session),
@@ -485,6 +520,7 @@ export async function getBootstrapData(
 
   return {
     authMode: session.authMode,
+    completedEntryRevision,
     viewerTimeZone: timeZone,
     user,
     workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],
@@ -1033,14 +1069,18 @@ export type TimeEntryQueryOptions = {
   limit?: number;
 };
 
-export function buildTimeEntriesQuery(
+const capturedNowParam = "$3";
+
+function timeEntryQueryScope(
   session: RequestSession,
-  options: TimeEntryQueryOptions = {}
+  options: TimeEntryQueryOptions,
+  needsDuration: boolean
 ) {
   const where = ["te.workspace_id = $1", "te.user_id = $2"];
-  const capturedNow = options.capturedNow ?? new Date().toISOString();
-  const values: Array<string | number> = [session.workspaceId, session.userId, capturedNow];
-  const capturedNowParam = "$3";
+  const values: Array<string | number> = [session.workspaceId, session.userId];
+  if (needsDuration || options.overlappingFrom) {
+    values.push(options.capturedNow ?? new Date().toISOString());
+  }
   if (options.entryId) {
     values.push(options.entryId);
     where.push(`te.id = $${values.length}::uuid`);
@@ -1059,6 +1099,19 @@ export function buildTimeEntriesQuery(
   }
   values.push(options.limit ?? 100);
 
+  return {
+    text: `where ${where.join(" and ")}
+     order by te.started_at desc, te.id desc
+     limit $${values.length}`,
+    values
+  };
+}
+
+export function buildTimeEntriesQuery(
+  session: RequestSession,
+  options: TimeEntryQueryOptions = {}
+) {
+  const scope = timeEntryQueryScope(session, options, true);
   return {
     text: `select te.id,
             p.id as "projectId",
@@ -1115,11 +1168,24 @@ export function buildTimeEntriesQuery(
      left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
-     where ${where.join(" and ")}
-     order by te.started_at desc, te.id desc
-     limit $${values.length}`,
-    values
+     ${scope.text}`,
+    values: scope.values
   };
+}
+
+async function getLocationGroupContext(session: RequestSession, options: TimeEntryQueryOptions) {
+  const { text, values } = timeEntryQueryScope(session, options, false);
+  // Keep the original list's cap before filtering location candidates, including manual rows in that cap.
+  const result = await query<Pick<TimeEntryRow, "id" | "source" | "startedAt" | "stoppedAt">>(
+    `select id, source, "startedAt", "stoppedAt" from (
+       select te.id, te.source, te.started_at as "startedAt", te.stopped_at as "stoppedAt"
+       from time_entries te
+       ${text}
+     ) bounded_context
+     where source = any($${values.length + 1}::text[]) and "stoppedAt" is not null`,
+    [...values, locationGroupSources]
+  );
+  return result.rows;
 }
 
 async function getTimeEntries(
@@ -1356,7 +1422,9 @@ async function getActiveEntry(session: RequestSession) {
 }
 
 async function getReviewItems(session: RequestSession) {
-  const result = await query<ReviewItemRow>(
+  const result = await query<ReviewItemRow & {
+    hashEventId: string | null; hashTitle: string; hashCategoryId: string | null; hashPlaceId: string | null; hashRevision: string | Date | null;
+  }>(
     `select ri.id,
             ri.type,
             case
@@ -1386,6 +1454,11 @@ async function getReviewItems(session: RequestSession) {
             ri.notes,
             ae.raw_payload as "rawPayload",
             ri.created_at as "createdAt",
+            ri.event_id as "hashEventId",
+            ri.title as "hashTitle",
+            ri.suggested_category_id as "hashCategoryId",
+            ri.suggested_place_id as "hashPlaceId",
+            coalesce(ri.resolved_at, ri.created_at) as "hashRevision",
             coalesce((
               select array_agg(te.id::text order by te.id)
               from time_entries te
@@ -1406,7 +1479,17 @@ async function getReviewItems(session: RequestSession) {
      limit 100`,
     [session.workspaceId, session.userId]
   );
-  return result.rows;
+  return result.rows.map(({ hashEventId, hashTitle, hashCategoryId, hashPlaceId, hashRevision, ...row }) =>
+    // "A block ran into your trip" is answered on its block with End it, sent with the proposal it was shown
+    // (location v4 design §7): the same hash the Review answer checks (`genericProposalHash`).
+    row.type === TIMER_TRIP_CLASH_REVIEW_TYPE ? {
+      ...row,
+      proposalHash: reviewProposalHash({
+        reviewItemId: row.id, eventId: hashEventId, locationSegmentId: null, sourceKind: "generic", title: hashTitle,
+        categoryId: hashCategoryId, placeId: hashPlaceId, startedAt: row.suggestedStartedAt, stoppedAt: row.suggestedStoppedAt,
+        confidence: row.confidence, eventSource: row.eventSource, eventType: row.eventType, semanticRevision: hashRevision
+      })
+    } : row);
 }
 
 async function getActivityEvents(session: RequestSession) {

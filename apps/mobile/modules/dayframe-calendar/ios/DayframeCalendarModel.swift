@@ -80,6 +80,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let isActive: Bool
   let isMoment: Bool
   let isReview: Bool
+  let asking: Bool
   let isUncategorized: Bool
   let laneCount: Int
   let laneIndex: Int
@@ -92,6 +93,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let placeText: String?
   let regionOffsetFraction: Double
   let regionWidthFraction: Double
+  let legs: [DayframeCalendarLegRecord]
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
@@ -121,6 +123,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     isActive = record.isActive
     isMoment = record.isMoment ?? false
     isReview = record.isReview
+    asking = record.asking ?? false
     isUncategorized = record.isUncategorized
     laneCount = max(1, record.laneCount)
     laneIndex = max(0, record.laneIndex)
@@ -131,6 +134,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     overlapCount = max(0, record.overlapCount)
     overlapSeconds = max(0, record.overlapSeconds)
     placeText = record.placeText
+    legs = record.legs ?? []
     regionOffsetFraction = record.regionOffsetFraction ?? 0
     regionWidthFraction = record.regionWidthFraction ?? 1
     startedAtMs = record.startedAtMs
@@ -182,6 +186,7 @@ struct DayframeCalendarBracket: Equatable, Identifiable {
 
 struct DayframeCalendarPresentation: Equatable {
   let brackets: [DayframeCalendarBracket]
+  let placesLane: [DayframeCalendarLaneItemRecord]
   let dayEndMs: Double
   let dayStartMs: Double
   let emptyState: String
@@ -198,6 +203,7 @@ struct DayframeCalendarPresentation: Equatable {
   let reduceMotion: Bool
   let reduceTransparency: Bool
   let refreshing: Bool
+  let scrollToNowRequest: Int
   let selectedDayKey: String
   let selectedDayTitle: String
   let theme: DayframeCalendarTheme
@@ -214,6 +220,7 @@ struct DayframeCalendarPresentation: Equatable {
 
   init(_ record: DayframeCalendarPresentationRecord) {
     brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)
+    placesLane = record.placesLane ?? []
     dayEndMs = record.dayEndMs
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState
@@ -227,6 +234,7 @@ struct DayframeCalendarPresentation: Equatable {
     reduceMotion = record.reduceMotion
     reduceTransparency = record.reduceTransparency
     refreshing = record.refreshing
+    scrollToNowRequest = record.scrollToNowRequest ?? 0
     selectedDayKey = record.selectedDayKey
     selectedDayTitle = record.selectedDayTitle
     theme = DayframeCalendarTheme(record.theme)
@@ -244,8 +252,9 @@ struct DayframeCalendarPresentation: Equatable {
 
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 
-  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width.
-  var entryLeadingInset: Double { 0 }
+  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width. The
+  /// Places lane (step 17) takes this much on the left when the day has one.
+  var entryLeadingInset: Double { placesLane.isEmpty ? 0 : DayframeCalendarPlacesLaneMath.width }
 }
 
 /// A moment as the entries layer draws it and the coordinator hit-tests it (dense-day rules).
@@ -275,6 +284,34 @@ enum DayframeCalendarMomentLayout {
   }
 }
 
+/// A Places lane item as the entries layer draws it and the coordinator hit-tests it (step 17; Codex r1 on #610).
+struct DayframeCalendarLanePlacement {
+  let item: DayframeCalendarLaneItemRecord
+  let span: DayframeCalendarBracketSpan
+  let frame: DayframeCalendarHitFrame
+}
+
+enum DayframeCalendarLaneLayout {
+  /// The lane's items with their drawn spans and 44-point targets, resolved together (DayframeCalendarPlacesLaneMath).
+  static func layout(presentation: DayframeCalendarPresentation, hourHeight: Double, hourLabelWidth: Double) -> [DayframeCalendarLanePlacement] {
+    let placed = presentation.placesLane.compactMap { item -> (DayframeCalendarLaneItemRecord, DayframeCalendarBracketSpan)? in
+      guard let span = DayframeCalendarBracketMath.span(
+        parts: [(startedAtMs: item.startedAtMs, stoppedAtMs: Optional(item.stoppedAtMs))],
+        nowMs: presentation.nowMs,
+        dayStartMs: presentation.dayStartMs,
+        dayEndMs: presentation.dayEndMs,
+        hourHeight: hourHeight,
+        minimumHeight: 4
+      ) else {
+        return nil
+      }
+      return (item, span)
+    }
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(spans: placed.map(\.1), hourLabelWidth: hourLabelWidth, timelineHeight: 24 * hourHeight)
+    return zip(placed, frames).map { DayframeCalendarLanePlacement(item: $0.0.0, span: $0.0.1, frame: $0.1) }
+  }
+}
+
 /// One press of the header's zoom − / + buttons. The scroll coordinator, the timeline's only
 /// geometry owner, animates it around the viewport centre and records the token it has handled.
 struct DayframeCalendarZoomRequest: Equatable {
@@ -298,6 +335,7 @@ final class DayframeCalendarViewModel: ObservableObject {
   /// The Dynamic Type scale of the block labels, set by the hosting view from its traits, so drawing
   /// and hit testing size the one-line minimum alike (location v4 C6).
   @Published private(set) var labelTextScale: Double = 1
+  let timelineTouches = DayframeCalendarTouchObserver()
   private var nextCreationSessionToken: UInt64 = 0
   private var nextZoomToken: UInt64 = 0
 
@@ -413,6 +451,8 @@ struct DayframeCalendarActions {
   let selectDay: (String) -> Void
   /// Grid · List in the header (location v4 step 9).
   let changeLayout: (String) -> Void
+  /// The header's Today pill. The app decides what it does: go to today, or scroll to now.
+  let pressToday: () -> Void
   /// In List: the height the header and week strip need, so the app sizes the view to them.
   let reportHeaderHeight: (Double) -> Void
 }

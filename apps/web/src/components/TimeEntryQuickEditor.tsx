@@ -51,8 +51,19 @@ export type TimeEntryQuickEditorMutationOutcome = { ok: true } | { ok: false; er
 
 type TimeEntryQuickEditorBusyAction = "delete" | "duplicate" | "save" | "split" | "start";
 
+/**
+ * A question the block asks at the top of its editor (a block that ran into a trip, location v4 design §7): one Yes
+ * ("End it at 09:42") and "Keep it", compact pills. `onAnswer` holds the answer for Undo (void) or saves it at once and
+ * resolves with why it was not saved (null: saved).
+ */
+export type TimeEntryQuickEditorQuestion = {
+  text: string; yesLabel: string | null; noLabel: string;
+  onAnswer: (yes: boolean) => void | Promise<string | null>;
+};
+
 type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
+  question?: TimeEntryQuickEditorQuestion | null;
   categories: CategoryRow[];
   isTimerBusy: boolean;
   onCreateCategory?: (name: string, color?: DayframePaletteKey, icon?: string) => Promise<CreateCategoryOutcome>;
@@ -442,7 +453,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.defaultPrevented || event.key !== "Escape") return;
       if (busyRef.current) {
         event.preventDefault();
         event.stopPropagation();
@@ -918,6 +929,11 @@ export function TimeEntryQuickEditorPanel({
         </div>
       </div>
 
+      {props.question && props.mode === "entry" ? (
+        <BlockQuestionCard disabled={controlsDisabled} hasUnsavedChanges={controller.hasUnsavedChanges} question={props.question}
+          onAnswered={() => props.onDismiss({ restoreFocus: true })} />
+      ) : null}
+
       {/* The split row's single transition owner: rows 0fr ↔ 1fr with opacity, entering from closed
           (@starting-style) and kept until its close has finished, so the fields below move, not jump. */}
       {splitShownAtMs != null && controller.splitBounds ? (
@@ -942,12 +958,20 @@ export function TimeEntryQuickEditorPanel({
           <label className="sr-only" htmlFor="time-entry-quick-description">Description</label>
           <div className="time-entry-quick-description-control" ref={descriptionInteractionRef}>
             <InlineTagInput
+              activities={props.mode === "entry" ? props.categories : undefined}
               ariaLabel="Description"
               className="time-entry-quick-tags"
               closeSignal={controller.dismissTagPanelsSignal}
+              completionScope={props.mode === "entry" ? props.entry.id : undefined}
               disabled={controlsDisabled}
               inputId="time-entry-quick-description"
               inputRef={descriptionRef}
+              onActivityChoose={(categoryId, description, _trigger, scope) => {
+                if (props.mode !== "entry" || scope !== props.entry.id) return;
+                controller.updateField("categoryId", categoryId);
+                controller.updateField("description", description);
+                controller.setSuggestionsOpen(false);
+              }}
               onChange={(value) => {
                 controller.updateField("description", value);
                 controller.setSuggestionsOpen(true);
@@ -1008,7 +1032,27 @@ export function TimeEntryQuickEditorPanel({
 
         <div className="calendar-compact-temporal-fields" data-clock={clock}>
           <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Start</span>
+            <div className="df-card-label-row">
+              <span className="calendar-compact-field-label">Start</span>
+              <DatePickerPopover
+                ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
+                className="calendar-compact-date-picker"
+                disabled={controlsDisabled}
+                label={formatShortDate(draft.startedAtDate)}
+                onChange={(date) => controller.updateTemporalField("startedAtDate", date, "start", true)}
+                onOpenChange={(open) => {
+                  if (open) controller.setSuggestionsOpen(false);
+                  controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current);
+                }}
+                panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
+                panelLabel="Choose Start date"
+                portal
+                max={today}
+                today={today}
+                triggerClassName="df-card-date"
+                value={draft.startedAtDate}
+                            />
+            </div>
             <div className="calendar-compact-date-time-controls">
               <input
                 aria-describedby={feedbackMode === "error" && startIsInvalid ? temporalErrorId : undefined}
@@ -1024,30 +1068,33 @@ export function TimeEntryQuickEditorPanel({
                 // once left (Codex r2 on #446: never append " AM" under the caret).
                 value={controller.activeTemporalOwner === "start" ? draft.startedAtTime : displayTypedTime(draft.startedAtTime, clock)}
               />
-              <DatePickerPopover
-                ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
-                className="calendar-compact-date-picker"
-                disabled={controlsDisabled}
-                iconOnly
-                label={formatAccessibleDate(draft.startedAtDate)}
-                onChange={(date) => controller.updateTemporalField("startedAtDate", date, "start", true)}
-                onOpenChange={(open) => {
-                  if (open) controller.setSuggestionsOpen(false);
-                  controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current);
-                }}
-                panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
-                panelLabel="Choose Start date"
-                portal
-                max={today}
-                today={today}
-                triggerClassName="calendar-compact-date-trigger"
-                value={draft.startedAtDate}
-              />
             </div>
           </div>
 
           <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">End</span>
+            <div className="df-card-label-row">
+              <span className="calendar-compact-field-label">End</span>
+              {isRunning ? null : (
+                <DatePickerPopover
+                  ariaLabel={`Choose End date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
+                  className="calendar-compact-date-picker"
+                  disabled={controlsDisabled}
+                  label={formatShortDate(draft.stoppedAtDate)}
+                  onChange={(date) => controller.updateTemporalField("stoppedAtDate", date, "finish", true)}
+                  onOpenChange={(open) => {
+                    if (open) controller.setSuggestionsOpen(false);
+                    controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
+                  }}
+                  panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
+                  panelLabel="Choose End date"
+                  portal
+                  max={today}
+                  today={today}
+                  triggerClassName="df-card-date"
+                  value={draft.stoppedAtDate}
+                />
+              )}
+            </div>
             {isRunning ? (
               <div className="calendar-compact-running-value">Running</div>
             ) : (
@@ -1067,25 +1114,6 @@ export function TimeEntryQuickEditorPanel({
                 {finishDayOffset > 0 ? (
                   <span className="calendar-compact-day-offset" aria-hidden="true" title={finishDescription}>+{finishDayOffset}</span>
                 ) : null}
-                <DatePickerPopover
-                  ariaLabel={`Choose End date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
-                  className="calendar-compact-date-picker"
-                  disabled={controlsDisabled}
-                  iconOnly
-                  label={formatAccessibleDate(draft.stoppedAtDate)}
-                  onChange={(date) => controller.updateTemporalField("stoppedAtDate", date, "finish", true)}
-                  onOpenChange={(open) => {
-                    if (open) controller.setSuggestionsOpen(false);
-                    controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
-                  }}
-                  panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
-                  panelLabel="Choose End date"
-                  portal
-                  max={today}
-                  today={today}
-                  triggerClassName="calendar-compact-date-trigger"
-                  value={draft.stoppedAtDate}
-                />
               </div>
             )}
           </div>
@@ -1163,6 +1191,51 @@ export function TimeEntryQuickEditorPanel({
         surfaceClassName="time-entry-quick-editor-nested-surface"
         title="Discard unsaved changes?"
       />
+    </div>
+  );
+}
+
+/**
+ * The block's question at the top of its editor (design §7), in the owner's compact pills (one Yes only, 44 px
+ * targets). It enters with the editor (the editor owns the motion; nothing of its own moves, so Reduce Motion needs no
+ * other path). An answer closes the editor; one saved at once keeps the editor and says why when it was refused. With
+ * unsaved changes it waits, so an answer never drops an edit.
+ */
+function BlockQuestionCard({ disabled, hasUnsavedChanges, onAnswered, question }: {
+  disabled: boolean; hasUnsavedChanges: boolean; onAnswered: () => void; question: TimeEntryQuickEditorQuestion;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const off = disabled || busy || hasUnsavedChanges;
+  async function answer(yes: boolean) {
+    const result = question.onAnswer(yes);
+    if (result) {
+      setBusy(true);
+      setError(null);
+      const failure = await result;
+      if (!alive.current) return;
+      setBusy(false);
+      if (failure) {
+        setError(failure);
+        return;
+      }
+    }
+    onAnswered();
+  }
+  return (
+    <div className="location-correction-question calendar-compact-question" role="group" aria-label={`${question.text}, Needs a look`}
+      aria-busy={busy || undefined}>
+      <b>{question.text}</b>
+      {hasUnsavedChanges ? <small>Save or discard your changes to answer.</small> : null}
+      <div className="location-correction-question-answers">
+        {question.yesLabel ? (
+          <button className="ui-button timeline-check-log is-compact" disabled={off} onClick={() => void answer(true)} type="button">{question.yesLabel}</button>
+        ) : null}
+        <button className="ui-button ui-button-secondary is-compact" disabled={off} onClick={() => void answer(false)} type="button">{question.noLabel}</button>
+      </div>
+      {error ? <p className="calendar-compact-question-error" role="alert">{error}</p> : null}
     </div>
   );
 }
@@ -1291,10 +1364,25 @@ export async function saveTimeEntryQuickEdit(entryId: string, plan: CalendarEntr
       }
       return { ok: false, error: message } as const;
     }
+    if (plan.payload.startedAt || plan.payload.stoppedAt) {
+      try {
+        const { updatedAt } = (await response.json()) as { updatedAt?: unknown };
+        if (typeof updatedAt === "string") return { ok: true, updatedAt } as const;
+      } catch {
+        // A successful save can still use the normal refresh if the response has no version.
+      }
+    }
     return { ok: true } as const;
   } catch {
     return { ok: false, error: "Unable to save this block. Check your connection and try again." } as const;
   }
+}
+
+/** The date beside a time box's label ("Fri 30 Oct"): quiet text that opens the picker (the card kit has no calendar icon). */
+function formatShortDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return dateKey;
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" }).format(new Date(year, month - 1, day)).replace(",", "");
 }
 
 function formatAccessibleDate(value: string) {
@@ -1340,7 +1428,7 @@ export function SplitLine({ atMs, bounds, canConfirm, clock, color, colorName, d
 }) {
   const ownLineRef = useRef<HTMLInputElement>(null);
   const lineRef = hostLineRef ?? ownLineRef;
-  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [open]);
+  useEffect(() => { if (open) lineRef.current?.focus({ preventScroll: true }); }, [lineRef, open]);
   const time = (ms: number) => formatTime(new Date(ms), clock);
   const minutes = (fromMs: number, toMs: number) => formatDuration(Math.round((toMs - fromMs) / 1000));
   // Where the line sits: the slider's own position (its range is where a split may fall), so the line, the

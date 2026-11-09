@@ -9,6 +9,11 @@ import {
 } from "./mobile-network";
 import { isAuthenticatedSessionSnapshotCurrent, readOwnedAuthenticatedSessionSnapshot } from "./secure-session";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
+import {
+  clearAnswersAfterCorrectionsForOwner,
+  noteTimelineCorrectionAcknowledged,
+  noteTimelineCorrectionRefused
+} from "./reviewAnswersAfterCorrections";
 
 /**
  * The iPhone's queue of location timeline corrections (location v4 step 12): what the person set in a place,
@@ -39,7 +44,7 @@ export type PendingTimelineCorrection = MobileAccountOwner & {
   failureKind?: "retryable" | "permanent";
 };
 
-export type TimelineCorrectionPreview = { name: string | null; role?: string | null };
+export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean };
 
 export type TimelineCorrectionSyncResult = {
   deliveredCount: number;
@@ -50,8 +55,12 @@ export type TimelineCorrectionSyncResult = {
   reason: "drained" | "retry_wait" | "retryable_failure" | "authentication_required" | "session_changed" | "background";
 };
 
-/** A correction the server has, kept a short while so the List keeps showing it until a timeline read after it lands. */
-export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number };
+/**
+ * A correction the server has, kept a short while so the List keeps showing it until a timeline read after it lands.
+ * `resolvedReviewItemIds`: the "?" the server resolved with it — a Logs as on a place with an open "?" resolves
+ * them in the same transaction, as their own "Not now" (#609) — so they leave the List at once.
+ */
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[] };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
 /** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
@@ -166,7 +175,8 @@ function parsePreview(value: unknown): TimelineCorrectionPreview | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   if (item.name !== null && typeof item.name !== "string") return null;
-  return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}) };
+  return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}),
+    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}) };
 }
 
 /** Keeps a correction on the phone (it shows at once) and returns it; send with `synchroniseTimelineCorrections`. */
@@ -215,9 +225,27 @@ export async function enqueueTimelineCorrections(
     };
   });
   if (!items.length) return items;
-  await withMutation(() => updateAll((current) => [...current, ...items]));
+  const kept: PendingTimelineCorrection[] = [];
+  await withMutation(() => updateAll((current) => {
+    for (const item of items) {
+      const request = item.request;
+      const previous = request.kind === "save_visit_place" ? current.filter((candidate) => (
+        candidate.workspaceId === owner.workspaceId && candidate.userId === owner.userId
+        && candidate.request.subject === "place" && candidate.request.itemId === request.itemId
+        && candidate.failureKind !== "permanent"
+      )).at(-1) : undefined;
+      if (request.kind === "save_visit_place" && previous?.request.kind === "save_visit_place"
+        && previous.request.visitStartedAt === request.visitStartedAt && previous.request.name === request.name) {
+        kept.push(previous);
+      } else {
+        current.push(item);
+        kept.push(item);
+      }
+    }
+    return current;
+  }));
   notify();
-  return items;
+  return kept;
 }
 
 /** This owner's corrections, oldest first, refused ones included. */
@@ -257,6 +285,8 @@ export async function clearTimelineCorrectionsForOwner(owner: MobileAccountOwner
     await AsyncStorage.removeItem(TIMELINE_CORRECTION_UNREADABLE_KEY);
   });
   acknowledged = acknowledged.filter((item) => !mobileAccountOwnersEqual(item, owner));
+  // Answers waiting for its corrections leave with them (Codex r2 on #610).
+  await clearAnswersAfterCorrectionsForOwner(owner).catch(() => undefined);
   notify();
 }
 
@@ -339,15 +369,38 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         error instanceof Error ? error.message : "Network request failed.", stillCurrent);
       if (kept === "session_changed") return finish("session_changed");
       if (retryable) return finish("retryable_failure");
-      if (kept) refused.push(kept);
+      if (kept) refused.push(await noteRefused(input.owner, kept));
       continue;
     }
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
+      const { resolvedReviewItemIds, placeId } = await readReceipt(response);
+      if (!await stillCurrent()) return finish("session_changed");
+      let request = next.request;
+      if (request.kind === "save_visit_place") {
+        const applied = TimelineCorrectionRequestSchema.safeParse({
+          kind: "place", subject: "place", itemId: request.itemId, visitStartedAt: request.visitStartedAt,
+          clientCorrectionId: next.clientCorrectionId, placeId, learnedPlaceId: null
+        });
+        if (!placeId || !applied.success) {
+          const kept = await recordFailure(next.clientCorrectionId, attemptedAt, false,
+            "Couldn't confirm the saved place. This change will retry.", stillCurrent);
+          return finish(kept === "session_changed" ? "session_changed" : "retryable_failure");
+        }
+        request = { ...applied.data, clientCorrectionId: next.clientCorrectionId };
+      }
+      try {
+        // An answer waiting for this correction learns it is acknowledged before the queue lets go of it, so an
+        // id that has left the queue unmarked was refused or discarded (Codex r2 on #610).
+        await noteTimelineCorrectionAcknowledged(input.owner, next.clientCorrectionId);
+      } catch {
+        // Not marked: kept, and sent again later; its id answers it (#597).
+        return finish("retryable_failure");
+      }
       // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
       acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-        { ...next, acknowledgedAt: Date.now() }];
+        { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
       deliveredCount += 1;
       try {
         await removeQuietly([next.clientCorrectionId]);
@@ -355,16 +408,42 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         // Saved on the server; only the local copy stayed. Sent again later, its id answers it (Codex r2 on #598).
         return finish("retryable_failure");
       }
+      // Published as soon as it settles, never after the rest of the pass (Codex r1 on #617): a Logs as's blocks
+      // (the day read it starts) and the "?" it resolved, an outing's trips' too, never wait for a later request.
+      // The timeline is still read again once per pass, at its end (the refresh revision).
+      notify();
       continue;
     }
-    const permanent = PERMANENT_STATUS_CODES.has(response.status);
     const message = await responseMessage(response);
+    // A rollback can temporarily put the old request schema behind a previously compatible bootstrap.
+    const oldServer = next.request.kind === "save_visit_place" && response.status === 400 && message === "Invalid request.";
+    const permanent = !oldServer && PERMANENT_STATUS_CODES.has(response.status);
     // The account may have changed while the reply was read or the queue written: then this correction is not
     // touched (Codex r2 and r3 on #598).
     const kept = await recordFailure(next.clientCorrectionId, attemptedAt, permanent, message, stillCurrent, response.status);
     if (kept === "session_changed") return finish("session_changed");
     if (!permanent) return finish("retryable_failure");
-    if (kept) refused.push(kept);
+    if (kept) refused.push(await noteRefused(input.owner, kept));
+  }
+}
+
+/** An answer waiting for a refused correction is dropped (best effort: an unmarked one finds it refused anyway). */
+async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorrection) {
+  await noteTimelineCorrectionRefused(owner, item.clientCorrectionId).catch(() => undefined);
+  return item;
+}
+
+/** The review items the server resolved with this correction (#609), when its reply says so. */
+async function readReceipt(response: Response) {
+  try {
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown };
+      correction?: { kind?: unknown; target?: { placeId?: unknown } } };
+    const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
+    const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
+      ? body.correction.target.placeId : null;
+    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], placeId };
+  } catch {
+    return { resolvedReviewItemIds: [], placeId: null };
   }
 }
 

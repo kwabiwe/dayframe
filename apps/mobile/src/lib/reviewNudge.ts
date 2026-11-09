@@ -34,8 +34,9 @@ export const DEFAULT_REVIEW_NUDGE_STATE: ReviewNudgeState = {
 export type ReviewNudgePlan = { fireAt: Date; body: string };
 
 export function reviewNudgeBody(count: number) {
-  // Location v4 step 14: things to check, opening Calendar › List (every open one, so no "today").
-  return count === 1 ? "1 thing to check." : `${count} things to check.`;
+  // Owner item 13 (28 Oct 2026): one end-of-day reminder counting what the Calendar badge counts, the last 7 days,
+  // opening the oldest that still asks.
+  return count === 1 ? "1 thing to check from the last 7 days." : `${count} things to check from the last 7 days.`;
 }
 
 export function clampReviewNudgeMinutes(minutes: number) {

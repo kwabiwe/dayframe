@@ -57,49 +57,34 @@ struct DayframeCalendarRootView: View {
         .minimumScaleFactor(0.7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.isHeader)
+      DayframeCalendarTodayPill(
+        isOnToday: presentation.selectedDayKey == presentation.todayKey,
+        theme: theme
+      ) {
+        playSelectionHaptic()
+        actions.pressToday()
+      }
       viewMenu(presentation: presentation, theme: theme)
     }
     .dynamicTypeSize(.xSmall ... .xxxLarge)
   }
 
-  /// One round button (Calendar v3) showing the current view's icon. It opens the system menu, as Apple
-  /// Calendar's does, with exactly two choices, Day and List, each with its icon and a check on the
-  /// current one. The menu's own presentation is the system's (and follows Reduce Motion).
+  /// One round button (Calendar v3; owner item J, 28 Oct 2026): one tap switches between Day and List, and
+  /// its icon is always the view it goes to.
   @ViewBuilder
   private func viewMenu(presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme) -> some View {
-    Menu {
-      // A picker inside a menu is the system's single choice: a check on the current item, its icon beside.
-      Picker("Calendar view", selection: Binding(
-        get: { presentation.isList ? "list" : "grid" },
-        set: { layout in
-          guard layout != (model.presentation.isList ? "list" : "grid") else { return }
-          playSelectionHaptic()
-          actions.changeLayout(layout)
-        }
-      )) {
-        viewMenuItem(title: "Day", glyph: "view-day").tag("grid")
-        viewMenuItem(title: "List", glyph: "view-list").tag("list")
-      }
+    Button {
+      playSelectionHaptic()
+      actions.changeLayout(presentation.isList ? "grid" : "list")
     } label: {
-      DayframeCalendarGlyph(name: presentation.isList ? "view-list" : "view-day", size: 20, followsTextSize: false)
+      DayframeCalendarGlyph(name: presentation.isList ? "view-day" : "view-list", size: 20, followsTextSize: false)
         .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
         .frame(width: 44, height: 44)
         .background(Circle().fill(Color(dayframeCSS: theme.surface)))
         .contentShape(Circle())
     }
-    .menuOrder(.fixed)
-    .accessibilityLabel("Calendar view")
-    .accessibilityValue(presentation.isList ? "List" : "Day")
-    .accessibilityHint("Choose Day or List")
-  }
-
-  @ViewBuilder
-  private func viewMenuItem(title: String, glyph: String) -> some View {
-    if let image = DayframeCalendarGlyphs.image(named: glyph) {
-      Label { Text(title) } icon: { Image(uiImage: image) }
-    } else {
-      Text(title)
-    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(presentation.isList ? "Show as day" : "Show as list")
   }
 
   // Week strip: weekday initial, the date in a 32-point circle (selected filled, today coral) and up
@@ -202,10 +187,40 @@ struct DayframeCalendarRootView: View {
   }
 }
 
+/// The compact pill (`compactPill.ts`; owner rule, 28 Oct 2026) in SwiftUI, because the header is: 32 points
+/// tall, 16 of side padding, 14-point bold, in a 44-point target. It has one job and one place, so it never
+/// moves or changes, in Day or List; the app decides what a tap does.
+private struct DayframeCalendarTodayPill: View {
+  let isOnToday: Bool
+  let theme: DayframeCalendarTheme
+  let action: () -> Void
+  @ScaledMetric(relativeTo: .subheadline) private var textSize: CGFloat = 14
+
+  var body: some View {
+    Button(action: action) {
+      Text("Today")
+        .font(.system(size: textSize, weight: .bold))
+        .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 16)
+        .frame(minHeight: 32)
+        .background(Capsule().fill(Color(dayframeCSS: theme.surface)))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Today")
+    .accessibilityHint(isOnToday ? "Scroll to now" : "Go to today")
+    .accessibilityIdentifier("calendar-today-pill")
+  }
+}
+
 private struct DayframeCalendarTimelineCanvas: View {
   @ObservedObject var model: DayframeCalendarViewModel
   let actions: DayframeCalendarActions
   @ScaledMetric(relativeTo: .caption) private var scaledHourLabelWidth: CGFloat = 68
+  @ScaledMetric(relativeTo: .caption2) private var hourLabelGlyphHeight: CGFloat = 8
 
   var body: some View {
     let presentation = model.presentation
@@ -220,19 +235,21 @@ private struct DayframeCalendarTimelineCanvas: View {
           clockFormat: presentation.clockFormat,
           hourHeight: hourHeight,
           hourLabelWidth: hourLabelWidth,
+          labelGlyphHeight: hourLabelGlyphHeight,
           // Calendar v3: the time pill takes the place of the hour label it would cover.
           nowY: presentation.selectedDayKey == presentation.todayKey
             ? min(timelineHeight, max(0, CGFloat(minuteOfDay(milliseconds: presentation.nowMs)) / 60 * hourHeight))
             : nil,
-          theme: theme,
-          timelineHeight: timelineHeight
+          theme: theme
         )
 
         DayframeCalendarEntriesLayer(
           actions: actions,
+          touchObserver: model.timelineTouches,
           availableWidth: geometry.size.width,
           hourHeight: hourHeight,
           hourLabelWidth: hourLabelWidth,
+          hourLabelGlyphHeight: hourLabelGlyphHeight,
           labelTextScale: model.labelTextScale,
           presentation: presentation
         )
@@ -353,11 +370,14 @@ private struct DayframeCalendarNowMarker: View {
     // Light: the deeper danger text red under white; dark: the bright danger red under the canvas colour.
     let red = Color(dayframeCSS: light ? theme.dangerText : theme.danger)
     let ink = Color(dayframeCSS: light ? "#FFFFFF" : theme.background)
+    let pillTrailing = max(0, min(width, hourLabelWidth - 6))
+    // Overlap the capsule edge by a point so its antialiased edge cannot leave a seam.
+    let lineStart = max(0, pillTrailing - 1)
     ZStack(alignment: .leading) {
       Rectangle()
         .fill(red)
-        .frame(width: max(0, width - hourLabelWidth), height: 2)
-        .offset(x: hourLabelWidth)
+        .frame(width: max(0, width - lineStart), height: 2)
+        .offset(x: lineStart)
       Text(label)
         .font(.system(size: 11, weight: .bold))
         .monospacedDigit()
@@ -367,7 +387,7 @@ private struct DayframeCalendarNowMarker: View {
         .padding(.horizontal, 6)
         .frame(height: CGFloat(DayframeCalendarNowPillMath.pillHeight))
         .background(Capsule(style: .continuous).fill(red))
-        .frame(width: max(0, hourLabelWidth - 6), alignment: .trailing)
+        .frame(width: pillTrailing, alignment: .trailing)
     }
     .frame(width: width, height: 18, alignment: .leading)
   }
@@ -455,18 +475,16 @@ private struct DayframeCalendarHourGrid: View {
   let clockFormat: String
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
+  let labelGlyphHeight: CGFloat
   /// Today's now line: an hour label the time pill covers is hidden under it (#255: only then).
   let nowY: CGFloat?
   let theme: DayframeCalendarTheme
-  let timelineHeight: CGFloat
   @Environment(\.displayScale) private var displayScale
-  /// The hour labels' digit height (caption2 cap height), following Dynamic Type.
-  @ScaledMetric(relativeTo: .caption2) private var labelGlyphHeight: CGFloat = 8
 
   var body: some View {
     ForEach(0...24, id: \.self) { hour in
       let lineTop = CGFloat(hour) * hourHeight
-      let labelTop = min(timelineHeight - 11, max(11, lineTop))
+      let labelTop = CGFloat(DayframeCalendarBracketMath.hourLabelCenter(hour: hour, hourHeight: Double(hourHeight)))
 
       Text(DayframeClockText.hour(hour % 24, clockFormat: clockFormat))
         .font(.caption2.weight(.semibold))
@@ -493,11 +511,18 @@ private struct DayframeCalendarHourGrid: View {
 
 private struct DayframeCalendarEntriesLayer: View {
   let actions: DayframeCalendarActions
+  let touchObserver: DayframeCalendarTouchObserver
   let availableWidth: CGFloat
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
+  let hourLabelGlyphHeight: CGFloat
   let labelTextScale: Double
   let presentation: DayframeCalendarPresentation
+
+  /// Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
+  private func openLaneItem(_ item: DayframeCalendarLaneItemRecord) {
+    actions.open(DayframeCalendarActionTarget(id: item.checkId ?? "lane:\(item.id)", kind: .review))
+  }
 
   var body: some View {
     // One layout per zoom step and text size (location v4 C6): every block at least one label line
@@ -532,7 +557,17 @@ private struct DayframeCalendarEntriesLayer: View {
           minimumHeight: DayframeCalendarDayLayout.labelMinimumHeight(textScale: labelTextScale)
         ) {
           let height = CGFloat(metrics.height)
-          DayframeCalendarBracketView(height: height, name: bracket.name, nameWidth: max(0, hourLabelWidth - 6), theme: presentation.theme)
+          DayframeCalendarBracketView(
+            height: height,
+            name: bracket.name,
+            nameWidth: max(0, hourLabelWidth - 6),
+            labelPlacement: DayframeCalendarBracketMath.labelPlacement(
+              in: metrics,
+              hourHeight: Double(hourHeight),
+              hourLabelGlyphHeight: Double(hourLabelGlyphHeight)
+            ),
+            theme: presentation.theme
+          )
             .frame(width: hourLabelWidth + 4, height: height)
             .position(
               x: (hourLabelWidth + 4) / 2,
@@ -546,6 +581,42 @@ private struct DayframeCalendarEntriesLayer: View {
                 : .opacity.animation(.easeOut(duration: 0.21))
             )
         }
+      }
+
+      // Step 17: the Places lane left of the blocks (entryLeadingInset makes room): each
+      // place and trip at its time, quiet; one that asks something is hatched with the amber dot and opens its
+      // question in the List; any other opens the List on this day. Same fade as a block; none with Reduce Motion.
+      // Each item has a full 44 × 44-point target (DayframeCalendarLaneLayout, shared with the scroll coordinator so
+      // a long press never starts a block over one). Close neighbours' targets overlap; a touch goes to the item
+      // whose drawn centre is nearest (DayframeCalendarPlacesLaneMath.hitIndex), whichever target it lands on. Each
+      // item is its own VoiceOver button (Codex r1 and r2 on #610).
+      let lane = DayframeCalendarLaneLayout.layout(
+        presentation: presentation,
+        hourHeight: Double(hourHeight),
+        hourLabelWidth: Double(hourLabelWidth)
+      )
+      ForEach(lane, id: \.item.id) { placement in
+        let item = placement.item
+        let height = CGFloat(placement.span.height)
+        let laneWidth = CGFloat(DayframeCalendarPlacesLaneMath.itemWidth)
+        let hitHeight = CGFloat(placement.frame.maxY - placement.frame.minY)
+        DayframeCalendarLaneItemView(item: item, height: height, width: laneWidth, theme: presentation.theme)
+          .offset(y: CGFloat(placement.span.top - placement.frame.minY))
+          .frame(width: laneWidth, height: hitHeight, alignment: .top)
+          .contentShape(Rectangle())
+          .gesture(SpatialTapGesture().onEnded { value in
+            guard touchObserver.allowsActivation else { return }
+            let point = DayframeCalendarPoint(x: placement.frame.minX + Double(value.location.x), y: placement.frame.minY + Double(value.location.y))
+            let index = DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\.span), frames: lane.map(\.frame))
+            openLaneItem(index.map { lane[$0].item } ?? item)
+          })
+          .position(x: CGFloat(placement.frame.minX) + laneWidth / 2, y: CGFloat(placement.frame.minY) + hitHeight / 2)
+          .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
+          .accessibilityElement(children: .ignore)
+          .accessibilityAddTraits(.isButton)
+          .accessibilityLabel(item.accessibilityLabel)
+          .accessibilityHint(item.kind == "trip" ? "Opens the trip" : "Opens the place")
+          .accessibilityAction { openLaneItem(item) }
       }
 
       ForEach(presentation.entries) { entry in
@@ -574,6 +645,7 @@ private struct DayframeCalendarEntriesLayer: View {
           let hitHeight = CGFloat(vertical.hitHeight)
 
           Button {
+            guard touchObserver.allowsActivation else { return }
             actions.open(entry.actionTarget)
           } label: {
             DayframeCalendarBlockView(
@@ -583,6 +655,9 @@ private struct DayframeCalendarEntriesLayer: View {
               labelTextScale: labelTextScale,
               metrics: metrics,
               nested: laidOut.nested,
+              dayStartMs: presentation.dayStartMs,
+              dayEndMs: presentation.dayEndMs,
+              nowMs: presentation.nowMs,
               visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -615,8 +690,9 @@ private struct DayframeCalendarEntriesLayer: View {
           )
           .zIndex(Double(laidOut.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
-          .accessibilityHint(entry.isReview ? "Opens Review" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
+          .accessibilityHint(entry.isReview || entry.asking ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
+          .accessibilityAction { actions.open(entry.actionTarget) }
         }
       }
 
@@ -626,6 +702,7 @@ private struct DayframeCalendarEntriesLayer: View {
       ForEach(moments, id: \.entry.entryId) { moment in
         let frame = moment.frame
         Button {
+          guard touchObserver.allowsActivation else { return }
           actions.open(moment.entry.actionTarget)
         } label: {
           DayframeCalendarMomentTick(color: Color(dayframeCSS: moment.entry.color))
@@ -639,6 +716,7 @@ private struct DayframeCalendarEntriesLayer: View {
         .zIndex(Double(DayframeCalendarDayLayout.momentZIndex))
         .accessibilityLabel(moment.entry.accessibilityLabel)
         .accessibilityHint("Opens entry editor")
+        .accessibilityAction { actions.open(moment.entry.actionTarget) }
       }
     }
     .frame(width: availableWidth, height: 24 * hourHeight, alignment: .topLeading)
@@ -657,6 +735,10 @@ private struct DayframeCalendarBlockView: View {
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
   let nested: Bool
+  /// The day this block is drawn on, for its leg strip (Codex r1 on #610).
+  let dayStartMs: Double
+  let dayEndMs: Double
+  let nowMs: Double
   let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -670,9 +752,9 @@ private struct DayframeCalendarBlockView: View {
     )
     let blockColor = UIColor(dayframeCSS: entry.color)
     let dark = theme.mode == "dark"
-    // The mock-up's tint: 18 % light / 28 % dark for blocks, 10 % / 14 % for suggestions. Under Reduce
-    // Transparency it is opaque (blended over the surface) and a little stronger.
-    let tint: CGFloat = entry.isReview ? (dark ? 0.14 : 0.10) : (dark ? 0.28 : 0.18)
+    // The mock-up's tint: 18 % light / 28 % dark for blocks; a suggestion is a light fill, 5 % / 8 % (owner
+    // item K, 28 Oct 2026). Under Reduce Transparency it is opaque (blended over the surface) and a little stronger.
+    let tint: CGFloat = entry.isReview ? (dark ? 0.08 : 0.05) : (dark ? 0.28 : 0.18)
     let fill: Color = reduceTransparency
       ? Color(uiColor: blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint + 0.1))
       : Color(uiColor: blockColor).opacity(Double(tint))
@@ -687,6 +769,9 @@ private struct DayframeCalendarBlockView: View {
       width: horizontal.width,
       textScale: labelTextScale
     )
+    // Step 16: the leg strip takes the text's first 18 points.
+    let showsLegs = !entry.legs.isEmpty && visualHeight >= 44
+    let legInset: Double = showsLegs ? 18 : 0
     // Calendar v3: overlapping blocks are drawn side by side or nested, as in Apple Calendar, so no
     // overlap dot; VoiceOver still says "Overlaps N other entries".
 
@@ -697,13 +782,17 @@ private struct DayframeCalendarBlockView: View {
         shape.fill(Color(dayframeCSS: theme.background).opacity(DayframeCalendarConstants.nestedCanvasWash))
       }
       shape.fill(fill)
+      // Owner item K: a suggestion's dashed amber edge (no hatching), with the amber dot below.
       if entry.isReview {
-        DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))
-          .opacity(reduceTransparency ? 0.22 : 0.14)
-          .clipShape(shape)
+        shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
       }
       DayframeCalendarColourBar(color: Color(uiColor: blockColor), dashed: entry.isReview)
         .clipShape(shape)
+      // Step 16: a trip block from 44 points tall shows its legs down its leading edge.
+      if showsLegs {
+        DayframeCalendarLegStrip(entry: entry, dayStartMs: dayStartMs, dayEndMs: dayEndMs, nowMs: nowMs, height: visualHeight, ink: ink, theme: theme)
+          .padding(.leading, 5)
+      }
       if entry.isActive {
         DayframeCalendarLiveRing(color: Color(uiColor: blockColor), reduceMotion: reduceMotion, shape: shape)
       }
@@ -712,17 +801,24 @@ private struct DayframeCalendarBlockView: View {
         DayframeCalendarDenseText(
           details: entry.isReview ? [] : entry.detailLines,
           ink: ink,
-          isReview: entry.isReview,
           label: label,
           labelTextScale: labelTextScale,
-          theme: theme,
           title: entry.title,
-          titleWidth: max(0, horizontal.width - label.leadingPadding - label.trailingPadding),
-          width: max(0, horizontal.width - label.leadingPadding - label.trailingPadding)
+          titleWidth: max(0, horizontal.width - label.leadingPadding - legInset - label.trailingPadding),
+          width: max(0, horizontal.width - label.leadingPadding - legInset - label.trailingPadding)
         )
-        .padding(.leading, CGFloat(label.leadingPadding))
+        .padding(.leading, CGFloat(label.leadingPadding + legInset))
         .padding(.trailing, CGFloat(label.trailingPadding))
         .padding(.top, CGFloat(label.verticalPadding))
+      }
+    }
+    .overlay(alignment: .topTrailing) {
+      // A suggestion's dot, or a block's own "?" (location v4 design §7): the same amber dot.
+      if entry.isReview || entry.asking {
+        Circle().fill(Color(dayframeCSS: theme.warning)).frame(width: 9, height: 9)
+          .overlay(Circle().stroke(Color(dayframeCSS: theme.surface), lineWidth: 2))
+          .padding(4)
+          .accessibilityHidden(true)
       }
     }
   }
@@ -756,25 +852,20 @@ private struct DayframeCalendarColourBar: View {
 private struct DayframeCalendarDenseText: View {
   let details: [DayframeCalendarDetailLineRecord]
   let ink: Color
-  let isReview: Bool
   let label: DayframeCalendarDenseLabel
   let labelTextScale: Double
-  let theme: DayframeCalendarTheme
   let title: String
   let titleWidth: Double
   let width: Double
 
   var body: some View {
     let font = UIFont.systemFont(ofSize: CGFloat(label.titleFontSize), weight: .bold)
-    // A suggestion's "? " is decoration ahead of its title: only real title words are fitted beside it.
-    let mark = isReview ? "? " : ""
-    let markWidth = isReview ? Double((mark as NSString).size(withAttributes: [.font: font]).width) : 0
     let wanted = details.filter { !$0.text.isEmpty }
     let titleLines = label.titleLines(detailCount: wanted.count)
     let lines = DayframeCalendarTitleFit.lines(
       words: title.split(whereSeparator: \.isWhitespace).map(String.init),
       maxLines: titleLines,
-      width: titleWidth - markWidth,
+      width: titleWidth,
       cutFirstWord: true,
       measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
     )
@@ -801,8 +892,8 @@ private struct DayframeCalendarDenseText: View {
       return out
     }()
     VStack(alignment: .leading, spacing: 0) {
-      ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-        titleLine(line, mark: index == 0 && isReview)
+      ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+        Text(line)
           .font(.system(size: CGFloat(label.titleFontSize), weight: .bold))
           .foregroundStyle(ink)
           .lineLimit(1)
@@ -838,11 +929,6 @@ private struct DayframeCalendarDenseText: View {
     default: return "time"
     }
   }
-
-  private func titleLine(_ text: String, mark: Bool) -> Text {
-    guard mark else { return Text(text) }
-    return Text("? ").foregroundColor(Color(dayframeCSS: theme.warningText)).fontWeight(.heavy) + Text(text)
-  }
 }
 
 /// A named pattern's bracket under the dense-day rules: a thin rail at the hour gutter's edge, from its
@@ -853,31 +939,32 @@ private struct DayframeCalendarBracketView: View {
   let height: CGFloat
   let name: String
   let nameWidth: CGFloat
+  let labelPlacement: (offset: Double, maxLines: Int)?
   let theme: DayframeCalendarTheme
 
   var body: some View {
-    let font = UIFont.systemFont(ofSize: 10, weight: .bold)
-    let lines = DayframeCalendarTitleFit.lines(
-      words: name.split(whereSeparator: \.isWhitespace).map(String.init),
-      maxLines: max(1, Int(floor(Double(max(12, height - 4)) / 12))),
-      width: Double(nameWidth),
-      measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
-    )
     HStack(alignment: .top, spacing: 0) {
-      VStack(alignment: .leading, spacing: 0) {
-        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-          Text(line)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(height: 12, alignment: .leading)
+      if let labelPlacement {
+        let font = UIFont.systemFont(ofSize: 10, weight: .bold)
+        let lines = DayframeCalendarTitleFit.lines(
+          words: name.split(whereSeparator: \.isWhitespace).map(String.init),
+          maxLines: labelPlacement.maxLines,
+          width: Double(nameWidth),
+          measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
+        )
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+            Text(line)
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .frame(height: CGFloat(DayframeCalendarBracketMath.labelLineHeight), alignment: .leading)
+          }
         }
+        .padding(.top, CGFloat(labelPlacement.offset))
+        .frame(width: nameWidth, alignment: .topLeading)
       }
-      .padding(.top, 2)
-      .frame(width: nameWidth, alignment: .topLeading)
-      // Over the hour labels it passes, like the mock-up's gutter label.
-      .background(Color(dayframeCSS: theme.background).opacity(lines.isEmpty ? 0 : 1))
       Spacer(minLength: 0)
       RoundedRectangle(cornerRadius: 1)
         .fill(Color(dayframeCSS: theme.textMuted).opacity(0.55))
@@ -1025,6 +1112,91 @@ private struct DayframeCalendarHatch: View {
       }
       .stroke(color, lineWidth: 4)
     }
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+}
+
+
+/// One place or trip in the Places lane: a quiet tinted bar (a trip a thin one), hatched with the amber dot
+/// when it asks something.
+private struct DayframeCalendarLaneItemView: View {
+  let item: DayframeCalendarLaneItemRecord
+  let height: CGFloat
+  let width: CGFloat
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    let asking = item.checkId != nil
+    let barWidth = item.kind == "trip" ? (asking ? 14 : 6) : width
+    let shape = RoundedRectangle(cornerRadius: min(5, barWidth / 2), style: .continuous)
+    ZStack(alignment: .top) {
+      shape.fill(asking ? Color(dayframeCSS: theme.warning).opacity(0.16) : Color(dayframeCSS: theme.textSecondary).opacity(item.kind == "trip" ? 0.34 : 0.14))
+      if asking {
+        // Owner item K: the same amber dot as the List, on a light fill with a dashed edge (no hatching).
+        shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+      }
+      if item.kind == "place" && height >= 20 {
+        DayframeCalendarGlyph(name: item.glyph, size: 13, followsTextSize: false)
+          .foregroundStyle(asking ? Color(dayframeCSS: theme.warningText) : Color(dayframeCSS: theme.textSecondary))
+          .padding(.top, 4)
+      }
+    }
+    .frame(width: barWidth, height: max(height, 3))
+    .overlay(alignment: .topTrailing) {
+      if asking {
+        Circle().fill(Color(dayframeCSS: theme.warning)).frame(width: 9, height: 9)
+          .overlay(Circle().stroke(Color(dayframeCSS: theme.surface), lineWidth: 2))
+          .offset(x: 3, y: -3)
+      }
+    }
+    .frame(width: width, height: max(height, 3))
+    .accessibilityHidden(true)
+  }
+}
+
+/// A trip block's legs (step 16): one segment per leg in proportion to its time, its glyph where it has room,
+/// an Unsure leg hatched in amber. Only this day's part of the trip: legs are clipped to the day and placed by the
+/// block's own day-clipped span (DayframeCalendarLegStripMath; Codex r1 on #610).
+private struct DayframeCalendarLegStrip: View {
+  let entry: DayframeCalendarEntry
+  let dayStartMs: Double
+  let dayEndMs: Double
+  let nowMs: Double
+  let height: CGFloat
+  let ink: Color
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    let segments = DayframeCalendarLegStripMath.segments(
+      legs: entry.legs.map { (startedAtMs: $0.startedAtMs, stoppedAtMs: $0.stoppedAtMs) },
+      startedAtMs: entry.startedAtMs,
+      stoppedAtMs: entry.stoppedAtMs ?? max(nowMs, entry.legs.map(\.stoppedAtMs).max() ?? entry.startedAtMs + 1),
+      dayStartMs: dayStartMs,
+      dayEndMs: dayEndMs,
+      height: Double(height)
+    )
+    ZStack(alignment: .topLeading) {
+      ForEach(segments, id: \.index) { placed in
+        let leg = entry.legs[placed.index]
+        let segment = CGFloat(placed.height)
+        ZStack {
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(leg.unsure ? Color(dayframeCSS: theme.warning).opacity(0.2) : ink.opacity(0.16))
+          if leg.unsure {
+            DayframeCalendarHatch(color: Color(dayframeCSS: theme.warningText)).opacity(0.35)
+              .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+          }
+          if segment >= 15 {
+            DayframeCalendarGlyph(name: leg.glyph, size: 11, followsTextSize: false)
+              .foregroundStyle(leg.unsure ? Color(dayframeCSS: theme.warningText) : ink)
+          }
+        }
+        .frame(width: 16, height: segment)
+        .offset(y: CGFloat(placed.top))
+      }
+    }
+    .frame(width: 16, height: height, alignment: .topLeading)
     .allowsHitTesting(false)
     .accessibilityHidden(true)
   }

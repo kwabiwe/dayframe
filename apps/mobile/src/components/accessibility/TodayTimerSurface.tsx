@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, type ComponentProps } from "react";
-import { Animated, StyleSheet, View } from "react-native";
+import { Animated, StyleSheet, useWindowDimensions, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "./diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
+import { MOBILE_TEXT_CAP } from "../../lib/mobileTypography";
 import type { LandingRequest } from "../../lib/blocksMotion";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import type { QuickStartColumn } from "../../lib/quickStartMosaic";
 import { QuickStartMosaic } from "../today/QuickStartMosaic";
 import { TodayIdleCard } from "../today/TodayIdleCard";
 import { TodayLiveBlock, type TodayLiveBlockPresentation } from "../today/TodayLiveBlock";
-import { TodayOpenTripLine } from "../today/TodayOpenTripLine";
+import { TODAY_OPEN_TRIP_LINE_HEIGHT, TodayOpenTripLine } from "../today/TodayOpenTripLine";
 import type { ClockFormat } from "@dayframe/shared";
 import type { MobileOpenTrip } from "../../lib/api";
 
@@ -23,8 +24,7 @@ export type TodayActiveTimerPresentation = TodayLiveBlockPresentation;
  * the mosaic animate their own layout changes, and
  * idle and live cards crossfade at the same geometry. With Reduce Motion the cards swap in place and
  * the live block's content fade is the single opacity change. The "Travelling since…" line (location
- * v4 step 5) sits in the card slot under the card: it fades in and out (Reanimated presence) while the
- * slot's layout transition moves the mosaic; with Reduce Motion it appears and goes at once.
+ * v4 step 5) fades inside its own reserved area below the card. Trip updates cannot move the mosaic.
  */
 export function TodayTimerSurface({
   active,
@@ -84,8 +84,12 @@ export function TodayTimerSurface({
   const cardEntering = useMemo(() => localPresenceEntering(false), []);
   const cardExiting = useMemo(() => (reduceMotion ? undefined : localPresenceExiting(false)), [reduceMotion]);
 
+  const { fontScale } = useWindowDimensions();
+  // Allow the full status to wrap once at the same capped size as its text.
+  const tripHeight = Math.ceil(2 * TODAY_OPEN_TRIP_LINE_HEIGHT * Math.min(fontScale, MOBILE_TEXT_CAP.metadata));
+
   return (
-    <View style={styles.stack}>
+    <View>
       <Reanimated.View
         layout={layout}
         onLayout={(event) => recordMobileLayout(diagnostic, active ? "today.timer.running" : "today.timer.idle", event)}
@@ -118,16 +122,17 @@ export function TodayTimerSurface({
             <TodayIdleCard diagnostic={diagnostic} onAddTime={onAddTime} onStartBlank={onStartBlank} theme={theme} />
           )}
         </Reanimated.View>
-        {openTrip ? (
-          <Reanimated.View
-            entering={painted.current && !reduceMotion ? cardEntering : undefined}
-            exiting={cardExiting}
-            style={styles.openTrip}
-            testID="today-open-trip-slot"
-          >
-            <TodayOpenTripLine clockFormat={clockFormat} openTrip={openTrip} theme={theme} />
-          </Reanimated.View>
-        ) : null}
+        <View style={[styles.openTripReserve, { height: tripHeight }]} testID="today-open-trip-reserve">
+          {openTrip ? (
+            <Reanimated.View
+              entering={painted.current && !reduceMotion ? cardEntering : undefined}
+              exiting={cardExiting}
+              testID="today-open-trip-slot"
+            >
+              <TodayOpenTripLine clockFormat={clockFormat} openTrip={openTrip} theme={theme} />
+            </Reanimated.View>
+          ) : null}
+        </View>
       </Reanimated.View>
       <Reanimated.View layout={layout} testID="today-quick-start-slot">
         <QuickStartMosaic
@@ -146,7 +151,6 @@ export function TodayTimerSurface({
 }
 
 const styles = StyleSheet.create({
-  stack: { gap: 22 },
   hidden: { opacity: 0 },
-  openTrip: { marginTop: 10 },
+  openTripReserve: { justifyContent: "center", marginTop: 4 },
 });

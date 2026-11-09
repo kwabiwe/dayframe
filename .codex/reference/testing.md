@@ -41,7 +41,7 @@ For timer, auth, sync, schema, or category/task model changes, validate:
 - delayed/failed Live Activity delivery cannot delay or change a committed Start, Stop, Switch, Edit, or Delete response
 - browser mutation ownership releases before bootstrap/push reconciliation and the newest queued Stop-to-Start intent wins
 - finite iOS timer execution ends exactly once on success, failure, expiry, cancellation, logout, account replacement, and teardown while retryable work remains durable
-- online pending/backoff presentation is static and only active transmission rotates
+- pending, backoff and active transmission stay silent in the header: no sync arrows, rotation or synced check (AGENTS.md › Mobile Patterns)
 - no project required for approved category/task-first flows
 
 ## Hosted Migration Checks
@@ -66,14 +66,13 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - Logout is reachable.
 - Keyboard shortcuts opens fully on-screen (desktop; the phone top bar has Search and the avatar only).
 - The ⌘K palette (Search and commands) opens fully on-screen above the tab bar, with a 44px close button.
-- Notifications panel opens fully on-screen.
 - No horizontal overflow.
 - No zooming or landscape rotation required.
 - Close/cancel actions are visible and tappable.
 
 ## PR helper scripts
 
-- `tools/prcheck.sh` runs typecheck, lint (which includes the documentation and iOS config checks), tests and `git diff --check` against the merge base with `origin/main`; add `--build` for the web production build. It does not replace feature-specific validators, browser checks or device tests.
+- `tools/prcheck.sh` runs typecheck, lint (which includes the documentation, iOS config and icon checks), tests and `git diff --check` against the merge base with `origin/main`; add `--build` for the web production build. It does not replace feature-specific validators, browser checks or device tests.
 - `tools/codex-review.sh <prompt-file> [scratch-dir]` exports the exact committed `HEAD` with `git archive`, links the installed `node_modules`, and runs a Codex review told not to change code. Codex's `workspace-write` sandbox can write the export and the system temp directories (where the default scratch and report live), not the real checkout; the `node_modules` links resolve into the checkout, so tests that write caches there may fail inside the sandbox. Uncommitted changes are not reviewed. Set `CODEX_BIN` to override the Codex CLI path.
 
 ## Review Checklist
@@ -85,4 +84,5 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - [ ] App-shell and floating-surface changes include mobile overlay checks.
 - [ ] Core timer changes include start/stop/manual-entry regression checks.
 - [ ] Hosted migration-dependent changes include hosted schema verification notes.
+- [ ] iPhone-behaviour changes add their device checks to the next-TestFlight staging checklist (`.codex/reference/release-and-testflight.md`).
 - [ ] Canonical docs and delivery state were updated, or the PR explains why documentation is unaffected.

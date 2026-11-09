@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
 import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -774,7 +775,6 @@ export default function PlacesScreen() {
         onPress={() => beginEditPlace(place)}
         style={({ pressed }) => [
           styles.placesRow,
-          index > 0 ? styles.settingsActivityRowDivider : null,
           pressed ? styles.placesRowPressed : null
         ]}
         // The All places (or only) row keeps the plain id that tests and links use.
@@ -794,6 +794,7 @@ export default function PlacesScreen() {
           </View>
         </View>
         <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
       </Pressable>
     );
   }
@@ -810,7 +811,7 @@ export default function PlacesScreen() {
         <View
           accessible
           accessibilityLabel={row.accessibilityLabel}
-          style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+          style={styles.placesRow}
           testID={`places-restored-${row.id}`}
         >
           <View style={styles.placesRowMain}>
@@ -822,6 +823,7 @@ export default function PlacesScreen() {
               <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
             </View>
           </View>
+          {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
         </View>
       </Reanimated.View>
     );
@@ -897,7 +899,7 @@ export default function PlacesScreen() {
               Archived, Suggested places) never make a boundary or a footnote below them jump. */}
           <ReflowBlockGroup foot="Trips are named after these." reduceMotion={reduceMotion} theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
-              <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
+              <View key={slot.role} style={styles.placesRow} testID={`places-role-${slot.role}`}>
                 <View style={styles.placesRowMain}>
                   <View style={styles.placesBlock}>
                     <DayframeIcon color={theme.textPrimary} glyph={slot.role === "home" ? DAYFRAME_APP_ICONS.placeHome : DAYFRAME_APP_ICONS.placeWork} size={18} />
@@ -919,6 +921,7 @@ export default function PlacesScreen() {
                     <SettingsPillButton accessibilityLabel={`Set ${slot.label}`} label="Set" onPress={() => openRole(slot.role, "choose")} theme={theme} />
                   )}
                 </View>
+                {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
               </View>
             ))}
           </ReflowBlockGroup>
@@ -1008,7 +1011,7 @@ export default function PlacesScreen() {
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
                   >
-                    <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
+                    <View style={styles.placesRow}>
                       <Pressable
                         accessibilityHint="Shows details, Ignore and Forget"
                         accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
@@ -1034,6 +1037,7 @@ export default function PlacesScreen() {
                           theme={theme}
                         />
                       </View>
+                      {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                     </View>
                   </Reanimated.View>
                 ))}

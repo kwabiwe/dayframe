@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MobileBootstrap, QueuedEvent } from "./api";
 import { projectDurableLocalWork, type DurableLocalWork } from "./durableLocalProjection";
+import { rollbackRejectedCompletedCopy } from "./completedEntryCopyProjection";
+import { optimisticPatchTimeEntry } from "./timerPresentation";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
 
@@ -82,6 +84,169 @@ describe("durable dashboard projection", () => {
     expect(projected.entries.find((item) => item.id === edited.id)?.description)
       .toBe("Retained offline edit");
     expect(projected.entries.some((item) => item.id === deleted.id)).toBe(false);
+  });
+
+  it("projects a duplicate across midnight once and retires it on canonical or changed-source reads", () => {
+    const updatedAt = "2026-08-22T23:30:00.000Z";
+    const original = {
+      ...entry("finished"), startedAt: "2026-08-22T23:20:00.000Z", stoppedAt: "2026-08-22T23:50:00.000Z",
+      updatedAt, tagNames: ["writing"], locationGroup: { key: "trip", name: "Trip" }
+    };
+    const copyId = "e99b1dae-3711-8125-8a38-a05709a63d52";
+    const copy: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "copy-1", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "duplicate" }, copyId, expectedUpdatedAt: updatedAt },
+      createdAt: updatedAt, updatedAt, attemptCount: 0
+    };
+    const data = bootstrap({
+      entries: [original], dayEntries: [], weekEntries: [original],
+      dateRange: {
+        selectedDate: "2026-08-23", previousDate: "2026-08-22", nextDate: "2026-08-24",
+        dayStart: "2026-08-23T00:00:00.000Z", dayEnd: "2026-08-24T00:00:00.000Z",
+        weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const durable = work({ timeEntryCommands: [copy] });
+    const first = projectDurableLocalWork(data, durable);
+    expect(first.dayEntries).toHaveLength(1);
+    expect(first.dayEntries?.[0]).toMatchObject({
+      id: copyId, startedAt: "2026-08-22T23:50:00.000Z", stoppedAt: "2026-08-23T00:20:00.000Z",
+      tagNames: ["writing"], source: "manual_app", locationGroup: undefined
+    });
+    expect(projectDurableLocalWork(first, durable)).toBe(first);
+    const afterRemoval = { ...data, entries: [{ ...original, updatedAt: "2026-08-22T23:59:00.000Z" }] };
+    expect(projectDurableLocalWork(afterRemoval, durable)).toBe(afterRemoval);
+    expect(projectDurableLocalWork(data, work({ timeEntryCommands: [{ ...copy, failureKind: "permanent" }] }))).toBe(data);
+  });
+
+  it("projects a split without changing the running timer or showing an empty half in the next day", () => {
+    const running = entry("live");
+    const splitAt = "2026-08-23T00:00:00.000Z";
+    const original = {
+      ...entry("finished"), startedAt: "2026-08-22T23:30:00.000Z", stoppedAt: "2026-08-23T00:30:00.000Z",
+      updatedAt: "2026-08-23T01:00:00.000Z", durationSeconds: 3600
+    };
+    const copy: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "split-1", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "split", splitAt }, copyId: "split-half", expectedUpdatedAt: original.updatedAt },
+      createdAt: original.updatedAt, updatedAt: original.updatedAt, attemptCount: 0
+    };
+    const data = bootstrap({
+      entries: [running, original], activeEntry: running, dayEntries: [original],
+      dateRange: {
+        selectedDate: "2026-08-23", previousDate: "2026-08-22", nextDate: "2026-08-24",
+        dayStart: splitAt, dayEnd: "2026-08-24T00:00:00.000Z",
+        weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const projected = projectDurableLocalWork(data, work({ timeEntryCommands: [copy] }));
+    expect(projected.activeEntry).toBe(running);
+    expect(projected.entries.find((candidate) => candidate.id === original.id)).toMatchObject({ stoppedAt: splitAt, durationSeconds: 1800 });
+    expect(projected.dayEntries).toEqual([expect.objectContaining({ id: "split-half", startedAt: splitAt, durationSeconds: 1800 })]);
+    const removed = work({ timeEntryCommands: [{ ...copy, copyAcknowledged: true, copyRemovedOnServer: true }] });
+    for (const snapshot of [data, projected]) {
+      const settled = projectDurableLocalWork(snapshot, removed);
+      expect(settled.activeEntry).toBe(running);
+      expect(settled.entries.find((candidate) => candidate.id === original.id)).toMatchObject({ stoppedAt: splitAt });
+      expect(settled.entries.some((candidate) => candidate.id === "split-half")).toBe(false);
+      expect(settled.dayEntries).toEqual([]);
+    }
+  });
+
+  it("fences a pre-split source in one bootstrap list even when a different list has the canonical split", () => {
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const original = {
+      ...entry("source"), startedAt: "2026-08-22T10:00:00.000Z", stoppedAt: "2026-08-22T11:00:00.000Z",
+      updatedAt: "2026-08-22T11:00:00.000Z"
+    };
+    const first = { ...original, stoppedAt: splitAt, updatedAt: "2026-08-22T11:30:00.000Z" };
+    const second = { ...first, id: "second", startedAt: splitAt, stoppedAt: original.stoppedAt };
+    const command: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "split-mixed-read", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "split", splitAt }, copyId: second.id, expectedUpdatedAt: original.updatedAt },
+      createdAt: first.updatedAt, updatedAt: first.updatedAt, attemptCount: 0, copyAcknowledged: true
+    };
+    const durable = work({ timeEntryCommands: [command] });
+    for (const head of [original, first]) {
+      const mixed = bootstrap({ entries: [head], dayEntries: [original], weekEntries: [first, second] });
+      const projected = projectDurableLocalWork(mixed, durable);
+      expect(projected.dayEntries).toEqual([expect.objectContaining({ id: original.id, pendingCompletedCopy: true })]);
+      expect(projected.weekEntries).toBe(mixed.weekEntries);
+    }
+    const coherent = bootstrap({ entries: [first, second], dayEntries: [first, second], weekEntries: [first, second] });
+    expect(projectDurableLocalWork(coherent, durable)).toBe(coherent);
+    const changed = { ...first, stoppedAt: "2026-08-22T10:15:00.000Z" };
+    const older = { ...original, updatedAt: "2026-08-22T10:59:00.000Z" };
+    const afterDeletion = bootstrap({ entries: [original], dayEntries: [older], weekEntries: [changed] });
+    const guarded = projectDurableLocalWork(afterDeletion, durable);
+    expect(guarded.dayEntries).toEqual([expect.objectContaining({ id: original.id, pendingCompletedCopy: true })]);
+    expect(guarded.weekEntries).toBe(afterDeletion.weekEntries);
+    expect(guarded.entries.some((candidate) => candidate.id === second.id)).toBe(false);
+    const duplicate = work({
+      timeEntryCommands: [{ ...command, copy: { ...command.copy!, action: { kind: "duplicate" } } }]
+    });
+    expect(projectDurableLocalWork(afterDeletion, duplicate)).toBe(afterDeletion);
+    const reopened = { ...changed, stoppedAt: null };
+    const active = bootstrap({ entries: [original], dayEntries: [older], activeEntry: reopened });
+    const withReopened = projectDurableLocalWork(active, durable);
+    expect(withReopened.activeEntry).toBe(reopened);
+    expect(withReopened.dayEntries).toEqual([expect.objectContaining({ pendingCompletedCopy: true })]);
+  });
+
+  it.each([false, true])("fences an older cached source after a split receipt (copy removed: %s)", (removed) => {
+    const old = {
+      ...entry("cached-source"), startedAt: "2026-08-22T10:00:00.000Z", stoppedAt: "2026-08-22T11:00:00.000Z",
+      updatedAt: "2026-08-22T10:59:00.000Z"
+    };
+    const command: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "cached-split-receipt", operation: "copy", targetEntryId: old.id,
+      copy: {
+        action: { kind: "split", splitAt: "2026-08-22T10:30:00.000Z" }, copyId: "copy",
+        expectedUpdatedAt: "2026-08-22T11:00:00.000Z"
+      },
+      createdAt: old.updatedAt, updatedAt: old.updatedAt, attemptCount: 0, copyAcknowledged: true,
+      copyRemovedOnServer: removed ? true : undefined
+    };
+    const data = bootstrap({ entries: [old], dayEntries: [old] });
+    const projected = projectDurableLocalWork(data, work({ timeEntryCommands: [command] }));
+    expect(projected.dayEntries).toEqual([expect.objectContaining({ id: old.id, pendingCompletedCopy: true })]);
+    expect(projected.entries.some((candidate) => candidate.id === "copy")).toBe(false);
+  });
+
+  it("rolls back a refused split immediately against cached server truth while retaining a later edit", () => {
+    const splitAt = "2026-08-23T00:00:00.000Z";
+    const original = {
+      ...entry("finished"), startedAt: "2026-08-22T23:30:00.000Z", stoppedAt: "2026-08-23T00:30:00.000Z",
+      updatedAt: "2026-08-23T01:00:00.000Z", durationSeconds: 3600
+    };
+    const copy: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "refused-split", operation: "copy", targetEntryId: original.id,
+      copy: { action: { kind: "split", splitAt }, copyId: "provisional-half", expectedUpdatedAt: original.updatedAt, originalStoppedAt: original.stoppedAt },
+      createdAt: original.updatedAt, updatedAt: original.updatedAt, attemptCount: 0
+    };
+    const baseline = bootstrap({
+      entries: [original], dayEntries: [original],
+      dateRange: {
+        selectedDate: "2026-08-23", previousDate: "2026-08-22", nextDate: "2026-08-24",
+        dayStart: splitAt, dayEnd: "2026-08-24T00:00:00.000Z",
+        weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const projected = projectDurableLocalWork(baseline, work({ timeEntryCommands: [copy] }));
+    const afterEdit = optimisticPatchTimeEntry(projected, original.id, { description: "Later local edit" })!;
+    const rollback = rollbackRejectedCompletedCopy(afterEdit, baseline, original.id, copy.copy!, false);
+    expect(rollback.dayEntries).toEqual([expect.objectContaining({
+      id: original.id, stoppedAt: original.stoppedAt, durationSeconds: 3600, description: "Later local edit"
+    })]);
+    expect(rollback.entries.some((candidate) => candidate.id === "provisional-half")).toBe(false);
+    expect(rollbackRejectedCompletedCopy(rollback, baseline, original.id, copy.copy!, false)).toBe(rollback);
+    const newerBaseline = { ...baseline, entries: [{ ...original, updatedAt: "2026-08-23T01:01:00.000Z" }] };
+    for (const unavailable of [null, newerBaseline]) {
+      const fallback = rollbackRejectedCompletedCopy(afterEdit, unavailable, original.id, copy.copy!, false);
+      expect(fallback.dayEntries).toEqual([expect.objectContaining({
+        id: original.id, stoppedAt: original.stoppedAt, description: "Later local edit"
+      })]);
+    }
   });
 
   it("restores server truth instead of projecting a permanently rejected edit", () => {

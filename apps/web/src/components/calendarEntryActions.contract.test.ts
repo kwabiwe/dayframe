@@ -39,7 +39,7 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("<CategoryPicker");
     expect(categoryPicker).toContain('role="listbox"');
     expect(categoryPicker).toContain('aria-label="Activities"');
-    expect(quick.match(/iconOnly/g)).toHaveLength(2);
+    expect(quick).not.toContain("iconOnly");
     expect(quick).toContain("calendarEntryLocalDayOffset");
     expect(quick).toContain("calendar-compact-day-offset");
     expect(quick).not.toContain("placeId");
@@ -87,28 +87,25 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \* \{[^}]*gap:\s*6px;[^}]*padding:\s*0;[^}]*background:\s*transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-time-controls,\n\.calendar-compact-editor-panel \.calendar-compact-duration-input input,\n\.calendar-compact-editor-panel \.calendar-compact-duration,\n\.calendar-compact-editor-panel \.calendar-compact-running-value \{[^}]*min-height:\s*44px;[^}]*border-radius:\s*12px;[^}]*background:\s*var\(--surface-inset\);[^}]*box-shadow:\s*inset 0 0 0 var\(--web-control-border-width\) var\(--control-border\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-time-controls:focus-within,\n\.calendar-compact-editor-panel \.calendar-compact-duration-input input:focus \{[^}]*var\(--web-focus-border\)/s);
-    // The date glyph keeps a full 44 × 44 target (Codex r1 on #465).
-    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-trigger \{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
-    // The uppercase field labels are the editor panel's own: Add time keeps its labels (Codex r1 on #465).
-    expect(styles).toMatch(/\n\.calendar-compact-field-label,\n\.calendar-compact-editor-description > label,\n\.calendar-compact-editor-fields label > span,\n\.calendar-compact-duration-field > span \{[^}]*font-size:\s*var\(--type-label\);[^}]*letter-spacing:\s*0\.02em;\n\}/);
-    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-field-label,[^{]*\{[^}]*text-transform:\s*uppercase;/s);
+    // The labels are the card kit's one label, Add time's too (cardKit.contract.test.ts).
+    expect(styles).toMatch(/\.calendar-compact-field-label,\n\.calendar-compact-editor-description > label,/);
     // The touch rule comes after the "All activities" chip's 32 px, so it wins (Codex r1 on #465).
-    const moreChip = styles.indexOf(".df-ed-chips .calendar-compact-category-field > .df-rchip--more {");
+    const moreChip = styles.indexOf(".df-rchip--more {");
+    expect(categoryPicker).toContain('variant === "more" ? "df-all-activities-field"');
+    expect(styles).toMatch(/\.df-all-activities-field \{[^}]*display:\s*inline-flex;/s);
     const coarseChips = styles.indexOf("@media (any-pointer: coarse) {\n  .df-ed-chips .df-rchip,");
     expect(moreChip).toBeGreaterThan(-1);
     expect(coarseChips).toBeGreaterThan(moreChip);
-    expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
-    expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
     expect(quick).toContain('className="calendar-compact-duration-field"');
     expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
     expect(quick).not.toContain('<strong className="tabular">');
-    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
+    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*var\(--fw-regular\);[^}]*line-height:\s*21px;/s);
     // Add time's own date-time picker is retired (WUI-025): its CSS goes with it.
     expect(styles).not.toContain("dayframe-date-time");
   });
 
   it("lets the title win at every size, compact and narrow, whole words only (Calendar v3, 24 Oct 2026)", () => {
-    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 14px;[^}]*font-weight: 700;[^}]*line-height: 17px;[^}]*word-break: normal;/s);
+    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 14px;[^}]*font-weight: var\(--fw-strong\);[^}]*line-height: 17px;[^}]*word-break: normal;/s);
     expect(styles).toMatch(/\.calendar-time-block\.is-dense-compact \.calendar-entry-title,[\s\S]*?\{[^}]*font-size: 11\.5px;[^}]*line-height: 14px;/s);
     expect(styles).toMatch(/@container calendar-time-block \(max-width: 89\.98px\)[\s\S]*?font-size: 11\.5px;/s);
     expect(styles).toMatch(/@container calendar-time-block \(min-width: 120px\)[\s\S]*?\.calendar-entry-details \{\s*display: grid;/s);

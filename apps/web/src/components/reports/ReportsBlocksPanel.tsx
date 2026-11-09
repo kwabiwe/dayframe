@@ -403,7 +403,6 @@ export function ReportsBlocksPanel({
           <div className="df-card-head">
             <h2 id="df-report-blocks-title">{blocks.layout === "month" ? "The month in blocks" : "The days in blocks"}</h2>
             <span className="df-faint">
-              <span className="df-hint-fine">Hover an activity to trace it</span>
               <span className="df-hint-coarse">Tap a day, then an activity, to trace it</span>
             </span>
             <span className="sr-only" id="df-report-blocks-hint">

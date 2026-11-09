@@ -23,13 +23,6 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     // Load failed is the in-page Blocks state with Try again (staging feedback B2), not an alert.
     '"Places"' // ignore or forget failed (one call site since Codex r11 on #508)
   ],
-  "app/review.tsx": [
-    '"Review"', // bulk skip: some moments not saved on this iPhone
-    '"Review"', // a held card's outbox check could not be read: not saved (Codex r3 on #582)
-    '"Review"', // a Review change was not saved on this iPhone
-    '"Edit"', // follow-up: validation inside the open entry sheet (a toast would sit under its modal)
-    '"Edit"' // save failed
-  ],
   "app/settings.tsx": [
     '"Unable to refresh Settings"',
     '"Apple Health"', // mapping save failed (the one Health mapping writer)
@@ -50,7 +43,12 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Couldn\'t sign out"'
   ],
   "src/components/calendar/useCalendarCheckAnswers.ts": [
-    '"Calendar"' // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"', // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+    '"Calendar"', // a waiting answer's record couldn't be let go, so the answer was given up (Codex r10 on #610)
+    '"Calendar"' // an answer couldn't be registered behind a queued correction on this iPhone (Codex r7 on #610)
+  ],
+  "src/components/calendar/useAnswersAfterCorrections.ts": [
+    '"Calendar"' // the recovery runner gave a waiting answer up on return to the front (Codex r11 on #610)
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',
@@ -65,10 +63,6 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Stop needs attention"',
     'entries.length > 1 ? "Blocks not deleted" : "Block not deleted"',
     'currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted"'
-  ],
-  "src/components/location/LocationReviewCorrectionEditor.tsx": [
-    '"Place search"', // search failed
-    '"Use map pin"' // follow-up: validation inside the correction editor
   ]
 };
 

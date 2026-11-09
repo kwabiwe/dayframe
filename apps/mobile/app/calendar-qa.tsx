@@ -4,11 +4,14 @@ import { CalendarListView } from "@/components/calendar/CalendarListView";
 import { LocationCorrectionSheet, type LocationCorrectionTarget } from "@/components/calendar/LocationCorrectionSheet";
 import { useEffect, useMemo, useState } from "react";
 import { LogBox, ScrollView, View } from "react-native";
+import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
+import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import { useClockFormat } from "@/lib/clockFormat";
 import { useMobileTheme } from "@/lib/mobileTheme";
+import { withPlacesAndLegs } from "@/lib/calendarGridPlaces";
 import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation";
 
 // Development-only harness for Calendar titles at every zoom (location v4 C6) and Calendar › List
@@ -62,7 +65,9 @@ const entries = [
   block("b6", "meeting", "Call with Sam", [11, 30], [11, 45]),
   block("b7", "social", "Coffee", [12, 30], [12, 34]),
   block("b4", "meeting", "Team sync", [13, 30], [14, 40]),
-  block("b5", "around", null, [14, 40], [16, 26])
+  block("b5", "around", null, [14, 40], [16, 26]),
+  // The owner's 28 Oct case: a gym visit logged as a block (its place line stands for the place row).
+  { ...block("b8", "health", "PureGym", [17, 10], [17, 40]), placeName: "PureGym" }
 ];
 
 // calendar-v3-mockup's synthetic Friday (Calendar v3, owner 24 Oct 2026): [start, end, title, colour, extra].
@@ -146,20 +151,32 @@ const timeline: LocationTimeline = {
     { kind: "place", id: "qa-office", status: "finalised", startedAt: iso(10, 39), stoppedAt: iso(14, 40), placeId: "p-office", learnedPlaceId: null,
       name: "Office", role: "work", matchKind: "saved", confidence: "high", blockIds: ["b3", "b4"] },
     { kind: "place", id: "qa-unknown", status: "finalised", startedAt: iso(16, 26), stoppedAt: iso(17, 0), placeId: null, learnedPlaceId: null,
-      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] }
+      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] },
+    { kind: "place", id: "qa-gym", status: "finalised", startedAt: iso(17, 10), stoppedAt: iso(17, 40), placeId: "p-gym", learnedPlaceId: null,
+      name: "PureGym", role: null, matchKind: "saved", confidence: "high", blockIds: ["b8"] },
+    { kind: "trip", id: "qa-trip-2", status: "finalised", startedAt: iso(17, 45), stoppedAt: iso(18, 20), fromId: "qa-gym", toId: "qa-home-2",
+      mode: "walking", stopIds: [], distanceMeters: 2_400, confidence: "medium", reason: null, blockIds: [], legs: [
+        { startedAt: iso(17, 45), stoppedAt: iso(18, 20), mode: "walking", confidence: "sure", distanceMeters: 2_400 }] },
+    { kind: "place", id: "qa-home-2", status: "finalised", startedAt: iso(18, 20), stoppedAt: iso(23, 0), placeId: "p-home", learnedPlaceId: null,
+      name: "Home", role: null, matchKind: "saved", confidence: "high", blockIds: [] }
   ]
 };
 
 // Things to check (step 14): the unknown place's question, and Apple Health's sleep.
 const QA_CHECKS = [
   { id: "qa-check-unknown", segmentId: "qa-unknown", startedAt: iso(16, 26), stoppedAt: iso(17, 0) },
-  { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) }
+  { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) },
+  { id: "qa-check-trip", segmentId: "qa-trip-2", startedAt: iso(17, 45), stoppedAt: iso(18, 20) }
 ];
-const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"]]);
+// Owner, 28 Oct 2026: each "?" row's own icon, and how many still ask across the last 7 days (other days too).
+const QA_CHECK_GLYPHS = new Map([["qa-check-unknown", "map-pin"], ["qa-check-sleep", "heart-pulse"], ["qa-check-trip", "route"]] as const);
+const QA_CHECK_TOTAL = 5;
+const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"], ["qa-check-trip", "Getting around"]]);
 // Their questions (step 14 part 3b), as reviewAnswerQuestion words them; answers here do nothing.
 const QA_CHECK_QUESTIONS = new Map([
-  ["qa-check-unknown", { question: "Log Unknown place, 16:26–17:00?", detail: null, logLabel: "Log it", skipLabel: "Not now", more: true, opens: false }],
-  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
+  ["qa-check-unknown", { question: "Visited Pret A Manger?", detail: "16:26–17:00", logLabel: "Yes", skipLabel: "Not now" }],
+  ["qa-check-trip", { question: "Getting around, 17:45–18:20?", detail: "35m · Location", logLabel: "Yes", skipLabel: "Not now" }],
+  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep" }]
 ]);
 
 // Step 12's correction sheets: the saved places, and the trip with no block (so its times and "This wasn't a
@@ -169,9 +186,20 @@ const QA_SHEET_PLACES = [
   { id: "p-office", name: "Work", role: "work" },
   { id: "p-school", name: "Exampleton Primary", role: null }
 ];
+// Logs as and the near guess for the sheets (made-up names and colours).
+const QA_SHEET_ACTIVITIES = [
+  { id: "qa-general", name: "General", isPinned: false, color: "slate", icon: null },
+  { id: "qa-errands", name: "Errands", isPinned: false, color: "amber", icon: null },
+  { id: "qa-health", name: "Health", isPinned: false, color: "green", icon: "heart-pulse" },
+  { id: "qa-getting-around", name: "Getting around", isPinned: false, color: "orange", icon: null },
+  { id: "qa-home", name: "Home", isPinned: false, color: "teal", icon: null }
+];
+const QA_SHEET_GUESS = { name: "Holland & Barrett", street: "12 Example Street", applePlaceId: null };
 // A made-up map for the sheets (public coordinates in central Paris, nobody's real places): readings around the
 // stay, and a trip's route with a silence in it.
 const qaPoint = (longitude: number, latitude: number) => ({ type: "Point" as const, coordinates: [longitude, latitude] as [number, number] });
+const qaSaved = (id: string, name: string, distanceMeters: number) =>
+  ({ id, name, distanceMeters, point: qaPoint(2.3524, 48.8567), radiusMeters: 100, matchClass: "outside" as const });
 function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | null {
   const trip = sheet === "trip" || sheet === "leg";
   const samples = Array.from({ length: trip ? 14 : 9 }, (_, index) => ({
@@ -192,7 +220,7 @@ function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | n
       route: trip ? { type: "LineString", coordinates: samples.map((sample) => sample.point.coordinates) } : null,
       straightLineFallback: null, acceptedSamples: samples, rejectedSamples: [], anchors: [],
       gaps: trip ? [{ startedAt: iso(9, 20), stoppedAt: iso(9, 41), durationSeconds: 1_260, fromPoint: null, toPoint: null }] : [],
-      nearbySavedPlaces: []
+      nearbySavedPlaces: trip ? [] : [qaSaved("p-school", "Exampleton Primary", 120), qaSaved("p-office", "Work", 340), qaSaved("p-home", "Home", 480)]
     },
     stops: [], suggestedSplitPoints: [], evidenceExpiresAt: null, evidenceExpired: false, rawEvidenceAvailable: true, textualSummary: ""
   } as TimelineItemEvidenceDto;
@@ -201,7 +229,10 @@ function qaSheetEvidence(sheet: string | undefined): TimelineItemEvidenceDto | n
 function qaSheetTarget(sheet: string | undefined): LocationCorrectionTarget | null {
   const place = timeline.items.find((item) => item.id === "qa-unknown");
   const trip = timeline.items.find((item) => item.id === "qa-trip-1");
-  if (sheet === "place" && place?.kind === "place") return { kind: "place", place, label: "Unknown place" };
+  if (sheet === "place" && place?.kind === "place") return { kind: "place", place, label: "Unknown place", notHere: true };
+  // A saved place (Home), for the sheet's one layout (owner feedback, 29 Oct 2026).
+  const home = timeline.items.find((item) => item.id === "qa-home-2");
+  if (sheet === "home" && home?.kind === "place") return { kind: "place", place: home, label: "Home" };
   if ((sheet === "trip" || sheet === "leg") && trip?.kind === "trip") {
     return { kind: "trip", trip: { ...trip, blockIds: [], route: "Exampleton Primary → Office" }, legIndex: sheet === "leg" ? 2 : null };
   }
@@ -210,7 +241,7 @@ function qaSheetTarget(sheet: string | undefined): LocationCorrectionTarget | nu
 
 export default function CalendarQaRoute() {
   // `?check=1` opens the List at its first "?" with its question showing, as Today's chip does.
-  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string; sheet?: string }>();
+  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string; sheet?: string; asks?: string }>();
   const [cycleStep, setCycleStep] = useState(0);
   useEffect(() => {
     if (params.cycle !== "1") return;
@@ -219,14 +250,19 @@ export default function CalendarQaRoute() {
   }, [params.cycle]);
   const dense = params.day === "dense";
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
+  const { showAllPlaces, onToggleShowAllPlaces } = useCalendarPlaceFilter();
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  // The week strip and the Today pill work here, as on the real Calendar, over the fixture's fixed "now".
+  const [selectedDay, setSelectedDay] = useState(dense ? DENSE_DAY : DAY);
+  const [scrollToNow, setScrollToNow] = useState(0);
+  const [listScrollToNow, setListScrollToNow] = useState(0);
   // Screenshots of the harness carry no development toasts; only while it is open (Codex r1 on #570).
   useEffect(() => {
     if (!__DEV__) return;
     LogBox.ignoreAllLogs(true);
     return () => LogBox.ignoreAllLogs(false);
   }, []);
-  const { theme } = useMobileTheme();
+  const { styles, theme } = useMobileTheme();
   const clockFormat = useClockFormat();
   const [now] = useState(() => dense ? new Date(2026, 9, 23, 16, 20).getTime() : new Date(2026, 9, 22, 17, 5).getTime());
   const model = useMemo(() => buildNativeCalendarBridgeState({
@@ -236,13 +272,29 @@ export default function CalendarQaRoute() {
     reduceMotion: false,
     reduceTransparency: false,
     refreshing: false,
-    selectedDayKey: dense ? DENSE_DAY : DAY,
+    selectedDayKey: selectedDay,
     theme,
     transitionDirection: 1
-  }).model, [clockFormat, dense, now, theme]);
-  const shown = useMemo(() => ({ ...model, layout }), [layout, model]);
+  }).model, [clockFormat, dense, now, selectedDay, theme]);
+  // Steps 16–17: the Grid's Places lane and trip leg strip over the synthetic Thursday.
+  const shown = useMemo(() => {
+    const base = { ...model, layout, scrollToNowRequest: scrollToNow };
+    return !dense && layout === "grid"
+      ? withPlacesAndLegs(base, timeline, QA_CHECKS, (ms) => new Date(ms).toTimeString().slice(0, 5)) : base;
+  }, [dense, layout, model, scrollToNow]);
+  const pressToday = () => {
+    const action = calendarTodayPressAction({ layout, selectedDayKey: selectedDay, todayKey: model.todayKey });
+    if (action === "go-to-today") setSelectedDay(model.todayKey);
+    if (action === "scroll-grid-to-now") setScrollToNow((count) => count + 1);
+    if (action === "scroll-list-to-now") setListScrollToNow((count) => count + 1);
+  };
+  // `?sheet=place|trip|leg` opens a correction sheet at once; a place or trip row (or `?check=unknown|trip`) opens
+  // it too, its "?" asked at the top (owner, 28 Oct 2026).
+  const [sheet, setSheet] = useState<{ name: string; asks: boolean } | null>(params.sheet ? { name: params.sheet, asks: params.asks === "1" } : null);
+  const sheetTarget = qaSheetTarget(sheet?.name);
+  const sheetQuestion = sheet?.asks ? QA_CHECK_QUESTIONS.get(sheet.name === "place" ? "qa-check-unknown" : "qa-check-trip") : undefined;
   if (!__DEV__) return <Redirect href="/" />;
-  if (dense && layout !== "list") {
+  if ((dense || params.at) && layout !== "list") {
     // The whole day at the default 72 points an hour, opened at `at` (the header when absent), so
     // Simulator screenshots of the mock-up's windows need no scrolling (the native view's own scroll
     // has nothing left to move).
@@ -252,7 +304,7 @@ export default function CalendarQaRoute() {
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} testID="calendar-qa">
         <ScrollView key={cycleStep} contentOffset={{ x: 0, y: opensAt !== null && Number.isFinite(opensAt) ? header + opensAt * 72 - 12 : 0 }}>
           <DayframeCalendarView
-            model={model}
+            model={dense ? model : shown}
             onChangeLayout={() => undefined}
             onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
             // The native view also keeps the top safe area inside it: room for it, so 23:59 is drawn too.
@@ -269,20 +321,33 @@ export default function CalendarQaRoute() {
           model={shown}
           onChangeLayout={(event) => setLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
           onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
+          onPressToday={pressToday}
+          onSelectDay={(event) => setSelectedDay(event.nativeEvent.dayKey)}
           style={layout === "list" && headerHeight ? { height: headerHeight } : { flex: 1 }}
         />
         {layout === "list" ? (
           <View style={{ flex: 1 }}>
-            <CalendarListView checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
-              onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+            <CalendarListView checkGlyphs={dense ? undefined : QA_CHECK_GLYPHS} checkTotal={dense ? undefined : QA_CHECK_TOTAL}
+              onNextCheck={() => undefined}
+              // `?check=unknown|trip|sleep` opens that "?" by id and scrolls to it, as the chip and badge do: a place's or a
+              // trip's in its sheet, Apple Health's under its row.
+              openCheckRequest={params.check && params.check !== "1" ? { id: `qa-check-${params.check}`, request: 1 } : null}
+              checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
+              onAnswerCheck={() => undefined} onOpenCheck={(id) => { if (id === "qa-check-trip") setSheet({ name: "trip", asks: true }); }}
+              onOpenPlace={(place) => { if (place.id === "qa-unknown") setSheet({ name: "place", asks: true }); }} scrollToFirstCheck={params.check === "1" ? 1 : undefined} scrollToNowRequest={listScrollToNow} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
-              timeline={dense ? null : timeline} />
+              timeline={dense ? null : timeline} showAllPlaces={showAllPlaces} onToggleShowAllPlaces={onToggleShowAllPlaces} />
           </View>
         ) : null}
-        {/* `?sheet=place|trip|leg` (step 12): a correction sheet open over the List, for Simulator screenshots. */}
-        {qaSheetTarget(params.sheet) ? (
-          <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(params.sheet)} onDismissed={() => undefined} onQueue={async () => undefined} places={QA_SHEET_PLACES}
-            presentationId={1} reduceMotion={false} rootHosted={false} target={qaSheetTarget(params.sheet)!} theme={theme} />
+        {/* Step 12: a correction sheet open over the List, for Simulator screenshots. */}
+        {sheet && sheetTarget ? (
+          <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(sheet.name)} key={sheet.name} onDismissed={() => setSheet(null)}
+            onQueue={async () => undefined} onSavePlace={async () => undefined} pickerStyles={styles} places={QA_SHEET_PLACES} presentationId={1}
+            question={sheetQuestion ? { text: sheetQuestion.question, detail: null, yesLabel: sheetQuestion.logLabel, noLabel: sheetQuestion.skipLabel, onAnswer: () => undefined,
+              // The near guess (PRD D23), as the sheet's own nearby list would make it for the unknown place.
+              guess: sheet?.name === "place" ? QA_SHEET_GUESS : null } : null}
+            logAs={sheet?.name === "place" || sheet?.name === "home" ? { activities: QA_SHEET_ACTIVITIES, onLog: () => undefined } : undefined}
+            reduceMotion={false} rootHosted={false} target={sheetTarget} theme={theme} />
         ) : null}
       </View>
     </SafeAreaView>

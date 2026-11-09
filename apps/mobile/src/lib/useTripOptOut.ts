@@ -4,7 +4,7 @@ import { stopLoggingTripsLike } from "./api";
 import { currentMobileAccountEpoch } from "./mobileAccount";
 
 export const TRIP_OPT_OUT_LABEL = "Don’t log trips like this";
-export const TRIP_OPT_OUT_DONE = "Trips like this will wait in Review.";
+export const TRIP_OPT_OUT_DONE = "Trips like this will be asked in Calendar.";
 export const TRIP_OPT_OUT_FAILED = "Couldn’t save that. Try again from a later trip.";
 
 /**

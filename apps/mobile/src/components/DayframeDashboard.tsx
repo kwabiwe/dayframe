@@ -35,10 +35,12 @@ import { router, useFocusEffect, useIsFocused, usePathname } from "expo-router";
 import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  type CompletedEntryCopyAction,
   withGoalExclusions,
   paletteColorFor,
   previousEndOffer,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
+  completedEntriesChanged,
   timerStateChanged,
   timerStatePollDelay,
   formatClockTime,
@@ -50,8 +52,10 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
+import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
+import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
-import { correctionsToShow, projectTimelineCorrections } from "@/lib/timelineCorrectionProjection";
+import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
 import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
@@ -68,8 +72,8 @@ import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivi
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
-import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { getReviewItemSyncStates, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { getReviewItemSyncStates, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -110,10 +114,13 @@ import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
+import { useReviewNudgeCount } from "@/lib/useReviewNudgeCount";
+import { createReviewClientMutationId } from "@/lib/reviewSyncStore";
+import { useAnswersAfterCorrections } from "@/components/calendar/useAnswersAfterCorrections";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
-import { listCheckOverlaps, type ListCheck } from "@dayframe/shared";
-import { latestCheckDay } from "@/lib/calendarChecks";
+import { checkAskingStartMs, checkStillAsks, checksOldestFirst, DAYFRAME_APP_ICONS, listCheckOverlaps, timerTripClashQuestion, timerTripClashWords, type DayframeGlyph, type ListCheck } from "@dayframe/shared";
+import { withPlacesAndLegs } from "@/lib/calendarGridPlaces";
 import {
   ActivityNameTakenError,
   AuthRequiredError,
@@ -123,6 +130,7 @@ import {
   enqueueEvent,
   fetchBootstrap,
   fetchLocationTimeline,
+  fetchOwnedTimeEntry,
   fetchTimerState,
   isQueuedTimerMutationEvent,
   login,
@@ -155,6 +163,7 @@ import {
   type DashboardRefreshGuard
 } from "@/lib/dashboardRefresh";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
+import { projectedLastStopIds } from "@/lib/entryLastStop";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
   configureLocationIntelligence
@@ -168,14 +177,19 @@ import {
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import {
   activateMobileAccount,
+  currentMobileAccountEpoch,
   deactivateMobileAccount
 } from "@/lib/mobileAccount";
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
+import { projectCompletedEntryCopy, rollbackRejectedCompletedCopy } from "@/lib/completedEntryCopyProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
-import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
+import {
+  currentSessionGeneration,
+  readOwnedAuthenticatedSessionSnapshot
+} from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
@@ -208,11 +222,16 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
+  enqueueCompletedEntryCopy,
+  PendingCompletedEntryChangeError,
   enqueueTimeEntryUpdate,
   isTimeEntryCommandRejected,
+  readPendingTimeEntryCommands,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
   type TimeEntryCommandHoldLease,
+  subscribeDeliveredTimeEntryDeletes,
+  subscribeTimeEntryOutbox,
   synchroniseTimeEntryCommands
 } from "@/lib/timeEntryOutbox";
 import {
@@ -249,11 +268,18 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { asksOnItsBlock, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
+import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { settledCheckBase, useCalendarCheckAnswers, type WaitingAnswersHidden } from "@/components/calendar/useCalendarCheckAnswers";
 import { useRunningSplit } from "@/lib/useRunningSplit";
-import { useCheckVenueGuess } from "@/components/calendar/useCheckVenueGuess";
+import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
+import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
+import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
+import { useDeferredReload } from "@/lib/useDeferredReload";
+import { firstCheckReachingDay } from "@/lib/reviewLinks";
+import { useCheckVenueGuess, venueGuessEligible } from "@/components/calendar/useCheckVenueGuess";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -338,7 +364,6 @@ function DashboardBrandLockup({
     </View>
   );
 }
-const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Correlation pruning reads every durable store, so a refresh does it at most this often. */
 const TIMER_ID_CORRELATION_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 /**
@@ -351,6 +376,13 @@ type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
   /** Things to check today and the 7 days before: the Calendar tab's badge (location v4 step 14). */
   checkCount: number;
+  /**
+   * The Calendar tab's tap (owner bug, 29 Oct 2026): Calendar opens on today, badge or not. The badge is a count only;
+   * "N to check", the reminder and a link to one "?" step to a question's day.
+   */
+  openCalendarToday: () => void;
+  /** An old Review link (step 15): opens the "?" it names, or today's first ("first"), once the data is in. */
+  openCheckLink: (check: string) => void;
 };
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -380,7 +412,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   // Calendar › Grid or List (location v4 step 9), remembered on this phone.
   const [calendarLayout, setCalendarLayout] = useState<"grid" | "list">("grid");
+  const { showAllPlaces, onToggleShowAllPlaces } = useCalendarPlaceFilter();
   const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
+  // The Today pill on today: Swift's scroll owner on the Grid, the List's own ScrollView on the List.
+  const [calendarScrollToNow, setCalendarScrollToNow] = useState(0);
+  const [calendarListScrollToNow, setCalendarListScrollToNow] = useState(0);
+  const [calendarWaitingTapCancel, setCalendarWaitingTapCancel] = useState(0);
   // A layout the person picked here wins over the stored one, however late that read lands (Codex r1 on #570).
   const calendarLayoutChosen = useRef(false);
   // The evening reminder's tap lands in an effect set up once: it reads the current opener.
@@ -492,7 +529,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
-  const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
+  const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<boolean>>(async () => false);
+  // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
+  // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
+  const appliedServerDataListeners = useRef(new Set<(startedAtMs: number, server: MobileBootstrap) => void>());
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
@@ -539,6 +579,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
    * their canonical synchronous view, and a publication that shows a flown block running again cancels its
    * flight before React renders it.
    */
+  // Server bootstraps that completed (a load, a recovered refresh), counted apart from every local publication.
+  const [bootstrapCompletions, setBootstrapCompletions] = useState(0);
+  // Keep the raw, accepted owner snapshot distinct from locally projected dashboard rows.
+  const lastStopServerBootstrap = useRef<MobileBootstrap | null>(null);
   function publishDashboardData(next: MobileBootstrap | null) {
     dropCancelledStopFlight(stopFlightLedger.published(latestData.current?.activeEntry?.id, next?.activeEntry?.id));
     latestData.current = next;
@@ -604,6 +648,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
     loadedBootstrap.current = null;
+    lastStopServerBootstrap.current = null;
     timerStateRef.current = null;
     setData(null);
     setReportsRangeRequest(null);
@@ -683,11 +728,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       queueDashboardRefreshAfterConflict();
       return;
     }
-    void applyRecoveredDashboardBootstrap(event.bootstrap, guard);
+    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard);
   }), []);
 
   async function applyRecoveredDashboardBootstrap(
     bootstrap: MobileBootstrap,
+    serverBootstrap: MobileBootstrap,
     guard: DashboardRefreshGuard
   ) {
     const current = latestData.current;
@@ -717,8 +763,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshQueued.current = false;
+    lastStopServerBootstrap.current = serverBootstrap;
     loadedBootstrap.current = next;
     publishDashboardData(next);
+    // A server bootstrap landed (a recovered refresh): a completed load (Codex r6 on #615).
+    setBootstrapCompletions((count) => count + 1);
     void readOwnedPendingTimerStops(next).then((stops) => {
       const visible = latestData.current;
       if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
@@ -944,7 +993,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function reconcilePendingActiveDeletionAfterQueueBarrier(
-    externalActiveEntryId: string | null
+    externalActiveEntryId: string | null,
+    canReconcile?: () => boolean
   ) {
     const pending = deletionCoordinator.current?.current();
     if (pending) {
@@ -952,6 +1002,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         if (!localId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) continue;
         const durableId = optimisticTimerIds.current.get(localId) ??
           await resolveTimerEntryIdAfterQueueBarrier(localId);
+        // A poll can lose its account or foreground lifetime while waiting for the queue.
+        if (canReconcile?.() === false) return new Set<string>();
         const currentPending = deletionCoordinator.current?.current();
         if (
           durableId &&
@@ -1003,14 +1055,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           setRefreshing(false);
         }
       }
-      return;
+      return false;
     }
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
       if (options?.throwOnError) {
         throw new Error("Dayframe is already refreshing. Please try again.");
       }
-      return;
+      return false;
     }
     refreshInFlight.current = true;
     const settingsSeedGeneration = captureSettingsSeedGeneration();
@@ -1023,6 +1075,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
+      const readStartedAt = Date.now();
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1057,11 +1110,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         currentRevision: () => dashboardMutationRevision.current,
         guard: refreshGuard,
         reconcile: reconcileDashboardDeletionState,
-        timerMutationsInFlight: () => timerMutationCount.current
+        timerMutationsInFlight: () => timerMutationCount.current,
+        // Only once the guard accepted it, just before it is published: a discarded read settles nothing.
+        onApplied: () => {
+          const applied = serverBootstrap;
+          for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);
+        }
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
-        return;
+        return false;
       }
       bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
@@ -1071,8 +1129,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           serverNow: new Date().toISOString()
         };
       }
+      lastStopServerBootstrap.current = serverBootstrap;
       loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
+      // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
+      setBootstrapCompletions((count) => count + 1);
       setPendingTimerStops([...ownedPendingStops]);
       void pruneTimerIdCorrelationsAfterLoad(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -1083,13 +1144,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           if (error instanceof AuthRequiredError) transitionToSignedOut();
         });
       });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         transitionToSignedOut({
           preserveAuthPassword: options?.preserveAuthFormOnAuthRequired
         });
         if (options?.throwOnError) throw error;
-        return;
+        return false;
       }
       if (options?.throwOnError) throw error;
       const cachedOfflineDashboardAvailable =
@@ -1109,6 +1171,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           "Dayframe could not refresh your data. Try again in a moment."
         );
       }
+      return false;
     } finally {
       refreshInFlight.current = false;
       if (options?.visibleRefresh) setRefreshing(false);
@@ -1176,6 +1239,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function presentCompletedEntry(entry: NativeCalendarEntry) {
+    if (entry.pendingCompletedCopy) {
+      showTodayNotice("Wait for this split or copy to sync before editing the block.", null);
+      return;
+    }
     const presentation = createSheetPresentation("completed_entry", false);
     // A Start again from an earlier sheet that never finished leaving must not fire later.
     pendingStartAgain.current = null;
@@ -1383,6 +1450,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           filtered,
           pendingDeletionIds
         ) as MobileBootstrap;
+        lastStopServerBootstrap.current = cached.bootstrap;
         loadedBootstrap.current = filtered;
         publishDashboardData(filtered);
         setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
@@ -1441,6 +1509,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     let consecutiveFailures = 0;
+    let foregroundGeneration = 0;
 
     const schedule = (delay: number) => {
       if (cancelled || AppState.currentState !== "active") return;
@@ -1449,25 +1518,44 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     };
 
     const poll = async () => {
-      if (
-        cancelled ||
-        AppState.currentState !== "active" ||
-        timerStatePollInFlight.current
-      ) return;
+      if (cancelled || AppState.currentState !== "active") return;
+      if (timerStatePollInFlight.current) {
+        // An older effect can still own the in-flight request after a sign-in change.
+        schedule(timerStatePollDelay(consecutiveFailures));
+        return;
+      }
       timerStatePollInFlight.current = true;
+      const sessionGeneration = currentSessionGeneration();
+      const accountEpoch = currentMobileAccountEpoch();
+      const startedInForeground = foregroundGeneration;
+      const sameSession = () =>
+        !cancelled && authStateCurrent.current === "authenticated" &&
+        sessionGeneration === currentSessionGeneration() && accountEpoch === currentMobileAccountEpoch();
+      const canReconcile = () => sameSession() && AppState.currentState === "active" &&
+        startedInForeground === foregroundGeneration;
       try {
         const fetched = await fetchTimerState();
+        if (!canReconcile()) return;
         const tombstones = await reconcilePendingActiveDeletionAfterQueueBarrier(
-          fetched.activeEntryId
+          fetched.activeEntryId, canReconcile
         );
+        if (!canReconcile()) return;
         const next = fetched.activeEntryId && tombstones.has(fetched.activeEntryId)
           ? { ...fetched, activeEntryId: null }
           : fetched;
-        const changed = timerStateChanged(timerStateRef.current, next);
+        // A coalesced, refused or failed bootstrap did not apply this change. Leave it
+        // eligible for the next poll, with the same backoff used by a failed fingerprint.
+        const needsRefresh = timerStateChanged(timerStateRef.current, next) ||
+          completedEntriesChanged(loadedBootstrap.current?.completedEntryRevision, next.completedEntryRevision);
+        if (needsRefresh && !(await loadRef.current({ silent: true }))) {
+          if (sameSession()) consecutiveFailures += 1;
+          return;
+        }
+        if (!sameSession()) return;
         timerStateRef.current = next;
         consecutiveFailures = 0;
-        if (changed) await loadRef.current({ silent: true });
       } catch (error) {
+        if (!sameSession()) return;
         if (error instanceof AuthRequiredError) {
           cancelled = true;
           transitionToSignedOut();
@@ -1483,8 +1571,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         schedule(0);
-      } else if (timeout) {
-        clearTimeout(timeout);
+      } else {
+        foregroundGeneration += 1;
+        if (timeout) clearTimeout(timeout);
         timeout = null;
       }
     });
@@ -1582,7 +1671,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
   );
-  const activeEntryForDisplay = data?.activeEntry ?? null;
+  // "A block ran into your trip" (location v4 design §7): End it held for Undo or waiting on this iPhone shows the
+  // running block ended at the trip's start on every timer surface — Today, its timer card and the Play orb — as in
+  // the Calendar; Undo or a refusal takes it out of `timerClashEnds`, so the block runs again. The server's running
+  // block is unchanged until the answer arrives: a Play tap meanwhile starts a new block (the server then ends the old
+  // one, and End it still ends it at the trip's start).
+  const [timerClashEnds, setTimerClashEnds] = useState<ReadonlyMap<string, string>>(NO_CLASH_ENDS);
+  const timerShownData = useMemo(() => projectTimerTripClashEnds(data, timerClashEnds), [data, timerClashEnds]);
+  const clashEndedActiveId = data?.activeEntry && !timerShownData?.activeEntry ? data.activeEntry.id : null;
+  const clashEndedActiveRef = useRef(clashEndedActiveId);
+  clashEndedActiveRef.current = clashEndedActiveId;
+  const activeEntryForDisplay = timerShownData?.activeEntry ?? null;
   const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
   const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
 
@@ -1692,18 +1791,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
-  const historySourceEntries = useMemo(() => {
-    if (!data) return [];
-    return mergeActiveEntry(
-      dedupeEntriesById([
-        ...(data.historyEntries ?? data.entries ?? []),
-        ...(data.entries ?? []),
-        ...(data.weekEntries ?? []),
-        ...(data.dayEntries ?? [])
-      ]),
-      data.activeEntry
-    );
-  }, [data]);
+  const historySourceEntries = useMemo(() => dashboardHistoryEntries(timerShownData), [timerShownData]);
+  const lastStopBaseline = lastStopServerBootstrap.current;
+  const hasLastStopEditor = Boolean(manualEntryPresentation || activeEditPresentation || calendarEditPresentation);
+  const lastStopProjectedIds = useMemo(() => {
+    if (!hasLastStopEditor || !timerShownData || !lastStopBaseline ||
+        !sameTimerStopOwner(timerStopOwner(timerShownData), timerStopOwner(lastStopBaseline))) return undefined;
+    return projectedLastStopIds(dashboardHistoryEntries(lastStopBaseline), historySourceEntries);
+  }, [hasLastStopEditor, historySourceEntries, lastStopBaseline, timerShownData]);
   // Whole-minute consumers (history, day cards, native Calendar) rebuild once a minute, but never
   // fall behind a start or stop already shown, so a block from this minute is never clipped away.
   const newestShownMs = useMemo(
@@ -1843,10 +1938,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     timerEntryIdentity(stopFlight.entryId) === timerEntryIdentity(displayedActiveEntry.id)
       ? stopFlight.presentation.elapsedSeconds
       : undefined;
-  const recentStoppedAt = useMemo(
-    () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
-    [data?.activeEntry, data?.entries]
-  );
   // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
   // today's last finished block ended, when that was 1 min–4 h before the block started.
   const previousEndForSheet = useMemo(() => {
@@ -1871,7 +1962,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const scopedDayKey = localDayKey(minuteNow);
   useEffect(() => {
     if (!reviewListAtCap || !scopedOwner) {
-      setScopedReviewItems([]);
+      setScopedReviewItems((current) => keepScopedReviewItems(current, []));
       return;
     }
     const timeZone = currentTimeZone();
@@ -1889,7 +1980,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         readSuppressedReviewItemIds(scopedOwner)
       ])
         .then(([snapshot, suppressed]) => {
-          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot, suppressed));
+          // The same items keep the same array, so the Calendar's data (and its timeline read) stays put.
+          if (current && mine === sequence) setScopedReviewItems((items) => keepScopedReviewItems(items, scopedOpenReviewItems(snapshot, suppressed)));
         })
         .catch(() => undefined);
     };
@@ -1942,21 +2034,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
-  // Split for the running block (owner 28 Oct 2026): shown at once, held for its Undo, then delivered in the
-  // timer order with a reload, as a sheet Delete is.
   const runningSplit = useRunningSplit({
     read: () => latestData.current,
     update: updateDashboardData,
     owner: timerStopOwner,
+    generation: () => noticeSessionGeneration.current,
     persistedId: persistedTimerEntryId,
     isOnline: () => connectivityCurrent.current.isOnline,
-    deliver: (owner) => {
-      void enqueueTimerMutation(async () => {
-        if (!connectivityCurrent.current.isOnline) return;
-        const result = await synchroniseTimeEntryCommands({ owner, correlations: await readTimerEntryIdCorrelations(owner), force: true });
-        if (result.reason === "authentication_required") transitionToSignedOut();
-      });
-    },
+    deliver: (owner, commandId) => deliverQueuedTimeEntry(owner, commandId, true),
     onStorageFailure: () => Alert.alert(
       "Block not split",
       "Dayframe could not save this split on your iPhone. Check available storage and try again."
@@ -1964,28 +2049,184 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   });
   // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
   // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
+  // Location timeline corrections still on the phone (step 12), this account's.
+  const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
+    [authState, data]);
+  const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
+  const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
     // The backend, workspace and user. A build without a backend identity has none: its List offers no answers
     // (Codex r8 and r9 on #582).
     ownerKey: scopedOwnerKey ?? null,
-    syncStateIds: reviewSyncStateIds
+    syncStateIds: reviewSyncStateIds,
+    waitingHidden
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
-  const shownCalendarData = checkAnswers.data;
+  // "A block ran into your trip" (location v4 design §7): an End it held for Undo, saving, or waiting on this iPhone
+  // shows its block ended at the trip's start in the Calendar until the server's data does; Undo or a refused answer
+  // puts it back. Acknowledged ones count only against the data they were acknowledged over: the next read is the
+  // server's own.
+  const [pendingClashEnds, setPendingClashEnds] = useState<{ owner: string; ends: readonly PendingTimerTripClashEnd[]; version: number } | null>(null);
+  // Acknowledged ends stay shown until applied server data confirms them (Codex r3 on #618), for this account.
+  const clashEndLedger = useRef({ owner: null as string | null, ledger: createAcknowledgedEndLedger() });
+  useEffect(() => {
+    if (!scopedOwner || !scopedOwnerKey) return;
+    let current = true;
+    let sequence = 0;
+    if (clashEndLedger.current.owner !== scopedOwnerKey) clashEndLedger.current = { owner: scopedOwnerKey, ledger: createAcknowledgedEndLedger() };
+    const own = clashEndLedger.current;
+    const read = () => {
+      const mine = ++sequence;
+      readPendingTimerTripClashEnds(scopedOwner).then((ends) => {
+        if (!current || mine !== sequence || clashEndLedger.current !== own) return;
+        own.ledger.observe(ends, Date.now());
+        setPendingClashEnds((now) => ({ owner: scopedOwnerKey, ends, version: (now?.version ?? 0) + 1 }));
+      }).catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeReviewSync(read);
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || clashEndLedger.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.ledger.applied(startedAtMs, server)) setPendingClashEnds((now) => now && { ...now, version: now.version + 1 });
+    };
+    appliedServerDataListeners.current.add(applied);
+    return () => {
+      current = false;
+      unsubscribe();
+      appliedServerDataListeners.current.delete(applied);
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedOwnerKey]);
+  const clashEnds = useMemo(() => {
+    const ends = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? pendingClashEnds.ends : [];
+    // `version` changes when the ledger retires one (it is read here, not stored).
+    const live = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? clashEndLedger.current.ledger.live(ends) : [];
+    return clashEndsFor(checkAnswers.data?.reviewItems ?? [], checkAnswers.answeredYesIds, live);
+  }, [checkAnswers.answeredYesIds, checkAnswers.data, pendingClashEnds, scopedOwnerKey]);
+  // An acknowledged End it (the server ended the block, and stopped it if it was running): the day is read again, once.
+  const reloadedForClash = useRef(new Set<string>());
+  useEffect(() => {
+    const ends = pendingClashEnds && pendingClashEnds.owner === scopedOwnerKey ? pendingClashEnds.ends : [];
+    const fresh = ends.filter((end) => end.acknowledged && !reloadedForClash.current.has(end.clientMutationId));
+    if (!fresh.length) return;
+    for (const end of fresh) reloadedForClash.current.add(end.clientMutationId);
+    void loadRef.current({ silent: true });
+  }, [pendingClashEnds, scopedOwnerKey]);
+  // An End it refused because its question changed (409 `proposal_changed`): the question stays, read again as the
+  // server has it now.
+  useEffect(() => subscribeTimerTripClashChanged(() => { void loadRef.current({ silent: true }); }), []);
+  const shownCalendarData = useMemo(() => projectTimerTripClashEnds(checkAnswers.data, clashEnds), [checkAnswers.data, clashEnds]);
+  // The same ends for the timer surfaces (above), before paint, so Today and the orb never show it running a frame.
+  useLayoutEffect(() => {
+    setTimerClashEnds((current) => sameClashEnds(current, clashEnds) ? current : clashEnds);
+  }, [clashEnds]);
+  // Blocks deleted on this iPhone and not yet gone from the server (held for Undo, or queued): a block that ran into a
+  // trip whose block is known deleted stops asking at once (Codex r1 on #618); one not loaded never asks (r1 on #622).
+  const [queuedDeletes, setQueuedDeletes] = useState<{ owner: string; ids: ReadonlySet<string> } | null>(null);
+  // Queued deletes, and delivered ones until an authoritative read settles them (Codex r2 on #618), for this account.
+  const deleteTombstones = useRef({ owner: null as string | null, tombstones: createDeleteTombstones() });
+  useEffect(() => {
+    if (!scopedOwner || !scopedOwnerKey) return;
+    let current = true;
+    let sequence = 0;
+    if (deleteTombstones.current.owner !== scopedOwnerKey) deleteTombstones.current = { owner: scopedOwnerKey, tombstones: createDeleteTombstones() };
+    const own = deleteTombstones.current;
+    const read = () => {
+      const mine = ++sequence;
+      readPendingTimeEntryCommands(
+        { userId: scopedOwner.userId, workspaceId: scopedOwner.workspaceId },
+        { includeCompletedCopies: true }
+      ).then(async (commands) => {
+        const readCurrent = () => current && mine === sequence && deleteTombstones.current === own;
+        if (!readCurrent()) return;
+        own.tombstones.observe(commands);
+        setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+        const terminalCopies = commands.filter((command) => command.copy &&
+          (command.failureKind === "permanent" || command.copyRemovedOnServer));
+        if (terminalCopies.length === 0) return;
+        const baseline = terminalCopies.some((command) => command.failureKind === "permanent")
+          ? await loadCachedDashboardBootstrap().catch(() => null)
+          : null;
+        if (!readCurrent()) return;
+        const data = latestData.current;
+        if (!data || !sameTimerStopOwner(timerStopOwner(data), scopedOwner)) return;
+        let next = data;
+        for (const command of terminalCopies) {
+          if (!command.copy || !command.targetEntryId) continue;
+          if (command.copyRemovedOnServer) {
+            next = projectCompletedEntryCopy(next, command.targetEntryId, command.copy, { acknowledged: true, removedOnServer: true });
+            continue;
+          }
+          next = rollbackRejectedCompletedCopy(
+            next, baseline?.bootstrap ?? null, command.targetEntryId, command.copy,
+            own.tombstones.ids().has(command.targetEntryId)
+          );
+        }
+        if (next !== data) updateDashboardData(() => next);
+      }).catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeTimeEntryOutbox(read);
+    // Only an acknowledged delivery holds a tombstone past its command; Undo or Discard removes it with the command.
+    const unsubscribeDelivered = subscribeDeliveredTimeEntryDeletes((command) => {
+      if (!current || deleteTombstones.current !== own || command.userId !== scopedOwner.userId || command.workspaceId !== scopedOwner.workspaceId) return;
+      own.tombstones.delivered(command, Date.now());
+      setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    });
+    const applied = (startedAtMs: number, server: MobileBootstrap) => {
+      if (!current || deleteTombstones.current !== own || server.user.id !== scopedOwner.userId || server.workspace.id !== scopedOwner.workspaceId) return;
+      if (own.tombstones.applied(startedAtMs)) setQueuedDeletes({ owner: scopedOwnerKey, ids: own.tombstones.ids() });
+    };
+    appliedServerDataListeners.current.add(applied);
+    return () => {
+      current = false;
+      unsubscribe();
+      unsubscribeDelivered();
+      appliedServerDataListeners.current.delete(applied);
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedOwnerKey]);
+  const pendingDeletionKey = (pendingDeletion?.entryIds ?? []).join(",");
+  const locallyDeletedIds = useMemo<ReadonlySet<string>>(() => new Set([
+    ...(queuedDeletes && queuedDeletes.owner === scopedOwnerKey ? queuedDeletes.ids : []),
+    ...(pendingDeletionKey ? pendingDeletionKey.split(",") : [])
+  ]), [pendingDeletionKey, queuedDeletes, scopedOwnerKey]);
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
   // The open suggestions the List asks about, and the outings it folds (their trips asked with their stay).
+  // Answers from a sheet waiting for its corrections (Codex r2 on #610): released into the Review outbox once the
+  // server has them; their "?" stay out of the List and Grid meanwhile.
+  const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
+    // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
+    onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
+  waitingHidden.current = { ids: answersAfterCorrections.waitingIds, segments: answersAfterCorrections.waitingSegments };
+  // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
+  // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
+  // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
+  const resolvedByCorrections = useMemo(() => reviewItemIdsResolvedByCorrections(correctionQueue.acknowledged),
+    [correctionQueue.acknowledged]);
+  // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do answers held
+  // for Undo or saving (part 3b), waiting for corrections, or resolved by one (settledCheckBase). "A block ran into
+  // your trip" (location v4 design §7) is one "?" like any other — counted by the badge, the List's "N to check",
+  // Today's chip, the reminder and Earlier this week's chips — asked on its block, and only while it can be put on
+  // its block and that block, as this iPhone has it now (a queued edit, Stop, delete or End it), still runs into the
+  // trip (clashStillAsksHere). Today's Earlier this week chips count from this same projection (Codex r1 on #617, #618).
   const calendarCheckBase = useMemo(() => {
-    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
-    // answers held for Undo or saving (part 3b).
-    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
-      && !checkAnswers.hiddenIds.has(item.id));
-    return { open, ...calendarCheckOutings(open, reviewSyncStateIds) };
-  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, locallyDecidedIds, reviewSyncStateIds]);
+    const blocks = bootstrapBlocksById(shownCalendarData);
+    return settledCheckBase(shownCalendarData?.reviewItems ?? [], {
+      decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
+      waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds,
+      stillAsks: (item) => clashStillAsksHere(item, shownCalendarData, minuteNow, blocks, locallyDeletedIds)
+    });
+  }, [shownCalendarData, minuteNow, locallyDeletedIds, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
+    answersAfterCorrections.waitingSegments,
+    locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
   const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);
   const openCalendarCheck = openCalendarCheckId
@@ -2013,6 +2254,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stoppedAt: item.suggestedStoppedAt
       })),
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      // What each "?" is about, for which have a sheet (Codex r2 on #610): Apple Health's; a location suggestion's
+      // place or trip by its segment; anything else (a legacy location suggestion from before location v2, which
+      // has no segment) "none", asked under its row.
+      kinds: new Map(items.map((item) => [item.id, calendarCheckKind(item)] as const)),
+      // A block that ran into a trip: its "?" is on the block (its row and its Grid block), by block id.
+      blockChecks: clashChecksByBlock(items),
+      // Owner, 28 Oct 2026 (concern 1): each "?" row's own icon — a trip's route, Apple Health's heart, a place's pin.
+      glyphs: new Map(items.map((item) => [item.id, (item.eventType === "commute_detected" ? DAYFRAME_APP_ICONS.openTrip
+        : item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_") ? DAYFRAME_APP_ICONS.sourceHealth
+          : DAYFRAME_APP_ICONS.places) as DayframeGlyph] as const)),
       questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, {
         outing: outings.has(item.id),
         pendingChange: reviewSyncStateIds.has(item.id),
@@ -2022,35 +2273,60 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarCheckBase, clockFormat, reviewSyncStateIds, openCalendarCheckId, openCheckVenue.venue]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
+  // Owner, 28 Oct 2026 (concern 4): only "?" from today and the 6 days before ask; the badge, the List's
+  // "N to check" and the reminder count and step through them oldest first, across days. Older ones stop asking:
+  // their places stay plain rows you can still correct.
+  const askingChecks = useMemo(() => {
+    const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
+    return checksOldestFirst(calendarChecks.checks.filter((check) => check.startedAt && checkStillAsks(check, fromMs)));
+  }, [calendarChecks, todayKey]);
+  // `week` is the 7-day count (the Calendar badge, the List's "N to check" and the reminder). `today` is Today's
+  // own "N to check today" chip, today-only on purpose (owner-approved; kept so after Codex r1 on #610): it counts
+  // today's "?" and opens today's oldest; earlier days are the badge's.
   const checkCounts = useMemo(() => {
     const todayStart = dateFromKey(todayKey).getTime();
-    const weekStart = addDaysToDate(dateFromKey(todayKey), -7).getTime();
     const tomorrowStart = addDaysToDate(dateFromKey(todayKey), 1).getTime();
-    return {
-      week: calendarChecks.checks.filter((check) => listCheckOverlaps(check, weekStart, tomorrowStart)).length,
-      today: calendarChecks.checks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length
-    };
-  }, [calendarChecks, todayKey]);
+    return { week: askingChecks.length, today: askingChecks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length };
+  }, [askingChecks, todayKey]);
+  // Owner item 13 (28 Oct 2026): the end-of-day reminder counts the badge's "?", for this account, noted again on
+  // each return to the front and each new day so the one-shot reminder is renewed (Codex r1 on #610).
+  const nudgeOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
+    [authState, data]);
+  useReviewNudgeCount(nudgeOwner, askingChecks.length, { dayKey: todayKey, foreground: appIsForeground });
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
   const calendarCheckRequests = useRef(0);
-  // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
-  // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
+  // Quick win (b): the hatched count chip on Earlier this week rows, from the same settled "?" the Calendar draws
+  // (the bootstrap's list, plus Today's scoped window when it is capped, less those settled on this phone: a Logs as
+  // the server acknowledged clears its day's chip at once, an outing's trips with it; Codex r1 on #617).
+  // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once, folded as the deck and
+  // Calendar › List fold it (Codex r2 on #582).
   const earlierDayReviewCountMap = useMemo(
-    () => {
-      // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
-      // The same outings the deck and Calendar › List fold (Codex r2 on #582).
-      const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);
-      const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
-      return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
-    },
-    [shownCalendarData?.reviewItems, earlierDays, reviewSyncStateIds]
+    () => earlierDayReviewCounts(earlierDays, calendarCheckBase.open.filter((item) => !calendarCheckBase.folded.has(item.id))),
+    [calendarCheckBase, earlierDays]
   );
+  // Owner, 28 Oct 2026: the Grid draws only the "?" that still ask, outings folded, as the List does, so an expired
+  // or folded suggestion is never a dashed block there; onOpenReview's lookup (calendarChecks) covers every one drawn.
+  const gridReviewItemIds = useMemo(() => new Set(askingChecks.map((check) => check.id)), [askingChecks]);
+  // The blocks with a "?" of their own that still asks (location v4 design §7): the Grid's amber dot, and their sheet's question.
+  const askingBlockChecks = useMemo(() => {
+    const asking = new Set(askingChecks.map((check) => check.id));
+    return new Map([...calendarChecks.blockChecks].filter(([, checkId]) => asking.has(checkId)));
+  }, [askingChecks, calendarChecks.blockChecks]);
+  const askingBlockIds = useMemo(() => new Set(askingBlockChecks.keys()), [askingBlockChecks]);
+  // The held answer's words when it is a block that ran into a trip: its Undo toast says what it did to the block.
+  const heldClashWords = useMemo(() => {
+    const item = checkAnswers.held ? shownCalendarData?.reviewItems.find((candidate) => candidate.id === checkAnswers.held!.itemId) : undefined;
+    const question = item ? timerTripClashQuestion(item) : null;
+    return item && question ? timerTripClashWords(item, question, null, clockFormat) : null;
+  }, [checkAnswers.held, clockFormat, shownCalendarData]);
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       clockFormat,
       data: shownCalendarData,
+      reviewItemIds: gridReviewItemIds,
+      askingEntryIds: askingBlockIds,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -2064,6 +2340,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       shownCalendarData,
+      gridReviewItemIds,
+      askingBlockIds,
       clockFormat,
       hapticsEnabled,
       minuteNow,
@@ -2076,12 +2354,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Stable objects, so DayframeCalendarView re-serialises only when the model or refresh state changes.
   const nativeCalendarModel = useMemo(
-    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false }),
-    [calendarLayout, nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false, scrollToNowRequest: calendarScrollToNow }),
+    [calendarLayout, calendarScrollToNow, nativeCalendarBridge.model]
   );
   const nativeCalendarModelRefreshing = useMemo(
-    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true }),
-    [calendarLayout, nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true, scrollToNowRequest: calendarScrollToNow }),
+    [calendarLayout, calendarScrollToNow, nativeCalendarBridge.model]
   );
   useEffect(() => {
     let cancelled = false;
@@ -2097,17 +2375,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
   // The List's places and trips: the selected day's timeline for this account, read again after each refresh.
   // Location timeline corrections still on the phone (step 12) show over the List's timeline at once; each
-  // time the queue shrinks (delivered) the timeline is read again.
-  const correctionQueue = useTimelineCorrectionQueue(
-    authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null
-  );
+  // time the queue shrinks (delivered) the timeline is read again (correctionQueue, above).
+  // A request for one "?" reads its day again too, so a read from before it never decides that its item is missing
+  // (Codex r3 on #610).
+  const [checkTimelineReads, setCheckTimelineReads] = useState(0);
   const calendarTimelineRefreshKey = useMemo(
-    () => ({ calendarData, delivered: correctionQueue.delivered }),
-    [calendarData, correctionQueue.delivered]
+    () => ({ calendarData, delivered: correctionQueue.delivered, checkTimelineReads }),
+    [calendarData, correctionQueue.delivered, checkTimelineReads]
   );
   const serverCalendarSnapshot = useCalendarTimelineSnapshot({
     dayKey: selectedDayKey,
-    enabled: calendarLayout === "list",
+    // The Grid reads the day's places too (its Places lane and trip legs, steps 16–17).
+    enabled: true,
     fetchTimeline: fetchLocationTimeline,
     owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
     refreshKey: calendarTimelineRefreshKey
@@ -2117,11 +2396,75 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
+  const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
+  const gridModel = useMemo(() => calendarLayout === "grid"
+    ? withPlacesAndLegs(nativeCalendarModel, calendarTimeline, askingChecks, (ms) => formatClockTime(new Date(ms), clockFormat),
+      supportsLoggedPlaceChange)
+    : nativeCalendarModel,
+  [askingChecks, calendarLayout, calendarTimeline, clockFormat, nativeCalendarModel, supportsLoggedPlaceChange]);
+  const gridModelRefreshing = useMemo(() => gridModel === nativeCalendarModel ? nativeCalendarModelRefreshing : { ...gridModel, refreshing: true },
+    [gridModel, nativeCalendarModel, nativeCalendarModelRefreshing]);
   // The List's place, trip and leg correction sheets (step 12).
   const locationCorrections = useLocationCorrections({
+    acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
+    pickerStyles: styles,
+    resolveEditBlock: (id) => {
+      if (!correctionOwner) return null;
+      const block = mobileTimeEntryById(shownCalendarData, id) ?? mobileTimeEntryById(latestData.current, id);
+      return {
+        title: block ? block.description?.trim() || block.categoryName || formatClockTime(new Date(block.startedAt), clockFormat) : null,
+        prepare: async () => {
+          const entry = block ?? await fetchOwnedTimeEntry(id, correctionOwner);
+          return () => {
+            if (entry.stoppedAt) presentCompletedEntry({ ...entry, isActive: false });
+            else if (latestData.current?.activeEntry?.id === entry.id) presentActiveEditor("existing_active_timer");
+          };
+        }
+      };
+    },
+    // A place logged with Logs as: its blocks, and on an outing's stay its trips' (#612), come with this one read of
+    // the day, once the server acknowledged it; none is projected before (the Undo window shows none).
+    onLogged: () => { void load(); },
     pending: correctionQueue.pending,
+    // Owner items A, B, I (28 Oct 2026): a sheet opened from a row or the Grid asks its item's "?" on top.
+    questionFor: (kind, itemId) => {
+      const check = askingChecks.find((each) => each.segmentId === itemId);
+      const question = check ? calendarChecks.questions.get(check.id) : undefined;
+      if (!check || !question || !scopedOwnerKey) return null;
+      return {
+        text: question.question,
+        // The row and the sheet already say the times; only words that add something stay.
+        detail: question.detail && !/\d:\d\d/.test(question.detail) ? question.detail : null,
+        yesLabel: question.logLabel ?? null,
+        // An answer that isn't available stays unavailable: no "Not now" in place of a missing one (Codex r16 on #610).
+        // In the sheet Not now says what it does (owner, 31 Oct 2026); the List's row keeps its short word.
+        noLabel: question.skipLabel === "Not now" ? "Don't log" : question.skipLabel ?? null,
+        // No changes in the sheet: checkAnswers.answer is the one gated entry point, so it never goes ahead of a
+        // correction queued for its place or trip from an earlier Done (Codex r6 and r7 on #610).
+        // The near guess for "Visited {name}?" with Yes and Edit (PRD D23): the List's own when this "?" is the open
+        // one, else the one the sheet's nearby list makes. Yes records it there once (`record_poi_once`).
+        guess: check.id === openCalendarCheckId ? openCheckVenue.venue : null,
+        // The sheet's own Nearby guess only for an unnamed visit, by Calendar's one rule (an outing's stay too, #642;
+        // never a question already titled with a name, Codex r5 on #620).
+        guessable: venueGuessEligible(shownCalendarData?.reviewItems.find((item) => item.id === check.id) ?? null),
+        outing: calendarCheckBase.outings.has(check.id),
+        onAnswer: (yes, venue, logAsCategoryId, logAsDescription) => checkAnswers.answer(check.id, yes, venue ?? (check.id === openCalendarCheckId ? openCheckVenue.venue : null),
+          logAsCategoryId || logAsDescription ? { logAsCategoryId, logAsDescription } : {}),
+        // One tap with the sheet's own changes (owner, 28 Oct 2026; Codex r2 on #610): the answer is kept on the phone
+        // before the corrections are queued — with every one already queued for its place or trip (Codex r6) — and goes
+        // to the Review outbox only once the server has every one of them. A guessed venue goes with it (Codex r1 on
+        // #620); otherwise the corrections say where it was.
+        // `generation`: the tap's account lifetime, carried from before its first await (Codex r17 on #610).
+        answerAfter: (yes, ids, generation, venue, logAsCategoryId, logAsDescription) => {
+          if (!correctionOwner || !check.segmentId || !scopedOwnerKey) throw new Error("No account.");
+          return checkAnswers.answerAfterCorrections({ itemId: check.id, segmentId: check.segmentId, logged: yes, newIds: ids, generation,
+            venue: venue ?? null, logAsCategoryId: logAsCategoryId ?? null, logAsDescription, owner: correctionOwner, ownerKey: scopedOwnerKey });
+        }
+      };
+    },
     reduceMotion,
     showNotice: (message) => showTodayNotice(message, null),
     theme,
@@ -2135,11 +2478,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
     const isBlankStart = !categoryId && !description.trim();
     if (isBlankStart && blankTimerStartGate.current.current()) return false;
-    if (
-      latestData.current?.activeEntry &&
-      !isActiveEntryPendingDeletion() &&
-      isBlankStart
-    ) {
+    if (runningForStartNow() && isBlankStart) {
       presentActiveEditor("existing_active_timer");
       return false;
     }
@@ -2195,7 +2534,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A start that replaces a running block says so ("Switched to …", no Undo: there is no un-switch
   // contract); a start of exactly what is recording does nothing but say "Already recording".
   function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
-    const running = isActiveEntryPendingDeletion() ? null : latestData.current?.activeEntry ?? null;
+    const running = runningForStartNow();
     if (running && startMatchesRunning(running, { categoryId, description, tagNames })) {
       showTodayNotice(alreadyRecordingToastMessage(running), toastSwatchColor(running, theme.mode));
       return;
@@ -2283,7 +2622,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The Play orb (step 3): tap starts a bare block (which opens it) or stops the running one; on
   // Today the Stop flies the live block into its row, elsewhere it stops in place.
   function tapPlayOrb() {
-    const entryId = latestData.current?.activeEntry?.id;
+    // A block End it has ended here (location v4 design §7) is not running on this iPhone: a tap starts one.
+    const entryId = runningForStartNow()?.id;
     if (!entryId) {
       startFromToday(null);
       return;
@@ -2295,7 +2635,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A bloom pick starts that activity, or switches to it; the running activity opens its editor
   // instead of starting a duplicate, as its mosaic tile does.
   function chooseFromPlayOrb(activityId: string) {
-    const active = latestData.current?.activeEntry;
+    const active = runningForStartNow();
     if (active && active.categoryId === activityId) {
       presentActiveEditor("existing_active_timer");
       return;
@@ -2505,6 +2845,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     startedAt?: string | null;
     tagNames?: string[];
   }, options: { blankStartToken?: number } = {}) {
+    const generation = noticeSessionGeneration.current;
+    const undoInFlight = runningSplit.undoInFlight();
+    if (undoInFlight) await undoInFlight;
+    if (generation !== noticeSessionGeneration.current) return false;
     if (!latestData.current) return false;
     commitPendingActiveDeletionBeforeTimerStart();
     const trimmedDescription = input.description?.trim() ?? "";
@@ -2528,6 +2872,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
     const previousData = latestData.current;
+    if (previousData.activeEntry) runningSplit.finishBeforeTimerChange(previousData.activeEntry.id);
     try {
       const queue = await enqueueEvent({
         owner: timerStopOwner(previousData),
@@ -2535,6 +2880,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         source: "mobile_app",
         type: "timer_start",
         occurredAt: new Date(pendingEntry.startedAt),
+        replacesRunningSplitEntryId: previousData.activeEntry?.id,
         categoryId: pendingEntry.categoryId ?? undefined,
         description: pendingEntry.description?.trim() || undefined,
         rawPayload: {
@@ -2650,8 +2996,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function saveActiveTimerEdit(entryId: string, patch: TimeEntryUpdatePatch) {
+    const activeId = latestData.current?.activeEntry?.id;
+    const targetId = activeId && timerEntryIdentity(activeId) === timerEntryIdentity(entryId) ? activeId : entryId;
     return saveTimeEntryOptimistically(
-      entryId,
+      targetId,
       patch,
       "Block not saved",
       { awaitPersistence: true }
@@ -2690,7 +3038,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         patch,
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       }));
-    } catch {
+    } catch (error) {
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         errorTitle,
         "Dayframe could not save this change on your iPhone. Check available storage and try again."
@@ -2702,40 +3054,77 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
     queuedTimerStartRecoveryRequested.current = true;
 
-    if (connectivityCurrent.current.isOnline) {
-      void (async () => {
-        const correlations = await readTimerEntryIdCorrelations(owner);
-        const result = await synchroniseTimeEntryCommands({
-          owner,
-          correlations,
-          force: true
-        });
-        if (result.reason === "authentication_required") {
-          transitionToSignedOut();
-          return;
-        }
-        // Feedback belongs to the account that made the edit, checked again after every wait.
-        const ownerCurrent = () => {
-          const current = latestData.current;
-          return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
-        };
-        if (!ownerCurrent()) return;
-        // Any rejection reloads, so its block returns as it was; only this edit's own rejection
-        // alerts, as older sync issues stay in Settings › Sync help.
-        const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
-        if (!ownerCurrent()) return;
-        if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
-          await loadRef.current({ silent: true });
-        }
-        if (rejected && ownerCurrent()) {
-          Alert.alert(
-            "Change not saved",
-            "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
-          );
-        }
-      })().catch(() => undefined);
-    }
+    deliverQueuedTimeEntry(owner, clientCommandId);
     return true;
+  }
+
+  async function copyCalendarEntry(entry: TimeEntry, action: CompletedEntryCopyAction) {
+    const bootstrap = latestData.current;
+    const unavailable = { ok: false as const, message: "Open a saved finished block to make this change." };
+    if (!bootstrap?.serverBuild?.completedEntryCopy || !entry.stoppedAt || !entry.updatedAt) return unavailable;
+    const owner = timerStopOwner(bootstrap);
+    const current = mobileTimeEntryById(bootstrap, entry.id);
+    if (current && (!current.stoppedAt || current.updatedAt !== entry.updatedAt)) {
+      return { ok: false as const, message: "This block changed. Close and reopen it to see its current details." };
+    }
+    try {
+      const command = await enqueueCompletedEntryCopy({
+        owner,
+        entryId: entry.id,
+        expectedUpdatedAt: entry.updatedAt,
+        originalStoppedAt: entry.stoppedAt,
+        action,
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
+      });
+      const copy = command.copy;
+      if (!copy || !latestData.current || !sameTimerStopOwner(timerStopOwner(latestData.current), owner)) return unavailable;
+      nextTimerMutationVersion(entry.id);
+      updateDashboardData((data) => data ? projectCompletedEntryCopy(data, entry.id, copy, { linkedSource: entry }) : data);
+      queuedTimerStartRecoveryRequested.current = true;
+      deliverQueuedTimeEntry(owner, command.clientCommandId);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: error instanceof PendingCompletedEntryChangeError
+          ? error.message
+          : "Dayframe could not save this change on your iPhone. Check available storage and try again."
+      };
+    }
+  }
+
+  function deliverQueuedTimeEntry(owner: TimerStopOwner, clientCommandId: string, followTimerStops = false) {
+    if (!connectivityCurrent.current.isOnline) return;
+    void (async () => {
+      const correlations = await readTimerEntryIdCorrelations(owner);
+      const result = await synchroniseTimeEntryCommands({
+        owner, correlations, force: true, isForeground: () => AppState.currentState === "active"
+      });
+      if (result.reason === "authentication_required") {
+        transitionToSignedOut();
+        return;
+      }
+      const ownerCurrent = () => {
+        const current = latestData.current;
+        return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
+      };
+      if (!ownerCurrent()) return;
+      const current = latestData.current;
+      if (followTimerStops && result.deliveredCount > 0 && current) {
+        await deliverOwnedPendingTimerStops(current, { reloadAfterDelivery: false });
+      }
+      const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
+      if (!ownerCurrent()) return;
+      if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
+        await loadRef.current({ silent: true });
+      }
+      if (rejected && ownerCurrent()) {
+        Alert.alert(
+          "Change not saved",
+          "Dayframe couldn't save this change. Try again or discard it in Settings › Sync help."
+        );
+      }
+    })().catch(() => undefined);
   }
 
   async function deleteCalendarEntry(entryId: string) {
@@ -2771,16 +3160,149 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
-  const openTodayChecks = useCallback(() => openChecksOn(formatDateKey(new Date())), [openChecksOn]);
-  // The evening reminder counts every open suggestion, so it opens the latest day that has one, never an
-  // empty today (Codex r1 on #573); with none loaded here, Review, which lists them all.
-  const latestCheckDayKey = useMemo(
-    () => latestCheckDay(calendarChecks.checks, new Date(now), { dayKey: formatDateKey }),
-    [calendarChecks, now]
-  );
+  // Calendar › List on a day with nothing selected: an old link's item that no longer asks (Codex r2 on #615). Every
+  // selection is cleared first, the same day included (Codex r3 on #615): the open question and any waiting request
+  // or scroll (so a List mounting from the Grid has nothing to replay), and an open sheet.
+  const [calendarCheckTarget, setCalendarCheckTarget] = useState<{ id: string; request: number; at: number } | null>(null);
+  const [calendarSelectionClear, setCalendarSelectionClear] = useState(0);
+  // Bumped by the Calendar tab's tap: cancels every old link still being answered (`useCheckLinks`' cancelRequest).
+  const [calendarLinkCancel, setCalendarLinkCancel] = useState(0);
+  const closeCorrectionSheet = locationCorrections.closeSheet;
+  const openListDay = useCallback((dayKey: string) => {
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    setCalendarSelectionClear((count) => count + 1);
+    closeCorrectionSheet();
+    changeCalendarLayout("list");
+    selectCalendarDay(dayKey);
+    router.navigate("/(tabs)/calendar");
+  }, [changeCalendarLayout, closeCorrectionSheet, selectCalendarDay]);
+  // Owner, 28 Oct 2026 (concern 4): open one "?" by its id — Calendar › List on its day, scrolled to it, its question
+  // open. Used by "N to check" (the next one, oldest first), Today's chip, the reminder and the Grid's "?" — never the
+  // Calendar tab, which opens today.
+  // `dayKey` keeps a given day selected (today, for a "?" that started yesterday; Codex r1 on #615), else its start day.
+  const openCheckOn = useCallback((checkId: string, dayKey?: string) => {
+    const check = calendarChecks.checks.find((each) => each.id === checkId);
+    const startedAtMs = check?.startedAt ? Date.parse(check.startedAt) : NaN;
+    if (!Number.isFinite(startedAtMs)) return false;
+    changeCalendarLayout("list");
+    selectCalendarDay(dayKey ?? formatDateKey(new Date(startedAtMs)));
+    calendarCheckRequests.current += 1;
+    setCalendarCheckTarget({ id: checkId, request: calendarCheckRequests.current, at: Date.now() });
+    setCheckTimelineReads((count) => count + 1);
+    router.navigate("/(tabs)/calendar");
+    return true;
+  }, [calendarChecks, changeCalendarLayout, selectCalendarDay]);
+  const openNextCheck = useCallback((currentId: string | null) => {
+    if (!askingChecks.length) return;
+    const at = currentId ? askingChecks.findIndex((check) => check.id === currentId) : -1;
+    openCheckOn(askingChecks[(at + 1) % askingChecks.length].id);
+  }, [askingChecks, openCheckOn]);
+  // The Calendar tab's tap: today, in the layout the person left, with no earlier "?" or scroll request carried over
+  // (owner bug, 29 Oct 2026: it kept landing on the oldest question's day, 6 days back).
+  // Every presentation request still waiting is cancelled too (Codex r1 on #625): an old link's read still out (its
+  // late answer opens nothing, `cancelRequest`) and a List tap waiting for fresh places (the selection clear). An open
+  // sheet's draft and answers already given (held, saving or saved) are kept.
+  const openCalendarToday = useCallback(() => {
+    setCalendarLinkCancel((count) => count + 1);
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    setCalendarSelectionClear((count) => count + 1);
+    selectCalendarDay(formatDateKey(new Date()));
+  }, [selectCalendarDay]);
+  // The header's Today pill: from another day the Calendar tab's path, keeping the Grid/List choice. Already on today
+  // it only scrolls to now in the layout showing: waiting link, "?" and tap requests are cancelled so none can move the view
+  // afterwards, and the selection clear is skipped, so an open Apple Health question stays open.
+  const pressCalendarToday = useCallback(() => {
+    const action = calendarTodayPressAction({ layout: calendarLayout, selectedDayKey, todayKey: formatDateKey(new Date()) });
+    if (action === "go-to-today") {
+      openCalendarToday();
+      return;
+    }
+    setCalendarLinkCancel((count) => count + 1);
+    setCalendarWaitingTapCancel((count) => count + 1);
+    setCalendarCheckTarget(null);
+    setCalendarCheckScroll(0);
+    if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);
+    if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);
+  }, [calendarLayout, openCalendarToday, selectedDayKey]);
+  // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge is a count only.
+  // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
+  const openTodayChecks = useCallback(() => {
+    const today = formatDateKey(new Date());
+    const first = firstCheckReachingDay(askingChecks, dateFromKey(today).getTime());
+    if (first && openCheckOn(first.id, today)) return;
+    openChecksOn(today);
+  }, [askingChecks, openCheckOn, openChecksOn]);
+  // Apple Health's "?" brought up to date when Calendar › List is in front (step 15; Codex r1 on #615): the deck's
+  // forced reprocess on open, bounded per account (`calendarHealthReprocess.ts`), whether or not Health capture is on.
+  const calendarListInFront = authState === "authenticated" && appIsForeground && calendarOnScreen && calendarLayout === "list";
+  // Foreground only (Codex r2 on #615): leaving the front aborts it before its next batch, and a reload it calls for
+  // waits until Dayframe is back in front.
+  const healthReprocessOwnerRef = useRef(scopedOwnerKey);
+  healthReprocessOwnerRef.current = scopedOwnerKey;
+  const calendarListInFrontRef = useRef(calendarListInFront);
+  calendarListInFrontRef.current = calendarListInFront;
+  // One consumer for the reload it asks for: whichever comes last, the request or being in front and signed in
+  // (Codex r3 on #615).
+  const requestHealthReload = useDeferredReload(appIsForeground && authState === "authenticated",
+    () => { void loadRef.current({ silent: true }); });
   useEffect(() => {
-    openTodayChecksRef.current = () => latestCheckDayKey ? openChecksOn(latestCheckDayKey) : router.push("/review");
-  }, [latestCheckDayKey, openChecksOn]);
+    if (!calendarListInFront || !scopedOwnerKey) return;
+    const ownerKey = scopedOwnerKey;
+    const controller = new AbortController();
+    const inFront = () => calendarListInFrontRef.current && AppState.currentState === "active";
+    void reprocessHealthOnCalendarFront({ ownerKey, isCurrentOwner: () => healthReprocessOwnerRef.current === ownerKey,
+      isInFront: inFront, signal: controller.signal })
+      .then((outcome) => {
+        if (outcome !== "changed" && outcome !== "interrupted") return;
+        if (healthReprocessOwnerRef.current !== ownerKey) return;
+        requestHealthReload();
+      })
+      .catch((error) => { if (error instanceof AuthRequiredError) transitionToSignedOut(); });
+    return () => controller.abort();
+  }, [calendarListInFront, requestHealthReload, scopedOwnerKey, transitionToSignedOut]);
+  // Old Review links and Today's ribbon (step 15, `reviewLinks.ts`): held until signed in with the bootstrap in, then
+  // the "?" opens through the one check request; an item the List lacks is read once for its day (`useCheckLinks`).
+  const checkLinkOwner = useMemo(() => data ? { workspaceId: data.workspace.id, userId: data.user.id, backendId: scopedOwner?.backendId ?? null } : null,
+    [data?.workspace.id, data?.user.id, scopedOwner?.backendId]);
+  // Completed loads only (a server bootstrap landing, the shown day's places landing; Codex r5 and r6 on #615): a named
+  // "?" an old link waits for is tried again on each; a day switch's empty first render, a timer update or any other
+  // local publication is none.
+  const checkLinkLoads = useCompletedLoadCount(bootstrapCompletions, calendarTimelineRequestedAt);
+  const openCheckLink = useCheckLinks({
+    ready: authState === "authenticated" && data !== null,
+    owner: checkLinkOwner,
+    todayKey,
+    // Only a "?" that still asks opens by its id; anything else opens its day with nothing selected (Codex r2 on #615).
+    openCheck: (checkId, dayKey) => askingChecks.some((check) => check.id === checkId) && openCheckOn(checkId, dayKey),
+    openDay: openListDay,
+    openTodayFirst: openTodayChecks,
+    // Whether it still asks: open on the server, an ordinary question, and within the List's 7 days (Codex r4 on #615).
+    lookupItem: async (owner, reviewItemId) => {
+      if (!owner.backendId) return null;
+      const item = await lookupReviewLinkItem({ ...owner, backendId: owner.backendId }, reviewItemId, currentTimeZone() ?? "Etc/UTC");
+      if (!item) return null;
+      const asks = item.open && Boolean(item.startedAt) && checkStillAsks(
+        { startedAt: item.startedAt, stoppedAt: item.stoppedAt },
+        checkAskingStartMs(dateFromKey(formatDateKey(new Date())).getTime()));
+      return { startedAt: item.startedAt, asks };
+    },
+    selectedDayKey,
+    loads: checkLinkLoads,
+    cancelRequest: calendarLinkCancel,
+    dayKeyOf: (instant) => {
+      const ms = Date.parse(instant);
+      return Number.isFinite(ms) ? formatDateKey(new Date(ms)) : null;
+    }
+  });
+  // Today's hatched ribbon blocks (step 15): their "?" in Calendar › List, as an old Review link opens it. Stable, so
+  // the memoised ribbon is not re-rendered by the per-second header.
+  const openTodayRibbonCheck = useCallback((reviewItemId: string | null) => openCheckLink(reviewItemId ?? "first"), [openCheckLink]);
+  useEffect(() => {
+    // The reminder opens the oldest question that still asks (no Review page, step 15).
+    openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));
+  }, [askingChecks, openCheckOn, openChecksOn]);
 
   // One stable handler for Today's rows and ribbon, so the per-second header render does not
   // re-render the memoised ribbon. The latest editors are read through the ref.
@@ -2821,13 +3343,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   stopActiveTimerRef.current = stopActiveTimer;
   async function stopActiveTimer() {
+    const generation = noticeSessionGeneration.current;
+    const undoInFlight = runningSplit.undoInFlight();
+    if (undoInFlight) await undoInFlight;
+    if (generation !== noticeSessionGeneration.current) return false;
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
     if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) return false;
     const bootstrap = latestData.current;
     if (!bootstrap) return false;
-    const generation = noticeSessionGeneration.current;
     const stoppedAt = new Date().toISOString();
+    runningSplit.finishBeforeTimerChange(activeEntry.id);
     let pendingStop: PendingTimerStop;
     let stopBackgroundReservation: Promise<void> | null;
     try {
@@ -2929,6 +3455,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   ) {
     const bootstrap = snapshot ?? latestData.current;
     if (!bootstrap) return false;
+    if (entries.some((entry) => entry.pendingCompletedCopy)) {
+      getDeletionCoordinator().invalidate(token);
+      showTodayNotice("Wait for this split or copy to sync before deleting the block.", null);
+      return false;
+    }
     const owner = timerStopOwner(bootstrap);
     // Captured now: a sign-out or teardown during the writes ends this lease, not a later one.
     getDeletionCoordinator();
@@ -2948,9 +3479,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (lease.ended) return false;
       deletionCommandIds.current.set(token, commandIds);
       return true;
-    } catch {
+    } catch (error) {
       if (lease.ended) return false;
       getDeletionCoordinator().invalidate(token);
+      if (error instanceof PendingCompletedEntryChangeError) {
+        showTodayNotice(error.message, null);
+        return false;
+      }
       Alert.alert(
         entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
         "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
@@ -3156,6 +3691,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (coordinator && pending && isActiveEntryPendingDeletion()) {
       coordinator.commit(pending.token);
     }
+  }
+
+  /** The block Start guards treat as running: the canonical one, unless being deleted or ended by End it here. */
+  function runningForStartNow() {
+    return runningForStart(latestData.current?.activeEntry ?? null, {
+      pendingDeletion: isActiveEntryPendingDeletion(), clashEndedId: clashEndedActiveRef.current
+    });
   }
 
   function isActiveEntryPendingDeletion() {
@@ -3554,7 +4096,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
-                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, data?.activeEntry ?? null))}
+                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, activeEntryForDisplay))}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -3564,6 +4106,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <TodayRibbonSection
                   entries={todayRibbonEntries}
                   nowMs={minuteNow}
+                  onOpenCheck={openTodayRibbonCheck}
                   onOpenEntry={openTodayEntry}
                   onOpenWhereWent={openReportsToday}
                   reduceMotion={reduceMotion}
@@ -3615,6 +4158,44 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  /**
+   * A block's own "?" for its sheet (location v4 design §7): "Team sync ran 18m into your trip · End it at 09:42 ·
+   * Keep it", answered through the one gate (held for Undo, then the outbox); the sheet closes once it is taken.
+   */
+  function blockQuestionFor(entryId: string | null | undefined, dismiss: () => void): BlockQuestion | null {
+    const checkId = entryId ? askingBlockChecks.get(entryId) : undefined;
+    const words = checkId ? calendarChecks.questions.get(checkId) : undefined;
+    if (!checkId || !words || !words.skipLabel) return null;
+    return {
+      text: words.question,
+      endLabel: scopedOwnerKey ? words.logLabel : null,
+      keepLabel: words.skipLabel,
+      onAnswer: (end) => {
+        if (!scopedOwnerKey) return;
+        if (checkAnswers.answer(checkId, end)) dismiss();
+      }
+    };
+  }
+
+  /**
+   * Opens a "?"'s own sheet (a place's or a trip's, its "?" asked at the top), or a Places lane item's (`lane:<id>`),
+   * when the day's places have it. False when it has none (Apple Health, a legacy suggestion, a place not read yet).
+   */
+  function openCheckSheet(reviewItemId: string | null | undefined) {
+    const segmentId = reviewItemId?.startsWith("lane:") ? reviewItemId.slice(5)
+      : calendarChecks.checks.find((check) => check.id === reviewItemId)?.segmentId ?? null;
+    const item = segmentId ? calendarTimeline?.items.find((each) => each.id === segmentId) : undefined;
+    if (item?.kind === "place") {
+      locationCorrections.openPlace(item, item.name ?? (item.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"));
+      return true;
+    }
+    if (item?.kind === "trip") {
+      locationCorrections.openTripLeg(item, null);
+      return true;
+    }
+    return false;
+  }
+
   function renderDashboardTab(tab: DayframeDashboardTab, isFocused: boolean) {
     if (tab === "timer") return renderTodayTab(isFocused);
     if (tab === "calendar") {
@@ -3630,11 +4211,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
-            // only older needs-review entries ("") opens the Review list.
-            onOpenReview: (reviewItemId) => reviewItemId
-              ? router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
-              : router.push("/review")
+            // Step 15: a "?" on the Grid never opens Review (there is none). Owner item A (28 Oct 2026): a Grid "?" or
+            // Places lane item opens its own sheet (its "?" asked at the top); Apple Health's, which has no sheet,
+            // opens its question in the List; a crowd of only older needs-review entries ("") opens the List.
+            onOpenReview: (reviewItemId) => {
+              if (openCheckSheet(reviewItemId)) return;
+              if (!reviewItemId || reviewItemId.startsWith("lane:") || !openCheckOn(reviewItemId)) changeCalendarLayout("list");
+            }
           }
         );
       };
@@ -3654,9 +4237,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
             </Animated.View>
             <DayframeCalendarView
-              model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
+              model={isFocused && refreshing ? gridModelRefreshing : gridModel}
               onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
               onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
+              onPressToday={pressCalendarToday}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
               onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
@@ -3688,9 +4272,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  blockChecks={askingBlockChecks}
+                  checkGlyphs={calendarChecks.glyphs}
+                  checkKinds={calendarChecks.kinds}
                   checkQuestions={calendarChecks.questions}
-                  checks={calendarChecks.checks}
+                  checks={askingChecks}
                   checkTitles={calendarChecks.titles}
+                  checkTotal={askingChecks.length}
+                  onNextCheck={openNextCheck}
+                  onSwipeDay={shiftSelectedCalendarDay}
+                  onToggleShowAllPlaces={onToggleShowAllPlaces}
+                  openCheckRequest={calendarCheckTarget}
+                  clearSelectionRequest={calendarSelectionClear}
+                  timelineLoading={serverCalendarSnapshot.loading}
+                  timelineReadAt={calendarTimelineRequestedAt}
+                  onRequestFreshRead={() => setCheckTimelineReads((count) => count + 1)}
                   clockFormat={clockFormat}
                   dayEndMs={nativeCalendarModel.dayEndMs}
                   dayStartMs={nativeCalendarModel.dayStartMs}
@@ -3701,41 +4297,40 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   // Without a backend identity the outbox's record is not read here, so an answer could never
                   // hand over: there a "?" opens the suggestion instead (Codex r9 on #582).
                   onAnswerCheck={scopedOwnerKey
-                    // Yes to "Visited {Apple place}?" records it there once (card B part 2).
+                    // Yes to "Visited {Apple place}?" records it there once (card B part 2). The row's Yes and its question go
+                  // through checkAnswers.answer, the one gated entry point (Codex r7 on #610).
                     ? (id, logged) => checkAnswers.answer(id, logged, id === openCalendarCheckId ? openCheckVenue.venue : null)
                     : undefined}
                   onOpenCheckChange={setOpenCalendarCheckId}
-                  // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
-                  // The editor's Nearby search takes the native search over from the question first (Codex r1 on #600).
+                  // Step 15: there is no Review screen to open a suggestion on. A place's or trip's "?" opens its sheet
+                  // in the List itself (onOpenPlace, onOpenTripLeg), or asks under its row when the day lacks its item;
+                  // this is only the List's own fallback (a build without a backend identity, which can't answer in
+                  // place), and opens the sheet when the day has one. The sheet's Nearby search takes the native
+                  // search over from the question first (Codex r1 on #600).
                   onOpenCheck={(reviewItemId) => {
                     openCheckVenue.release();
-                    const reviewItem = shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId);
-                    // A trip's question edits the trip on its own sheet (mock-up #ios-list editorTrip; Codex r1 on #602):
-                    // its times, legs and "This wasn't a trip". Anything else keeps its screen.
-                    const segmentId = typeof reviewItem?.rawPayload?.clientSegmentId === "string" ? reviewItem.rawPayload.clientSegmentId : null;
-                    const trip = reviewItem?.eventType === "commute_detected" && segmentId
-                      ? calendarTimeline?.items.find((each) => each.kind === "trip" && each.id === segmentId && !each.blockIds.length)
-                      : undefined;
-                    if (trip?.kind === "trip") {
-                      locationCorrections.openTripLeg(trip, null);
-                      return;
-                    }
-                    router.push(calendarCheckRoute(reviewItem, reviewItemId) as never);
+                    openCheckSheet(reviewItemId);
                   }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onOpenPlace={locationCorrections.openPlace}
                   onOpenTripLeg={locationCorrections.openTripLeg}
-                  onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
+                  // Only the request it reports: a newer one that arrived with it stays (Codex r2 on #640).
+                  onScrolledToFirstCheck={(request) => setCalendarCheckScroll((current) => (current === request ? 0 : current))}
+                  cancelWaitingTapRequest={calendarWaitingTapCancel}
                   scrollToFirstCheck={calendarCheckScroll}
+                  scrollToNowRequest={calendarListScrollToNow}
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
                   reduceMotion={reduceMotion}
                   refreshing={isFocused && refreshing}
+                  showAllPlaces={showAllPlaces}
                   theme={theme}
                   timeline={calendarTimeline}
                 />
                 {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
+            {/* Owner item A (28 Oct 2026): the Grid's items open the same sheets, over the Grid. */}
+            {calendarLayout !== "list" ? locationCorrections.sheet : null}
           </View>
         </SafeAreaView>
       );
@@ -3795,7 +4390,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openCalendarToday, openCheckLink }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -3807,10 +4402,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           // its token re-mounts the toast, so a second answer replaces it (the first is saved).
           <BlocksToast
             key={`check-${checkAnswers.held.token}`}
-            actionAccessibilityLabel={`Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
+            actionAccessibilityLabel={heldClashWords
+              ? `Undo ${checkAnswers.held.logged ? "ending" : "keeping"} ${checkAnswers.held.title}`
+              : `Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
             actionLabel="Undo"
             actionTestID="calendar-check-undo"
-            message={`${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
+            message={heldClashWords
+              ? checkAnswers.held.logged ? `Ended at ${heldClashWords.endsAt}` : "Kept as it was"
+              : `${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
             onAction={() => {
               checkAnswers.undo();
               playHaptic("undoRestore");
@@ -3820,9 +4419,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             theme={theme}
           />
         ) : null}
-        {runningSplit.held ? (
-          // Split for the running block (owner 28 Oct 2026): the split hook owns the 5 s window; its token
-          // re-mounts the toast, so a second split replaces it (the first is kept).
+        {locationCorrections.heldLog ? (
+          // Logs as from a place's correction sheet (step 12 part 4c), held for Undo as an answer is.
+          <BlocksToast
+            key={`log-place-${locationCorrections.heldLog.token}`}
+            actionAccessibilityLabel={`Undo logging ${locationCorrections.heldLog.title}`}
+            actionLabel="Undo"
+            actionTestID="location-log-undo"
+            message={`Logged ${locationCorrections.heldLog.title}`}
+            onAction={() => {
+              locationCorrections.undoLog();
+              playHaptic("undoRestore");
+            }}
+            reduceMotion={reduceMotion}
+            testID="location-log-toast"
+            theme={theme}
+          />
+        ) : null}
+        {runningSplit.held && authState === "authenticated" &&
+          runningSplit.held.generation === noticeSessionGeneration.current ? (
           <BlocksToast
             key={`split-${runningSplit.held.token}`}
             actionAccessibilityLabel={`Undo splitting ${runningSplit.held.title}`}
@@ -3837,8 +4452,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             testID="today-split-toast"
             theme={theme}
           />
-        ) : null}
-        {pendingDeletion?.phase === "active" ? (
+        ) : pendingDeletion?.phase === "active" ? (
           // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
           // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
           <BlocksToast
@@ -3890,7 +4504,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           onClose={() => setSwitchSheetRecents(null)}
           onPick={switchToRecent}
           recents={switchSheetRecents}
-          running={Boolean(data?.activeEntry)}
+          running={Boolean(activeEntryForDisplay)}
           reduceMotion={reduceMotion}
           styles={styles}
           theme={theme}
@@ -3902,7 +4516,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
         entry={manualDraftEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         mode="add"
         onCancel={completeManualEntryExit}
         onCreateActivity={createSheetActivity}
@@ -3923,18 +4540,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={displayedActiveDurationSeconds}
         entry={retainedActiveEntryForSheet}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={recentStoppedAt}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         onApplySuggestion={applyRunningTimerSuggestion}
         previousEnd={previousEndForSheet}
         onCancel={completeActiveEditorExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onDelete={deleteActiveTimer}
-        onSplit={(atMs) => { void runningSplit.split(atMs); }}
+        isRunningSplitTarget={(entryId) => {
+          const current = latestData.current?.activeEntry;
+          return Boolean(current && timerEntryIdentity(current.id) === timerEntryIdentity(entryId));
+        }}
+        onSplit={data?.serverBuild?.runningEntrySplit ? runningSplit.split : undefined}
         onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
         presentation={activeEditPresentation}
+        question={blockQuestionFor(retainedActiveEntryForSheet?.id, () => setActiveEditDismissRequestId(activeEditPresentation.id))}
         reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
@@ -3949,12 +4574,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
         historicalEntries={historySourceEntries}
-        lastStoppedAt={null}
+        lastStopOwner={data ? timerStopOwner(data) : undefined}
+        lastStopDeletedIds={locallyDeletedIds}
+        lastStopProjectedIds={lastStopProjectedIds}
+        lastStopBootstrapGeneration={bootstrapCompletions}
         mode="entry"
         dismissRequestId={calendarEditDismissRequestId}
         onCancel={completeCalendarEntryExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
+        onCopyCompletedEntry={data?.serverBuild?.completedEntryCopy ? copyCalendarEntry : undefined}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
         onStartAgain={(values) => {
@@ -3963,6 +4592,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           pendingStartAgain.current = values;
         }}
         presentation={calendarEditPresentation}
+        question={blockQuestionFor(calendarEditEntry?.id, () => setCalendarEditDismissRequestId(calendarEditPresentation.id))}
         reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
@@ -3997,6 +4627,16 @@ function ScreenFocusReporter({ focused, onChange }: { focused: boolean; onChange
 /** The Calendar tab's badge: things to check today and the 7 days before (location v4 step 14). */
 export function useDashboardCheckCount() {
   return useContext(DashboardContext)?.checkCount ?? 0;
+}
+
+/** The Calendar tab's tap opens today, badge or not (owner bug, 29 Oct 2026). */
+export function useDashboardOpenCalendarToday() {
+  return useContext(DashboardContext)?.openCalendarToday;
+}
+
+/** Step 15: opens the "?" an old Review link names (the Calendar tab reads the link's `check`). */
+export function useDashboardOpenCheckLink() {
+  return useContext(DashboardContext)?.openCheckLink;
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {
@@ -4056,6 +4696,16 @@ function PasswordVisibilityGlyph({
       ) : null}
     </Svg>
   );
+}
+
+function dashboardHistoryEntries(data: MobileBootstrap | null): TimeEntry[] {
+  if (!data) return [];
+  return mergeActiveEntry(dedupeEntriesById([
+    ...(data.historyEntries ?? data.entries ?? []),
+    ...(data.entries ?? []),
+    ...(data.weekEntries ?? []),
+    ...(data.dayEntries ?? [])
+  ]), data.activeEntry);
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {
@@ -4191,31 +4841,23 @@ function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
   return left.userId === right.userId && left.workspaceId === right.workspaceId;
 }
 
-function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
-  if (!activeEntry) return null;
-  const activeStart = new Date(activeEntry.startedAt).getTime();
-  if (Number.isNaN(activeStart)) return null;
-
-  let recentStop: string | null = null;
-  let recentStopTime = 0;
-  for (const entry of entries) {
-    if (!entry.stoppedAt) continue;
-    const stoppedAt = new Date(entry.stoppedAt).getTime();
-    if (
-      Number.isNaN(stoppedAt) ||
-      stoppedAt > activeStart ||
-      activeStart - stoppedAt > RECENT_LAST_STOP_WINDOW_MS ||
-      stoppedAt <= recentStopTime
-    ) {
-      continue;
-    }
-    recentStop = entry.stoppedAt;
-    recentStopTime = stoppedAt;
-  }
-
-  return recentStop;
-}
-
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
+}
+
+/** What a "?" is about (Codex r2 on #610): only "health" and "none" have no sheet in Calendar › List. */
+const NO_CLASH_ENDS: ReadonlyMap<string, string> = new Map();
+
+/** Whether two End it projections end the same blocks at the same times. */
+function sameClashEnds(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>) {
+  return left.size === right.size && [...left].every(([id, at]) => right.get(id) === at);
+}
+
+function calendarCheckKind(item: MobileReviewItem): "health" | "place" | "trip" | "block" | "none" {
+  // Asked on its block, whose sheet asks it (location v4 design §7).
+  if (asksOnItsBlock(item)) return "block";
+  if (item.eventType?.startsWith("health_") || item.eventSource?.startsWith("health_")) return "health";
+  const segmentId = typeof item.rawPayload?.clientSegmentId === "string" ? item.rawPayload.clientSegmentId : null;
+  if (isLocationReviewItem(item) && segmentId) return item.eventType === "commute_detected" ? "trip" : "place";
+  return "none";
 }

@@ -12,8 +12,8 @@ const page = readFileSync(join(root, "app/timeline/page.tsx"), "utf8");
 
 describe("Calendar phone layout", () => {
   it("sizes the gutter and day columns from CSS, narrower on phones", () => {
-    expect(views).toContain("gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))`");
-    expect(styles).toMatch(/\.timeline-calendar-workspace \{\s*--calendar-axis-width: 104px;\s*--calendar-day-min-width: 130px;/);
+    expect(views).toContain("gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(0, 1fr))`");
+    expect(styles).toMatch(/\.timeline-view-stage,\s*\.df-cal-striprow \{\s*--calendar-axis-width: 104px;/);
     const phone = styles.slice(styles.lastIndexOf("/* Calendar phone layout"));
     expect(phone).toMatch(/@media \(max-width: 560px\)/);
     expect(phone).toMatch(/--calendar-axis-width: 60px;/);
@@ -34,7 +34,8 @@ describe("Calendar phone layout", () => {
     expect(views).toContain('className="calendar-phone-zoom" role="group" aria-label="Calendar zoom"');
     expect(styles).toMatch(/\.calendar-phone-zoom \{\s*display: none;/);
     const phone = styles.slice(styles.lastIndexOf("/* Calendar phone layout"));
-    expect(phone).toMatch(/\.calendar-grid-corner \.calendar-corner-zoom \{\s*display: none;/);
+    // The day row keeps its zoom cell on phones (the days keep their columns); only its buttons go (UI review round 2).
+    expect(styles).toMatch(/\.df-cal-dayrow-zoom \{\s*overflow: hidden;\s*visibility: hidden;/);
     expect(phone).toMatch(/\.calendar-phone-zoom button \{[^}]*width: 44px;[^}]*height: 44px;/);
     expect(phone).toMatch(/\.calendar-now-pill \{[^}]*white-space: nowrap;/);
   });

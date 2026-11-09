@@ -6,7 +6,10 @@ import {
   REVIEW_PRESENTATION_LEARNED_NAME_FEATURE,
   REVIEW_PRESENTATION_OUTING_FEATURE,
   REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
+  REVIEW_PRESENTATION_TIMER_TRIP_CLASH_FEATURE,
+  REVIEW_PRESENTATION_MAX_LIMIT,
   ReviewPresentationResponseSchema,
+  ReviewTimerTripClashPresentationSchema,
   ReviewPresentationSnapshotSchema,
   type ReviewPresentationRequest,
   type ReviewPresentationResponse,
@@ -28,6 +31,44 @@ import { rememberReviewPresentationRequestedAt, reviewPresentationRequestedAt } 
 
 const PRESENTATION_TIMEOUT_MS = 8_000;
 const MAX_SNAPSHOT_RESTARTS = 1;
+/**
+ * The most pages one snapshot read follows (performance.md: bounded reads): 25 pages of up to 200 records is the
+ * contract's 5,000-record display collection, so every Review item past the bootstrap's 100 (a block that ran into a
+ * trip included) is read without an unbounded loop.
+ */
+export const REVIEW_PRESENTATION_MAX_SNAPSHOT_PAGES = Math.ceil(REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS / REVIEW_PRESENTATION_MAX_LIMIT);
+
+/** Every presentation feature this client understands, sent on each read (comma-joined). */
+export const REVIEW_PRESENTATION_CLIENT_FEATURES = [
+  REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
+  REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE,
+  REVIEW_PRESENTATION_OUTING_FEATURE,
+  REVIEW_PRESENTATION_OUTING_COUNT_FEATURE,
+  REVIEW_PRESENTATION_LEARNED_NAME_FEATURE,
+  // "A block ran into your trip" (location v4 design §7, #621): each clash's block and trip, so a clash past the
+  // bootstrap's cap is put on its block and counted.
+  REVIEW_PRESENTATION_TIMER_TRIP_CLASH_FEATURE
+].join(",");
+
+/**
+ * A record whose `timerTripClash` is missing stays as it is; one whose field is malformed keeps the record without it
+ * (never failing the page): that clash then has no block to ask on, so it is not counted (Codex r1 on #618).
+ */
+function withoutInvalidClashFields(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const page = value as { records?: unknown; lookup?: { reviewItems?: unknown } };
+  const clean = (records: unknown) => Array.isArray(records) ? records.map((record) => {
+    if (!record || typeof record !== "object" || !("timerTripClash" in record)) return record;
+    if (ReviewTimerTripClashPresentationSchema.safeParse((record as { timerTripClash: unknown }).timerTripClash).success) return record;
+    const { timerTripClash: _dropped, ...rest } = record as Record<string, unknown>;
+    return rest;
+  }) : records;
+  return {
+    ...page,
+    ...(page.records !== undefined ? { records: clean(page.records) } : {}),
+    ...(page.lookup && typeof page.lookup === "object" ? { lookup: { ...page.lookup, reviewItems: clean(page.lookup.reviewItems) } } : {})
+  };
+}
 
 export class ReviewPresentationSnapshotChangedError extends Error {
   constructor() {
@@ -70,7 +111,7 @@ export async function fetchReviewPresentationPage(input: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.snapshot.token}`,
-        [REVIEW_PRESENTATION_FEATURES_HEADER]: `${REVIEW_PRESENTATION_TIME_AWAY_FEATURE},${REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE},${REVIEW_PRESENTATION_OUTING_FEATURE},${REVIEW_PRESENTATION_OUTING_COUNT_FEATURE},${REVIEW_PRESENTATION_LEARNED_NAME_FEATURE}`
+        [REVIEW_PRESENTATION_FEATURES_HEADER]: REVIEW_PRESENTATION_CLIENT_FEATURES
       },
       body: JSON.stringify(input.request)
     },
@@ -88,7 +129,7 @@ export async function fetchReviewPresentationPage(input: {
             ? value as { code?: unknown }
             : null;
         }
-        const parsed = ReviewPresentationResponseSchema.safeParse(value);
+        const parsed = ReviewPresentationResponseSchema.safeParse(withoutInvalidClashFields(value));
         if (!parsed.success) throw new ReviewPresentationValidationError();
         return parsed.data;
       }
@@ -101,7 +142,7 @@ export async function fetchReviewPresentationPage(input: {
   if (!response.ok) {
     throw new MobileHttpResponseError(response.status, "Unable to load Review presentation.");
   }
-  const parsed = ReviewPresentationResponseSchema.safeParse(body);
+  const parsed = ReviewPresentationResponseSchema.safeParse(withoutInvalidClashFields(body));
   if (!parsed.success) throw new ReviewPresentationValidationError();
   return rememberReviewPresentationRequestedAt(parsed.data, requestedAt);
 }
@@ -127,6 +168,9 @@ export async function fetchReviewPresentationSnapshot(input: {
         cursor = page.nextCursor ?? undefined;
         if (pages.reduce((total, current) => total + current.records.length, 0) > REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS) {
           throw new Error("Review presentation exceeded its bounded display collection.");
+        }
+        if (cursor && pages.length >= REVIEW_PRESENTATION_MAX_SNAPSHOT_PAGES) {
+          throw new Error("Review presentation exceeded its bounded page count.");
         }
       } while (cursor);
       return mergeReviewPresentationPages(pages);

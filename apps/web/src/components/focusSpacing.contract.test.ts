@@ -39,7 +39,6 @@ describe("web focus and control contracts", () => {
     expect(styles.match(/--focus:\s*#64718a;/g)).toHaveLength(2);
     expect(styles).toContain("--web-focus-border: var(--focus);");
     expect(styles).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus\);[\s\S]*outline-offset: 2px;/);
-    expect(styles).toContain(".focus-ring:not(input, select, textarea):focus-visible");
     expect(styles).toMatch(/button:focus:not\(:focus-visible\),[\s\S]*outline: 0;[\s\S]*box-shadow: none;/s);
 
     const focusBlocks = styles.match(/[^{}]*(?:focus-visible|focus-within)[^{}]*\{[^}]*\}/g) ?? [];
@@ -54,7 +53,7 @@ describe("web focus and control contracts", () => {
   it("gives the persistent timer Description's focus to the command bar without hiding validation (Trello 213)", () => {
     // No box after a click or tap; keyboard-origin focus (data-focus-ring) shows the neutral perimeter.
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:focus-within \{[^}]*border-color:\s*transparent;/s);
-    expect(styles).toMatch(/\.swiss-timer-description-control \.inline-tag-picker-search:focus-within,\s*\.swiss-timer-description-control\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\) \{[^}]*border-color:\s*var\(--focus\);/s);
+    expect(styles).toMatch(/\.swiss-timer-description-control\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\) \{[^}]*border-color:\s*var\(--focus\);/s);
     expect(styles).not.toContain(".df-cmd:has(");
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\) \{[^}]*border-color:\s*var\(--danger\);/s);
     expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\):focus-within \{[^}]*box-shadow:\s*inset 0 -2px 0 var\(--danger\);/s);

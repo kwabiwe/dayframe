@@ -1,20 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewItemRow } from "@/lib/queries";
 import {
-  activeDraft,
-  nextAfterDecision,
   outingMutationFor,
-  outingSummary,
   reviewOutings,
   reviewCardCategory,
   reviewMutationFor,
   reviewPicture,
   reviewProposalSignature,
-  reviewReason,
-  reviewRoute,
-  reviewTitle,
-  reviewWhen,
-  stepSelection
+  reviewTitle
 } from "@/lib/review-deck";
 
 const CAT = "10000000-0000-4000-8000-000000000001";
@@ -62,13 +55,11 @@ describe("Review deck helpers", () => {
     expect(reviewPicture(item())).toBe("workout");
   });
 
-  it("shows a Stay or Move by the server's title and a Move's route line (PRD D19)", () => {
+  it("shows a Stay or Move by the server's title (PRD D19)", () => {
     const drive = item({ title: "Drive", eventSource: "location_learning", eventType: "commute_detected",
       rawPayload: { routeLabel: "Home → Peak Gym" } });
     expect(reviewTitle(drive)).toBe("Drive");
-    expect(reviewRoute(drive)).toBe("Home → Peak Gym");
     expect(reviewTitle(item({ title: "", eventSource: "location_learning", eventType: "commute_detected", rawPayload: {} }))).toBe("Getting around");
-    expect(reviewRoute(item({ title: "Morning walk" }))).toBeNull();
     // A Stay is called by its place, never "Visit to …".
     expect(reviewTitle(item({ ...v2, title: "Peak Gym", placeName: "Peak Gym" }))).toBe("Peak Gym");
     expect(reviewTitle(item({ ...v2, title: "", placeName: "Peak Gym" }))).toBe("Peak Gym");
@@ -103,8 +94,7 @@ describe("Review deck helpers", () => {
     expect(reviewMutationFor(item({ suggestedStoppedAt: null }), "log", { name: "Park run" })).toEqual({ action: "accept" });
   });
 
-  it("drops a picked activity that is gone and falls back to the suggestion's", () => {
-    expect(activeDraft({ categoryId: "gone", name: "x" }, categories)).toEqual({ categoryId: undefined, name: "x" });
+  it("falls back to the suggestion's activity when none is picked", () => {
     expect(reviewCardCategory(item(), { categoryId: OTHER }, categories)?.name).toBe("Errands");
     expect(reviewCardCategory(item(), undefined, categories)?.name).toBe("Exercise");
     expect(reviewCardCategory(item({ suggestedCategoryId: null, categoryName: null }), undefined, categories)).toBeNull();
@@ -130,47 +120,6 @@ describe("Review deck helpers", () => {
     });
   });
 
-  it("writes the when-line in local days", () => {
-    const now = new Date(2026, 9, 10, 12).getTime();
-    expect(reviewWhen(item(), now, "24h")).toBe("Today · 07:00–07:45");
-    expect(reviewWhen(item(), now, "12h")).toBe("Today · 7:00 AM–7:45 AM");
-    expect(reviewWhen(item({ suggestedStartedAt: local(9, 23), suggestedStoppedAt: local(10, 6) }), now, "24h")).toBe("Yesterday · 23:00–Today 06:00");
-    expect(reviewWhen(item({ suggestedStartedAt: local(9, 23), suggestedStoppedAt: local(10, 6) }), now, "12h")).toBe("Yesterday · 11:00 PM–Today 6:00 AM");
-  });
-
-  it("steps through the queue and picks the next card after a decision", () => {
-    expect(stepSelection(["a", "b", "c"], "c", 1)).toBe("a");
-    expect(stepSelection(["a", "b", "c"], "a", -1)).toBe("c");
-    expect(nextAfterDecision(["a", "b", "c"], "b")).toBe("c");
-    expect(nextAfterDecision(["a", "b", "c"], "c")).toBe("b");
-    expect(nextAfterDecision(["a"], "a")).toBeNull();
-  });
-});
-
-describe("location reason line (location v3 bug 8)", () => {
-  const location = (semanticReason: string, eventType = "geofence_exit") =>
-    reviewReason(item({ eventSource: "location_learning", eventType, rawPayload: { semanticReason } }));
-
-  it("says why a visit at a Log automatically place came to Review", () => {
-    expect(location("auto_log_uncertain")).toBe("Not logged automatically · location was less certain than usual.");
-    expect(location("auto_log_overlap")).toBe("Not logged automatically · it overlaps a block.");
-    expect(location("auto_log_logged_before")).toBe("Not logged automatically · this visit was logged once before.");
-    expect(location("auto_log_offered_before")).toBe("Not logged automatically · it was offered in Review before.");
-    expect(location("auto_log_off")).toBe("Log automatically is off for this place.");
-    // Moves that log themselves (PRD D19).
-    expect(location("travel_mode_unknown")).toBe("Not logged automatically · how you travelled isn’t clear.");
-    expect(location("log_trips_off")).toBe("Log trips automatically is off.");
-    expect(location("trip_logged_before")).toBe("Not logged automatically · this trip was logged once before.");
-    expect(location("trip_logging_opted_out")).toBe("Not logged automatically · you stopped logging trips like this.");
-  });
-
-  it("never claims automatic logging is off for the whole app", () => {
-    expect(location("review_mode", "commute_detected")).toBe("Trips aren’t logged automatically yet.");
-    expect(location("review_mode")).toBe("Not logged automatically.");
-    expect(location("untrusted_place", "unknown_stay")).toBe("New place.");
-    expect(location("untrusted_place", "learned_place_visit")).toBe("This place isn’t saved.");
-    expect(location("ambiguous_place", "unknown_stay")).toBe("It’s near more than one saved place.");
-  });
 });
 
 describe("one card per outing (PRD D19)", () => {
@@ -188,14 +137,6 @@ describe("one card per outing (PRD D19)", () => {
     expect([...outings.keys()]).toEqual([shop.id]);
     expect(outings.get(shop.id)!.members.map((member) => member.id)).toEqual([there.id, back.id]);
     expect(reviewOutings([there, back]).size).toBe(0);
-  });
-
-  it("says how the outing travelled, there and back, with the travel time", () => {
-    expect(outingSummary(reviewOutings([there, shop, back]).get(shop.id)!)).toBe("Drives there and back · 11m");
-    expect(outingSummary(reviewOutings([there, shop]).get(shop.id)!)).toBe("Drives there · 6m");
-    // A leg without a known way of travelling keeps the line neutral (Codex r1 on #466).
-    const unknownBack = { ...back, rawPayload: { ...back.rawPayload, travelMode: undefined } };
-    expect(outingSummary(reviewOutings([there, shop, unknownBack]).get(shop.id)!)).toBe("Travel there and back · 11m");
   });
 
   it("logs or skips every member together; Log as applies to the Stay", () => {

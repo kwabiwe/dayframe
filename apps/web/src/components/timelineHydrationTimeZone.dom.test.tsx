@@ -128,8 +128,11 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(html).not.toContain("calendar-now-line");
     expect(html).not.toMatch(/\b(23|00):(30|45)\b/);
     expect(html).toContain('data-calendar-day-key="2026-10-12"');
-    // #256: each day's total under its date waits for hydration (a dash), as the week total does.
-    expect(html).toContain('<span aria-hidden="true" class="df-cal-day-total df-tnum">–</span>');
+    // Each day's total waits for hydration, as the week total does: the day row's tips name only the day until then
+    // (UI review round 2: the totals moved from the row into each day's tip and name).
+    expect(html).not.toContain("df-cal-day-total");
+    expect(html).toContain('data-tip="Mon 12"');
+    expect(html).not.toMatch(/data-tip="[^"]*·/);
     expect(html).not.toContain("df-cal-framed");
 
     expect(recoverable).toEqual([]);
@@ -147,12 +150,16 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
       .toBe(monday.querySelector<HTMLElement>(".calendar-now-line")?.style.top);
     expect(container.querySelector('[data-calendar-day-key="2026-10-13"]')?.classList.contains("is-future")).toBe(true);
     expect(monday.classList.contains("is-future")).toBe(false);
-    expect(container.querySelector(".calendar-day-heading.is-today")?.querySelector("[aria-label]")?.getAttribute("aria-label")).toContain("12 Oct");
+    expect(container.querySelector(".df-cal-dayrow .df-cal-day.is-today")?.getAttribute("aria-label")).toContain("12 October");
     expect(container.querySelector(".calendar-grid-scroller")?.hasAttribute("aria-busy")).toBe(false);
     // 45 minutes on Monday (London) and an hour on Wednesday.
-    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m this week");
-    // Day totals, as the bars, count time up to the test's now (00:45 on Monday, London).
-    expect([...container.querySelectorAll(".df-cal-day-total")].map((total) => total.textContent)).toEqual(["15m", "–", "–", "–", "–", "–", "–"]);
+    expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m");
+    // The days' totals land on the viewer's days after hydration: 45 minutes on Monday, an hour on Wednesday.
+    // The day row counts time up to now (calendar-head), so Monday holds the call's minutes so far and Wednesday's
+    // block, still ahead of this frozen clock, adds nothing yet.
+    const tips = [...container.querySelectorAll(".df-cal-dayrow .df-cal-day")].map((day) => day.getAttribute("data-tip"));
+    expect(tips[0]).toMatch(/^Mon 12 · \d+m$/);
+    expect(tips.slice(1)).toEqual(["Tue 13", "Wed 14", "Thu 15", "Fri 16", "Sat 17", "Sun 18"]);
     await unmount();
   });
 
@@ -175,8 +182,8 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     const { container, html, recoverable, unmount } = await hydrateFromUtc("calendar", "2026-10-11");
     expect(html).toContain("timeline-today-button");
     expect(recoverable).toEqual([]);
-    // The browser knows better once hydrated: this week holds today, so no Today button.
-    expect(container.querySelector(".timeline-today-button")).toBeNull();
+    // The browser knows better once hydrated: this week holds today, so Today is shown but disabled (UI review round 2).
+    expect(container.querySelector<HTMLButtonElement>(".timeline-today-button")?.disabled).toBe(true);
     expect(container.querySelector('[data-calendar-day-key="2026-10-12"] .calendar-now-line')).not.toBeNull();
     await unmount();
   });

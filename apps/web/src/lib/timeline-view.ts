@@ -166,6 +166,56 @@ export function shouldAdvanceStaleTimelineToToday(
  * "Today", "Sun 12 Oct 2026" or a week's span. `now` is the current time, or today's date key
  * (null when today is not known yet, which never reads "Today").
  */
+/**
+ * The Calendar toolbar's date (UI review round 2, owner 30 Oct 2026): "26 Oct – 1 Nov" for a week, "Fri 30 Oct" for a
+ * day, with the year only when it isn't the current year (both years when a week spans two).
+ */
+/** The narrowest readable Week column, in px: below it the grid shows fewer days instead of scrolling sideways. */
+export const WEEK_MIN_COLUMN_WIDTH = 118;
+
+/** How many of a week's days fit the grid: all seven, else five, else three (owner, 30 Oct 2026). */
+export function weekColumnCount(gridWidth: number, axisWidth: number, minColumn = WEEK_MIN_COLUMN_WIDTH): 3 | 5 | 7 {
+  const room = gridWidth - axisWidth;
+  if (room >= 7 * minColumn) return 7;
+  return room >= 5 * minColumn ? 5 : 3;
+}
+
+/**
+ * The days a narrow Week shows. Five: Monday to Friday, shifted just enough to include a chosen weekend day. Three:
+ * from the chosen day, as Apple Calendar's multi-day view, held inside the week.
+ */
+export function weekWindow(weekDays: readonly Date[], selected: Date, count: 3 | 5 | 7) {
+  if (count >= weekDays.length) return { start: 0, days: [...weekDays] };
+  const selectedKey = toTimelineDateKey(selected);
+  const index = Math.max(0, weekDays.findIndex((day) => toTimelineDateKey(day) === selectedKey));
+  const start = count === 5 ? Math.max(0, index - 4) : Math.min(index, weekDays.length - count);
+  return { start, days: weekDays.slice(start, start + count) };
+}
+
+export function formatCalendarRangeLabel(
+  scope: TimelineScope,
+  ranges: TimelineRanges,
+  today: Date | string | null = new Date()
+) {
+  const currentYear = today instanceof Date ? today.getFullYear() : today ? Number(today.slice(0, 4)) : new Date().getFullYear();
+  const withYear = (date: Date) => date.getFullYear() !== currentYear;
+  if (scope === "day") {
+    const day = ranges.day.start;
+    // Today names itself ("Today · 30 Oct", owner 30 Oct 2026); other days keep their weekday.
+    if (today != null && toTimelineDateKey(day) === (today instanceof Date ? toTimelineDateKey(startOfLocalDay(today)) : today)) {
+      return `Today · ${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(day)}`;
+    }
+    const options: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short", ...(withYear(day) ? { year: "numeric" } : {}) };
+    return new Intl.DateTimeFormat("en-GB", options).format(day).replace(",", "");
+  }
+  const start = ranges.weekDays[0];
+  const end = ranges.weekDays[ranges.weekDays.length - 1];
+  const spansYears = start.getFullYear() !== end.getFullYear();
+  const format = (date: Date, year: boolean) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}) }).format(date);
+  // The year once, after the end, unless the week spans two years ("22 Sept – 28 Sept 2025").
+  return `${format(start, spansYears)} – ${format(end, spansYears || withYear(end))}`;
+}
+
 export function formatTimelinePeriodLabel(
   scope: TimelineScope,
   ranges: TimelineRanges,
@@ -219,6 +269,37 @@ export function addCalendarDays(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return copy;
+}
+
+/**
+ * Calendar › List refreshes (performance.md, request-storm fix 30 Oct 2026): an edit re-reads at once the loaded days
+ * within this many days of the List's top day (and the weeks that overlap them), plus the edited blocks' own days.
+ * Every other loaded day is stale and read again only when the List's top day comes within this many days of it, so a
+ * scroll reads at most this window (15 days, 3 weeks) however much history the List has loaded.
+ */
+export const LIST_REFRESH_RADIUS_DAYS = 7;
+
+/** The date keys (inclusive) an edit re-reads at once around the List's top day, or null for every loaded day. */
+export function listRefreshWindow(focusKey: string | null | undefined) {
+  const focus = parseTimelineDateKey(focusKey);
+  if (!focus) return null;
+  return {
+    from: toTimelineDateKey(addCalendarDays(focus, -LIST_REFRESH_RADIUS_DAYS)),
+    to: toTimelineDateKey(addCalendarDays(focus, LIST_REFRESH_RADIUS_DAYS))
+  };
+}
+
+/** Whether a day key falls in the refresh window (every day does without one). */
+export function inListRefreshWindow(dateKey: string, window: { from: string; to: string } | null) {
+  return !window || (dateKey >= window.from && dateKey <= window.to);
+}
+
+/** Whether a week (by its start key) overlaps the refresh window (every week does without one). */
+export function weekInListRefreshWindow(weekStartKey: string, window: { from: string; to: string } | null) {
+  if (!window) return true;
+  const start = parseTimelineDateKey(weekStartKey);
+  if (!start) return false;
+  return weekStartKey <= window.to && toTimelineDateKey(addCalendarDays(start, 6)) >= window.from;
 }
 
 function normalizeTimelineState(state: TimelineState): TimelineState {

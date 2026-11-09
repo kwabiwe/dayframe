@@ -1,11 +1,14 @@
 import {
+  createContext,
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
+  type ComponentProps,
   type MutableRefObject,
   type ReactNode
 } from "react";
@@ -25,13 +28,17 @@ import {
 } from "react-native-gesture-handler";
 import Reanimated, {
   cancelAnimation,
+  measure,
   runOnJS,
+  type AnimatedRef,
+  type SharedValue,
+  useAnimatedRef,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming
 } from "react-native-reanimated";
-import { MOBILE_MOTION } from "@/lib/motion";
+import { localLayoutTransition, MOBILE_MOTION } from "@/lib/motion";
 import {
   backdropProgressForTranslation,
   canSettleSwipeGesture,
@@ -40,6 +47,7 @@ import {
   shouldDismissSwipe,
   swipeSheetExitPlan,
   swipeSheetPresentationPlan,
+  exclusionAfterTouchesDown,
   SWIPE_DISMISS_MOTION
 } from "@/lib/swipeDismissMotion";
 
@@ -62,8 +70,35 @@ export type SwipeDismissSheetHandle = {
   dismiss: () => void;
 };
 
+/**
+ * The one exclusion from the sheet's drag: the view drawn with `ref` (a time wheel's panel) keeps every swipe that
+ * starts inside it, so the wheel turns and the sheet stays. The pan measures it live on the UI thread when a finger
+ * lands; if the finger is inside, it fails before it can activate, so the touch stays with the wheel and the pan
+ * never enters its dragging state, the only state that can move or dismiss the sheet. `mounted` says the ref is attached (a sheet has one wheel at most). See `useSheetGestureExclusion`.
+ */
+type SheetGestureExclusion = {
+  mounted: SharedValue<boolean>;
+  ref: AnimatedRef<View>;
+};
+
+const SheetGestureExclusionContext = createContext<SheetGestureExclusion | null>(null);
+
+/** Keeps swipes inside the returned ref's view away from the enclosing sheet's drag. Outside a sheet it does nothing. */
+export function useSheetGestureExclusion() {
+  const exclusion = useContext(SheetGestureExclusionContext);
+  useEffect(() => {
+    if (!exclusion) return;
+    exclusion.mounted.value = true;
+    return () => {
+      exclusion.mounted.value = false;
+    };
+  }, [exclusion]);
+  return exclusion?.ref;
+}
+
 type SwipeDismissSheetProps = {
   accessibilityLabel?: string;
+  animateContentSize?: boolean;
   backdropAccessibilityLabel: string;
   backdropStyle: StyleProp<ViewStyle>;
   children: ReactNode;
@@ -82,7 +117,7 @@ type SwipeDismissSheetProps = {
   onStaleCallback?: (presentationId: number) => void;
   presentationId?: number;
   reduceMotion: boolean;
-  style: StyleProp<ViewStyle>;
+  style: ComponentProps<typeof Reanimated.View>["style"];
   testID?: string;
   translateYOffset?: ReactNativeAnimated.Value | ReactNativeAnimated.AnimatedInterpolation<number> | number;
   visible: boolean;
@@ -91,6 +126,7 @@ type SwipeDismissSheetProps = {
 export const SwipeDismissSheet = forwardRef<SwipeDismissSheetHandle, SwipeDismissSheetProps>(
 function SwipeDismissSheet({
   accessibilityLabel,
+  animateContentSize = false,
   backdropAccessibilityLabel,
   backdropStyle,
   children,
@@ -115,6 +151,7 @@ function SwipeDismissSheet({
   visible
 }, ref) {
   const { height: windowHeight } = useWindowDimensions();
+  const contentSizeTransition = useMemo(() => animateContentSize ? localLayoutTransition(reduceMotion) : undefined, [animateContentSize, reduceMotion]);
   const initialExitTarget = windowHeight + OFFSCREEN_PADDING;
   const translationY = useSharedValue(initialExitTarget);
   const exitTarget = useSharedValue(initialExitTarget);
@@ -127,6 +164,13 @@ function SwipeDismissSheet({
   const presence = useSharedValue(0);
   const gestureState = useSharedValue<"idle" | "dragging" | "settling" | "dismissing">("idle");
   const dismissCommitted = useSharedValue(false);
+  const exclusionRef = useAnimatedRef<View>();
+  const exclusionMounted = useSharedValue(false);
+  const startedInExclusion = useSharedValue(false);
+  const gestureExclusion = useMemo(
+    () => ({ mounted: exclusionMounted, ref: exclusionRef }),
+    [exclusionMounted, exclusionRef]
+  );
   const onDismissRef = useRef(onDismiss);
   const onDismissStartRef = useRef(onDismissStart);
   const onGestureSettledRef = useRef(onGestureSettled);
@@ -446,11 +490,19 @@ function SwipeDismissSheet({
       -SWIPE_DISMISS_MOTION.horizontalFailureOffset,
       SWIPE_DISMISS_MOTION.horizontalFailureOffset
     ])
+    // A finger landing in a time wheel fails this pan before it can activate, so it can't take the touch from the
+    // wheel, move the sheet or reach a dismiss. A later finger can't end a drag already under way.
+    .onTouchesDown((event, stateManager) => {
+      if (gestureState.value === "dragging") return;
+      const excluded = exclusionAfterTouchesDown(startedInExclusion.value, event, exclusionMounted.value ? measure(exclusionRef) : null);
+      startedInExclusion.value = excluded;
+      if (excluded) stateManager.fail();
+    })
     // Only claim the interaction after the pan crosses activeOffsetY. Using
     // onBegin here would dismiss the keyboard for ordinary taps on fields,
     // Suggestions, and quick actions before those controls can respond.
     .onStart(() => {
-      if (dismissCommitted.value) return;
+      if (dismissCommitted.value || startedInExclusion.value) return;
       cancelAnimation(translationY);
       cancelAnimation(presence);
       gestureOriginY.value = translationY.value;
@@ -532,6 +584,9 @@ function SwipeDismissSheet({
     dismissGestureRef,
     dismissCommitted,
     commitDismiss,
+    exclusionMounted,
+    exclusionRef,
+    startedInExclusion,
     gestureOriginY,
     gestureTravelY,
     gestureState,
@@ -586,6 +641,7 @@ function SwipeDismissSheet({
     <Reanimated.View
       accessibilityLabel={accessibilityLabel}
       accessibilityViewIsModal
+      layout={contentSizeTransition}
       onAccessibilityEscape={disabled ? undefined : requestBackdropDismiss}
       onLayout={(event) => {
         const measuredTarget = Math.max(
@@ -597,11 +653,13 @@ function SwipeDismissSheet({
         onLayout?.(event);
       }}
       pointerEvents={visible ? "auto" : "none"}
-      style={[style, sheetAnimatedStyle]}
+      style={[style, animateContentSize ? CLIP_RESIZING_CONTENT_STYLE : null, sheetAnimatedStyle]}
       testID={testID}
     >
       {dismissHandle}
-      {children}
+      <SheetGestureExclusionContext.Provider value={gestureExclusion}>
+        {children}
+      </SheetGestureExclusionContext.Provider>
     </Reanimated.View>
   );
 
@@ -629,6 +687,9 @@ function SwipeDismissSheet({
     </>
   );
 });
+
+// The incoming editor lays out at its final size before the animated sheet reaches it.
+const CLIP_RESIZING_CONTENT_STYLE: ViewStyle = { overflow: "hidden" };
 
 const BACKDROP_PRESSABLE_STYLE: ViewStyle = {
   flex: 1

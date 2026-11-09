@@ -34,14 +34,15 @@ export function outingTravelSeconds(outing: Pick<ReviewDeckOuting, "members">, n
   return outing.members.reduce((sum, member) => sum + reviewItemDurationSeconds(member, now), 0);
 }
 
-/** Log it / Skip on the grouped card: every part together; "Log as" applies to the Stay. */
+/** Log it / Skip on the grouped card: every part together; "Log as" and a guessed venue apply to the Stay (#642). */
 export function reviewDeckOutingMutation(
   memberReviewItemIds: readonly string[],
   logged: boolean,
-  edit: Extract<ReviewMutation, { memberReviewItemIds: string[] }>["edit"] | null
+  edit: Extract<ReviewMutation, { memberReviewItemIds: string[] }>["edit"] | null,
+  venue: { name: string; applePlaceId: string } | null = null
 ): ReviewMutation {
   if (!logged) return { action: "ignore_outing", memberReviewItemIds: [...memberReviewItemIds] };
-  return { action: "confirm_outing", memberReviewItemIds: [...memberReviewItemIds], ...(edit ? { edit } : {}) };
+  return { action: "confirm_outing", memberReviewItemIds: [...memberReviewItemIds], ...(edit ? { edit } : {}), ...(venue ? { venue } : {}) };
 }
 
 export type HeldOutingMember = { key: string; itemId: string; proposal: string };

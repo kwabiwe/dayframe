@@ -18,6 +18,19 @@ type Props = {
   selectedPointRadiusMeters?: number;
   selectedSavedPlaceId?: string | null;
   showDetails?: boolean;
+  /**
+   * Owner items L, M (28 Oct 2026): only the visit's own area (no saved places' circles or pins), and the
+   * readings line inside the map card. The Calendar's correction sheet always draws it so; the Review details
+   * editor keeps the full map.
+   */
+  visitOnly?: boolean;
+  /**
+   * The place and trip sheets' one line in place of the readings summary (owner feedback, 29 Oct 2026):
+   * `evidenceSheetCaption`, null for none. The gaps and stops are in Settings › Location details (`app/location-details.tsx`).
+   */
+  caption?: string | null;
+  /** The map's height, when not the full map's 280 points (the sheets' 160). */
+  height?: number;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
   reduceMotion?: boolean;
   /** Changes once per place chosen from a list; each change shows `selectedPoint` with the stay. */
@@ -38,6 +51,9 @@ export function LocationEvidenceMap({
   selectedPointRadiusMeters,
   selectedSavedPlaceId,
   showDetails = true,
+  visitOnly = false,
+  caption,
+  height,
   reduceMotion = false,
   revealChoiceToken,
   onSelectPoint,
@@ -48,10 +64,13 @@ export function LocationEvidenceMap({
   const handledRevealRef = useRef(revealChoiceToken);
   const samples = evidence.map.acceptedSamples;
   // Plain words, not the server's diagnostic summary (owner feedback, 27 Oct 2026).
-  const summary = evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
-  const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
+  const summary = caption !== undefined ? caption ?? "" : evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
+  // The sheets' map (`visitOnly`) shows only the visit's area or the trip's route: never readings, rejected readings,
+  // gaps, anchors or saved places, whatever else is asked (Codex r6 on #620). The diagnostic map keeps them.
+  const details = showDetails && !visitOnly;
+  const shouldShowSavedPlaces = !visitOnly && (showDetails || evidence.segment.kind === "stay");
   // Time away has no route line, so its readings are the evidence to inspect.
-  const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
+  const shouldShowSamples = !visitOnly && (showDetails || evidence.segment.timeAway === true);
   const coordinates = [
     ...samples.map((sample) => ({
       latitude: sample.point.coordinates[1],
@@ -62,7 +81,7 @@ export function LocationEvidenceMap({
       longitude: place.point.coordinates[0]
     })),
     ...(evidence.map.straightLineFallback?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? []),
-    ...(showDetails ? evidence.map.rejectedSamples : []).flatMap((sample) => sample.point
+    ...(details ? evidence.map.rejectedSamples : []).flatMap((sample) => sample.point
       ? [{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }]
       : [])
   ];
@@ -114,8 +133,8 @@ export function LocationEvidenceMap({
   if (!centre || !initialRegion) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
-        <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
-        <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
+        {summary ? <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text> : null}
+        <Text style={[styles.fallbackText, { color: textColor }]}>{visitOnly ? "There's no map for this one." : "Mapped evidence has expired or is unavailable."}</Text>
       </View>
     );
   }
@@ -135,20 +154,20 @@ export function LocationEvidenceMap({
     <View>
       <MapView
         // The plain words are always heard, whether or not the details show (Codex r1 on #599).
-        accessibilityLabel={`${showDetails
+        accessibilityLabel={`${details
           ? "Location evidence map."
           : evidence.segment.timeAway
-            ? "Map of readings while you were away."
+            ? visitOnly ? "Map of where you were while away." : "Map of readings while you were away."
             : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
-            : "Map showing the detected visit location."} ${summary}`}
+            : "Map showing the detected visit location."}${summary ? ` ${summary}` : ""}`}
         initialRegion={initialRegion}
         ref={mapRef}
         userInterfaceStyle={appearance}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
         rotateEnabled={false}
-        style={styles.map}
+        style={height ? [styles.map, { height }] : styles.map}
       >
         {route.length >= 2 ? <Polyline coordinates={route} strokeColor={accentColor} strokeWidth={4} /> : null}
         {route.length < 2 && straightLineFallback.length >= 2 ? (
@@ -159,7 +178,7 @@ export function LocationEvidenceMap({
             strokeWidth={3}
           />
         ) : null}
-        {showDetails ? evidence.map.gaps.map((gap) => gap.fromPoint && gap.toPoint ? (
+        {details ? evidence.map.gaps.map((gap) => gap.fromPoint && gap.toPoint ? (
           <Polyline
             key={`${gap.startedAt}-${gap.stoppedAt}`}
             coordinates={[
@@ -190,7 +209,7 @@ export function LocationEvidenceMap({
             strokeWidth={1}
           />
         )) : null}
-        {showDetails ? evidence.map.rejectedSamples.map((sample) => sample.point ? (
+        {details ? evidence.map.rejectedSamples.map((sample) => sample.point ? (
           <Circle
             key={`rejected-${sample.id}`}
             center={{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }}
@@ -200,7 +219,7 @@ export function LocationEvidenceMap({
             strokeWidth={2}
           />
         ) : null) : null}
-        {showDetails ? evidence.map.anchors.map((anchor) => anchor.point ? (
+        {details ? evidence.map.anchors.map((anchor) => anchor.point ? (
           <Marker
             key={anchor.id}
             coordinate={{ latitude: anchor.point.coordinates[1], longitude: anchor.point.coordinates[0] }}
@@ -208,7 +227,7 @@ export function LocationEvidenceMap({
             title={anchor.label}
           />
         ) : null) : null}
-        {!showDetails && commuteStart ? (
+        {!details && commuteStart ? (
           <Marker
             accessibilityLabel="Commute start"
             coordinate={commuteStart}
@@ -216,7 +235,7 @@ export function LocationEvidenceMap({
             title="Start"
           />
         ) : null}
-        {!showDetails && commuteEnd ? (
+        {!details && commuteEnd ? (
           <Marker
             accessibilityLabel="Commute end"
             coordinate={commuteEnd}
@@ -267,9 +286,12 @@ export function LocationEvidenceMap({
         <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
       ) : null}
       {/* The map's plain words, always (owner feedback, 27 Oct 2026; Codex r1 on #599); the map already says them. */}
-      <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.routeCaption, { color: textColor }]}
-        testID="location-evidence-summary">{summary}</Text>
-      {showDetails ? (
+      {summary ? (
+        <Text importantForAccessibility="no-hide-descendants" accessibilityElementsHidden numberOfLines={visitOnly ? 1 : undefined}
+          style={[styles.routeCaption, { color: textColor }, visitOnly ? [styles.insideCaption, { backgroundColor: surfaceColor }] : null]}
+          testID="location-evidence-summary">{summary}</Text>
+      ) : null}
+      {details ? (
         <>
           <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
             <Text style={[styles.legendText, { color: textColor }]}>Solid route · accepted evidence</Text>
@@ -318,6 +340,8 @@ function spread(values: number[]) {
 }
 
 const styles = StyleSheet.create({
+  // Owner item M: the readings line sits inside the map card, on its own small plate.
+  insideCaption: { position: "absolute", left: 10, bottom: 8, marginTop: 0, overflow: "hidden", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   fallback: { borderRadius: 16, minHeight: 140, padding: 18, justifyContent: "center", gap: 8 },
   fallbackText: { fontSize: 14, lineHeight: 20 },
   map: { width: "100%", height: 280, borderRadius: 16 },

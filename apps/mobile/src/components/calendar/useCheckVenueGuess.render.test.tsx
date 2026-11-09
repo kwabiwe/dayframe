@@ -68,12 +68,16 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     mocks.appState.listeners.clear();
   });
 
-  it("asks only for an unnamed visit with its window, never a named place, a trip or an outing", () => {
-    expect(venueGuessEligible(stay, false)).toBe(true);
-    expect(venueGuessEligible({ ...stay, title: "Office" }, false)).toBe(false);
-    expect(venueGuessEligible({ ...stay, eventType: "commute_detected" }, false)).toBe(false);
-    expect(venueGuessEligible(stay, true)).toBe(false);
-    expect(venueGuessEligible({ ...stay, suggestedStoppedAt: null }, false)).toBe(false);
+  it("asks only for an unnamed visit with its window, an outing's stay too, never a named place, a trip or an outing's Move", () => {
+    expect(venueGuessEligible(stay)).toBe(true);
+    expect(venueGuessEligible({ ...stay, title: "Office" })).toBe(false);
+    expect(venueGuessEligible({ ...stay, eventType: "commute_detected" })).toBe(false);
+    const inOuting = (outingRole: string, title = "Unknown place") => ({ ...stay, title, rawPayload: { ...stay.rawPayload, outingKey: "outing:1", outingRole } });
+    expect(venueGuessEligible(inOuting("stay"))).toBe(true);
+    // A named outing stay keeps its name.
+    expect(venueGuessEligible(inOuting("stay", "Bread run"))).toBe(false);
+    for (const role of ["in", "out"]) expect(venueGuessEligible(inOuting(role))).toBe(false);
+    expect(venueGuessEligible({ ...stay, suggestedStoppedAt: null })).toBe(false);
     expect(streetOf("12 Example Street, Exampleton, EX1 2AB")).toBe("12 Example Street");
     expect(streetOf(null)).toBeNull();
   });
@@ -94,6 +98,38 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     await act(async () => { tree.update(<Probe item={stay} />); });
     expect(mocks.search).toHaveBeenCalledTimes(1);
     expect(mocks.search.mock.calls[0][0]).toMatchObject({ latitude: 10, longitude: 20 });
+  });
+
+  it("guesses the top destination within 50 m when the ranker isn't sure enough to suggest one (PRD D23)", async () => {
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    // The owner's case (29 Oct 2026): two shops 10 m away and one 30 m away, none clear.
+    const shop = (id: string, title: string, east: number, north: number, category: string) => ({ id, requestId: "", title,
+      subtitle: `${id} High Street, Exampleton`, distanceMeters: Math.round(Math.hypot(east, north)), category, offsetEastMeters: east,
+      offsetNorthMeters: north, source: "nearby", placeId: `I${id}` });
+    mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({
+      requestId, areasOfInterest: [],
+      places: [shop("1", "Holland & Barrett", 8, 6, "MKPOICategoryStore"), shop("2", "Transylvania Sweet", -6, 8, "MKPOICategoryBakery"),
+        shop("3", "Hotel Chocolat", 18, -24, "MKPOICategoryStore")].map((place) => ({ ...place, requestId }))
+    }));
+    await act(async () => { create(<Probe item={stay} />); });
+    await settle();
+    expect(["Holland & Barrett", "Transylvania Sweet", "Hotel Chocolat"]).toContain(seen?.venue?.name);
+    expect(seen?.venue?.applePlaceId).toMatch(/^I[123]$/);
+  });
+
+  it("finds the guess even when the five rows shown leave it out (Codex r1 on #620)", async () => {
+    // A 40-minute stay; five gyms 60–64 m away fill the rows, a shop at 10 m is the only place within 50 m.
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({
+      requestId, areasOfInterest: [],
+      places: [...Array.from({ length: 5 }, (_, index) => ({ id: `g${index}`, requestId, title: `Gym ${index}`, subtitle: null,
+        distanceMeters: 60 + index, category: "MKPOICategoryFitnessCenter", offsetEastMeters: 60 + index, offsetNorthMeters: 0, source: "nearby" })),
+      { id: "s", requestId, title: "Corner Shop", subtitle: "1 High Street, Exampleton", distanceMeters: 10, category: "MKPOICategoryStore",
+        offsetEastMeters: 0, offsetNorthMeters: 10, source: "nearby", placeId: "ISHOP" }]
+    }));
+    await act(async () => { create(<Probe item={stay} />); });
+    await settle();
+    expect(seen?.venue).toEqual({ name: "Corner Shop", street: "1 High Street", applePlaceId: "ISHOP" });
   });
 
   it("guesses nothing when the ranker isn't sure, and searches again after a failure", async () => {

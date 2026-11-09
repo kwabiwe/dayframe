@@ -10,11 +10,12 @@ const rule = (selector: string) => {
 };
 
 describe("web Today hero (W9)", () => {
-  it("puts the date in the prototype's capitalised eyebrow", () => {
+  // UI review (owner 29 Oct 2026): sentence case at the meta size, no tracked capitals.
+  it("puts the date in a quiet sentence-case eyebrow", () => {
     const eyebrow = rule(".df-eyebrow");
-    expect(eyebrow).toContain("text-transform: uppercase;");
-    expect(eyebrow).toContain("letter-spacing: 0.08em;");
-    expect(eyebrow).toContain("font-size: 11px;");
+    expect(eyebrow).toContain("text-transform: none;");
+    expect(eyebrow).toContain("letter-spacing: 0;");
+    expect(eyebrow).toContain("font-size: var(--type-meta);");
   });
 
   it("sets 'framed today' as the prototype's hero-sub, straight under the total", () => {

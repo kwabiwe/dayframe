@@ -35,6 +35,7 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
   place-search and Review map-tile routes. Never expose it through a
   `NEXT_PUBLIC_` variable.
+- `MAPKIT_JS_TEAM_ID`, `MAPKIT_JS_KEY_ID` and `MAPKIT_JS_PRIVATE_KEY`: server-only Apple MapKit JS key (the `.p8` text; one line with escaped newlines is fine) for the place and trip dialogs' Apple map. Preview uses the staging key, Production the production key. Optional: without all three the web keeps its MapLibre map.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
 - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, and `APNS_BUNDLE_ID`:
   server-only Apple provider-token credentials and the Dayframe app bundle ID.
@@ -86,6 +87,10 @@ DAYFRAME_LOCATION_ROLLOUT_MODE=v2_shadow
 # Preview only; omit in Production.
 NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging
 GEOAPIFY_API_KEY=...
+# Staging key on Preview, production key on Production.
+MAPKIT_JS_TEAM_ID=...
+MAPKIT_JS_KEY_ID=...
+MAPKIT_JS_PRIVATE_KEY=...
 APNS_KEY_ID=...
 APNS_TEAM_ID=...
 APNS_PRIVATE_KEY=...
@@ -108,8 +113,10 @@ DAYFRAME_INGEST_TOKEN=...
 APNs delivery uses a durable per-token outbox. Timer mutations enqueue the
 newest state before the immediate provider request. Network failures, 429, and
 5xx responses retry with bounded backoff and `Retry-After`; permanent failures
-stop, and invalid/expired tokens are invalidated. Authenticated timer-state
-reads reconcile due rows promptly. `vercel.json` adds a protected daily sweep,
+stop, and invalid or expired tokens are invalidated. Authenticated bootstrap
+rebuilds the desired state and reconciles due rows after responding. The
+lightweight timer-state route does not enqueue or deliver pushes.
+`vercel.json` adds a protected daily sweep,
 which is the highest cron frequency available on this project's current Hobby
 plan; do not silently change that schedule without checking the Vercel plan.
 Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
@@ -136,6 +143,17 @@ afterwards. A preview without the key remains usable: search reports a
 friendly unavailable state, place editing still supports Current location and
 Advanced coordinates, and Review keeps its explicit tile-free evidence canvas.
 
+### Apple MapKit JS (UI review, owner 29 Oct 2026)
+
+The place and trip dialogs draw Apple's map, the same map as the iPhone, when the server has a MapKit JS key. The
+browser asks the authenticated `/api/mapkit-token` once per page; it signs a 30-minute ES256 token on the server,
+locked to the page's own origin, and answers 404 when the three variables aren't all set, which keeps the MapLibre
+map. MapKit JS loads from `https://cdn.apple-mapkit.com` (the web app sends no Content-Security-Policy today; one
+added later must allow that CDN and Apple's map hosts). An authorisation or load failure falls back to MapLibre for
+the rest of the page. The key comes from Certificates, Identifiers & Profiles › Keys (MapKit JS, tied to the Maps ID
+`maps.com.layereight.dayframe.web`), one key for staging and one for production so each can be revoked alone. Adding
+the variables needs a redeploy to take effect.
+
 Geoapify search results must retain visible Geoapify and OpenStreetMap
 attribution. The default Review map retains Geoapify, OpenMapTiles, and
 OpenStreetMap attribution. An optional `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL`
@@ -159,6 +177,12 @@ Log in offers "Forgot password?" in provider mode. `POST /api/auth/password-rese
 Hosted prerequisite (owner, Supabase dashboard, per project): Authentication › URL Configuration › Redirect URLs must allow `https://dayframe-web.vercel.app/reset-password` (production) and `https://dayframe-staging.vercel.app/reset-password` (staging; add the Preview pattern if Previews are tested). Supabase sends any other redirect to the project's Site URL instead. The default "Reset Password" email template works as-is (implicit flow; the link carries the session in its fragment). Until the URLs are allowed, the email arrives but its link lands on the Site URL rather than the reset page.
 
 Auth email delivery (owner decision, 12 Oct 2026: deferred). Both projects still send auth email (password reset, confirmation) through Supabase's built-in mailer (Supabase's own sender address). It only delivers to members of the Supabase organisation's team — the Dayframe signup allowlist does not change that, so a friend on the allowlist gets no reset or confirmation email until custom SMTP is set up — and it is rate-limited (a repeat request within the cooldown returns `over_email_send_rate_limit`, which the app hides behind its uniform reply) and its mail often lands in spam, so a reset can look as if it never arrived even when the auth logs show `mail.send` (staging, 12 Oct). The owner plans to move Dayframe to its own domain and may later self-host Supabase; custom SMTP from that domain (with branded templates) is set up then, in the Supabase Auth dashboard by the owner. Until then, check spam and the project's auth logs before treating a missing reset email as a code fault.
+
+## Completed-block refresh migration
+
+Apply `supabase/migrations/202611070001_completed_entry_revisions.sql` to staging before promoting its Preview and to production before deploying the matching server. The ordered local equivalent is `packages/db/migrations/024_completed_entry_revisions.sql`. The migration is additive, does not backfill historical entries and works with the previous server and installed clients. Existing owners start at revision zero.
+
+Verify the revision table's composite key, the entry and tag-link triggers, the membership cleanup triggers and the deferred commit trigger. Confirm browser and iPhone sessions read the same marker for the same disposable workspace and user, and a different owner stays at zero after an edit. Keep the `dayframe_sync` schema outside the hosted public API. The app database role needs access to read the marker. Browser and mobile app sessions only receive their own marker through the server.
 
 ## Personal Beta Defaults
 
@@ -211,3 +235,20 @@ The server that accepts Motion & Fitness evidence requires `supabase/migrations/
 ### Sync recovery schema prerequisite
 
 The bounded sync server requires `supabase/migrations/202609040001_health_sleep_resolution_link.sql` before its Preview or production deployment. It adds nullable, owner-scoped lookup provenance for logical Sleep resolution without backfilling existing events. Validate against the existing staging schema and clean ordered local setup (`packages/db/migrations/006_health_sleep_resolution_link.sql`). An exact Review receipt remains authoritative and replays without rewriting the canonical entry. Production application of this migration remains part of the separately approved release; staging validation is not production authorization.
+
+### Location evidence expiry and uploads
+
+The upload transaction and the daily retention job both delete expired evidence. PostgreSQL cascades those deletes to `location_segment_evidence` by `evidence_id` alone. The partial indexes for stay and trip links cannot serve that lookup. An unindexed cascade can exhaust the upload's statement budget before it saves new readings, leaving the phone retrying HTTP 503.
+
+`supabase/migrations/202611040001_location_evidence_cascade_index.sql` adds an ordinary index on that foreign key. It is compatible with the running API and does not change retention or replay rules. Local ordered setup uses `packages/db/migrations/023_location_evidence_cascade_index.sql`.
+
+After approval, prebuild on populated staging and production databases outside a transaction, using a direct or session connection:
+
+```sql
+create index concurrently idx_location_segment_evidence_evidence_id
+  on public.location_segment_evidence (evidence_id);
+```
+
+Check `pg_index` for both `indisvalid` and `indisready` and verify that `pg_get_indexdef` shows the exact column and no predicate. If a build was interrupted and left an invalid index, drop that invalid index concurrently before retrying. Record the migration only after verification. On staging, send a disposable batch with expired parent evidence and verify both the new evidence acknowledgement and the removal of the expired links. On production, verify the phone's ordinary retries reach the server and compare queue depth and replay outcomes. Check the separate retention job's invocation and response through its existing logs.
+
+If removal is required, drop the index concurrently outside a transaction. Removing it can bring back the upload timeout.

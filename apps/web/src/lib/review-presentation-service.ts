@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   REVIEW_PRESENTATION_MAX_IDS,
+  REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS,
   REVIEW_PRESENTATION_VERSION,
+  TIMER_TRIP_CLASH_EVENT_TYPE,
+  TIMER_TRIP_CLASH_REVIEW_TYPE,
+  timerTripClashQuestion,
   ReviewPresentationResponseSchema,
+  ReviewTimerTripClashPresentationSchema,
   type CompletedTodayEntryPresentation,
   type LegacyReviewEntryPresentation,
   type ReviewPresentationRecord,
@@ -50,6 +55,8 @@ type ReviewRow = {
   outingTravelMode?: string | null;
   learnedName?: boolean | null;
   venuePlaceId?: string | null;
+  /** A timer-trip clash's event payload (null for every other Review item). */
+  clashPayload?: Record<string, unknown> | null;
 };
 
 type LegacyRow = {
@@ -137,7 +144,10 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean; venue?: boolean };
+export type ReviewPresentationFeatures = {
+  timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean; venue?: boolean;
+  timerTripClash?: boolean;
+};
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -345,6 +355,9 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             -- An unsaved stay's Apple venue (location v3 PR 8): the one picked, else the suggestion.
             case when st.id is not null and st.place_id is null
               then coalesce(st.venue_place_id, st.suggested_venue_place_id) end as "venuePlaceId",
+            -- A block that ran into a trip (#611): the question it asks, read from its event.
+            case when ri.type = '${TIMER_TRIP_CLASH_REVIEW_TYPE}' or ae.event_type = '${TIMER_TRIP_CLASH_EVENT_TYPE}'
+              then ae.raw_payload end as "clashPayload",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -497,6 +510,9 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
             -- An unsaved stay's Apple venue (location v3 PR 8): the one picked, else the suggestion.
             case when st.id is not null and st.place_id is null
               then coalesce(st.venue_place_id, st.suggested_venue_place_id) end as "venuePlaceId",
+            -- A block that ran into a trip (#611): the question it asks, read from its event.
+            case when ri.type = '${TIMER_TRIP_CLASH_REVIEW_TYPE}' or ae.event_type = '${TIMER_TRIP_CLASH_EVENT_TYPE}'
+              then ae.raw_payload end as "clashPayload",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -630,6 +646,7 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {}),
     ...(row.learnedName ? { learnedName: true as const } : {}),
     ...(row.venuePlaceId && row.venuePlaceId.length <= 200 ? { venuePlaceId: row.venuePlaceId } : {}),
+    ...clashFor(row),
     ...(row.outingKey && (row.outingRole === "stay" || row.outingRole === "in" || row.outingRole === "out") && row.outingKey.length <= 200
       ? { outing: { key: row.outingKey, role: row.outingRole,
           ...(row.outingTravelMode && row.outingTravelMode.length <= 40 ? { travelMode: row.outingTravelMode } : {}) } } : {})
@@ -642,15 +659,33 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
   };
 }
 
+/**
+ * A timer-trip clash's question (#611): the block it asks on and the trip it ran into, for clients that list every
+ * clash past the bootstrap's 100 Review items (the List's dot). Only a complete payload (its overlap a number) that
+ * fits the record's own schema; anything else carries no question, so one bad payload never fails a page (Codex r1
+ * on #621).
+ */
+function clashFor(row: ReviewRow) {
+  const clash = timerTripClashQuestion({ type: row.type, eventType: row.eventType, rawPayload: row.clashPayload ?? null });
+  const overlap = row.clashPayload?.overlapSeconds;
+  if (!clash || typeof overlap !== "number" || !Number.isFinite(overlap)) return {};
+  const parsed = ReviewTimerTripClashPresentationSchema.safeParse({
+    ...clash, overlapSeconds: Math.min(Math.round(clash.overlapSeconds), REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS)
+  });
+  return parsed.success ? { timerTripClash: parsed.data } : {};
+}
+
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
   if (!record || typeof record !== "object") return record;
-  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown; venuePlaceId?: unknown };
+  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown; venuePlaceId?: unknown;
+    timerTripClash?: unknown };
   if (!features.timeAway) delete rest.timeAway;
   if (!features.moveRoute) delete rest.routeLabel;
   if (!features.outing) delete rest.outing;
   if (!features.learnedName) delete rest.learnedName;
   if (!features.venue) delete rest.venuePlaceId;
+  if (!features.timerTripClash) delete rest.timerTripClash;
   return rest as T;
 }
 

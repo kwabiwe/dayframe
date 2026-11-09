@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectTodayReviewPresentation, todayReviewNudgeSplit } from "./todayReviewPresentation";
+import { projectTodayReviewPresentation } from "./todayReviewPresentation";
 import type { ReviewPresentationSnapshot } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
@@ -53,6 +53,41 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.savedConfirmationCount).toBe(1);
     expect(presentation.daySections[0].activities.find((activity) => activity.source.kind === "review"))
       .toMatchObject({ state: "accepted_locally", countsAsLogged: false });
+  });
+
+  it("never hatches a timer that ran into a trip on Today (step 15: its block UI comes later)", () => {
+    const work = entry("work", "Work", "2026-09-12T09:00:00.000Z", "2026-09-12T11:00:00.000Z");
+    const clash = { ...review("clash", "Team sync ran into your trip", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z"), eventType: "timer_trip_clash" };
+    const walk = review("walk", "Walk", "2026-09-12T13:00:00.000Z", "2026-09-12T13:30:00.000Z");
+    const presentation = project({ response: response([work, clash, walk], 2, 2) });
+
+    expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")
+      .map((activity) => activity.source.kind === "review" && activity.source.reviewItemId)).toEqual(["walk"]);
+    expect(presentation.donutSegments.map((segment) => segment.id)).not.toContain("review:clash");
+    expect(presentation.awaitingReviewMs).toBe(30 * 60_000);
+  });
+
+  it("never brings a timer that ran into a trip back from the outbox's own copy (a restored or refused decision; Codex r1 on #615)", () => {
+    const clash = { ...review("clash", "Team sync ran into your trip", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z"), eventType: "timer_trip_clash" };
+    const source = (id: string) => ({
+      reviewItemId: id, sourceKind: "generic" as const, title: "Team sync ran into your trip",
+      category: { id: null, name: null, color: null }, placeLabel: null,
+      interval: { start: clash.interval.start, end: clash.interval.end }, createdAt: clash.createdAt,
+      eventSource: "location", eventType: "timer_trip_clash"
+    });
+    const restored = (id: string) => ({ ...effect(id, "rejected"), localEffect: "restore" as const, source: source(id) });
+    for (const records of [[], [clash]]) {
+      const presentation = project({ response: response(records, 0, 0), effects: [restored("clash"), restored("clash-gone")] });
+      expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")).toHaveLength(0);
+      expect(presentation.donutSegments.map((segment) => segment.id)).not.toContain("review:clash");
+      expect(presentation.awaitingReviewMs).toBe(0);
+    }
+    // An ordinary restored decision still comes back.
+    const walk = review("walk", "Walk", "2026-09-12T13:00:00.000Z", "2026-09-12T13:30:00.000Z");
+    const ordinary = { ...restored("walk"), source: { ...source("walk"), title: "Walk", eventType: walk.eventType, eventSource: walk.eventSource,
+      interval: { start: walk.interval.start, end: walk.interval.end } } };
+    expect(project({ response: response([], 0, 0), effects: [ordinary] }).daySections[0].activities
+      .filter((activity) => activity.source.kind === "review")).toHaveLength(1);
   });
 
   it("uses a linked canonical result once and removes the verified saved marker", () => {
@@ -367,27 +402,6 @@ function mobileEntry(id: string, title: string, startedAt: string, stoppedAt: st
   };
 }
 
-describe("todayReviewNudgeSplit (the Today nudge, 14 Oct 2026)", () => {
-  const exact = (value: number) => ({ value, exact: true });
-
-  it("splits the exact total into today and earlier and targets the segment with moments", () => {
-    expect(todayReviewNudgeSplit(exact(12), exact(3))).toEqual({ today: 3, earlier: 9, segment: "today" });
-    expect(todayReviewNudgeSplit(exact(9), exact(0))).toEqual({ today: 0, earlier: 9, segment: "earlier" });
-    expect(todayReviewNudgeSplit(exact(3), exact(3))).toEqual({ today: 3, earlier: 0, segment: "today" });
-  });
-
-  it("has no split unless both counts are exact", () => {
-    expect(todayReviewNudgeSplit({ value: 12, exact: false }, exact(3))).toBeNull();
-    expect(todayReviewNudgeSplit(exact(12), { value: 3, exact: false })).toBeNull();
-    expect(todayReviewNudgeSplit(exact(12), { value: null, exact: true })).toBeNull();
-    expect(todayReviewNudgeSplit(null, null)).toBeNull();
-  });
-
-  it("never counts more today than in total", () => {
-    expect(todayReviewNudgeSplit(exact(2), exact(5))).toEqual({ today: 2, earlier: 0, segment: "today" });
-  });
-});
-
 describe("today's count after a local decision (Codex r1 on #408)", () => {
   const earlier = review("earlier", "Earlier walk", "2026-09-11T10:00:00.000Z", "2026-09-11T11:00:00.000Z");
   const evening = review("evening", "Evening run", "2026-09-12T18:00:00.000Z", "2026-09-12T19:00:00.000Z");
@@ -400,8 +414,6 @@ describe("today's count after a local decision (Codex r1 on #408)", () => {
     });
     expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
     expect(presentation.todayReviewCount).toEqual({ value: 0, exact: true });
-    expect(todayReviewNudgeSplit(presentation.globalReviewCount, presentation.todayReviewCount))
-      .toEqual({ today: 0, earlier: 1, segment: "earlier" });
   });
 
   it("takes a decided moment without a complete window out of today's count by when it was detected", () => {

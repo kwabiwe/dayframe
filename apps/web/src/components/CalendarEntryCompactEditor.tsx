@@ -8,7 +8,8 @@ import type { CreateCategoryOutcome } from "@/components/CategoryPicker";
 import {
   TimeEntryQuickEditorPanel,
   useTimeEntryQuickEditor,
-  type TimeEntryQuickEditorProps
+  type TimeEntryQuickEditorProps,
+  type TimeEntryQuickEditorQuestion
 } from "@/components/TimeEntryQuickEditor";
 import {
   calculateCalendarEditorPosition,
@@ -33,6 +34,8 @@ type CalendarEntryCompactEditorSharedProps = {
   onOutsidePointerDown?: (pointer: { pointerId: number; pointerDownTimeStamp: number }) => void;
   peerEntries: TimeEntryRow[];
   positionKey: string;
+  /** A question the block asks at the top (a block that ran into a trip, location v4 design §7). */
+  question?: TimeEntryQuickEditorQuestion | null;
   scrollContainer: HTMLElement | null;
   taskSuggestions?: RecentActivitySuggestion[];
   taskSuggestionCandidates?: RecentActivitySuggestionCandidate[];

@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IconButton } from "@/components/ui/Primitives";
-import { TooltipHost } from "./TooltipHost";
+import { focusQuietly, TooltipHost } from "./TooltipHost";
 
 // WUI-014: icon-only buttons name themselves on hover (after 400 ms) and on keyboard focus.
 describe("TooltipHost", () => {
@@ -61,6 +61,22 @@ describe("TooltipHost", () => {
     expect(tip()?.textContent).toBe("Edit");
     act(() => button.blur());
     expect(tip()).toBeNull();
+  });
+
+  it("shows no tip for focus an action gave back on its own, until the keyboard is used (running Split, 28 Oct 2026)", () => {
+    const view = setup();
+    const button = view.getByRole("button", { name: "Edit block" });
+
+    act(() => focusQuietly(button));
+    expect(document.activeElement).toBe(button);
+    expect(tip()).toBeNull();
+    expect(button.hasAttribute("data-tip-quiet")).toBe(true);
+    // A key press ends the quiet: the ring shows again, and the next keyboard focus has its tip.
+    act(() => { fireEvent.keyDown(document, { key: "Tab" }); });
+    expect(button.hasAttribute("data-tip-quiet")).toBe(false);
+    act(() => button.blur());
+    act(() => button.focus());
+    expect(tip()?.textContent).toBe("Edit");
   });
 
   it("keeps a focus tip through a scroll (Tab scrolls the button into view) but hides a hover tip", () => {

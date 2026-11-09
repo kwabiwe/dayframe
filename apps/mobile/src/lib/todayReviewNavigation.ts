@@ -1,9 +1,13 @@
 import type { TodayActivity } from "./todayReviewPresentation";
 
+/**
+ * Where a hatched block on Today's ribbon opens. Step 15 (list-first): there is no Review screen, so a suggestion's
+ * block opens its "?" in Calendar › List (its day, its question or sheet open), and an older needs-review entry,
+ * which is no "?" of its own, opens today's List.
+ */
 export type TodayReviewNavigationTarget =
-  | { kind: "location_evidence"; pathname: "/review/[id]"; params: { from: "today"; id: string } }
-  | { kind: "generic_review"; pathname: "/review"; params: { focusReviewId: string } }
-  | { kind: "legacy_entry"; pathname: "/review"; params: { focusEntryId: string } }
+  | { kind: "check"; reviewItemId: string }
+  | { kind: "today_checks" }
   | { kind: "sync_diagnostics"; pathname: "/settings"; params: { from: "today"; section: "sync" } }
   | { kind: "canonical_entry"; entryId: string };
 
@@ -21,12 +25,8 @@ export function todayReviewNavigationTarget(activity: TodayActivity): TodayRevie
       : null;
   }
   if (activity.source.kind === "legacy_review_entry") {
-    return UUID.test(activity.source.entryId)
-      ? { kind: "legacy_entry", pathname: "/review", params: { focusEntryId: activity.source.entryId } }
-      : null;
+    return UUID.test(activity.source.entryId) ? { kind: "today_checks" } : null;
   }
   if (!UUID.test(activity.source.reviewItemId)) return null;
-  return activity.reviewSourceKind === "location_v2"
-    ? { kind: "location_evidence", pathname: "/review/[id]", params: { from: "today", id: activity.source.reviewItemId } }
-    : { kind: "generic_review", pathname: "/review", params: { focusReviewId: activity.source.reviewItemId } };
+  return { kind: "check", reviewItemId: activity.source.reviewItemId };
 }

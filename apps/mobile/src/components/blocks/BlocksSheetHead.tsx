@@ -17,7 +17,7 @@ export type BlocksSheetHeadAction = {
 
 /**
  * The one Blocks sheet head (design/blocks/ios.html .sheet-head, UIA-006): a left eyebrow over a
- * 17-point title, and one right pill. Sheets dismiss with the grabber, a swipe, the backdrop or
+ * 17-point title and a right pill, with a secondary control when needed. Sheets dismiss with the grabber, a swipe, the backdrop or
  * the VoiceOver escape gesture (each keeps that sheet's discard prompt), so there is no Cancel.
  * Presentation only: the owner keeps the draft, the save and the dismissal.
  */
@@ -26,23 +26,22 @@ export function BlocksSheetHead({
   eyebrow,
   eyebrowTestID,
   leading,
+  secondaryAction,
   testID,
   textTestID,
   theme,
-  title,
-  trailing
+  title
 }: {
   action?: BlocksSheetHeadAction | null;
   eyebrow: string;
   eyebrowTestID?: string;
   /** Only for a pushed route with no sheet to swipe: a circular back control before the text. */
   leading?: ReactNode;
+  secondaryAction?: ReactNode;
   testID?: string;
   textTestID?: string;
   theme: MobileTheme;
   title: string;
-  /** A circular icon action before the pill (the running block's "…", owner 28 Oct 2026). */
-  trailing?: ReactNode;
 }) {
   const tone = action?.tone ?? "neutral";
   const inactive = Boolean(action?.disabled || action?.busy);
@@ -59,7 +58,7 @@ export function BlocksSheetHead({
           {title}
         </Text>
       </View>
-      {trailing}
+      {secondaryAction}
       {action ? (
         <Pressable
           accessibilityHint={action.accessibilityHint}

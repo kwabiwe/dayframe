@@ -18,13 +18,19 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { askingChecks, clashBlocksFrom } from "@/lib/calendar-checks";
+import { calendarNavigationGeneration } from "@/lib/calendar-today-request";
+import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
+import { useClashesBeyondCap } from "@/components/location/useClashesBeyondCap";
+import { withClashItems } from "@/lib/clash-presentation";
 import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { beforeSessionChange } from "@/lib/session-change";
 import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
-import type { BootstrapData } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, ReviewItemRow } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import { markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
@@ -46,7 +52,7 @@ type Overlay = "search" | "profile" | "help" | null;
 const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
-  ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
+  ["G then T, C, P, L, S", "Go to Today, Calendar, Reports, Library, Settings"],
   ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
@@ -63,9 +69,62 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AppShellRuntimeProvider>
-      <AppShellContent>{children}</AppShellContent>
+      <CheckDecisionsHost>
+        <AppShellContent>{children}</AppShellContent>
+      </CheckDecisionsHost>
     </AppShellRuntimeProvider>
   );
+}
+
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
+const NO_CATEGORIES: readonly CategoryRow[] = [];
+
+/**
+ * The "?" decisions' one owner (Codex r4 on #609), per workspace/user lifetime: Calendar › List answers through it,
+ * and the sidebar badge and Today's chip count from it, so an answer held, saving or saved shows the same everywhere,
+ * and survives leaving the List. Another workspace or person starts it afresh.
+ */
+export function CheckDecisionsHost({ children }: { children: ReactNode }) {
+  const { canonicalShellData, data, refresh, shellData } = useAppShellRuntime();
+  const refreshShell = useCallback(async () => { await refresh(); }, [refresh]);
+  // The blocks the shell has (the running one last, so it wins): a "block ran into your trip" stops asking once its
+  // block no longer runs into the trip (location v4 design §7).
+  // As the server last sent them (not the End it projection), so a projection is confirmed against canonical data.
+  const canonical = canonicalShellData ?? shellData ?? data;
+  // The owner is the signed-in account as the shell's canonical bootstrap names it, which never goes empty while the
+  // Calendar loads another date (the selected period's data is null then): decisions held, saving or saved survive a
+  // date load, and only a real change of account or workspace starts afresh (Codex r2 on #623; latent since #609).
+  const owner = canonical ? `${canonical.workspace.id}:${canonical.user.id}` : "";
+  const blocks = useMemo(() => canonical ? clashBlocksFrom([...canonical.historyEntries ?? [], ...canonical.weekEntries ?? [],
+    ...canonical.dayEntries ?? [], ...canonical.entries ?? [], ...(canonical.activeEntry ? [canonical.activeEntry] : [])],
+  canonical.categories) : undefined, [canonical]);
+  // Clashes past the bootstrap's 100 items (web parity with #622): read only when the bootstrap reached its cap, on its
+  // refreshes, and merged in once each; every one still counts only while its block is loaded here.
+  // From the stable canonical shell data, which keeps its owner while the Calendar loads another date (Codex r1 on #623).
+  const todayStartMs = useLocalDayStartMs();
+  const canonicalOwner = owner;
+  const canonicalItems = canonical?.reviewItems ?? NO_REVIEW_ITEMS;
+  const beyondCap = useClashesBeyondCap({ bootstrapItems: canonicalItems, dataVersion: canonical, owner: canonicalOwner, todayStartMs });
+  // The canonical bootstrap's items too: the same list the period data carries, kept while a date loads.
+  const reviewItems = useMemo(() => withClashItems(canonicalItems, beyondCap), [beyondCap, canonicalItems]);
+  return (
+    <CheckDecisionsProvider blocks={blocks} categories={canonical?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
+      reviewItems={reviewItems}>
+      <EndedBlocksToTimer />
+      {children}
+    </CheckDecisionsProvider>
+  );
+}
+
+/** Hands the "?" owner's End it projections to the timer's owner, so the bar, Today and Calendar show them (design §7). */
+function EndedBlocksToTimer() {
+  const { setProjectedEnds } = useAppShellRuntime();
+  const ended = useEndedBlocks();
+  useEffect(() => {
+    setProjectedEnds?.(ended);
+  }, [ended, setProjectedEnds]);
+  useEffect(() => () => setProjectedEnds?.(new Map()), [setProjectedEnds]);
+  return null;
 }
 
 function AppShellContent({ children }: { children: ReactNode }) {
@@ -90,10 +149,16 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const goToTimer = useRef<number | undefined>(undefined);
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
-  // Review cards: an outing counts once (PRD D19, PR 12c).
-  const reviewCount = data?.stats.reviewCardCount ?? 0;
   // Things to check today and the 7 days before (location v4 step 14); older servers send none.
-  const checkCount = data?.stats.checkCount ?? 0;
+  // Things to check (owner, 28 Oct 2026): the "?" that still ask — today and the 6 days before — in the viewer's own
+  // days. The badge is a count only: Calendar opens on today (owner, 29 Oct 2026). Before hydration (no local day yet)
+  // the server's count stands in.
+  const todayStartMs = useLocalDayStartMs();
+  // As the List shows them, from the one decisions owner: held, saving and saved answers away, revived ones back.
+  const projectedItems = useProjectedReviewItems(data?.reviewItems ?? NO_REVIEW_ITEMS);
+  const asking = useMemo(() => todayStartMs !== null && data ? askingChecks(projectedItems, todayStartMs) : null,
+    [data, projectedItems, todayStartMs]);
+  const checkCount = asking ? asking.length : data?.stats.checkCount ?? 0;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -163,7 +228,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
+  const persistentTimer = <PersistentTimerBar onToday={pathname === "/"} workspaceMode={isTimeline} />;
   // The timer band draws its hairline only once page content has scrolled under it (C1), on every
   // page: Calendar's band is the same opaque canvas and its grid scrolls inside its own panel.
   const timerBandRef = useRef<HTMLDivElement | null>(null);
@@ -174,7 +239,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
     if (pathname !== "/timeline" || timelineState.view === "list") return;
     const nextState = shiftTimelineState(timelineState, direction);
     const originSearch = searchParams.toString();
+    // A Calendar nav tap while this loads wins (Codex r4 on #625): the URL stays on today, and the data goes back to it.
+    const generation = calendarNavigationGeneration();
     const outcome = await loadDate(nextState.date);
+    if (generation !== calendarNavigationGeneration()) {
+      if (outcome.ok) void refresh();
+      return;
+    }
     if (outcome.ok && window.location.search.slice(1) === originSearch) {
       window.history.pushState(
         null,
@@ -182,7 +253,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         timelineHref(searchParams.toString(), nextState)
       );
     }
-  }, [loadDate, pathname, searchParams, timelineState]);
+  }, [loadDate, pathname, refresh, searchParams, timelineState]);
 
   useEffect(() => {
     const openShortcuts = () => setOverlay("help");
@@ -266,7 +337,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -308,36 +379,24 @@ function AppShellContent({ children }: { children: ReactNode }) {
       </header>
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
-        {isTimeline ? (
-          <section className="swiss-timeline-surface" aria-label="Calendar">
-            <div
-              className="swiss-persistent-timer-shell"
-              data-scrolled={contentUnderBand ? "true" : undefined}
-              ref={timerBandRef}
-            >
-              {persistentTimer}
-            </div>
-            {/* The Calendar grid scrolls inside this panel, which never moves under the band, so
-                its own scrolling never shows the hairline. */}
-            <main className="swiss-timeline-main" ref={pageMainRef}>{children}</main>
-          </section>
-        ) : (
-          <>
-            <div
-              className="swiss-persistent-timer-shell"
-              data-scrolled={contentUnderBand ? "true" : undefined}
-              ref={timerBandRef}
-            >
-              {persistentTimer}
-            </div>
-            <main ref={pageMainRef}>
-              {children}
-            </main>
-          </>
-        )}
+        {/* One tree for every page (UI review round 2, owner 30 Oct 2026): the timer band and its quick start never
+            move or remount between Today, Calendar, Reports and Library. Off Calendar the surface lays out as if it
+            weren't there (display: contents). */}
+        <section aria-label={isTimeline ? "Calendar" : undefined} className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}>
+          <div
+            className="swiss-persistent-timer-shell"
+            data-scrolled={contentUnderBand ? "true" : undefined}
+            ref={timerBandRef}
+          >
+            {persistentTimer}
+          </div>
+          {/* On Calendar the grid scrolls inside this panel, which never moves under the band, so its own scrolling
+              never shows the hairline. */}
+          <main className={isTimeline ? "swiss-timeline-main" : undefined} ref={pageMainRef}>{children}</main>
+        </section>
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

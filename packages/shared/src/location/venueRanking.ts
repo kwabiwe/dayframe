@@ -187,11 +187,22 @@ export type VenueRanking = {
   venues: RankedVenue[];
   /** The venue to suggest, or null when no venue is clear (the street is the title then). */
   suggestion: RankedVenue | null;
+  /**
+   * The near guess (PRD D23, owner 29 Oct 2026): the strict suggestion when there is one; otherwise the ranker's
+   * top destination within `VENUE_GUESS_RADIUS_METERS` of the stay's centre, with no lead needed. Near-equal
+   * scores go to the nearest, then one picked here before (`pickedBefore`, all the server supplies; counts would
+   * need a server change), then the one whose usual length fits the stay best. Null when no destination is that close. The iPhone asks "Visited {name}?" with it.
+   */
+  guess: RankedVenue | null;
 };
 
 /** The top venue becomes the suggestion when it holds at least half the evidence and 1.8× the next. */
 export const VENUE_SUGGESTION_MIN_SHARE = 0.5;
 export const VENUE_SUGGESTION_MIN_LEAD = 1.8;
+/** The near guess (PRD D23): a destination this close to the stay's centre can be guessed without a lead. */
+export const VENUE_GUESS_RADIUS_METERS = 50;
+/** Scores within this fraction of the best near one are a tie for the near guess. */
+export const VENUE_GUESS_TIE_FRACTION = 0.1;
 /** The "spatial" spread never narrows below this (design §6.1). */
 const MIN_SIGMA_METERS = 30;
 const DWELL_LOG_SPREAD = 0.8;
@@ -222,7 +233,7 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
     candidate.title.trim().length > 0 &&
     Number.isFinite(candidate.distanceMeters) && candidate.distanceMeters >= 0 &&
     !(candidate.category && VENUE_EXCLUDED_CATEGORIES.has(candidate.category))));
-  if (!usable.length) return { venues: [], suggestion: null };
+  if (!usable.length) return { venues: [], suggestion: null, guess: null };
 
   const kinds = new Map(usable.map((candidate) => [candidate.id, venueKind(candidate)]));
   const areas = stay.areasOfInterest ?? [];
@@ -239,6 +250,7 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
   const minutes = stayMinutes(stay);
   const local = localTime(stay);
   const own = new Map<string, number>();
+  const dwellFit = new Map<string, number>();
   for (const candidate of usable) {
     const kind = kinds.get(candidate.id)!;
     const spec = VENUE_KINDS[kind];
@@ -251,6 +263,7 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
         ? UNKNOWN_KIND_DWELL
         : Math.max(DWELL_FLOOR, Math.exp(-((Math.log(Math.max(minutes, 1)) - Math.log(spec.medianMinutes)) ** 2) / (2 * DWELL_LOG_SPREAD ** 2)));
     const time = local && clearlyClosed(kind, local) ? CLOSED_HOURS_FACTOR : 1;
+    dwellFit.set(candidate.id, dwell);
     const history = stay.pickedBefore?.(candidate) ? HISTORY_FACTOR : 1;
     own.set(candidate.id, spatial * spec.prior * dwell * time * history);
   }
@@ -279,7 +292,20 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
   const [first, second] = venues;
   const suggestion = first && !NON_DESTINATIONS.has(first.kind) && first.share >= VENUE_SUGGESTION_MIN_SHARE &&
     (!second || first.share >= VENUE_SUGGESTION_MIN_LEAD * second.share) ? first : null;
-  return { venues, suggestion };
+  return { venues, suggestion, guess: suggestion ?? nearGuess(venues, stay, dwellFit) };
+}
+
+/** The near guess when no venue is clear (PRD D23): see `VenueRanking.guess`. */
+function nearGuess(venues: readonly RankedVenue[], stay: VenueStay, dwellFit: ReadonlyMap<string, number>) {
+  const near = venues.filter((venue) => !NON_DESTINATIONS.has(venue.kind) &&
+    venue.candidate.distanceMeters <= VENUE_GUESS_RADIUS_METERS);
+  if (!near.length) return null;
+  const best = Math.max(...near.map((venue) => venue.share));
+  const picks = (venue: RankedVenue) => stay.pickedBefore?.(venue.candidate) ? 1 : 0;
+  return near
+    .filter((venue) => venue.share >= best * (1 - VENUE_GUESS_TIE_FRACTION))
+    .sort((a, b) => a.candidate.distanceMeters - b.candidate.distanceMeters || picks(b) - picks(a) ||
+      (dwellFit.get(b.candidate.id) ?? 0) - (dwellFit.get(a.candidate.id) ?? 0) || byDistanceThenName(a.candidate, b.candidate))[0];
 }
 
 /**

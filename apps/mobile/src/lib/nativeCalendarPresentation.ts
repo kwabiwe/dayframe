@@ -17,6 +17,7 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
+  drawsAsOwnCheck,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "./review";
@@ -76,6 +77,11 @@ export type NativeCalendarPresentationEntry = {
   /** A finished block of a minute or less (dense-day rules): a tick at the gutter's edge, not a block. */
   isMoment: boolean;
   isReview: boolean;
+  /**
+   * Location v4 design §7: this block has a "?" of its own ("a block ran into your trip"), drawn as the amber dot;
+   * a tap opens its editor with the question at the top. Absent (false) on older models.
+   */
+  asking?: boolean;
   isUncategorized: boolean;
   laneCount: number;
   laneIndex: number;
@@ -160,6 +166,8 @@ export type NativeCalendarPresentation = {
   reduceMotion: boolean;
   reduceTransparency: boolean;
   refreshing: boolean;
+  /** A new number scrolls the Grid to now, with Swift's own scroll owner (the Today pill on today). */
+  scrollToNowRequest?: number;
   selectedDayKey: string;
   selectedDayTitle: string;
   theme: NativeCalendarTheme;
@@ -310,12 +318,21 @@ export function buildNativeCalendarBridgeState({
   reduceMotion,
   reduceTransparency,
   refreshing,
+  reviewItemIds,
+  askingEntryIds,
   selectedDayKey,
   theme,
   transitionDirection
 }: {
   clockFormat?: ClockFormat;
+  /** Blocks with a "?" on them (location v4 design §7): the amber dot, and ", Needs a look" read after their label. */
+  askingEntryIds?: ReadonlySet<string> | null;
   data: MobileBootstrap | null;
+  /**
+   * The suggestions the Grid may draw, when given: the "?" that still ask, outings folded, as Calendar › List
+   * shows them (owner, 28 Oct 2026; Codex r1 on #610). Absent, every open suggestion draws.
+   */
+  reviewItemIds?: ReadonlySet<string> | null;
   hapticsEnabled?: boolean;
   now: number;
   reduceMotion: boolean;
@@ -330,7 +347,7 @@ export function buildNativeCalendarBridgeState({
   const dayEnd = localDayEnd(dayStart);
   const todayKey = formatDateKey(new Date(now));
   const timeEntries = buildTimeEntries(data);
-  const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now);
+  const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now, reviewItemIds ?? null);
   const confirmedEntries = entries.filter((entry) => !isCalendarReviewNeeded(entry));
   const confirmedAnalysis = analyzeTimeIntervals(
     confirmedEntries.map((entry) => ({
@@ -411,7 +428,7 @@ export function buildNativeCalendarBridgeState({
       framedLabel: "",
       hapticsEnabled,
       clockFormat,
-      entries: entries.map((entry) => serializeCalendarEntry(
+      entries: entries.map((entry) => withAsking(serializeCalendarEntry(
         entry,
         dayStart,
         dayEnd,
@@ -427,7 +444,7 @@ export function buildNativeCalendarBridgeState({
           icon: data?.categories?.find((category) => category.id === entry.categoryId)?.icon,
           name: entry.categoryName
         }).glyph
-      )),
+      ), !entry.reviewItemId && Boolean(askingEntryIds?.has(entry.id)))),
       modelVersion: 4,
       monthTitle: formatMonthTitle(selectedDate, new Date(now)),
       nowMs: now,
@@ -458,6 +475,11 @@ export function buildNativeCalendarBridgeState({
       }))
     }
   };
+}
+
+/** A block with a "?" on it: the dot, and VoiceOver hears that it needs a look. */
+function withAsking(entry: NativeCalendarPresentationEntry, asking: boolean): NativeCalendarPresentationEntry {
+  return asking ? { ...entry, asking: true, accessibilityLabel: `${entry.accessibilityLabel}, Needs a look` } : entry;
 }
 
 export function routeNativeCalendarOpenEvent(
@@ -593,7 +615,8 @@ function buildCalendarEntries(
   data: MobileBootstrap | null,
   allTimeEntries: NativeCalendarEntry[],
   selectedDayKey: string,
-  now: number
+  now: number,
+  reviewItemIds: ReadonlySet<string> | null = null
 ) {
   if (!data) return [];
   const reviewEntries: NativeCalendarEntry[] = [];
@@ -604,7 +627,12 @@ function buildCalendarEntries(
   for (const item of data.reviewItems ?? []) {
     // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
     // show them (hatched in the Review lane), not only commutes.
-    if (!isOpenReviewItem(item)) continue;
+    // "A block ran into your trip" is never a dashed "?" block: it asks on its block (`askingEntryIds`).
+    if (!isOpenReviewItem(item) || !drawsAsOwnCheck(item)) continue;
+    // Its linked needs-review entries stay hidden even when the suggestion itself isn't drawn (expired, folded or
+    // answered on this phone): the moment is the suggestion's, never a second block (Codex r7 on #610).
+    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
+    if (reviewItemIds && !reviewItemIds.has(item.id)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
     const entry: NativeCalendarEntry = {
@@ -615,7 +643,6 @@ function buildCalendarEntries(
       reviewItemId: item.id
     };
       if (!entryOverlapsDay(entry, selectedDayKey, now)) continue;
-    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
     reviewEntries.push(entry);
   }
   const timeEntries = allTimeEntries.filter((entry) =>
@@ -741,7 +768,7 @@ function reviewCrowdAccessibilityLabel(
   endMs: number,
   clockFormat: ClockFormat
 ) {
-  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the Review list.";
+  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the List.";
   return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${formatClockTime(startMs, clockFormat)} to ${formatClockTime(endMs, clockFormat)}. ${opens}`;
 }
 

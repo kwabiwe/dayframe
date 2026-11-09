@@ -1,3 +1,4 @@
+import { InsetDivider } from "../src/components/InsetDivider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -39,6 +40,7 @@ import {
   type MobilePlace
 } from "@/lib/api";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { AllActivitiesChip } from "@/components/ActivityChips";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
@@ -540,7 +542,7 @@ export default function PlaceEditorScreen() {
     <SafeAreaView style={styles.safeArea}>
       {/* The shared sheet head (UIA-006) on the pushed route: eyebrow and title, the coral Save. A
           pushed page has no sheet to swipe, so a circular close control leads; it stays put. */}
-      <View style={[editorStyles.head, { borderBottomColor: theme.border }]}>
+      <View style={editorStyles.head}>
         <BlocksSheetHead
           action={{
             accessibilityHint: validation.ok ? undefined : validation.message,
@@ -567,6 +569,7 @@ export default function PlaceEditorScreen() {
           theme={theme}
           title={title}
         />
+        <InsetDivider color={theme.border} edge="bottom" />
       </View>
 
       <ScrollView
@@ -675,7 +678,6 @@ export default function PlaceEditorScreen() {
                           onPress={() => void chooseSuggestion(suggestion)}
                           style={({ pressed }) => [
                             editorStyles.resultRow,
-                            { borderTopColor: theme.border },
                             pressed ? { backgroundColor: theme.surfaceMuted } : null
                           ]}
                         >
@@ -688,6 +690,7 @@ export default function PlaceEditorScreen() {
                               <Text {...mobileTextProps("metadata")} numberOfLines={2} style={{ color: theme.textMuted }}>{suggestion.subtitle}</Text>
                             ) : null}
                           </View>
+                          <InsetDivider color={theme.border} edge="top" start={46} />
                         </Pressable>
                       ))}
                     </ScrollView>
@@ -699,7 +702,7 @@ export default function PlaceEditorScreen() {
                     entering={localPresenceEntering(reduceMotion)}
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
-                    style={[editorStyles.resultRow, { borderTopColor: theme.border }]}
+                    style={editorStyles.resultRow}
                   >
                     <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={18} />
                     <View style={editorStyles.resultText}>
@@ -711,6 +714,7 @@ export default function PlaceEditorScreen() {
                       ) : null}
                     </View>
                     <SettingsPillButton accessibilityLabel="Change selected place" label="Change" onPress={clearSearch} theme={theme} />
+                    <InsetDivider color={theme.border} edge="top" start={46} />
                   </Reanimated.View>
                 ) : null}
 
@@ -724,7 +728,6 @@ export default function PlaceEditorScreen() {
                   onPress={() => void useCurrentLocation()}
                   style={({ pressed }) => [
                     editorStyles.resultRow,
-                    { borderTopColor: theme.border },
                     pressed ? { backgroundColor: theme.surfaceMuted } : null
                   ]}
                   testID="place-editor-current-location"
@@ -738,6 +741,7 @@ export default function PlaceEditorScreen() {
                       <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{formatLocationAccuracy(locationAccuracy)}</Text>
                     ) : null}
                   </View>
+                  <InsetDivider color={theme.border} edge="top" start={46} />
                 </Pressable>
               </SettingsBlockGroup>
               {!provider ? (
@@ -853,7 +857,7 @@ export default function PlaceEditorScreen() {
 
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup
-                foot={loggingEnabled ? "Show detected visits in Review." : "Visits here are not suggested."}
+                foot={loggingEnabled ? "Ask about detected visits in Calendar." : "Visits here are not suggested."}
                 theme={theme}
                 title="Visits"
               >
@@ -878,8 +882,8 @@ export default function PlaceEditorScreen() {
                   theme={theme}
                   title="Suggest visits here"
                 />
-                {/* Shown always, choosable only with Suggest visits here on. The server still sends a
-                    visit to Review when it is short of trusted, overlaps tracked time or a timer runs. */}
+                {/* Shown always, choosable only with Suggest visits here on. The server still asks about a
+                    visit in Calendar when it is short of trusted, overlaps tracked time or a timer runs. */}
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
@@ -891,7 +895,7 @@ export default function PlaceEditorScreen() {
                       value={loggingEnabled && autoLog}
                     />
                   }
-                  subtitle="Visits here become blocks without a Review card."
+                  subtitle="Visits here become blocks without asking in Calendar."
                   testID="place-editor-auto-log"
                   theme={theme}
                   title="Log automatically"
@@ -911,15 +915,17 @@ export default function PlaceEditorScreen() {
                     exiting={localPresenceExiting(reduceMotion)}
                   >
                     <SettingsBlockRow
-                      accessibilityHint="Chooses the activity a visit here is suggested as"
-                      onPress={() => {
-                        Keyboard.dismiss();
-                        setActivityPickerOpen(true);
-                      }}
-                      testID="place-editor-logs-as"
+                      control={
+                        <AllActivitiesChip canCreate={false} count={categories.length}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            setActivityPickerOpen(true);
+                          }}
+                          testID="place-editor-logs-as" theme={theme} />
+                      }
+                      subtitle={defaultActivityLabel ?? "No default activity"}
                       theme={theme}
                       title="Logs as"
-                      value={defaultActivityLabel ?? "No default activity"}
                     />
                     {defaultCategoryId ? (
                       <Reanimated.View
@@ -942,7 +948,7 @@ export default function PlaceEditorScreen() {
                         />
                       </Reanimated.View>
                     ) : null}
-                    <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.fieldRow}>
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Block name</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -957,6 +963,7 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-description"
                         value={defaultActivityDescription}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </Reanimated.View>
                   </Reanimated.View>
                 ) : null}
@@ -982,7 +989,7 @@ export default function PlaceEditorScreen() {
                     entering={localPresenceEntering(reduceMotion)}
                     exiting={localPresenceExiting(reduceMotion)}
                   >
-                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <View style={editorStyles.fieldRow}>
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Latitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -995,8 +1002,9 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-latitude"
                         value={latitudeText}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </View>
-                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <View style={editorStyles.fieldRow}>
                       <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Longitude</Text>
                       <TextInput
                         {...mobileTextProps("input")}
@@ -1009,6 +1017,7 @@ export default function PlaceEditorScreen() {
                         testID="place-editor-longitude"
                         value={longitudeText}
                       />
+                      <InsetDivider color={theme.border} edge="top" />
                     </View>
                   </Reanimated.View>
                 ) : null}
@@ -1123,7 +1132,6 @@ function formatOptionalCoordinate(value?: number | null) {
 
 const editorStyles = StyleSheet.create({
   head: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
     paddingBottom: 8,
     paddingHorizontal: 16,
     paddingTop: 6
@@ -1142,7 +1150,6 @@ const editorStyles = StyleSheet.create({
   suggestionScroller: { maxHeight: 294 },
   resultRow: {
     alignItems: "center",
-    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: 12,
     minHeight: 52,

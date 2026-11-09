@@ -23,6 +23,7 @@ This document defines where Dayframe guidance lives and how it stays aligned wit
 ## Status and history rules
 
 - `docs/feature-fix-tracker.md` is the only canonical delivery-state document.
+- `.codex-dayframe-qa/STATUS.md` (main checkout, git-ignored) is a working note for handing over between agents and sessions: current state only, rewritten rather than appended, never a diary. It records where work stands and points at canonical documents; it is not one. When it disagrees with a canonical document, the canonical document wins and the note is corrected.
 - Dated investigations are evidence records. Their “current,” “next,” or “in progress” wording is historical after the associated PR merges.
 - Stable product, architecture, design, and testing documents must not embed “latest build” snapshots. Release records belong in the tracker or release reference.
 - A merged implementation may be `Done`, `Watch`, or `Release pending`; never leave it `In progress` solely because a historical investigation says so.

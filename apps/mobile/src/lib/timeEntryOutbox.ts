@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
+import {
+  completedEntryCopyId,
+  completedEntryCopySeed,
+  TIME_ENTRY_CLIENT_COMMAND_ID_HEADER,
+  TimeEntryClientCommandIdSchema,
+  type CompletedEntryCopyAction
+} from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
@@ -17,6 +23,7 @@ import {
   type MobileAccountOwner
 } from "./mobileAccount";
 import type { TimeEntryUpdatePatch } from "./api";
+import { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX } from "./runningSplitIdentity";
 import {
   hasTimerBackgroundExecutionReservation,
   reserveTimerBackgroundExecution,
@@ -35,23 +42,55 @@ const TIME_ENTRY_REFUSED_STARTS_KEY = "dayframe.timeEntryOutbox.refusedStarts.v1
 const REFUSED_START_FENCE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const REFUSED_START_FENCE_MAX_RECORDS = 200;
 export const REFUSED_START_COMMAND_MESSAGE = "The block this change was for was never saved.";
+export const REFUSED_SPLIT_STOP_MESSAGE = "The split was not saved, so this Stop could not be applied. Stop the original block if it is still running.";
+export { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX };
 export const MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS = 8_000;
 const PERMANENT_STATUS_CODES = new Set([400, 409, 413, 422]);
+const MAX_COMPLETED_COPY_RECEIPTS = 64;
+const MAX_RUNNING_SPLIT_RECEIPTS = 64;
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
+
+export class PendingCompletedEntryChangeError extends Error {
+  constructor(message = "Finish syncing this block before splitting or duplicating it.") {
+    super(message);
+    this.name = "PendingCompletedEntryChangeError";
+  }
+}
+
+export type PendingCompletedEntryCopy = {
+  action: CompletedEntryCopyAction;
+  copyId: string;
+  expectedUpdatedAt: string;
+  originalStoppedAt?: string;
+};
+
+type PendingRunningSplit = {
+  splitAt: string;
+  secondLocalId: string;
+  receipt?: {
+    firstEntryId?: string;
+    firstUpdatedAt?: string;
+    firstStoppedAt?: string | null;
+    firstRemoved?: true;
+    secondEntryId: string;
+    secondStoppedAt?: string;
+    secondUpdatedAt?: string;
+    secondRemoved?: true;
+    correlationPending?: true;
+  };
+};
 
 export type PendingTimeEntryCommand = MobileAccountOwner & {
   clientCommandId: string;
-  operation: "update" | "delete" | "split";
+  operation: "update" | "delete" | "copy" | "split";
+  copy?: PendingCompletedEntryCopy;
+  split?: PendingRunningSplit;
+  /** Keep a bounded delivered copy for an older cached bootstrap, outside delivery and diagnostics. */
+  copyAcknowledged?: true;
+  copyRemovedOnServer?: true;
   targetEntryId?: string;
   optimisticEntryId?: string;
   patch?: TimeEntryUpdatePatch;
-  /** Split (owner 28 Oct 2026): where the running block ends; its second part runs from here. */
-  splitAt?: string;
-  /**
-   * Split: the local id the second part is shown under until the server names it. The server's id is
-   * recorded against it (as a queued Start's is), so a Stop or Edit of the second part waits for it.
-   */
-  splitEntryLocalId?: string;
   deliverAfter?: string;
   createdAt: string;
   updatedAt: string;
@@ -78,6 +117,7 @@ export type TimeEntryOutboxSyncResult = {
     | "authentication_required"
     | "dependency_wait"
     | "deferred"
+    | "foreground_required"
     | "retry_wait"
     | "retryable_failure"
     | "session_changed";
@@ -145,6 +185,31 @@ export async function enqueueTimeEntryUpdate(input: {
   });
 }
 
+export async function enqueueCompletedEntryCopy(input: {
+  owner: MobileAccountOwner;
+  entryId: string;
+  expectedUpdatedAt: string;
+  originalStoppedAt?: string;
+  action: CompletedEntryCopyAction;
+  requestImmediateDelivery?: boolean;
+}) {
+  const { CryptoDigestAlgorithm, digestStringAsync, randomUUID } = await import("expo-crypto");
+  const commandId = randomUUID();
+  const seed = completedEntryCopySeed(input.owner, input.entryId, commandId, input.expectedUpdatedAt, input.action);
+  const copyId = completedEntryCopyId(await digestStringAsync(CryptoDigestAlgorithm.SHA256, seed));
+  return enqueueTimeEntryCommand({
+    owner: input.owner,
+    target: { targetEntryId: input.entryId },
+    operation: "copy",
+    commandId,
+    copy: {
+      action: input.action, copyId, expectedUpdatedAt: input.expectedUpdatedAt,
+      ...(input.action.kind === "split" && input.originalStoppedAt ? { originalStoppedAt: input.originalStoppedAt } : {})
+    },
+    requestImmediateDelivery: input.requestImmediateDelivery
+  });
+}
+
 export async function enqueueTimeEntryDelete(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
@@ -166,28 +231,21 @@ export async function enqueueTimeEntryDelete(input: {
   });
 }
 
-/**
- * Split for the running block (owner 28 Oct 2026, as Toggl): ends `target` at `splitAt` and starts its
- * second part there, running, with every detail. Held like a sheet Delete for its Undo window
- * (`deliverAfter` and `holdLease`); Undo removes it before it is sent.
- */
-export async function enqueueTimeEntrySplit(input: {
+export function enqueueTimeEntrySplit(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   splitAt: string;
   splitEntryLocalId: string;
   deliverAfter?: string;
   holdLease?: TimeEntryCommandHoldLease;
-  requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
     owner: input.owner,
     target: input.target,
     operation: "split",
-    split: { splitAt: input.splitAt, splitEntryLocalId: input.splitEntryLocalId },
+    split: { splitAt: input.splitAt, secondLocalId: input.splitEntryLocalId },
     deliverAfter: input.deliverAfter,
-    holdLease: input.holdLease,
-    requestImmediateDelivery: input.requestImmediateDelivery
+    holdLease: input.holdLease
   });
 }
 
@@ -254,6 +312,28 @@ export function wereTimeEntryCommandsDispatched(clientCommandIds: readonly strin
   return clientCommandIds.some((id) => dispatchedCommandIds.has(id));
 }
 
+export async function undoHeldTimeEntrySplit(
+  owner: MobileAccountOwner,
+  clientCommandId: string,
+  isStillRunning: () => boolean
+) {
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    const command = all.find((item) =>
+      item.clientCommandId === clientCommandId && mobileAccountOwnersEqual(item, owner)
+    );
+    if (!command?.split || !heldCommands.has(clientCommandId) ||
+      dispatchedCommandIds.has(clientCommandId) || !isStillRunning()) return false;
+
+    const secondLocalId = command.split.secondLocalId;
+    const next = all.filter((item) => !mobileAccountOwnersEqual(item, owner) ||
+      (item.clientCommandId !== clientCommandId && item.optimisticEntryId !== secondLocalId));
+    await writeAllCommands(next);
+    dropHold(clientCommandId);
+    return true;
+  });
+}
+
 export async function releaseTimeEntryCommands(
   clientCommandIds: readonly string[],
   options: {
@@ -312,7 +392,7 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
   optimisticEntryId: string,
   message: string = REFUSED_START_COMMAND_MESSAGE
 ) {
-  const refusedSplits: PendingTimeEntryCommand[] = [];
+  const refusedSecondParts: string[] = [];
   const refusedCount = await withMutation(async () => {
     // The fence first, under the same lock as every enqueue: a command written after this is refused
     // as it is written, and one written before is refused below.
@@ -336,15 +416,16 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
         return command;
       }
       refusedCount += 1;
-      if (command.operation === "split") refusedSplits.push(command);
+      if (command.split) refusedSecondParts.push(command.split.secondLocalId);
       const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
       return { ...rest, failureKind: "permanent" as const, refusedStart: true, lastError: message, updatedAt: now };
     });
     if (refusedCount > 0) await writeAllCommands(next);
     return refusedCount;
   });
-  // A split of a block that never existed never makes its second part either.
-  for (const split of refusedSplits) await settleRefusedSplit(owner, split);
+  for (const secondLocalId of refusedSecondParts) {
+    await settleRefusedSplit(owner, secondLocalId);
+  }
   return refusedCount;
 }
 
@@ -369,12 +450,55 @@ export async function removeTimeEntryCommands(clientCommandIds: readonly string[
 }
 
 export async function readPendingTimeEntryCommands(
-  owner?: MobileAccountOwner
+  owner?: MobileAccountOwner,
+  {
+    includeCompletedCopies = false,
+    includeRunningSplitReceipts = false
+  }: { includeCompletedCopies?: boolean; includeRunningSplitReceipts?: boolean } = {}
 ): Promise<PendingTimeEntryCommand[]> {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return [];
   const all = await readAllCommands();
-  return all.filter((command) => mobileAccountOwnersEqual(command, resolvedOwner));
+  return all.filter((command) => mobileAccountOwnersEqual(command, resolvedOwner) &&
+    (includeCompletedCopies || !command.copyAcknowledged) &&
+    (includeRunningSplitReceipts || !hasPublishedRunningSplitReceipt(command)));
+}
+
+export async function hasRunningSplitReceiptForSecondEntry(owner: MobileAccountOwner, entryId: string) {
+  return (await readAllCommands()).some((command) =>
+    mobileAccountOwnersEqual(command, owner) && command.split?.receipt?.secondEntryId === entryId
+  );
+}
+
+/** Persist the exact canonical second part's terminal state before its Stop leaves the outbox. */
+export async function recordRunningSplitSecondState(
+  owner: MobileAccountOwner,
+  entryId: string,
+  state: { updatedAt: string; stoppedAt: string | null } | { removed: true }
+) {
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    let changed = false;
+    const next = all.map((command): PendingTimeEntryCommand => {
+      const split = command.split;
+      const receipt = split?.receipt;
+      if (!split || !receipt || receipt.secondEntryId !== entryId || receipt.secondRemoved ||
+        !mobileAccountOwnersEqual(command, owner)) return command;
+      if ("updatedAt" in state && receipt.secondUpdatedAt &&
+        Date.parse(state.updatedAt) < Date.parse(receipt.secondUpdatedAt)) return command;
+      changed = true;
+      return {
+        ...command,
+        split: {
+          ...split,
+          receipt: "removed" in state
+            ? { ...receipt, secondRemoved: true }
+            : { ...receipt, secondUpdatedAt: state.updatedAt, secondStoppedAt: state.stoppedAt ?? undefined }
+        }
+      };
+    });
+    if (changed) await writeAllCommands(next);
+  });
 }
 
 /**
@@ -412,7 +536,7 @@ export async function resolvePendingTimeEntryCommandTargets(
       return { ...command, targetEntryId, updatedAt: new Date().toISOString() };
     });
     if (changed) await writeAllCommands(next);
-    return next.filter((command) => mobileAccountOwnersEqual(command, owner));
+    return next.filter((command) => mobileAccountOwnersEqual(command, owner) && !hasDeliveryReceipt(command));
   });
 }
 
@@ -422,6 +546,8 @@ export async function synchroniseTimeEntryCommands(input: {
   force?: boolean;
   now?: Date;
   signal?: AbortSignal;
+  foregroundOnly?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   const ownerKey = mobileAccountKey(input.owner);
   const existing = syncInFlightByOwner.get(ownerKey);
@@ -452,7 +578,9 @@ export async function synchroniseTimeEntryCommands(input: {
     control,
     now: input.now,
     owner: input.owner,
-    signal: input.signal
+    signal: input.signal,
+    backgroundExecutionChecked: input.foregroundOnly,
+    isForeground: input.isForeground
   }).finally(() => {
     if (syncInFlightByOwner.get(ownerKey)?.promise === sync) {
       syncInFlightByOwner.delete(ownerKey);
@@ -480,15 +608,17 @@ export async function getTimeEntryOutboxDiagnostics(
   const deviceQuarantine = quarantine.filter((record) => record.owner === null);
   const retryable = commands.filter((command) => command.failureKind !== "permanent");
   const permanent = commands.filter((command) => command.failureKind === "permanent");
+  const next = retryable[0];
+  const ready = (command: PendingTimeEntryCommand) => isTimeEntryCommandTransportReady(
+    command, options.correlations ?? new Map(), { now: options.now }
+  );
   return {
     pendingCount: retryable.length,
-    transportReadyCount: retryable.filter((command) =>
-      isTimeEntryCommandTransportReady(
-        command,
-        options.correlations ?? new Map(),
-        { now: options.now }
-      )
-    ).length,
+    transportReadyCount: retryable.filter(ready).length,
+    backgroundReadyCount: next && !next.copy && ready(next) ? 1 : 0,
+    headNextDueAt: [next?.nextAttemptAt, next?.deliverAfter]
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null,
     needsAttentionCount: permanent.length,
     /** Stable identities of the rejected commands, so a new rejection is noticed even at an equal count. */
     needsAttentionIds: permanent.map((command) => `entry:${command.clientCommandId}`),
@@ -592,6 +722,7 @@ export function __resetTimeEntryOutboxForTests() {
   mutationTail = Promise.resolve();
   syncInFlightByOwner.clear();
   listeners.clear();
+  deliveredDeleteListeners.clear();
   heldCommands.clear();
   dispatchedCommandIds.clear();
 }
@@ -602,6 +733,7 @@ async function runTimeEntryCommandDrain(input: {
   now?: Date;
   signal?: AbortSignal;
   backgroundExecutionChecked?: boolean;
+  isForeground?: () => boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
     return currentOutboxResult(input.owner, 0, true, "session_changed");
@@ -610,7 +742,7 @@ async function runTimeEntryCommandDrain(input: {
     const reservationKey = timeEntryBackgroundExecutionKey(input.owner);
     const firstPendingCommand = (await readPendingTimeEntryCommands(input.owner))
       .find((command) => command.failureKind !== "permanent");
-    const hasTransportReadyCommand = firstPendingCommand
+    const hasTransportReadyCommand = firstPendingCommand && !firstPendingCommand.copy
       ? isTimeEntryCommandTransportReady(
           firstPendingCommand,
           input.control.correlations,
@@ -621,10 +753,9 @@ async function runTimeEntryCommandDrain(input: {
         )
       : false;
     if (
-      hasTimerBackgroundExecutionReservation(reservationKey) ||
-      hasTransportReadyCommand
+      hasTimerBackgroundExecutionReservation(reservationKey) || hasTransportReadyCommand
     ) {
-      return withTimerBackgroundExecutionReservation(
+      const result = await withTimerBackgroundExecutionReservation(
         reservationKey,
         "Dayframe timer Edit or Delete sync",
         (signal) => runTimeEntryCommandDrain({
@@ -634,6 +765,10 @@ async function runTimeEntryCommandDrain(input: {
         }),
         { beginIfMissing: hasTransportReadyCommand }
       );
+      if (result.reason !== "foreground_required") return result;
+      // A copy queued behind timer work gets its own foreground attempt after the assertion ends.
+      const remaining = await runTimeEntryCommandDrain({ ...input, backgroundExecutionChecked: true });
+      return combineTimeEntryOutboxSyncResults(result, remaining);
     }
   }
   let deliveredCount = 0;
@@ -648,15 +783,34 @@ async function runTimeEntryCommandDrain(input: {
       return {
         all: current,
         command: current.find((command) =>
-          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent"
+          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent" && !hasDeliveryReceipt(command)
         )
       };
     });
     if (!original) return outboxResult(all, input.owner, deliveredCount, false);
+    if ((original.copy && input.signal) || (!input.signal && input.isForeground?.() === false)) {
+      return outboxResult(all, input.owner, deliveredCount, true, "foreground_required");
+    }
     if (isHeld(original, now)) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
     lapseOverdueHold(original.clientCommandId, now.getTime());
+    if (original.split?.receipt?.correlationPending) {
+      if (!input.control.forceRequested && original.nextAttemptAt && Date.parse(original.nextAttemptAt) > now.getTime()) {
+        return outboxResult(all, input.owner, deliveredCount, true, "retry_wait");
+      }
+      try {
+        await publishRunningSplitCorrelation(original, input.owner, input.control.correlations);
+        deliveredCount += 1;
+        continue;
+      } catch {
+        const current = await retainCommandFailure(original.clientCommandId, new Date().toISOString(), {
+          kind: "retryable",
+          message: "Dayframe couldn't save the split's block ID yet."
+        });
+        return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
+      }
+    }
     const targetEntryId = original.targetEntryId ?? (
       original.optimisticEntryId
         ? input.control.correlations.get(original.optimisticEntryId)
@@ -664,7 +818,10 @@ async function runTimeEntryCommandDrain(input: {
     );
     if (!targetEntryId) {
       // A refused Start's block never exists: its command is refused, not waited for (Codex r3 on #532).
-      if (original.optimisticEntryId && await refuseFencedCommand(input.owner, original.clientCommandId)) continue;
+      if (original.optimisticEntryId && await refuseFencedCommand(input.owner, original.clientCommandId)) {
+        if (original.split) await settleRefusedSplit(input.owner, original.split.secondLocalId);
+        continue;
+      }
       return outboxResult(all, input.owner, deliveredCount, true, "dependency_wait");
     }
     if (
@@ -693,17 +850,41 @@ async function runTimeEntryCommandDrain(input: {
     if (heldCommands.has(original.clientCommandId)) {
       return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
     }
-    markDispatched(original.clientCommandId);
-    const split = original.operation === "split";
+    if (!input.signal && input.isForeground?.() === false) {
+      return currentOutboxResult(input.owner, deliveredCount, true, "foreground_required");
+    }
+    if (original.split) {
+      // Undo and dispatch claim the same durable command under the outbox lock.
+      const dispatchable = await withMutation(async () => {
+        const latest = (await readAllCommands()).find((command) => command.clientCommandId === original.clientCommandId);
+        if (!latest || latest.failureKind === "permanent" || isHeld(latest, new Date()) ||
+          !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) return false;
+        markDispatched(original.clientCommandId);
+        return true;
+      });
+      if (!dispatchable) return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
+    } else {
+      markDispatched(original.clientCommandId);
+    }
     try {
+      const copy = original.copy;
+      const split = original.split;
+      const entryPath = "/api/time-entries";
+      const path = copy || split ? entryPath : entryPath + "/" + encodeURIComponent(targetEntryId);
+      const body = copy
+        ? {
+            mode: "copy-completed", action: copy.action.kind, entryId: targetEntryId,
+            expectedUpdatedAt: copy.expectedUpdatedAt, source: "mobile_app",
+            ...(copy.action.kind === "split" ? { splitAt: copy.action.splitAt } : {})
+          }
+        : split ? { mode: "split-running", entryId: targetEntryId, splitAt: split.splitAt, source: "mobile_app" }
+        : original.operation === "update" ? original.patch ?? {} : undefined;
       const response = await mobileFetchWithTimeout(
-        split
-          ? `${DAYFRAME_API_BASE}/api/time-entries`
-          : `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(targetEntryId)}`,
+        DAYFRAME_API_BASE + path,
         {
-          method: split ? "POST" : original.operation === "delete" ? "DELETE" : "PATCH",
+          method: copy || split ? "POST" : original.operation === "delete" ? "DELETE" : "PATCH",
           headers: {
-            ...(original.operation !== "delete" ? { "Content-Type": "application/json" } : {}),
+            ...(body ? { "Content-Type": "application/json" } : {}),
             Authorization: `Bearer ${sessionRead.snapshot.token}`,
             // The same id on every attempt: the server answers a resend of an Edit it already applied
             // as delivered instead of applying it again over a newer change (item 17).
@@ -711,13 +892,7 @@ async function runTimeEntryCommandDrain(input: {
               ? { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: original.clientCommandId }
               : {})
           },
-          ...(original.operation === "update"
-            ? { body: JSON.stringify(original.patch ?? {}) }
-            : split
-            // The server's split of a running block: one transaction under the timer lock, answered
-            // again for the same command id. It splits the block as it is when this arrives.
-            ? { body: JSON.stringify({ mode: "split", source: "mobile_app", entryId: targetEntryId, splitAt: original.splitAt }) }
-            : {}),
+          ...(body ? { body: JSON.stringify(body) } : {}),
           signal: input.signal
         },
         {
@@ -739,26 +914,63 @@ async function runTimeEntryCommandDrain(input: {
       ) {
         return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
       }
-      if (split && response.ok) {
-        const answer = await splitAnswerFrom(response);
-        const newEntryId = answer.newEntryId;
-        if (!newEntryId && answer.replayed) {
-          // Done before, and its second part has gone since (joined back elsewhere): nothing to follow it.
-          await settleRefusedSplit(input.owner, original);
-          if (await removeDeliveredCommand(original.clientCommandId)) deliveredCount += 1;
-          continue;
+      if (response.ok && copy) {
+        const result = await response.json().catch(() => null);
+        const exists = result?.newEntryId === copy.copyId;
+        const removedSince = result?.replayed === true && result?.newEntryId === null;
+        if (exists || removedSince) {
+          try {
+            const acknowledged = await acknowledgeCompletedCopy(original.clientCommandId, removedSince);
+            if (acknowledged) deliveredCount += 1;
+            continue;
+          } catch {
+            // The server receipt is safe to replay if the phone couldn't persist the acknowledgement.
+          }
         }
-        if (!newEntryId) {
+        const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
+          kind: "retryable",
+          message: "Dayframe couldn't confirm this block change yet."
+        });
+        return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
+      }
+      if (response.ok && split) {
+        try {
+          const receipt = await response.json();
+          if (typeof receipt?.newEntryId === "string" &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receipt.newEntryId) &&
+            receipt.newEntryId !== targetEntryId) {
+            const entries = Array.isArray(receipt.entries) ? receipt.entries : null;
+            const first = entries?.find((entry: { id?: unknown }) => entry?.id === targetEntryId);
+            const firstUpdatedAt = validIso(first?.updatedAt);
+            const firstStoppedAt = first?.stoppedAt === null ? null : validIso(first?.stoppedAt) ?? undefined;
+            const second = entries?.find((entry: { id?: unknown }) => entry?.id === receipt.newEntryId);
+            const secondStoppedAt = validIso(second?.stoppedAt);
+            const secondUpdatedAt = validIso(second?.updatedAt);
+            // The Stop lane can send as soon as it sees a correlation. Its matching receipt must already be durable.
+            const stored = await storeRunningSplitReceipt(original.clientCommandId, {
+              firstEntryId: targetEntryId, secondEntryId: receipt.newEntryId,
+              ...(firstUpdatedAt && firstStoppedAt !== undefined ? { firstUpdatedAt, firstStoppedAt } : {}),
+              ...(entries && receipt.id === targetEntryId && !first ? { firstRemoved: true } : {}),
+              ...(secondStoppedAt ? { secondStoppedAt } : {}),
+              ...(secondUpdatedAt ? { secondUpdatedAt } : {}),
+              correlationPending: true
+            });
+            if (!stored) return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
+            await publishRunningSplitCorrelation(stored, input.owner, input.control.correlations);
+            deliveredCount += 1;
+            continue;
+          } else if (receipt?.replayed === true && receipt.newEntryId === null) {
+            await settleRefusedSplit(input.owner, split.secondLocalId);
+          } else {
+            throw new Error("The running split receipt has no second block.");
+          }
+        } catch {
           const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
             kind: "retryable",
-            message: "Dayframe didn't name the split block. It will retry automatically."
+            message: "Dayframe couldn't confirm this split yet."
           });
           return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
         }
-        // Recorded before the command goes, so a Stop or Edit of the second part never loses its target.
-        const { recordTimerEntryIdCorrelation } = await import("./api");
-        await recordTimerEntryIdCorrelation(original.splitEntryLocalId as string, newEntryId, input.owner);
-        input.control.correlations.set(original.splitEntryLocalId as string, newEntryId);
       }
       if (response.ok || (original.operation === "delete" && response.status === 404)) {
         const removed = await removeDeliveredCommand(original.clientCommandId);
@@ -766,8 +978,11 @@ async function runTimeEntryCommandDrain(input: {
         continue;
       }
 
-      const permanent = PERMANENT_STATUS_CODES.has(response.status) || response.status === 404;
       const message = await safeResponseMessage(response);
+      const unsupportedSplit = split && response.status === 400 &&
+        message.startsWith("mode must be one of ") && !message.includes("split-running");
+      const permanent = !unsupportedSplit && (PERMANENT_STATUS_CODES.has(response.status) || response.status === 404);
+      if (permanent && split) await settleRefusedSplit(input.owner, split.secondLocalId);
       const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
         kind: permanent ? "permanent" : "retryable",
         message,
@@ -776,9 +991,8 @@ async function runTimeEntryCommandDrain(input: {
       if (!permanent) {
         return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
       }
-      if (split) await settleRefusedSplit(input.owner, original);
     } catch (error) {
-      const retryable = input.signal?.aborted ||
+      const retryable = Boolean(original.split) || input.signal?.aborted ||
         error instanceof MobileRequestTimeoutError ||
         isMobileTransportFailure(error);
       const message = error instanceof Error ? error.message : "Network request failed.";
@@ -793,36 +1007,21 @@ async function runTimeEntryCommandDrain(input: {
   }
 }
 
-/** The second part's id from the server's answer to a split (null when none), and whether it was a repeat. */
-async function splitAnswerFrom(response: Response) {
-  const body = await response.json().catch(() => null) as { newEntryId?: unknown; replayed?: unknown } | null;
-  return {
-    newEntryId: typeof body?.newEntryId === "string" && body.newEntryId ? body.newEntryId : null,
-    replayed: body?.replayed === true
-  };
-}
-
-/**
- * A split the server refused for good never makes its second part: as for a refused Start, the Stops
- * written for that part go and its Edits and Deletes become sync issues (fenced), so nothing waits for it.
- */
-async function settleRefusedSplit(owner: MobileAccountOwner, command: PendingTimeEntryCommand) {
-  if (!command.splitEntryLocalId) return;
-  try {
-    const { removePendingTimerStopsForTarget } = await import("./timerStopOutbox");
-    await removePendingTimerStopsForTarget(owner, { optimisticEntryId: command.splitEntryLocalId });
-    await refuseTimeEntryCommandsForOptimisticEntry(owner, command.splitEntryLocalId, "The split this change was for was never saved.");
-  } catch {
-    // The next pass's dependency check refuses fenced commands; a storage failure here only delays it.
-  }
+/** A refused split never creates a target for the queued changes to its second part. */
+async function settleRefusedSplit(owner: MobileAccountOwner, secondLocalId: string) {
+  await refuseTimeEntryCommandsForOptimisticEntry(owner, secondLocalId, "The split this change was for was never saved.");
+  const { rejectPendingTimerStopsForTarget } = await import("./timerStopOutbox");
+  await rejectPendingTimerStopsForTarget(owner, secondLocalId, REFUSED_SPLIT_STOP_MESSAGE);
 }
 
 async function enqueueTimeEntryCommand(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
-  operation: "update" | "delete" | "split";
+  operation: PendingTimeEntryCommand["operation"];
+  commandId?: string;
+  copy?: PendingCompletedEntryCopy;
+  split?: PendingRunningSplit;
   patch?: TimeEntryUpdatePatch;
-  split?: { splitAt: string; splitEntryLocalId: string };
   deliverAfter?: string;
   holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
@@ -832,19 +1031,43 @@ async function enqueueTimeEntryCommand(input: {
     throw new Error("This change belongs to a different Dayframe account.");
   }
   return withMutation(async () => {
+    const all = await readAllCommands();
+    if (input.copy && all.some((command) =>
+      mobileAccountOwnersEqual(command, input.owner) && !command.copyAcknowledged &&
+      (command.targetEntryId === input.target.targetEntryId || command.copy?.copyId === input.target.targetEntryId)
+    )) {
+      throw new PendingCompletedEntryChangeError();
+    }
+    if (!input.copy && input.target.targetEntryId) {
+      const target = input.target.targetEntryId;
+      const related = all.find((command) => {
+        const copy = command.copy;
+        if (!copy || command.copyAcknowledged || !mobileAccountOwnersEqual(command, input.owner)) return false;
+        if (copy.copyId === target) return true;
+        if (copy.action.kind !== "split" || command.targetEntryId !== target) return false;
+        return command.failureKind !== "permanent" || input.operation === "delete" ||
+          input.patch?.stoppedAt === copy.action.splitAt;
+      });
+      if (related) {
+        throw new PendingCompletedEntryChangeError(related.failureKind === "permanent"
+          ? "Resolve the split or copy in Sync help before changing this block."
+          : "Wait for this split or copy to sync before changing either block.");
+      }
+    }
     const now = new Date().toISOString();
     const fenced = input.target.optimisticEntryId
       ? (await readRefusedStartFence()).find((record) =>
           fencedFor(record, input.owner, input.target.optimisticEntryId as string))
       : undefined;
     const command: PendingTimeEntryCommand = {
-      clientCommandId: generatedCommandId(),
+      clientCommandId: input.commandId ?? generatedCommandId(),
       operation: input.operation,
       userId: input.owner.userId,
       workspaceId: input.owner.workspaceId,
       ...input.target,
       ...(input.operation === "update" ? { patch: input.patch ?? {} } : {}),
-      ...(input.operation === "split" && input.split ? input.split : {}),
+      ...(input.copy ? { copy: input.copy } : {}),
+      ...(input.split ? { split: input.split } : {}),
       ...(validIso(input.deliverAfter) && !fenced ? { deliverAfter: input.deliverAfter } : {}),
       createdAt: now,
       updatedAt: now,
@@ -862,7 +1085,6 @@ async function enqueueTimeEntryCommand(input: {
         lease
       });
     }
-    const all = await readAllCommands();
     try {
       await writeAllCommands([...all, command]);
     } catch (error) {
@@ -872,6 +1094,9 @@ async function enqueueTimeEntryCommand(input: {
     if (
       !fenced &&
       input.requestImmediateDelivery &&
+      input.operation !== "copy" &&
+      !all.some((candidate) => candidate.copy && !candidate.copyAcknowledged &&
+        candidate.failureKind !== "permanent" && mobileAccountOwnersEqual(candidate, input.owner)) &&
       isTimeEntryCommandTransportReady(command, new Map(), {
         force: true,
         now: new Date()
@@ -888,10 +1113,10 @@ export function isTimeEntryCommandTransportReady(
   correlations: ReadonlyMap<string, string>,
   options: { force?: boolean; now?: Date } = {}
 ) {
-  if (command.failureKind === "permanent") return false;
+  if (command.failureKind === "permanent" || hasDeliveryReceipt(command)) return false;
   const now = options.now ?? new Date();
   if (isHeld(command, now)) return false;
-  if (!command.targetEntryId && !(
+  if (!command.split?.receipt?.correlationPending && !command.targetEntryId && !(
     command.optimisticEntryId && correlations.has(command.optimisticEntryId)
   )) {
     return false;
@@ -1188,14 +1413,105 @@ async function currentOutboxResult(
   );
 }
 
+function acknowledgeCompletedCopy(clientCommandId: string, removedSince: boolean) {
+  return withMutation(async () => {
+    const current = await readAllCommands();
+    const command = current.find((candidate) => candidate.clientCommandId === clientCommandId && candidate.copy);
+    if (!command) return false;
+    const next = current.filter((candidate) => candidate.clientCommandId !== clientCommandId);
+    const delivered = next.filter((candidate) => candidate.copyAcknowledged);
+    const obsolete = new Set(delivered.slice(0, Math.max(0, delivered.length - MAX_COMPLETED_COPY_RECEIPTS + 1))
+      .map((candidate) => candidate.clientCommandId));
+    const receipt: PendingTimeEntryCommand = {
+      ...command, copyAcknowledged: true, copyRemovedOnServer: removedSince ? true : undefined, failureKind: undefined,
+      nextAttemptAt: undefined, lastError: undefined, lastStatusCode: undefined
+    };
+    await writeAllCommands([...next.filter((candidate) => !obsolete.has(candidate.clientCommandId)), receipt]);
+    return true;
+  });
+}
+
+function storeRunningSplitReceipt(clientCommandId: string, receipt: NonNullable<PendingRunningSplit["receipt"]>) {
+  return withMutation(async () => {
+    const current = await readAllCommands();
+    const command = current.find((candidate) => candidate.clientCommandId === clientCommandId);
+    if (!command?.split) return null;
+    const next = current.filter((candidate) => candidate.clientCommandId !== clientCommandId);
+    const delivered = next.filter(hasPublishedRunningSplitReceipt);
+    const obsolete = new Set(delivered.slice(0, Math.max(0, delivered.length - MAX_RUNNING_SPLIT_RECEIPTS + 1))
+      .map((candidate) => candidate.clientCommandId));
+    const acknowledged = {
+      ...command, split: { ...command.split, receipt }, failureKind: undefined,
+      nextAttemptAt: undefined, lastError: undefined, lastStatusCode: undefined
+    };
+    await writeAllCommands(current.filter((candidate) => !obsolete.has(candidate.clientCommandId))
+      .map((candidate) => candidate.clientCommandId === clientCommandId ? acknowledged : candidate));
+    return acknowledged;
+  });
+}
+
+async function publishRunningSplitCorrelation(
+  command: PendingTimeEntryCommand,
+  owner: MobileAccountOwner,
+  correlations: Map<string, string>
+) {
+  const split = command.split;
+  const receipt = split?.receipt;
+  if (!split || !receipt?.correlationPending) return;
+  const { recordTimerEntryIdCorrelation } = await import("./api");
+  if (!await recordTimerEntryIdCorrelation(split.secondLocalId, receipt.secondEntryId, owner)) {
+    throw new Error("Dayframe could not store the split's second block ID.");
+  }
+  await withMutation(async () => {
+    const all = await readAllCommands();
+    const next = all.map((item): PendingTimeEntryCommand => {
+      if (item.clientCommandId !== command.clientCommandId || !item.split?.receipt?.correlationPending) return item;
+      const { correlationPending: _pending, ...published } = item.split.receipt;
+      return {
+        ...item, split: { ...item.split, receipt: published }, failureKind: undefined,
+        nextAttemptAt: undefined, lastError: undefined, lastStatusCode: undefined
+      };
+    });
+    await writeAllCommands(next);
+  });
+  correlations.set(split.secondLocalId, receipt.secondEntryId);
+}
+
+function hasPublishedRunningSplitReceipt(command: PendingTimeEntryCommand) {
+  return Boolean(command.split?.receipt && !command.split.receipt.correlationPending);
+}
+
+function hasDeliveryReceipt(command: PendingTimeEntryCommand) {
+  return Boolean(command.copyAcknowledged || hasPublishedRunningSplitReceipt(command));
+}
+
 function removeDeliveredCommand(clientCommandId: string) {
   return withMutation(async () => {
     const current = await readAllCommands();
     const next = current.filter((command) => command.clientCommandId !== clientCommandId);
     if (next.length === current.length) return false;
+    // A delete the server acknowledged (not one undone or discarded): said before the outbox's own change, so a
+    // listener never sees its block as neither queued nor delivered (Codex r3 on #618).
+    const delivered = current.find((command) => command.clientCommandId === clientCommandId);
+    if (delivered?.operation === "delete") {
+      for (const listener of deliveredDeleteListeners) listener(delivered);
+    }
     await writeAllCommands(next);
     return true;
   });
+}
+
+const deliveredDeleteListeners = new Set<(command: PendingTimeEntryCommand) => void>();
+
+/**
+ * Told when the server acknowledged a delete and it left the outbox. Never for one removed by Undo or Discard: a
+ * listener can tell a delivered delete from a cancelled one.
+ */
+export function subscribeDeliveredTimeEntryDeletes(listener: (command: PendingTimeEntryCommand) => void) {
+  deliveredDeleteListeners.add(listener);
+  return () => {
+    deliveredDeleteListeners.delete(listener);
+  };
 }
 
 function retainCommandFailure(
@@ -1243,7 +1559,7 @@ function outboxResult(
   stopped: boolean,
   reason?: TimeEntryOutboxSyncResult["reason"]
 ): TimeEntryOutboxSyncResult {
-  const owned = commands.filter((command) => mobileAccountOwnersEqual(command, owner));
+  const owned = commands.filter((command) => mobileAccountOwnersEqual(command, owner) && !hasDeliveryReceipt(command));
   return {
     deliveredCount,
     waitingCount: owned.filter((command) => command.failureKind !== "permanent").length,
@@ -1274,21 +1590,22 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   const clientCommandId = optionalText(item.clientCommandId);
-  const operation = item.operation === "update" || item.operation === "delete" || item.operation === "split"
+  const operation = item.operation === "update" || item.operation === "delete" || item.operation === "copy" || item.operation === "split"
     ? item.operation
     : null;
-  const splitAt = validIso(item.splitAt);
-  const splitEntryLocalId = optionalText(item.splitEntryLocalId);
   const userId = optionalText(item.userId);
   const workspaceId = optionalText(item.workspaceId);
   const targetEntryId = optionalText(item.targetEntryId);
   const optimisticEntryId = optionalText(item.optimisticEntryId);
   const createdAt = validIso(item.createdAt);
   const updatedAt = validIso(item.updatedAt);
+  const copy = operation === "copy" ? parseCompletedEntryCopy(item.copy) : null;
+  const split = operation === "split" ? parseRunningSplit(item.split) : null;
   if (
+    (operation === "copy" && (!copy || !targetEntryId || optimisticEntryId)) ||
+    (operation === "split" && (!split || Boolean(targetEntryId) === Boolean(optimisticEntryId))) ||
     !clientCommandId || !operation || !userId || !workspaceId ||
-    (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt ||
-    (operation === "split" && (!splitAt || !splitEntryLocalId))
+    (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt
   ) {
     return null;
   }
@@ -1299,10 +1616,15 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
     workspaceId,
     ...(targetEntryId ? { targetEntryId } : {}),
     ...(optimisticEntryId ? { optimisticEntryId } : {}),
+    ...(copy ? { copy } : {}),
+    ...(split ? { split } : {}),
+    ...(copy && item.copyAcknowledged === true ? {
+      copyAcknowledged: true as const,
+      ...(item.copyRemovedOnServer === true ? { copyRemovedOnServer: true as const } : {})
+    } : {}),
     ...(operation === "update" && item.patch && typeof item.patch === "object"
       ? { patch: item.patch as TimeEntryUpdatePatch }
       : {}),
-    ...(operation === "split" ? { splitAt: splitAt as string, splitEntryLocalId: splitEntryLocalId as string } : {}),
     createdAt,
     updatedAt,
     attemptCount: typeof item.attemptCount === "number" && Number.isFinite(item.attemptCount)
@@ -1320,6 +1642,53 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
       : {}),
     ...(item.refusedStart === true ? { refusedStart: true } : {})
   };
+}
+
+function parseRunningSplit(value: unknown): PendingRunningSplit | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Partial<PendingRunningSplit>;
+  const splitAt = validIso(item.splitAt);
+  const secondLocalId = optionalText(item.secondLocalId);
+  const firstUpdatedAt = validIso(item.receipt?.firstUpdatedAt);
+  const firstEntryId = optionalText(item.receipt?.firstEntryId);
+  const firstStoppedAt = item.receipt?.firstStoppedAt === null ? null : validIso(item.receipt?.firstStoppedAt) ?? undefined;
+  const secondEntryId = optionalText(item.receipt?.secondEntryId);
+  const secondStoppedAt = validIso(item.receipt?.secondStoppedAt);
+  const secondUpdatedAt = validIso(item.receipt?.secondUpdatedAt);
+  return splitAt && secondLocalId?.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX)
+    ? {
+      splitAt, secondLocalId,
+      ...(secondEntryId ? {
+        receipt: {
+          secondEntryId,
+          ...(firstEntryId ? { firstEntryId } : {}),
+          ...(firstUpdatedAt ? { firstUpdatedAt, firstStoppedAt } : {}),
+          ...(item.receipt?.firstRemoved ? { firstRemoved: true } : {}),
+          ...(secondStoppedAt ? { secondStoppedAt } : {}),
+          ...(secondUpdatedAt ? { secondUpdatedAt } : {}),
+          ...(item.receipt?.secondRemoved ? { secondRemoved: true } : {}),
+          ...(item.receipt?.correlationPending ? { correlationPending: true } : {})
+        }
+      } : {})
+    }
+    : null;
+}
+
+function parseCompletedEntryCopy(value: unknown): PendingCompletedEntryCopy | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Partial<PendingCompletedEntryCopy>;
+  const expectedUpdatedAt = validIso(item.expectedUpdatedAt);
+  const copyId = optionalText(item.copyId);
+  const action = item.action;
+  if (!copyId || !/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(copyId) || !expectedUpdatedAt) {
+    return null;
+  }
+  if (action?.kind === "duplicate") return { action: { kind: action.kind }, copyId, expectedUpdatedAt };
+  const splitAt = action?.kind === "split" ? validIso(action.splitAt) : null;
+  const originalStoppedAt = validIso(item.originalStoppedAt) ?? undefined;
+  return splitAt ? {
+    action: { kind: "split", splitAt }, copyId, expectedUpdatedAt, ...(originalStoppedAt ? { originalStoppedAt } : {})
+  } : null;
 }
 
 function generatedCommandId() {

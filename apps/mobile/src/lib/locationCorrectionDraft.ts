@@ -1,11 +1,11 @@
-import type { TimelineCorrectionRequest, TimelinePlace, TimelineTrip, TripLegMode } from "@dayframe/shared";
+import { sameKnownPlace, type TimelineCorrectionRequest, type TimelinePlace, type TimelineTrip, type TripLegMode } from "@dayframe/shared";
 import type { TimelineCorrectionPreview } from "./timelineCorrectionOutbox";
 
 /**
  * What a correction sheet (location v4 step 12, mock-up #ios-list) sends when Done is tapped: only what
  * the person changed, as timeline corrections, in the order the server applies them. Pure, so the sheet
- * stays a view. The server refuses a place's place or times, or a trip's times or existence, once the item
- * is in a block, so those are only offered for an item with no block; a leg's mode is offered on any trip.
+ * stays a view. A logged visit's place can change on a compatible server. Its times belong to its block,
+ * and a leg's mode can change on any trip.
  */
 
 export type CorrectionPlaceOption = { id: string; name: string; role: string | null };
@@ -38,21 +38,24 @@ function changedTimes(original: { startedAt: string; stoppedAt: string | null },
 export function placeCorrections(
   place: TimelinePlace,
   draft: { choice: PlaceChoice; times: CorrectionTimes },
-  options: readonly CorrectionPlaceOption[]
+  options: readonly CorrectionPlaceOption[],
+  allowLoggedPlaceChange = false
 ): QueuedCorrection[] {
-  if (!correctable(place)) return [];
+  const hasBlock = !correctable(place);
+  if (hasBlock && !allowLoggedPlaceChange) return [];
   const out: QueuedCorrection[] = [];
   if (draft.choice.kind === "saved" && draft.choice.id !== place.placeId) {
     const chosen = draft.choice.id;
     const option = options.find((item) => item.id === chosen);
     out.push({
-      request: { kind: "place", subject: "place", itemId: place.id, placeId: chosen, learnedPlaceId: null },
-      preview: { name: option?.name ?? null, role: option?.role ?? null }
+      request: { kind: "place", subject: "place", itemId: place.id, placeId: chosen, learnedPlaceId: null,
+        ...(hasBlock ? { visitStartedAt: place.startedAt } : {}) },
+      preview: { name: option?.name ?? null, role: option?.role ?? null, ...(hasBlock ? { refreshBlocks: true } : {}) }
     });
-  } else if (draft.choice.kind === "unknown" && (place.placeId || place.learnedPlaceId)) {
+  } else if (!hasBlock && draft.choice.kind === "unknown" && (place.placeId || place.learnedPlaceId)) {
     out.push({ request: { kind: "place", subject: "place", itemId: place.id, placeId: null, learnedPlaceId: null }, preview: { name: null } });
   }
-  const times = timesProblem(place, draft.times) ? null : changedTimes(place, draft.times);
+  const times = hasBlock || timesProblem(place, draft.times) ? null : changedTimes(place, draft.times);
   if (times) out.push({ request: { kind: "times", subject: "place", itemId: place.id, ...times } });
   return out;
 }
@@ -72,6 +75,37 @@ export function legCorrection(trip: TimelineTrip, index: number, mode: TripLegMo
   const leg = trip.legs[index];
   if (!leg || leg.mode === mode) return null;
   return { request: { kind: "leg_mode", subject: "leg", itemId: trip.id, legStartedAt: leg.startedAt, legStoppedAt: leg.stoppedAt, mode } };
+}
+
+/**
+ * Whether "I wasn't here" can join a place's trips (step 12 part 4): a finished place with a trip in and a trip
+ * out, none of them in a block (the server refuses a join that touches a block).
+ */
+export function canSayNotHere(place: TimelinePlace, items: ReadonlyArray<TimelinePlace | TimelineTrip>) {
+  const before = items.find((item): item is TimelineTrip => item.kind === "trip" && item.toId === place.id);
+  const after = items.find((item): item is TimelineTrip => item.kind === "trip" && item.fromId === place.id);
+  return Boolean(place.stoppedAt && correctable(place) && before && after && before !== after && correctable(before) && correctable(after));
+}
+
+/** "I wasn't here": the place leaves the day, and its trips either side become one. */
+export function notHere(place: TimelinePlace): QueuedCorrection {
+  return { request: { kind: "delete", subject: "place", itemId: place.id } };
+}
+
+/**
+ * Whether "I didn't leave" can make a trip's two visits one stay: both to one saved or learned place, and none
+ * of the three in a block.
+ */
+export function canSayDidntLeave(trip: TimelineTrip, items: ReadonlyArray<TimelinePlace | TimelineTrip>) {
+  const first = items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.fromId);
+  const second = items.find((item): item is TimelinePlace => item.kind === "place" && item.id === trip.toId);
+  return Boolean(first && second && first !== second && sameKnownPlace(first, second) &&
+    correctable(trip) && correctable(first) && correctable(second));
+}
+
+/** "I didn't leave": the trip leaves the day, and the visits either side become one stay. */
+export function didntLeave(trip: TimelineTrip): QueuedCorrection {
+  return { request: { kind: "merge", subject: "trip", itemId: trip.id } };
 }
 
 /** "This wasn't a trip": takes it off the List (only a trip with no block). */

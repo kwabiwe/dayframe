@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("")
@@ -55,6 +55,16 @@ async function mount(data: BootstrapData) {
   return { container, root };
 }
 
+/** An open location suggestion: one "?" in Calendar › List. */
+function checkItem(id: string, startedAt: string, stoppedAt: string): ReviewItemRow {
+  return {
+    id, type: "location_place", title: "Visited a place", eventSource: "location", eventType: "geofence_stay", projectName: null,
+    categoryName: null, categoryColor: null, placeName: null, suggestedProjectId: null, suggestedCategoryId: null, suggestedPlaceId: null,
+    suggestedStartedAt: startedAt, suggestedStoppedAt: stoppedAt, confidence: "medium", status: "open", notes: null, rawPayload: null,
+    createdAt: startedAt
+  };
+}
+
 /** Today's rows, without a named pattern's parts (they sit in its panel, open or not). */
 function rowLabels(container: HTMLElement) {
   return [...container.querySelectorAll(".df-erow-main")]
@@ -93,14 +103,14 @@ describe("Today", () => {
     vi.setSystemTime(NOW);
     const counting = await mount(bootstrap());
     // Both hours count: the line reads as before.
-    expect(counting.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 25% of your 8h goal");
+    expect(counting.container.querySelector(".df-today-sub")?.textContent).toBe("framed · 25% of 8h");
     await act(async () => counting.root.unmount());
 
     const data = bootstrap();
     data.categories = data.categories.map((category) => category.id === "admin" ? { ...category, countsTowardGoal: false } : category);
     const { container, root } = await mount(data);
     expect(container.querySelector("#df-today-total")?.textContent).toContain("2h");
-    expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h toward your 8h goal (13%)");
+    expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed · 1h toward 8h (13%)");
     await act(async () => root.unmount());
 
     // Admin archived: gone from `categories`, still listed as not counting.
@@ -108,7 +118,7 @@ describe("Today", () => {
     archived.categories = archived.categories.filter((category) => category.id !== "admin");
     archived.goalExcludedCategoryIds = ["admin"];
     const after = await mount(archived);
-    expect(after.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h toward your 8h goal (13%)");
+    expect(after.container.querySelector(".df-today-sub")?.textContent).toBe("framed · 1h toward 8h (13%)");
     await act(async () => after.root.unmount());
   });
 
@@ -250,25 +260,30 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
-  it("says what is left to check today in one quiet chip that opens Calendar's List at the first one (location v4 step 14)", async () => {
+  it("says what is left to check today at the end of the total's line, opening Calendar's List at the first one (location v4 step 14; UI review W10)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const data = bootstrap();
-    const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 2 } });
-    expect(container.querySelector<HTMLElement>(".df-today-checks")?.dataset.open).toBe("true");
-    const chip = container.querySelector<HTMLAnchorElement>(".df-today-checks a");
-    expect(chip?.textContent).toContain("2 to check today");
-    expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&check=first");
+    // The chip counts today's "?" from the badge's own list (owner, 28 Oct 2026): yesterday's and an
+    // answered one don't count here, and the server's dayCheckCount only stands in before hydration.
+    const reviewItems = [
+      checkItem("check-today-late", local(10), local(10, 30)),
+      checkItem("check-today-early", local(9), local(9, 20)),
+      checkItem("check-yesterday", new Date(2026, 7, 16, 15).toISOString(), new Date(2026, 7, 16, 16).toISOString()),
+      { ...checkItem("check-answered", local(8), local(8, 30)), status: "accepted" }
+    ];
+    const { container, root } = await mount({ ...data, reviewItems, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 7 } });
+    const chip = container.querySelector<HTMLAnchorElement>(".df-today-sub .df-today-check-link");
+    expect(chip?.textContent).toBe("2 to check");
+    expect(container.querySelector(".df-today-sub")?.textContent).toMatch(/ · 2 to check$/);
+    // It opens today's oldest question in Calendar's List.
+    expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&date=2026-08-17&check=check-today-early");
     // The Review card is gone; nothing shows when there is nothing to check today.
     expect(container.textContent).not.toContain("moments waiting");
-    await act(async () => root.render(tree({ ...data, stats: { ...data.stats, dayCheckCount: 0 } })));
-    // It closes (its row folds away and fades; at once with Reduce Motion), hidden from assistive tech and the keyboard.
-    const closed = container.querySelector<HTMLElement>(".df-today-checks");
-    expect(closed?.dataset.open).toBe("false");
-    expect(closed?.getAttribute("aria-hidden")).toBe("true");
-    expect(closed?.hasAttribute("inert")).toBe(true);
-    // It keeps its words while it closes.
-    expect(closed?.textContent).toContain("2 to check today");
+    await act(async () => root.render(tree({ ...data, reviewItems: reviewItems.slice(2), stats: { ...data.stats, dayCheckCount: 7 } })));
+    // It leaves at once when nothing is left to check today; nothing else in the line changes.
+    expect(container.querySelector(".df-today-check-link")).toBeNull();
+    expect(container.querySelector(".df-today-sub")?.textContent).not.toContain("to check");
     await act(async () => root.unmount());
   });
 

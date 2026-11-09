@@ -3,45 +3,38 @@ import { AccessibilityInfo } from "react-native";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import { createUndoHoldLease, undoHoldDeliverAfter } from "./deletionUndoHold";
 import { DELETION_UNDO_MS } from "./historyDeletion";
-import type { MobileAccountOwner } from "./mobileAccount";
+import { mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
+import { runningSplitBounds } from "./runningSplitBounds";
 import {
   enqueueTimeEntrySplit,
-  readPendingTimeEntryCommands,
+  OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX,
   releaseTimeEntryCommands,
-  removeTimeEntryCommands,
-  wereTimeEntryCommandsDispatched,
+  undoHeldTimeEntrySplit,
   type TimeEntryCommandHoldLease
 } from "./timeEntryOutbox";
-import { OPTIMISTIC_TIMER_ID_PREFIX, optimisticSplitTimeEntry } from "./timerPresentation";
+import { optimisticSplitTimeEntry } from "./timerPresentation";
 
-/** A split shown with its Undo: the block it ended, its running second part and the held command. */
 export type HeldRunningSplit = {
   token: number;
+  owner: MobileAccountOwner;
+  generation: number;
   firstId: string;
   secondId: string;
   splitAt: string;
   title: string;
   swatchEntry: MobileTimeEntry;
-  commandId: string | null;
+  commandId: string;
 };
 
-/**
- * Split for the running block on iPhone (owner 28 Oct 2026, as Toggl). The split shows at once (no spinner):
- * the block ends at the chosen minute and its second part keeps running under a local id. The command is
- * durable at once but held for the Undo window, as a sheet Delete is (a force-quit keeps it, and it goes when
- * the window would have closed). Undo, while nothing was sent and the second part still runs, removes it and
- * shows one running block again; otherwise the window closing releases it to the outbox, which sends it and
- * records the second part's server id, so a Stop or Edit made of that part follows it.
- */
+/** A running Split is durable before it is shown. Undo cancels the held request before it can be sent. */
 export function useRunningSplit(input: {
   read: () => MobileBootstrap | null;
   update: (change: (current: MobileBootstrap | null) => MobileBootstrap | null) => void;
   owner: (bootstrap: MobileBootstrap) => MobileAccountOwner;
-  /** The block's server id, or null while its Start is still queued (then its local id is the target). */
+  generation: () => number;
   persistedId: (entryId: string) => string | null;
   isOnline: () => boolean;
-  /** Runs after the window closes: the outbox's delivery and a reload, in the dashboard's timer order. */
-  deliver: (owner: MobileAccountOwner) => void;
+  deliver: (owner: MobileAccountOwner, commandId: string) => void;
   onStorageFailure: () => void;
 }) {
   const [held, setHeld] = useState<HeldRunningSplit | null>(null);
@@ -49,6 +42,8 @@ export function useRunningSplit(input: {
   const token = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lease = useRef<TimeEntryCommandHoldLease | null>(null);
+  const changing = useRef(false);
+  const undoFlight = useRef<Promise<boolean> | null>(null);
   const deps = useRef(input);
   deps.current = input;
 
@@ -57,21 +52,24 @@ export function useRunningSplit(input: {
     setHeld(next);
   }, []);
 
-  /** Lets the held split go: its Undo has closed. */
+  const isCurrentOwner = useCallback((owner: MobileAccountOwner, generation: number) => {
+    const current = deps.current.read();
+    return Boolean(current && deps.current.generation() === generation &&
+      mobileAccountOwnersEqual(deps.current.owner(current), owner));
+  }, []);
+
   const commit = useCallback((split: HeldRunningSplit) => {
     if (heldRef.current?.token === split.token) show(null);
-    if (!split.commandId) return;
-    const bootstrap = deps.current.read();
-    if (!bootstrap) return;
-    const owner = deps.current.owner(bootstrap);
-    void releaseTimeEntryCommands([split.commandId], { owner, requestImmediateDelivery: deps.current.isOnline() })
-      .then(() => deps.current.deliver(owner))
-      .catch(() => deps.current.deliver(owner));
-  }, [show]);
+    const online = isCurrentOwner(split.owner, split.generation) && deps.current.isOnline();
+    const deliver = () => {
+      if (isCurrentOwner(split.owner, split.generation)) deps.current.deliver(split.owner, split.commandId);
+    };
+    void releaseTimeEntryCommands([split.commandId], { owner: split.owner, requestImmediateDelivery: online })
+      .then(deliver, deliver);
+  }, [isCurrentOwner, show]);
 
   const getLease = useCallback(() => {
     if (!lease.current || lease.current.ended) {
-      // A hold that ran past its bound is about to be delivered: its Undo closes as if it expired.
       lease.current = createUndoHoldLease((commandId) => {
         const current = heldRef.current;
         if (current?.commandId === commandId) commit(current);
@@ -82,114 +80,129 @@ export function useRunningSplit(input: {
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
-    // The dashboard going away (sign-out, teardown): the split stands, unheld, as after a force-quit.
     lease.current?.end();
   }, []);
 
-  /** Splits the running block at `atMs`; false when there is nothing running to split. */
-  const split = useCallback(async (atMs: number) => {
+  const split = useCallback(async (entryId: string, atMs: number) => {
     const bootstrap = deps.current.read();
     const running = bootstrap?.activeEntry;
-    if (!bootstrap || !running) return false;
-    const splitAt = new Date(atMs).toISOString();
-    const startedMs = Date.parse(running.startedAt);
-    if (!(atMs > startedMs && atMs < Date.now())) return false;
-    // An earlier split still in its window goes now: one Undo at a time.
-    const earlier = heldRef.current;
-    if (timer.current) clearTimeout(timer.current);
-    if (earlier) commit(earlier);
-    const next: HeldRunningSplit = {
-      token: ++token.current,
-      firstId: running.id,
-      // The timer's local id prefix: a Stop or Edit of it waits for the server's id, as for a queued Start.
-      secondId: `${OPTIMISTIC_TIMER_ID_PREFIX}split:${Date.now()}:${token.current}`,
-      splitAt,
-      title: running.description?.trim() || running.categoryName || "Block",
-      swatchEntry: running,
-      commandId: null
-    };
-    deps.current.update((current) => optimisticSplitTimeEntry(current, next.firstId, splitAt, next.secondId));
-    show(next);
-    AccessibilityInfo.announceForAccessibility(`Split ${next.title}. Undo available.`);
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      const current = heldRef.current;
-      if (current?.token === next.token) commit(current);
-    }, DELETION_UNDO_MS);
+    if (changing.current || !bootstrap?.serverBuild?.runningEntrySplit || !running) return false;
+    const identity = (id: string) => deps.current.persistedId(id) ?? id;
+    if (identity(running.id) !== identity(entryId)) return false;
+    const bounds = runningSplitBounds(Date.parse(running.startedAt), Date.now());
+    if (!bounds || !Number.isFinite(atMs) || atMs % 60_000 || atMs < bounds.minMs || atMs > bounds.maxMs) return false;
+
+    changing.current = true;
     const owner = deps.current.owner(bootstrap);
-    const persistedId = deps.current.persistedId(running.id);
+    const generation = deps.current.generation();
+    const stillRunning = () => {
+      const active = deps.current.read()?.activeEntry;
+      return Boolean(active && identity(active.id) === identity(entryId) && isCurrentOwner(owner, generation));
+    };
+    const nextToken = ++token.current;
+    const splitAt = new Date(atMs).toISOString();
+    const secondId = `${OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX}${Date.now()}:${nextToken}`;
     try {
+      const persistedId = deps.current.persistedId(running.id);
       const command = await enqueueTimeEntrySplit({
         owner,
         target: persistedId ? { targetEntryId: persistedId } : { optimisticEntryId: running.id },
         splitAt,
-        splitEntryLocalId: next.secondId,
+        splitEntryLocalId: secondId,
         deliverAfter: undoHoldDeliverAfter(Date.now()),
         holdLease: getLease()
       });
-      const current = heldRef.current;
-      if (current?.token === next.token) {
-        const withCommand = { ...current, commandId: command.clientCommandId };
-        heldRef.current = withCommand;
-        setHeld(withCommand);
-      } else {
-        // Its window already closed while it was written: it goes now.
-        commit({ ...next, commandId: command.clientCommandId });
+      if (command.failureKind === "permanent") return false;
+      if (!stillRunning()) {
+        // The exact timer or owner changed while storage was pending. Cancel before the hold releases.
+        await undoHeldTimeEntrySplit(owner, command.clientCommandId, () => true);
+        return false;
+      }
+      if (timer.current) clearTimeout(timer.current);
+      const earlier = heldRef.current;
+      if (earlier) commit(earlier);
+      const next = {
+        token: nextToken, owner, generation, firstId: running.id, secondId, splitAt,
+        title: running.description?.trim() || running.categoryName || "Block",
+        swatchEntry: running, commandId: command.clientCommandId
+      };
+      deps.current.update((current) => current?.activeEntry && stillRunning()
+        ? optimisticSplitTimeEntry(current, current.activeEntry.id, splitAt, secondId)
+        : current);
+      show(next);
+      AccessibilityInfo.announceForAccessibility(`Split ${next.title}. Undo available.`);
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        if (heldRef.current?.token === next.token) commit(next);
+      }, DELETION_UNDO_MS);
+      return true;
+    } catch {
+      if (isCurrentOwner(owner, generation)) deps.current.onStorageFailure();
+      return false;
+    } finally {
+      changing.current = false;
+    }
+  }, [commit, getLease, isCurrentOwner, show]);
+
+  const undoSplit = useCallback(async () => {
+    const current = heldRef.current;
+    if (!current || changing.current) return false;
+    const stillRunning = () => isCurrentOwner(current.owner, current.generation) &&
+      deps.current.read()?.activeEntry?.id === current.secondId;
+    changing.current = true;
+    try {
+      if (!await undoHeldTimeEntrySplit(current.owner, current.commandId, stillRunning)) {
+        commit(current);
+        return false;
+      }
+      if (heldRef.current?.token === current.token) {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
+        show(null);
+      }
+      if (stillRunning()) {
+        const firstId = deps.current.persistedId(current.firstId) ?? current.firstId;
+        deps.current.update((data) => joinOptimisticSplit(data, firstId, current.secondId));
       }
       return true;
     } catch {
-      if (heldRef.current?.token === next.token) show(null);
-      deps.current.update((current) => joinOptimisticSplit(current, next.firstId, next.secondId));
-      deps.current.onStorageFailure();
+      if (isCurrentOwner(current.owner, current.generation)) deps.current.onStorageFailure();
       return false;
+    } finally {
+      changing.current = false;
     }
-  }, [commit, getLease, show]);
+  }, [commit, isCurrentOwner, show]);
 
-  /**
-   * Undo: one running block again. Only while the second part is the running block and nothing was sent;
-   * Edits made to the second part in the window go with it. False when it is too late.
-   */
-  const undo = useCallback(async () => {
+  const undo = useCallback(() => {
+    if (undoFlight.current) return undoFlight.current;
+    const flight = undoSplit();
+    undoFlight.current = flight;
+    void flight.finally(() => {
+      if (undoFlight.current === flight) undoFlight.current = null;
+    });
+    return flight;
+  }, [undoSplit]);
+
+  function finishBeforeTimerChange(entryId: string) {
     const current = heldRef.current;
-    if (!current?.commandId) return false;
-    const bootstrap = deps.current.read();
-    if (
-      !bootstrap ||
-      bootstrap.activeEntry?.id !== current.secondId ||
-      wereTimeEntryCommandsDispatched([current.commandId])
-    ) {
-      commit(current);
-      return false;
-    }
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    show(null);
-    const owner = deps.current.owner(bootstrap);
-    const forSecond = (await readPendingTimeEntryCommands(owner))
-      .filter((command) => command.optimisticEntryId === current.secondId)
-      .map((command) => command.clientCommandId);
-    await removeTimeEntryCommands([current.commandId, ...forSecond]);
-    deps.current.update((data) => joinOptimisticSplit(data, current.firstId, current.secondId));
-    return true;
-  }, [commit, show]);
+    if (current?.secondId === entryId && isCurrentOwner(current.owner, current.generation)) commit(current);
+  }
 
-  return { held, split, undo };
+  return { held, split, undo, undoInFlight: () => undoFlight.current, finishBeforeTimerChange };
 }
 
-/** The split's parts shown as one again: the first takes the second's end (running when it ran). */
-export function joinOptimisticSplit(data: MobileBootstrap | null, firstId: string, secondId: string): MobileBootstrap | null {
-  if (!data) return data;
-  const all = [data.activeEntry, ...data.entries, ...(data.dayEntries ?? []), ...(data.weekEntries ?? [])];
-  const first = all.find((entry) => entry?.id === firstId);
-  const second = all.find((entry) => entry?.id === secondId);
-  if (!first || !second) return data;
-  // The first part's details: Edits made to the second part in the window go with it.
-  const joined: MobileTimeEntry = { ...first, stoppedAt: second.stoppedAt };
+/** The first part takes its running end again. Edits to the discarded second part leave with it. */
+function joinOptimisticSplit(data: MobileBootstrap | null, firstId: string, secondId: string): MobileBootstrap | null {
+  if (!data || data.activeEntry?.id !== secondId) return data;
+  const all = [...data.entries, ...(data.dayEntries ?? []), ...(data.weekEntries ?? [])];
+  const first = all.find((entry) => entry.id === firstId);
+  if (!first) return data;
+  const joined: MobileTimeEntry = { ...first, stoppedAt: null, durationSeconds: 0 };
   const swap = (entries: MobileTimeEntry[]) =>
     entries.filter((entry) => entry.id !== secondId).map((entry) => entry.id === firstId ? joined : entry);
   return {
     ...data,
-    activeEntry: data.activeEntry?.id === secondId ? joined : data.activeEntry,
+    activeEntry: joined,
     entries: swap(data.entries),
     dayEntries: data.dayEntries ? swap(data.dayEntries) : data.dayEntries,
     weekEntries: data.weekEntries ? swap(data.weekEntries) : data.weekEntries

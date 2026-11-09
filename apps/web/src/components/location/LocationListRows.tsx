@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DAYFRAME_APP_ICONS,
@@ -8,6 +8,7 @@ import {
   legDetail,
   legModeLabel,
   type ClockFormat,
+  type DayframeGlyph,
   type LocationListRow,
   type LocationTimeline,
   type TimelinePlace,
@@ -16,6 +17,7 @@ import {
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { formatDuration, formatTime } from "@/lib/format";
+import { inListRefreshWindow, listRefreshWindow } from "@/lib/timeline-view";
 
 /**
  * The day's location timeline for Calendar › List (location v4 step 10): fetched for the shown day and
@@ -42,6 +44,12 @@ export function useLocationTimeline(date: string | null, refreshKey: unknown, ow
   return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
 
+/** Of the stale days without places the List's top day passes over, at most this many are read per move (nearest first). */
+export const LOCATION_GAP_DAYS_READ_ON_SCROLL = 2;
+
+/** Of the edited blocks' own days outside the window, at most this many are read again at once. */
+export const LOCATION_EDITED_DAYS_READ_ON_EDIT = 8;
+
 /** Location reads in flight at once while the List loads its days. */
 export const LOCATION_TIMELINE_CONCURRENCY = 3;
 
@@ -52,13 +60,31 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * `staleKey` changes (an edit or a correction). A day asked for again while its read is out is read
  * once more when that read lands, so no refresh is lost.
  *
+ * With a `focusDate` (the List's top day), an edit re-reads at once only the days read within LIST_REFRESH_RADIUS_DAYS of
+ * it and the edited blocks' own days (`affectedDates`); every other day read is stale, as is every day but the live ones
+ * after a bootstrap refresh, and is read again when the List's top day comes within that radius of it. A failed read
+ * leaves the day stale (request-storm fix, 30 Oct 2026: an edit used to re-read every day the List had ever loaded, 69
+ * reads after nine weeks of scroll).
+ *
  * Days belong to one owner lifetime (workspace and user): every owner change starts a new generation,
  * dropping the days read and aborting the reads in flight, so even an A → B → A round trip never shows
  * A's earlier days. Unmounting aborts every read and stops the queue. A failed read keeps the day's last
  * copy; a day without one shows blocks (and its checks) only, as before.
  */
-export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
-  owner: string, enabled = true): ReadonlyMap<string, LocationTimeline> {
+export function useLocationTimelines(...args: Parameters<typeof useLocationTimelinesWithStatus>): ReadonlyMap<string, LocationTimeline> {
+  return useLocationTimelinesWithStatus(...args).days;
+}
+
+/**
+ * The same, with the days whose newest read again failed (shown from their old copy, Codex r2 on #634) and a way to read
+ * days again now (Try again).
+ */
+export function useLocationTimelinesWithStatus(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
+  owner: string, enabled = true, focusDate: string | null = null, affectedDates: readonly string[] = []): {
+  days: ReadonlyMap<string, LocationTimeline>;
+  failedDays: readonly string[];
+  retry: (dates: readonly string[]) => void;
+} {
   // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
   const [scope, setScope] = useState({ owner, generation: 0 });
   let generation = scope.generation;
@@ -67,9 +93,16 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     setScope({ owner, generation });
   }
   const [loaded, setLoaded] = useState<{ generation: number; days: ReadonlyMap<string, LocationTimeline> }>({ generation: 0, days: new Map() });
+  const [failed, setFailed] = useState<{ generation: number; days: ReadonlySet<string> }>({ generation: 0, days: new Set() });
   const queueRef = useRef<TimelineQueue | null>(null);
   const datesKey = dates.join(",");
   const liveDatesKey = liveDates.join(",");
+
+  const refreshWindow = listRefreshWindow(focusDate);
+  const windowRef = useRef(refreshWindow);
+  useLayoutEffect(() => {
+    windowRef.current = refreshWindow;
+  });
 
   const queueFor = (forGeneration: number) => {
     if (queueRef.current?.generation !== forGeneration) {
@@ -82,7 +115,13 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
           days.set(date, timeline);
           return { generation: forGeneration, days };
         });
-      });
+      }, (date, isFailed) => setFailed((current) => {
+        const days = new Set(current.generation === forGeneration ? current.days : []);
+        if (current.generation === forGeneration && days.has(date) === isFailed) return current;
+        if (isFailed) days.add(date);
+        else days.delete(date);
+        return { generation: forGeneration, days };
+      }), (date) => inListRefreshWindow(date, windowRef.current));
     }
     return queueRef.current;
   };
@@ -100,43 +139,105 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     const queue = queueFor(generation);
     queue.want(datesKey ? datesKey.split(",") : [], false);
   }, [datesKey, enabled, generation]);
-  // The selected day and today again with each bootstrap refresh.
+  // The selected day and today again with each bootstrap refresh; every other day read is stale (read when visited).
+  const lastLiveKeyRef = useRef(liveKey);
   useEffect(() => {
     if (!enabled) return;
-    queueFor(generation).want(liveDatesKey ? liveDatesKey.split(",") : [], true);
+    const queue = queueFor(generation);
+    const live = liveDatesKey ? liveDatesKey.split(",") : [];
+    if (lastLiveKeyRef.current !== liveKey) {
+      lastLiveKeyRef.current = liveKey;
+      queue.markStale([...queue.asked].filter((date) => !live.includes(date)));
+    }
+    queue.want(live, true);
   }, [enabled, liveDatesKey, liveKey, generation]);
-  // Every day again after an edit.
+  // After an edit: the days near the List's top day and the edited days at once; every other day read is stale.
+  const windowKey = refreshWindow ? `${refreshWindow.from}..${refreshWindow.to}` : "";
   const lastStaleRef = useRef(staleKey);
   useEffect(() => {
     if (lastStaleRef.current === staleKey) return;
     lastStaleRef.current = staleKey;
     if (!enabled) return;
     const queue = queueFor(generation);
-    queue.want([...queue.asked], true);
+    const asked = [...queue.asked];
+    queue.markStale(asked);
+    const edited = new Set(affectedDates.filter((date) => queue.asked.has(date)).slice(0, LOCATION_EDITED_DAYS_READ_ON_EDIT));
+    queue.want(asked.filter((date) => inListRefreshWindow(date, refreshWindow) || edited.has(date)), true);
+    // The window and the edited days are read from this render; the effect runs only for a new edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, generation, staleKey]);
+  // The stale days of the window the List's top day has come to (at most 2 × LIST_REFRESH_RADIUS_DAYS + 1), and of the
+  // stale days with no places it passed over, at most LOCATION_GAP_DAYS_READ_ON_SCROLL nearest the destination (such a
+  // day may have no heading, so the top day can never be on it; Codex r2 on #634). A day still being read is left to it.
+  const previousFocusRef = useRef(focusDate);
+  const loadedRef = useRef(loaded);
+  useLayoutEffect(() => {
+    loadedRef.current = loaded;
+  });
+  useEffect(() => {
+    const from = previousFocusRef.current;
+    previousFocusRef.current = focusDate;
+    if (!enabled) return;
+    const queue = queueRef.current;
+    if (!queue || queue.generation !== generation || !queue.stale.size) return;
+    const due = [...queue.stale.keys()].filter((date) => inListRefreshWindow(date, refreshWindow) && !queue.reading(date));
+    if (from && focusDate && from !== focusDate) {
+      const [low, high] = from < focusDate ? [from, focusDate] : [focusDate, from];
+      const days = loadedRef.current.generation === generation ? loadedRef.current.days : EMPTY_TIMELINES;
+      due.push(...[...queue.stale.keys()]
+        .filter((date) => date >= low && date <= high && !inListRefreshWindow(date, refreshWindow) && !queue.reading(date) &&
+          !(days.get(date)?.items.length))
+        .sort((left, right) => (left > right ? -1 : 1) * (focusDate < from ? -1 : 1))
+        .slice(0, LOCATION_GAP_DAYS_READ_ON_SCROLL));
+    }
+    if (due.length) queue.want(due, true);
+    // `windowKey` stands for the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, generation, windowKey]);
+  const retry = useCallback((retryDates: readonly string[]) => {
+    const queue = queueRef.current;
+    if (enabled && queue) queue.want(retryDates.filter((date) => queue.asked.has(date)), true);
+  }, [enabled]);
   // Leaving: every read is aborted and the queue stops.
   useEffect(() => () => {
     queueRef.current?.dispose();
     queueRef.current = null;
   }, []);
 
-  return loaded.generation === generation ? loaded.days : EMPTY_TIMELINES;
+  return {
+    days: loaded.generation === generation ? loaded.days : EMPTY_TIMELINES,
+    failedDays: failed.generation === generation ? [...failed.days] : NO_FAILED_DAYS,
+    retry
+  };
 }
+
+const NO_FAILED_DAYS: readonly string[] = [];
 
 type TimelineQueue = {
   generation: number;
   /** Days ever asked for in this lifetime. */
   asked: Set<string>;
+  /** Days whose copy may be out of date (after an edit or a bootstrap refresh), each with its mark. */
+  stale: Map<string, number>;
+  /** Marks days stale: only a read started after this, and successful, clears them. */
+  markStale: (dates: readonly string[]) => void;
+  /** Whether a day's read is out. */
+  reading: (date: string) => boolean;
   /** Asks for days: unread ones always; with `again`, read ones too (after a read in flight lands). */
   want: (dates: readonly string[], again: boolean) => void;
   dispose: () => void;
 };
 
-function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void): TimelineQueue {
+function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void,
+  onFailed: (date: string, failed: boolean) => void = () => undefined,
+  /** Whether a day is in the List's current refresh window. */
+  inWindow: (date: string) => boolean = () => false): TimelineQueue {
   const due = new Set<string>();
   const inFlight = new Map<string, AbortController>();
   const againAfterFlight = new Set<string>();
   const asked = new Set<string>();
+  const stale = new Map<string, number>();
+  let mark = 0;
   let disposed = false;
   const drain = () => {
     while (!disposed && inFlight.size < LOCATION_TIMELINE_CONCURRENCY && due.size) {
@@ -145,14 +246,25 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
       const controller = new AbortController();
       inFlight.set(date, controller);
       asked.add(date);
+      const startedAt = mark;
       clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store", signal: controller.signal })
         .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
         .catch(() => null)
         .then((next) => {
           if (disposed) return;
           inFlight.delete(date);
-          if (next && next.date === date) onRead(date, next);
+          if (!next || next.date !== date) onFailed(date, true);
+          if (next && next.date === date) {
+            onRead(date, next);
+            onFailed(date, false);
+            // Fresh only when read after it was marked; a failed read leaves it stale, so the next visit reads it again.
+            const marked = stale.get(date);
+            if (marked !== undefined && marked <= startedAt) stale.delete(date);
+          }
           if (againAfterFlight.delete(date)) due.add(date);
+          // A read begun before the day was marked stale, settling while the day is in the current window: a visit
+          // skipped it because this read was out, so read it once more (Codex r3 on #634). Never for a read begun after.
+          else if ((stale.get(date) ?? -1) > startedAt && inWindow(date)) due.add(date);
           drain();
         });
     }
@@ -160,6 +272,12 @@ function createTimelineQueue(generation: number, onRead: (date: string, timeline
   return {
     generation,
     asked,
+    stale,
+    markStale(dates) {
+      mark += 1;
+      for (const date of dates) stale.set(date, mark);
+    },
+    reading: (date) => inFlight.has(date),
     want(dates, again) {
       if (disposed) return;
       for (const date of dates) {
@@ -189,10 +307,15 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
 }
 
 /**
- * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
- * journey in progress. A place not in a block can be corrected (location v4 step 13).
+ * One location row of the List (owner, 28 Oct 2026): a place that needs you, or a quiet one with "All places", or the
+ * journey in progress. The row is one button that opens the place's dialog (its "?" asked at the top); its mark is
+ * the place's own icon with the amber dot when it asks something, and a confident guess has a Yes pill on the row.
  */
-export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
+export function LocationListRowView({ check, clock, guess = null, nowMs, onCorrect, onYes, row }: {
+  /** The one-tap Yes on the row, for a confident guess (owner item B). */
+  onYes?: () => void;
+  /** The question's best guess, shown on the row as "Boots?" (owner Q7, 28 Oct 2026). */
+  guess?: string | null;
   /** The row's "?" (location v4 step 14): whether its question is open, and the toggle. */
   check?: { expanded: boolean; onToggle: () => void };
   clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void;
@@ -224,66 +347,65 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
   const span = timeSpan(row.fromMs, row.spanEndMs, open, clock);
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
-  const correct = (onCorrect && !place.blockIds.length) || (check && row.checkIds.length) ? (
-    <div className="timeline-list-actions">
-      {check && row.checkIds.length ? <CheckToggle checkKey={row.key} expanded={check.expanded} label={label} onToggle={check.onToggle} /> : null}
-      {onCorrect && !place.blockIds.length ? (
-        <button aria-label={`Correct ${label}`} className="df-icon-action" data-tip="Correct" onClick={() => onCorrect(place, label)} type="button">
-          <DayframeIcon glyph="pencil" size={16} />
-        </button>
-      ) : null}
-    </div>
-  ) : null;
-  if (row.faint) {
-    const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
-      : DAYFRAME_APP_ICONS.places;
-    return (
-      <tr className="timeline-list-row timeline-location-row is-faint align-middle" data-location-row={place.id}
-        data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
-        <td className="px-3 py-3">
-          <div className="timeline-task-cell is-single">
-            <span aria-hidden="true" className="timeline-location-mark is-faint"><DayframeIcon glyph={glyph} size={16} /></span>
-            <span className="timeline-task-details">
-              <span className="timeline-task-primary-line">{label} · {span}</span>
-            </span>
-          </div>
-        </td>
-        {/* The span is in the title (mock-up #web-list): the time column stays empty. */}
-        <td className="tabular px-3 py-3" />
-        <td className="tabular px-3 py-3 timeline-list-duration">
-          <div className="timeline-list-duration-content timeline-location-note">
-            {row.unloggedSeconds < 60 ? "logged" : place.role === "home" ? "not logged" : `${formatDuration(row.unloggedSeconds)} not logged`}
-          </div>
-        </td>
-        <td className="px-3 py-3">{correct}</td>
-      </tr>
-    );
-  }
+  const asking = Boolean(check && row.checkIds.length);
+  // Q7: an unnamed place that asks "Visited Boots?" reads "Boots?" on its row.
+  const shownLabel = asking && guess && !place.name ? `${guess}?` : label;
+  // Owner item A: the row opens the place's dialog (its "?" asked at the top).
+  const opens = onCorrect ? () => onCorrect(place, label) : asking ? check!.onToggle : undefined;
+  const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
+    : DAYFRAME_APP_ICONS.places;
+  const notInBlock = row.unloggedSeconds >= 60 && row.unloggedSeconds < length - 59 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
+  const secondary = [row.faint ? null : notInBlock, place.setByYou ? "You set this" : null].filter(Boolean).join(" · ");
   return (
-    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={place.id}
+    <tr className={`timeline-list-row timeline-location-row align-middle is-v4${row.faint ? " is-quiet" : ""}`} data-location-row={place.id}
       data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
-      <td className="px-3 py-3">
-        <div className="timeline-task-cell is-single">
-          <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>
+      <td className="px-3 py-3" colSpan={2}>
+        <LocationRowButton asking={asking} checkKey={asking ? row.key : undefined} expanded={onCorrect ? undefined : check?.expanded}
+          hint={opens ? "Opens the place" : undefined}
+          label={`${shownLabel}, ${span}${asking ? ". Needs a look" : ""}${place.setByYou ? ". You set this" : ""}`} onPress={opens}>
+          <LocationMark asking={asking} glyph={glyph} quiet={row.faint} />
           <span className="timeline-task-details">
-            <span className="timeline-task-primary-line"><b>{label}</b></span>
+            <span className="timeline-task-primary-line">{row.faint ? <span>{shownLabel}</span> : <b>{shownLabel}</b>}</span>
+            {secondary ? <span className="timeline-location-secondary">{secondary}</span> : null}
           </span>
-        </div>
+          <span className="tabular timeline-location-span is-stacked">
+            <span>{formatTime(new Date(row.fromMs), clock)}</span>
+            <span>{open ? "now" : formatTime(new Date(row.spanEndMs), clock)}</span>
+          </span>
+        </LocationRowButton>
       </td>
-      <td className="tabular px-3 py-3"><div className="timeline-list-time-content">{span}</div></td>
-      <td className="tabular px-3 py-3 timeline-list-duration"><div className="timeline-list-duration-content">{formatDuration(length)}</div></td>
-      <td className="px-3 py-3">{correct}</td>
+      <td className="tabular px-3 py-3 timeline-list-duration">
+        <div className="timeline-list-duration-content">{row.faint && notInBlock ? <span className="timeline-location-note">{notInBlock}</span> : formatDuration(length)}</div>
+      </td>
+      <td className="px-3 py-3">
+        {onYes ? <button className="ui-button timeline-check-log is-compact timeline-row-yes" onClick={onYes} type="button">Yes</button> : null}
+      </td>
     </tr>
   );
 }
 
-/** A row's "?": opens its question under the row. */
-export function CheckToggle({ checkKey, expanded, label, onToggle }: { checkKey: string; expanded: boolean; label: string; onToggle: () => void }) {
+/**
+ * A location row's mark (owner, 28 Oct 2026, concern 1): a location row's mark is its normal icon in the usual
+ * filled square, with one small amber dot when it asks something. No outline, no second "?" box.
+ */
+export function LocationMark({ asking, glyph, quiet = false }: { asking: boolean; glyph: DayframeGlyph; quiet?: boolean }) {
   return (
-    <button aria-expanded={expanded} aria-label={`Check ${label}`} className="df-icon-action timeline-check-toggle" data-check-key={checkKey}
-      data-tip="Check"
-      onClick={onToggle} type="button">
-      <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
+    <span aria-hidden="true" className={`timeline-location-mark is-v4${quiet ? " is-faint" : ""}`}>
+      <DayframeIcon glyph={glyph} size={16} />
+      {asking ? <span className="timeline-location-dot" /> : null}
+    </span>
+  );
+}
+
+/** The whole row is the control: it opens its question (or, with none, the place or trip itself). */
+export function LocationRowButton({ asking, checkKey, children, expanded, hint, label, onPress }: {
+  asking: boolean; checkKey?: string; children: ReactNode; expanded?: boolean; hint?: string; label: string; onPress?: () => void;
+}) {
+  if (!onPress) return <div aria-label={label} className="timeline-location-hit" role="group">{children}</div>;
+  return (
+    <button aria-expanded={asking ? Boolean(expanded) : undefined} aria-label={label} className="timeline-location-hit" data-check-key={checkKey}
+      data-tip={hint} onClick={onPress} type="button">
+      {children}
     </button>
   );
 }
@@ -392,15 +514,3 @@ function LegButton({ children, label, onPress }: { children: ReactNode; label: s
 
 /** How long the legs row takes to open or close; matches `.timeline-trip-legs-wrap` in globals.css. */
 const TRIP_LEGS_MOTION_MS = 220;
-
-/** "Show Home and every place" under the List. */
-export function ShowEveryPlaceToggle({ onToggle, pressed }: { onToggle: () => void; pressed: boolean }) {
-  return (
-    <div className="timeline-location-foot">
-      {/* A secondary text button is text only (web buttons rule W10). */}
-      <button aria-pressed={pressed} className="timeline-location-chip" onClick={onToggle} type="button">
-        {pressed ? "Hide Home and logged places" : "Show Home and every place"}
-      </button>
-    </div>
-  );
-}

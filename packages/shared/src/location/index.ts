@@ -29,3 +29,4 @@ export * from "./namedPatternRows";
 export * from "./outingCards";
 export * from "./venueRanking";
 export * from "./placeQuestion";
+export * from "./timerTripClash";

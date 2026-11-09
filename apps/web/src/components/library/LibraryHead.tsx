@@ -13,7 +13,7 @@ export function LibraryHead({ current }: { current: (typeof LIBRARY_TABS)[number
     <div className="df-page-head">
       <div>
         <h1 tabIndex={-1}>Library</h1>
-        <p>Activities, tags and places in one place. Pinned activities appear in quick start.</p>
+        <p>Pinned activities appear in quick start.</p>
       </div>
       <div className="df-page-head-actions">
         <nav className="df-seg" aria-label="Library">

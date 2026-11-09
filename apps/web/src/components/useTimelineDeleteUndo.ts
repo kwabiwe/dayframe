@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useReportDeletedBlocks } from "@/components/location/ListChecks";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   TimelineDeleteUndoController,
@@ -15,19 +16,20 @@ export function useTimelineDeleteUndo({
   onSynced
 }: {
   entryIds: ReadonlySet<string>;
-  onSynced: () => Promise<void>;
+  /** After a delete commits, with the deleted blocks' ids. */
+  onSynced: (entryIds: readonly string[]) => Promise<void>;
 }) {
   const [state, setState] = useState<TimelineDeleteUndoState>(initialTimelineDeleteUndoState);
   // The controller outlives renders; a delete that commits after a period change must reload the
   // period shown then, so it calls the newest onSynced, never the first render's (WEB-UI-3).
   const [{ controller, latest }] = useState(() => {
     let latestOnSynced = onSynced;
-    const latest = { set: (next: () => Promise<void>) => { latestOnSynced = next; } };
+    const latest = { set: (next: (entryIds: readonly string[]) => Promise<void>) => { latestOnSynced = next; } };
     const controller = new TimelineDeleteUndoController(
       async (transaction, options) => {
         await commitTimelineDelete(transaction, options);
         try {
-          await latestOnSynced();
+          await latestOnSynced(transaction.ids);
         } catch {
           // The server commit succeeded. Keep the transaction hidden until a later reconciliation.
         }
@@ -52,6 +54,9 @@ export function useTimelineDeleteUndo({
   useEffect(() => {
     controller.reconcileEntryIds(entryIds);
   }, [controller, entryIds]);
+
+  // Deleted here and held for Undo: their "block ran into your trip" stops asking at once (Codex r1 on #618).
+  useReportDeletedBlocks(state.hiddenEntryIds);
 
   const requestDelete = useCallback((request: TimelineDeleteRequest) => {
     controller.requestDelete(request);

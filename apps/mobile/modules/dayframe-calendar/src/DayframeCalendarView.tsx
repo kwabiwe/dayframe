@@ -16,6 +16,8 @@ export type DayframeCalendarViewProps = ViewProps & {
   model: NativeCalendarPresentation;
   onChangeLayout?: (event: NativeSyntheticEvent<DayframeCalendarChangeLayoutEvent>) => void;
   onHeaderHeight?: (event: NativeSyntheticEvent<DayframeCalendarHeaderHeightEvent>) => void;
+  /** The header's Today pill. React decides what it does (`calendarTodayPressAction`). */
+  onPressToday?: () => void;
   onChangeDay?: (event: NativeSyntheticEvent<DayframeCalendarChangeDayEvent>) => void;
   onChangeWeek?: (event: NativeSyntheticEvent<DayframeCalendarChangeWeekEvent>) => void;
   onOpenActiveTimer?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;

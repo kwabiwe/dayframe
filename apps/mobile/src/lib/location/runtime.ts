@@ -36,6 +36,7 @@ import {
   type LocationSyncOptions
 } from "./store";
 import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
+import { armLocationAdmissionGuard } from "./admissionGuard";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 import { withJsTask } from "../jsTasks";
@@ -124,10 +125,12 @@ async function bindOwnerUnsafe(owner: MobileAccountOwner, revision: number, expl
 }
 
 export function bindLocationCaptureOwner(owner: MobileAccountOwner, revision = locationCaptureRevision()) {
+  armLocationAdmissionGuard();
   return withLocationCaptureLifecycle(() => bindOwnerUnsafe(owner, revision));
 }
 
 export function enableLocationCaptureOwnership(owner: MobileAccountOwner, revision: number) {
+  armLocationAdmissionGuard();
   return withLocationCaptureLifecycle(async () => {
     if (!ownerIsCurrent(owner, revision)) return false;
     const geofence = await import("../geofence");
@@ -158,6 +161,9 @@ export function stopUnownedLocationCapture(capture: LocationCaptureSnapshot) {
 
 // Called synchronously by the existing account listener, including A -> B -> A.
 export function locationCaptureAccountChanged(owner: MobileAccountOwner | null) {
+  // Every account change, sign-out and binding arms the accuracy trial's admission guard before any await (card K,
+  // Codex r27 on #619): it only ever lowers inherited best accuracy to normal capture.
+  armLocationAdmissionGuard();
   // A first cold activation may publish before mobileAccount hydrates its cache.
   // Preserve an already attributable same-owner binding in that case. Later
   // publications invalidate synchronously, including A -> B -> A.
@@ -174,6 +180,7 @@ export function locationCaptureAccountChanged(owner: MobileAccountOwner | null) 
 
 export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "opt_out" | "no_owner",
   owner?: MobileAccountOwner, isCurrent: () => boolean = () => true) {
+  armLocationAdmissionGuard();
   if (!isCurrent()) return Promise.resolve();
   if (owner && getActiveMobileAccountSnapshot() && !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) {
     return Promise.resolve();
@@ -234,6 +241,7 @@ export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "o
 }
 
 export function locationCaptureSessionSignedOut() {
+  armLocationAdmissionGuard();
   // Hydrate at publication, before a later account activation can be queued.
   const owner = readActiveMobileAccount();
   const end = endLocationCaptureOwnership("signed_out");
@@ -244,26 +252,37 @@ export function locationCaptureSessionSignedOut() {
 }
 
 export async function configureLocationIntelligence(bootstrap: MobileBootstrap) {
+  // Before any await: options a relaunch may have inherited are guarded while this admission waits (card K).
+  armLocationAdmissionGuard();
   const owner = { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id };
   const revision = locationCaptureRevision();
   await readActiveMobileAccount();
   await withLocationCaptureLifecycle(async () => {
-    if (!await bindOwnerUnsafe(owner, revision)) return;
-    const capture = await captureLocationOwnership();
-    if (!capture.context || !ownerIsCurrent(owner, revision)) return;
-    const geofence = await import("../geofence");
     const rolloutMode = bootstrap.locationRolloutMode ?? "v2_shadow";
-    await configureLocationAccount({ ...capture.context,
-      savedPlaces: bootstrap.places.flatMap(place => place.latitude == null || place.longitude == null ? [] : [{
-        id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
-        radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
-      }]),
-      acceptedLearnedPlaces: (bootstrap.learnedPlaces ?? []).flatMap(place => place.status !== "accepted" ? [] : [{
-        id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
-        radiusMeters: place.radiusMeters, priority: 0, accepted: true as const
-      }])
-    }, rolloutMode, Boolean(capture.binding?.enabled && await geofence.getLocationLearningEnabled()), revision);
-    if (!ownerIsCurrent(owner, revision)) return;
+    let admitted: LocationCaptureSnapshot | null = null;
+    try {
+      if (!await bindOwnerUnsafe(owner, revision)) return;
+      const capture = await captureLocationOwnership();
+      admitted = capture;
+      if (!capture.context || !ownerIsCurrent(owner, revision)) return;
+      const geofence = await import("../geofence");
+      await configureLocationAccount({ ...capture.context,
+        savedPlaces: bootstrap.places.flatMap(place => place.latitude == null || place.longitude == null ? [] : [{
+          id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
+          radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
+        }]),
+        acceptedLearnedPlaces: (bootstrap.learnedPlaces ?? []).flatMap(place => place.status !== "accepted" ? [] : [{
+          id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+          radiusMeters: place.radiusMeters, priority: 0, accepted: true as const
+        }])
+      }, rolloutMode, Boolean(capture.binding?.enabled && await geofence.getLocationLearningEnabled()), revision);
+      if (!ownerIsCurrent(owner, revision)) return;
+    } finally {
+      // However the account setup ended (a failure too), a consenting capture gets normal capture back here and the
+      // admission guard ends; without one, inherited options are put back or guarded (card K, Codex r22–r23 on #619).
+      const settled = admitted;
+      await import("../geofence").then((geofence) => geofence.reconcileLearningOptionsAfterAdmission(settled)).catch(() => undefined);
+    }
     if (rolloutMode === "v1") {
       await stopNativeLocationIntelligence();
       await clearNativeLocationSignals();
@@ -278,6 +297,8 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
 }
 
 export function syncLocationIntelligenceOnForeground(options: LocationSyncOptions = {}) {
+  // Before any await, as every capture admission does (card K, Codex r26 on #619).
+  armLocationAdmissionGuard();
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
     await drainNativeLocationSignalsInBatches();
@@ -317,6 +338,7 @@ export async function getNativeLocationIntelligenceStatus() {
 }
 
 export function drainNativeLocationSignals(limit = 100) {
+  armLocationAdmissionGuard();
   // Snapshot before waiting for the lifecycle lane; queued work cannot adopt B.
   const capture = captureLocationOwnership();
   return withJsTask("location-drain", () =>
@@ -333,7 +355,8 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
     // already in flight from running after B's monitoring starts.
     const current = await readLocationCaptureBinding();
     if (!current || current.id === capture.binding?.id) await native.clearAllSignals();
-    return { transferredCount: 0, drainedCount: 0, pendingAccount: true, positionSignalCount: 0, latestPosition: null };
+    return { transferredCount: 0, drainedCount: 0, pendingAccount: true, positionSignalCount: 0, latestPosition: null,
+      latestVisitDepartureAt: null, latestVisitArrivalAt: null };
   }
   const context = capture.context!;
   const signals = await native.drainSignals(limit);
@@ -377,6 +400,9 @@ type NativePositionSignal = { at: number; fix: GeofencePositionFix | null };
 function nativePositionSignals(evidence: LocationEvidence[]) {
   let positionSignalCount = 0;
   let latestPosition: NativePositionSignal | null = null;
+  // The newest Visit departure and arrival report, for card K's bursts (times only).
+  let latestVisitDepartureAt: number | null = null;
+  let latestVisitArrivalAt: number | null = null;
   for (const item of evidence) {
     if (item.kind !== "visit" && item.kind !== "significant_change") continue;
     positionSignalCount += 1;
@@ -385,14 +411,19 @@ function nativePositionSignals(evidence: LocationEvidence[]) {
     const at = Date.parse(departed ? item.endedAt! : item.kind === "visit"
       ? item.metadata?.nativeCallbackAt ?? item.occurredAt : item.occurredAt);
     if (!Number.isFinite(at)) continue;
+    if (item.kind === "visit") {
+      if (departed) latestVisitDepartureAt = Math.max(latestVisitDepartureAt ?? 0, at);
+      else latestVisitArrivalAt = Math.max(latestVisitArrivalAt ?? 0, at);
+    }
     const fix = departed || item.latitude == null || item.longitude == null ? null
       : { latitude: item.latitude, longitude: item.longitude, accuracy: item.horizontalAccuracyMeters ?? null, timestamp: at };
     if (!latestPosition || at >= latestPosition.at) latestPosition = { at, fix };
   }
-  return { positionSignalCount, latestPosition };
+  return { positionSignalCount, latestPosition, latestVisitDepartureAt, latestVisitArrivalAt };
 }
 
 export function drainNativeLocationSignalsInBatches() {
+  armLocationAdmissionGuard();
   const capture = captureLocationOwnership();
   return withLocationCaptureLifecycle(() => drainNativeLocationSignalsInBatchesUnsafe(capture));
 }
@@ -401,6 +432,18 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
   // Motion & Fitness history joins the same wake, after native signals; a
   // failure there never fails the drain.
   if (!result.pendingAccount) await captureMotionActivitySafelyUnsafe(await captured);
+  // A fresh Visit departure or arrival, at any place (an unknown one too), starts an accuracy burst
+  // (card K); one drained long after it happened doesn't. It never fails the drain.
+  if (!result.pendingAccount) {
+    const now = Date.now();
+    const fresh = (at: number | null) => at != null && now - at >= 0 && now - at <= VISIT_BURST_FRESHNESS_MS;
+    const kind = fresh(result.latestVisitDepartureAt) ? "departure" : fresh(result.latestVisitArrivalAt) ? "arrival" : null;
+    if (kind) {
+      await import("../geofence")
+        .then(geofence => captured.then(capture => geofence.maybeStartAccuracyBurst(kind, capture, "visit")))
+        .catch(() => undefined);
+    }
+  }
   // Every drain (task wakes, bootstrap, foreground sync) lets an admitted Visit or significant
   // change pick the nearest saved places again, in this same lane; it never fails the drain.
   if (!result.pendingAccount && result.positionSignalCount > 0) {
@@ -411,17 +454,25 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
   }
   return result;
 }
+/** A Visit drained more than this long after its departure or report starts no burst (card K). */
+const VISIT_BURST_FRESHNESS_MS = 10 * 60_000;
+
 async function drainNativeSignalPassesUnsafe(captured: Promise<LocationCaptureSnapshot>) {
   let transferredCount = 0;
   let positionSignalCount = 0;
   let latestPosition: NativePositionSignal | null = null;
+  let latestVisitDepartureAt: number | null = null;
+  let latestVisitArrivalAt: number | null = null;
   const outcome = (pendingAccount: boolean) =>
-    ({ transferredCount, pendingAccount, positionSignalCount, latestPositionFix: latestPosition?.fix ?? null });
+    ({ transferredCount, pendingAccount, positionSignalCount, latestPositionFix: latestPosition?.fix ?? null,
+      latestVisitDepartureAt, latestVisitArrivalAt });
   for (let pass = 0; pass < MAX_LOCATION_NATIVE_DRAIN_PASSES; pass += 1) {
     const result = await drainNativeLocationSignalsUnsafe(100, captured);
     transferredCount += result.transferredCount;
     positionSignalCount += result.positionSignalCount;
     if (result.latestPosition && (!latestPosition || result.latestPosition.at >= latestPosition.at)) latestPosition = result.latestPosition;
+    if (result.latestVisitDepartureAt != null) latestVisitDepartureAt = Math.max(latestVisitDepartureAt ?? 0, result.latestVisitDepartureAt);
+    if (result.latestVisitArrivalAt != null) latestVisitArrivalAt = Math.max(latestVisitArrivalAt ?? 0, result.latestVisitArrivalAt);
     if (result.pendingAccount || result.drainedCount < 100) return outcome(result.pendingAccount);
   }
   return outcome(false);

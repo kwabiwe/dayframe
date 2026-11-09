@@ -17,8 +17,8 @@ describe("Timeline inline row layout contract", () => {
     expect(styles).toMatch(/\.timeline-inline-description\.is-editing \{[^}]*width: auto;[^}]*flex: 1 1 auto;/s);
     expect(styles).toMatch(/\.timeline-task-cell \{[^}]*--timeline-task-primary-height: var\(--web-control-height\);[^}]*min-height: var\(--timeline-task-primary-height\);[^}]*align-items: start;/s);
     expect(styles).toMatch(/\.timeline-group-count \{[^}]*height: 28px;[^}]*margin-top: calc\(\(var\(--timeline-task-primary-height\) - 28px\) \/ 2\);[^}]*align-self: start;/s);
-    // Today's 36 px block with the X3 radius, centred on the two-line row (WUI-028).
-    expect(styles).toMatch(/\.timeline-task-block \{[^}]*width: 36px;[^}]*height: 36px;[^}]*align-self: center;[^}]*border-radius: calc\(36px \* 0\.3\);/s);
+    // Today's 28 px block with the X3 radius, centred on the two-line row (WUI-028; UI review, 29 Oct 2026).
+    expect(styles).toMatch(/\.timeline-task-block \{[^}]*width: 28px;[^}]*height: 28px;[^}]*align-self: center;[^}]*border-radius: calc\(28px \* 0\.3\);/s);
     expect(styles).toMatch(/\.timeline-task-secondary-line \{[^}]*display: flex;[^}]*font-size: 12px;/s);
     expect(styles).toMatch(/\.timeline-task-primary-line \{[^}]*display: flex;[^}]*height: var\(--timeline-task-primary-height\);[^}]*align-items: baseline;[^}]*gap: 8px;/s);
     expect(styles).toMatch(/\.timeline-task-primary-line \.timeline-task-meta,[\s\S]*\.timeline-task-primary-line \.tag-metadata \{[^}]*height: auto;[^}]*min-height: 0;[^}]*align-items: baseline;[^}]*line-height: var\(--timeline-task-text-line-height\);/s);
@@ -27,7 +27,7 @@ describe("Timeline inline row layout contract", () => {
     expect(styles).toMatch(/\.timeline-inline-description\.is-editing \.timeline-inline-description-measure \{[^}]*visibility: hidden;/s);
     expect(styles).toMatch(/\.timeline-inline-description:not\(\.is-editing\) \.timeline-inline-description-input\[readonly\] \{[^}]*color: transparent;[^}]*caret-color: transparent;/s);
     expect(styles).toMatch(/\.timeline-list-table tbody > tr:not\(\.timeline-list-day-heading\) > td \{[^}]*vertical-align: middle;/s);
-    expect(styles).toMatch(/\.timeline-list-table tbody > tr:not\(\.timeline-list-day-heading\) > td:first-child \{[^}]*vertical-align: top;/s);
+    expect(styles).toMatch(/\.timeline-list-table tbody > tr:not\(\.timeline-list-day-heading\) > td:first-child \{[^}]*vertical-align: middle;/s);
     expect(styles).not.toContain("tr.has-secondary-task-line > td");
     expect(styles).toMatch(/\.timeline-task-details > \.overlap-marker \{[^}]*margin-top: 0;/s);
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.timeline-inline-description \{[^}]*transition: none;/s);

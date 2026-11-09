@@ -15,10 +15,40 @@ const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
 describe("Calendar range and toolbar contract", () => {
+  it("puts every date load that moves the Calendar behind the nav tap's generation (Codex r3 and r4 on #625)", () => {
+    // The two places that load a period before moving the URL: the view's navigate (strip, picker, ‹ ›, Today, midnight)
+    // and the shell's Alt+← / Alt+→.
+    for (const file of [timeline, shell]) {
+      expect(file.match(/await loadDate\(/g)).toHaveLength(1);
+      expect(file).toMatch(/const generation = calendarNavigationGeneration\(\);\s*const outcome = await loadDate\(/);
+      expect(file).toContain("if (generation !== calendarNavigationGeneration()) {");
+    }
+  });
+
+  it("names the List's top day in the header, not only the URL's date (owner bug, 29 Oct 2026)", () => {
+    expect(timeline).toContain("onVisibleDay: reportListTopDay");
+    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey)');
+    expect(timeline).toContain("selectedDay: headerRanges.day.start");
+    expect(timeline).toContain("value={headerDayKey}");
+    // Reported whether or not the places column shows, and after a positioning that fires no scroll event.
+    expect(entries).toContain("onVisibleDay?.(topDayStartMs)");
+    expect(entries).not.toContain("if (columnShown) trackColumnDay();");
+    // Cheap per scroll (Codex r1 on #625): cached heading offsets, binary-searched; re-measured only on layout changes,
+    // and only while the List is shown.
+    expect(entries).toContain("const offsets = (remeasure ? null : headingOffsetsRef.current) ?? measureHeadingOffsets(root);");
+    expect(entries).toContain("if (!root || !tracksTopDay) return;");
+    expect(entries).toContain("new MutationObserver(");
+    expect(entries).toContain("new ResizeObserver(() => schedule())");
+    expect(entries).not.toMatch(/headings\.filter\(\(heading\) => heading\.getBoundingClientRect\(\)/);
+    // A deliberate choice of the URL's day positions the List again; the strip is the header day's week.
+    expect(timeline).toContain("focusRequest: `${state.date}#${listFocusToken}`");
+    expect(timeline).toContain("weekDays: headerRanges.weekDays");
+  });
+
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
-    expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar"/g)).toHaveLength(1);
+    expect(timeline.match(/className="timeline-range-toolbar df-cal-toolbar is-next"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
-    expect(timeline).toContain("timelineHref(searchParams.toString(), state, nextState)");
+    expect(timeline).toContain("timelineHref(nextSearch, state, nextState)");
     expect(timeline).toContain('window.history.pushState(null, "", href)');
     expect(timeline).toContain("document.cookie");
     expect(timeline).toContain("updateTimelinePreference");
@@ -38,7 +68,8 @@ describe("Calendar range and toolbar contract", () => {
     expect(runtime).toContain("dateDataCacheRef.current.get(dateDataCacheKey(workspaceId, date))");
     expect(runtime).toContain("DATE_DATA_CACHE_LIMIT = 8");
     expect(runtime).toContain("withCurrentSharedBootstrap(cached, dataRef.current)");
-    expect(runtime).toContain("shellData: data");
+    // The shell copy is the End it projection of the data (location v4 design §7, Codex r1 on #618).
+    expect(runtime).toContain("shellData: shownData");
     expect(runtime).toContain("data: selectedData");
     expect(source("./PersistentTimerBar.tsx")).toContain("shellData: data");
     // Timesheet left Calendar (owner, 11 Oct): views restore the preferred scope, nothing is forced.
@@ -55,7 +86,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");
-    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, todayKey)");
+    expect(timeline).toContain('formatCalendarRangeLabel(isList ? "day" : state.scope, narrowWeek ? { ...headerRanges, weekDays: narrowWeek.days } : headerRanges, todayKey)');
   });
 
   it("gives all views the same clipped period data", () => {
@@ -68,29 +99,27 @@ describe("Calendar range and toolbar contract", () => {
     // week total still opens its report.
     expect(timeline).not.toContain('className="timeline-range-totals"');
     expect(timeline).not.toContain("dayLoggedSeconds");
-    expect(timeline).toContain("weekLoggedSeconds: weekAnalysis.totalLoggedSeconds");
+    expect(timeline).toContain("weekLoggedSeconds: headWeekSeconds");
+    expect(timeline).toContain(": weekAnalysis.totalLoggedSeconds;");
     expect(timeline).toContain("weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Calendar period and view controls"');
-    // #259: one compact row — the period, the week strip, then Day | Week and Calendar | List.
-    const toolbar = timeline.slice(timeline.indexOf('className="timeline-range-toolbar df-cal-toolbar"'), timeline.indexOf('className="timeline-view-stage"'));
-    expect(toolbar.indexOf('className="timeline-range-navigation"')).toBeLessThan(toolbar.indexOf("<CalendarHead"));
-    expect(toolbar.indexOf("<CalendarHead")).toBeLessThan(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}'));
-    expect(toolbar.indexOf('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}')).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar view"'));
-    // Card C item 5: a visible Calendar | List switch on web; the round icon menu is the iPhone's only.
+    // UI review round 2 (owner 30 Oct 2026): one toolbar in every view — the date box with ‹ › inside it, Today, the
+    // total, then one Day · Week · List control; the 7-day picker is List's own row, and Day and Week share the grid's day row.
+    const toolbar = timeline.slice(timeline.indexOf('className="timeline-range-toolbar df-cal-toolbar is-next"'), timeline.indexOf('className="timeline-view-stage"'));
+    expect(toolbar.indexOf('className="df-cal-datebox"')).toBeLessThan(toolbar.indexOf('className="timeline-today-button"'));
+    expect(toolbar.indexOf('className="timeline-today-button"')).toBeLessThan(toolbar.indexOf('className="df-cal-weektotal df-tnum"'));
+    expect(toolbar.indexOf('className="df-cal-weektotal df-tnum"')).toBeLessThan(toolbar.indexOf('ariaLabel="Calendar view"'));
+    expect(toolbar).toContain('{ value: "list", label: "List", disabled: isDateLoading }');
+    expect(toolbar).toContain("{!isList ? null : (");
+    expect(timeline).toContain('variant="row"');
     expect(timeline).not.toContain("CalendarViewMenu");
-    expect(timeline).toContain('{ id: "calendar", label: "Calendar" }');
-    expect(timeline).toContain('{ id: "list", label: "List" }');
-    // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
-    expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
-    expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
-    expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
-    // Card C (27 Oct): List has no second Today button; the grid shows one away from today.
-    expect(timeline).toContain("{showsToday || isList ? null : (");
-    expect(timeline).not.toContain("Today, not used in List");
+    // Today stays available when it can clear the List's linked block, even if today is visible.
+    expect(timeline).toContain('const canClearListEntryLink = isList && searchParams.has("entry");');
+    expect(toolbar).toContain("disabled={isDateLoading || todayKey === null || (showsToday && !canClearListEntryLink)}");
     // Location days belong to the owner and the selected week (Codex r2 on #584).
-    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);");
+    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList, listFocusDate, listRefresh.affected);");
     // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).
     expect(timeline).toContain("locationTimelines={[...listTimelines.values()].filter((timeline) => listDays.includes(timeline.date))}");
     // Alt+← / → (the shell's period shortcut) does nothing in List either (Codex r1 on #584).
@@ -133,8 +162,8 @@ describe("Calendar range and toolbar contract", () => {
   it("keeps Timeline viewport-scoped and stacks the toolbar without page overflow at phone widths", () => {
     expect(shell).toContain('const isTimeline = pathname === "/timeline"');
     expect(shell).toContain('swiss-app-shell${isTimeline ? " is-timeline" : ""}');
-    expect(shell).toContain('className="swiss-timeline-surface"');
-    expect(shell).toContain('className="swiss-timeline-main"');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-main" : undefined}');
     expect(styles).toContain(".swiss-app-shell.is-timeline");
     expect(styles).toContain(".timeline-view-stage");
     expect(styles).toContain(".calendar-grid-scroller");
@@ -148,24 +177,22 @@ describe("Calendar range and toolbar contract", () => {
     expect(entries).toContain('className="timeline-list-scroll"');
     expect(entries).not.toContain("FilterSelect");
     expect(styles).not.toContain(".timeline-timesheet");
-    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);/);
-    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) max-content var\(--web-icon-button-size\);/s);
-    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*min-width: 120px;[^}]*justify-self: stretch;/s);
-    expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
-    // Calendar v3: the view button and the Day / Week scope share the phone row.
-    expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{\s*flex: 1 1 0;[^}]*min-width: 0;/);
+    // UI review round 2: one fixed-height toolbar (56 px; two 96 px lines on phones) over a fixed-height row.
+    expect(styles).toMatch(/\.swiss-timeline-surface \.df-cal-toolbar\.is-next \{[^}]*height: var\(--df-cal-toolbar-height\);/s);
+    expect(styles).toMatch(/@media \(max-width: 640px\)[\s\S]*--df-cal-toolbar-height: 96px;/);
+    expect(styles).toMatch(/\.df-cal-datebox \{[^}]*height: var\(--web-control-height\);/s);
   });
 
   it("uses one outer Timeline surface and direct per-view scrollers without duplicate titles", () => {
-    expect(shell).toContain('<PersistentTimerBar workspaceMode={isTimeline} />');
-    expect(shell).toContain('className="swiss-timeline-surface"');
+    expect(shell).toContain('<PersistentTimerBar onToday={pathname === "/"} workspaceMode={isTimeline} />');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-surface" : "swiss-page-surface"}');
     expect(timeline).not.toContain('className="timeline-view-title-row"');
     expect(entries).not.toContain('className="timeline-view-title-row"');
-    expect(timeline).toContain('className="calendar-corner-zoom"');
+    expect(timeline).toContain('className="calendar-corner-zoom df-cal-dayrow-zoom"');
     expect(timeline).not.toContain("<span>Time</span>");
-    expect(timeline).toContain('aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}');
-    expect(timeline).toContain("{loggedLabel}");
-    expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*min-height: 52px;/);
+    // The day row (UI review round 2): each day's total is its tip and part of its name.
+    expect(source("./calendar/CalendarHead.tsx")).toContain("data-tip={row ? day.tip : undefined}");
+    expect(styles).toMatch(/\.df-cal-dayrow \{[^}]*height: var\(--df-cal-row-height\);/s);
     expect(styles).toContain("--timeline-list-column-header-height: 40px");
     expect(styles).toMatch(/\.timeline-list-day-heading > td \{[^}]*top: var\(--timeline-list-column-header-height\);/s);
     expect(styles).toMatch(/\.timeline-list-day-heading > td \{[^}]*box-shadow: 0 -1px 0 var\(--line\);/s);
@@ -174,7 +201,7 @@ describe("Calendar range and toolbar contract", () => {
 
   it("keeps block Suggestions above sticky Calendar chrome and the complete Undo bean on the responsive control contract", () => {
     expect(styles).toMatch(/\.swiss-timeline-surface \.swiss-persistent-timer-shell \{[^}]*z-index: 50;/s);
-    expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*z-index: 40;/s);
+    expect(styles).toMatch(/\.df-cal-dayrow \{[^}]*position: sticky;[^}]*z-index: 41;/s);
     expect(styles).toMatch(/:root \{[^}]*--web-control-height: 44px;/s);
     // One control scale on every width (WUI-015): no 38 px desktop controls.
     expect(styles).not.toMatch(/--web-control-height: 38px;/);

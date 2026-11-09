@@ -13,7 +13,7 @@ describe("command palette", () => {
   it("opens on pinned Starts, then Go to, Add and Settings", () => {
     expect(filterPaletteCommands(commands, "").map((command) => command.label)).toEqual([
       "Start Focus",
-      "Today", "Calendar", "Review", "Reports", "Library", "Settings", "Tags", "Places",
+      "Today", "Calendar", "Reports", "Library", "Settings", "Tags", "Places",
       "Add a block",
       "Switch to Daylight", "Keyboard shortcuts"
     ]);

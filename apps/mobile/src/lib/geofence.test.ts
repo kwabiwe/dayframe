@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
@@ -110,6 +110,11 @@ const {
   recordGeofenceTransition,
   REPICK_MIN_INTERVAL_MS,
   __resetGeofenceRepickClockForTests,
+  __resetAccuracyBurstForTests,
+  maybeEndAccuracyBurst,
+  maybeStartAccuracyBurst,
+  readAccuracyBurstState,
+  stopLocationLearningIfStarted,
   refreshGeofencesForPlaces,
   refreshNearestGeofencesInLifecycleLane,
   setLocationLearningEnabled,
@@ -995,3 +1000,844 @@ describe("Always already asked, after a restart (UIA-111, Codex r3–r4)", () =>
     expect(await locationAccessNeedsIosSettings()).toBe(true);
   });
 });
+
+describe("departure and arrival accuracy bursts (card K, location v4 §10)", () => {
+  const BURST_KEY = "dayframe.location.burstTrial.v1";
+  const localDay = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const capture = async () => (await import("./location/store")).captureLocationOwnership();
+  // Moves the wall and monotonic clocks together, as real time does.
+  const moveTo = (date: Date) => vi.advanceTimersByTime(date.getTime() - Date.now());
+
+  beforeEach(async () => {
+    asyncStore.clear();
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    __resetMobileAccountForTests();
+    await activateMobileAccount({ userId: "user-geofence", workspaceId: "workspace-geofence" });
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(true);
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    locationMocks.stopLocationUpdatesAsync.mockResolvedValue(undefined);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => { asyncStore.set(key, value); return Promise.resolve(); });
+    __resetAccuracyBurstForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(false);
+  });
+
+  it("a departure runs 3 minutes at best accuracy, one at a time, then the next reading restores normal capture", async () => {
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0, pausesUpdatesAutomatically: false }));
+    expect((locationMocks.startLocationUpdatesAsync.mock.lastCall as unknown[] | undefined)?.[1]).not.toHaveProperty("deferredUpdatesInterval");
+    await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
+    moveTo(new Date(2026, 10, 2, 8, 2));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    moveTo(new Date(2026, 10, 2, 8, 3, 30));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    // Normal capture came back at 8:03:30: the burst ran 3.5 minutes, and that is what counts.
+    await expect(readAccuracyBurstState()).resolves.toMatchObject({ days: { [localDay(new Date())]: { count: 1, seconds: 210 } } });
+  });
+
+  it("a failed restore keeps the burst recorded and is tried again with the next reading (Codex r1 on #619)", async () => {
+    await maybeStartAccuracyBurst("departure", await capture());
+    moveTo(new Date(2026, 10, 2, 8, 3, 10));
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    moveTo(new Date(2026, 10, 2, 8, 4, 0));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(true);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())]).toMatchObject({ seconds: 240 });
+  });
+
+  it("a stale capture lifetime neither starts nor ends a burst (Codex r1 on #619)", async () => {
+    await maybeStartAccuracyBurst("departure", await capture());
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 3, 30));
+    captureState.current = false;
+    try {
+      await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+      expect((await readAccuracyBurstState())?.active).toBeTruthy();
+      await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a storage read that fails never starts the trial over (Codex r1 on #619)", async () => {
+    const finished = JSON.stringify({ startedDay: "2026-10-01", furthestTrialDay: 20, days: {} });
+    asyncStore.set(BURST_KEY, finished);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValueOnce(new Error("locked"));
+    await expect(maybeStartAccuracyBurst("departure", await capture())).rejects.toThrow("locked");
+    expect(asyncStore.get(BURST_KEY)).toBe(finished);
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+  });
+
+  it("never bursts on an off day of the trial, nor while location updates aren't running", async () => {
+    const eightDaysAgo = new Date(2026, 10, 2 - 8, 8, 0);
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(eightDaysAgo), days: {} }));
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {} }));
+    locationMocks.hasStartedLocationUpdatesAsync.mockResolvedValue(false);
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    // Never best accuracy (a first wake only puts normal capture back).
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0 }));
+  });
+
+  it("capture stopping (sign-out, an account change, location off) ends a burst at once, counted for what it ran", async () => {
+    await maybeStartAccuracyBurst("arrival", await capture());
+    moveTo(new Date(2026, 10, 2, 8, 1, 10));
+    await stopLocationLearningIfStarted();
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())]).toEqual({ count: 1, seconds: 70, measuredSeconds: 70, byTrigger: { saved_entry: { count: 1, seconds: 70 } } });
+  });
+
+  it("ends a burst with no readings at all, and stops updates outright if normal capture keeps failing (Codex r2 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+
+    // Next burst, after the cooldown: every restore fails, so updates are stopped 5 minutes past its 3.
+    vi.setSystemTime(new Date(2026, 10, 2, 9, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(9 * 60_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+  });
+
+  it("a late failed start never ends another lifetime's burst (Codex r2 on #619)", async () => {
+    const other = { kind: "arrival", trigger: "saved_entry", captureId: "capture-other", startedAt: new Date(2026, 10, 2, 8, 0, 1).toISOString(),
+      endsAt: new Date(2026, 10, 2, 8, 3, 1).toISOString(), offsetMinutes: 0 };
+    locationMocks.startLocationUpdatesAsync.mockImplementationOnce(async () => {
+      const state = JSON.parse(asyncStore.get(BURST_KEY)!);
+      asyncStore.set(BURST_KEY, JSON.stringify({ ...state, active: other }));
+      throw new Error("busy");
+    });
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    expect((await readAccuracyBurstState())?.active).toEqual(other);
+  });
+
+  it("an unknown native state is never taken for stopped updates (Codex r2–r3 on #619)", async () => {
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("unknown"));
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    // Updates may still run: the failure is the caller's, so teardown can't report success (Codex r3 on #619).
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("unknown"));
+    await stopLocationLearningIfStarted();
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("capture starting never resumes another lifetime's burst (Codex r2 on #619)", async () => {
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-old", startedAt: new Date(2026, 10, 2, 7, 59).toISOString(), endsAt: new Date(2026, 10, 2, 8, 2).toISOString(), offsetMinutes: 0 } }));
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("reading the trial keeps the day it shows, and the first admitted wake starts it (Codex r2 on #619)", async () => {
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date(2026, 10, 2 - 8)), furthestTrialDay: 0, days: {} }));
+    await readAccuracyBurstState();
+    expect(JSON.parse(asyncStore.get(BURST_KEY)!).furthestTrialDay).toBe(8);
+    vi.setSystemTime(new Date(2026, 10, 2 - 2, 8, 0));
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(false);
+    asyncStore.delete(BURST_KEY);
+    await maybeEndAccuracyBurst(await capture());
+    expect(JSON.parse(asyncStore.get(BURST_KEY)!)).toMatchObject({ startedDay: localDay(new Date()), days: {} });
+  });
+
+  it("the safety timer keeps trying until capture is confirmed, and stops by the day's remaining allowance (Codex r3 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    // Five bursts used (15 minutes): this one may run at most the 3 minutes left.
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 15 * 60 } } }));
+    await maybeStartAccuracyBurst("departure", await capture());
+    expect(JSON.parse(asyncStore.get(BURST_KEY)!).active.stopBy).toBe(new Date(2026, 10, 2, 8, 3).toISOString());
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    // The first forced stop fails too: the timer keeps going rather than giving up.
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    // The day stays within its 18 minutes.
+    expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(18 * 60 + 35);
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+  });
+
+  it("a stale lifetime's timer never restores anyone's capture, and stops only its own best accuracy left running (Codex r4, r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+      // No newer capture set the options since, so the best accuracy left running is this lifetime's own: stopped.
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("brings normal capture back, and stops by its deadline, while storage keeps failing; the time is settled once it works (Codex r4 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalled();
+    // Restores keep failing and storage too: at its deadline (5 minutes past its 3) updates are stopped anyway.
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a wake during a burst it didn't start in this process (a headless relaunch) arms the safety bound again (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    // No lease in memory (as after a relaunch); the burst is stored, a minute in.
+    __resetAccuracyBurstForTests();
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a clock set back never holds off a burst's end (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 0));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
+
+  it("settles a burst at the moment normal capture came back, however late storage takes it (Codex r5 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date(2026, 10, 2, 8, 0))].seconds).toBeLessThan(200);
+  });
+
+  it("a wake past a stored burst's 3 minutes keeps its retries and hard stop when the restore fails (Codex r6 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 4));
+    __resetAccuracyBurstForTests();
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await expect(maybeEndAccuracyBurst(await capture())).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(25 * 60_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+    locationMocks.startLocationUpdatesAsync.mockResolvedValue(undefined);
+  });
+
+  it("a capture refresh after the clock was set back keeps the running burst's deadlines (Codex r6 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 1));
+    await refreshGeofencesForPlaces([place]);
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
+
+  it("a reading after storage recovers settles at the moment normal capture came back, not the reading's (Codex r6 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    vi.setSystemTime(new Date(2026, 10, 2, 9, 3, 15));
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await maybeEndAccuracyBurst(await capture());
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date(2026, 10, 2, 8, 0))].seconds).toBeLessThan(200);
+  });
+
+  it("a refresh never restarts best accuracy for a burst already done, and settles it at its confirmed end (Codex r7 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    await maybeStartAccuracyBurst("departure", await capture());
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(200);
+  });
+
+  it("counts a burst's real elapsed time though the clock was set back while it ran (Codex r7 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 0));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(200);
+  });
+
+  it("a relaunch 12 minutes into a stored burst counts all 12 minutes, past its planned stop (Codex r8 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 12));
+    __resetAccuracyBurstForTests();
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    await maybeEndAccuracyBurst(await capture());
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(12 * 60);
+  });
+
+  it("a sign-out confirms its burst's end at once and keeps it until storage takes it (Codex r8 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(70_000);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(70);
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(80);
+  });
+
+  it("a settlement write that fails keeps the confirmed end, retried until storage takes it (Codex r9 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(70_000);
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.setItem).mockRejectedValue(new Error("full"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => { asyncStore.set(key, value); return Promise.resolve(); });
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeLessThan(80);
+  });
+
+  it("a headless teardown with no lease keeps the moment updates stopped (Codex r9 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
+  });
+
+  it("a second teardown never replaces the first stop's moment (Codex r10 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockRejectedValue(new Error("locked"));
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await stopLocationLearningIfStarted();
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await vi.advanceTimersByTimeAsync(31_000);
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(8 * 60);
+  });
+
+  it("a headless refresh that restores normal capture keeps that moment, for a later reading too (Codex r10 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    // An hour later storage is back and a reading arrives before the retry.
+    vi.setSystemTime(new Date(2026, 10, 2, 9, 1, 10));
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await maybeEndAccuracyBurst(await capture());
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBe(8 * 60);
+  });
+
+  it("a refresh never resumes a burst already confirmed over without a lease, whatever the clock (Codex r11 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1, 10));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 1, 20));
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
+  });
+
+  it("an earlier refresh's note never shortens a burst this process starts after it (Codex r11 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    await refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 59, 10));
+    await maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("after a relaunch, no refresh ever restarts best accuracy, whatever the clock or storage (Codex r12 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 7, 1, 10));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: {}, active: { kind: "departure", trigger: "saved_exit",
+      captureId: "capture-test", startedAt: new Date(2026, 10, 2, 8, 0).toISOString(), endsAt: new Date(2026, 10, 2, 8, 3).toISOString(),
+      stopBy: new Date(2026, 10, 2, 8, 8).toISOString(), offsetMinutes: 0 } }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    vi.mocked(storage.getItem).mockImplementation((key: string) => Promise.resolve(asyncStore.get(key) ?? null));
+    await refreshGeofencesForPlaces([place]);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ distanceInterval: 0 }));
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a headless wake puts normal capture back first, though the trial can't be read (Codex r12 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    vi.mocked(storage.getItem).mockImplementation((key: string) =>
+      key === BURST_KEY ? Promise.reject(new Error("locked")) : Promise.resolve(asyncStore.get(key) ?? null));
+    await maybeEndAccuracyBurst(await capture()).catch(() => undefined);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    // And if that restore keeps failing, updates are stopped 5 minutes on.
+    __resetAccuracyBurstForTests();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await maybeEndAccuracyBurst(await capture()).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+  });
+
+  it("a burst started while a refresh's restore is in flight keeps its guard (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    let release!: () => void;
+    locationMocks.startLocationUpdatesAsync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await refreshing;
+    await expect(starting).resolves.toBe(true);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("a refresh whose restore fails leaves the guard to retry and stop the inherited options (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await expect(refreshGeofencesForPlaces([place])).rejects.toBeTruthy();
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 31_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+  });
+
+  it("a teardown whose stop fails keeps stopping its own best accuracy once its lifetime is gone (Codex r13 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a refresh never settles a burst that was only reserved when its normal start ran (Codex r14 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release!: () => void;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await refreshing;
+    await expect(starting).resolves.toBe(true);
+    expect((await readAccuracyBurstState())?.active).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    expect((await readAccuracyBurstState())?.days["2026-11-02"].seconds).toBeGreaterThanOrEqual(180);
+  });
+
+  it("the guard for inherited options keeps stopping them after a failed teardown (Codex r14 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 1));
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    await expect(refreshGeofencesForPlaces([place])).rejects.toBeTruthy();
+    locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+    captureState.current = false;
+    try {
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a teardown that fails after a relaunch keeps stopping inherited options (Codex r15 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    __resetAccuracyBurstForTests();
+    // Location turned off: capture is no longer current when the teardown runs.
+    captureState.current = false;
+    try {
+      locationMocks.stopLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+      await expect(stopLocationLearningIfStarted()).rejects.toThrow("busy");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(25 * 60_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a slow reservation neither shortens the burst nor counts as best-accuracy time (Codex r15 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+    const seconds = (await readAccuracyBurstState())?.days["2026-11-02"].seconds ?? 0;
+    expect(seconds).toBeGreaterThanOrEqual(180);
+    expect(seconds).toBeLessThan(190);
+  });
+
+  it("a slow reservation, then a relaunch and a teardown, counts from when best accuracy started (Codex r16 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(70_000);
+    __resetAccuracyBurstForTests();
+    await stopLocationLearningIfStarted();
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    // No lease measured it, so it counts to its hard stop (Codex r21 on #619); a later moment would count more.
+    expect(state?.days["2026-11-02"].seconds).toBe(8 * 60);
+  });
+
+  it("a burst whose native start fails after a slow reservation counts no time (Codex r16 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    // Normal capture is already in place (a refresh ran), so only the burst's own start is tried.
+    await maybeEndAccuracyBurst(await capture());
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    release!();
+    await expect(starting).resolves.toBe(false);
+    expect((await readAccuracyBurstState())?.days["2026-11-02"]).toMatchObject({ count: 1, seconds: 0 });
+  });
+
+  it("a Visit whose native status can't be read still puts inherited options back (Codex r16 on #619)", async () => {
+    __resetAccuracyBurstForTests();
+    locationMocks.hasStartedLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await expect(maybeStartAccuracyBurst("departure", await capture(), "visit")).resolves.toBe(false);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenLastCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
+
+  it("a recording slow enough to reach the trial's first off day never starts best accuracy (Codex r17 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 8, 23, 59));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: "2026-11-02", days: {} }));
+    const storage = (await import("@react-native-async-storage/async-storage")).default;
+    let release: (() => void) | null = null;
+    vi.mocked(storage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      if (key === BURST_KEY && value.includes('"active"') && !release) return new Promise<void>((resolve) => { release = resolve; });
+      return Promise.resolve();
+    });
+    await maybeEndAccuracyBurst(await capture());
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(120_000);
+    release!();
+    await expect(starting).resolves.toBe(false);
+    expect(locationMocks.startLocationUpdatesAsync).not.toHaveBeenCalled();
+    expect((await readAccuracyBurstState())?.active).toBeUndefined();
+  });
+
+  it("a refresh queued behind a burst's start never sets options once capture is turned off (Codex r18 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeEndAccuracyBurst(await capture());
+    let release!: () => void;
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    locationMocks.startLocationUpdatesAsync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const starting = maybeStartAccuracyBurst("departure", await capture());
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshing = refreshGeofencesForPlaces([place]);
+    await vi.advanceTimersByTimeAsync(0);
+    captureState.current = false;
+    try {
+      release();
+      await starting;
+      await refreshing.catch(() => undefined);
+      expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("a failing restore is stopped at the day's last allowed second, never up to 30 seconds past it (Codex r24 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 895 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(186_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("a restore that fails late is stopped at once when its hard stop has passed (Codex r25 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 895 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    locationMocks.startLocationUpdatesAsync.mockImplementation(() => new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error("busy")), 6_000)));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(181_000 + 6_000 + 100);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("a burst's first restore is never later than its hard stop (Codex r25 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    asyncStore.set(BURST_KEY, JSON.stringify({ startedDay: localDay(new Date()), days: { [localDay(new Date())]: { count: 5, seconds: 900 } } }));
+    await maybeEndAccuracyBurst(await capture());
+    await expect(maybeStartAccuracyBurst("departure", await capture())).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(200_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.active).toBeUndefined();
+    expect(state?.days[localDay(new Date())].seconds).toBeLessThanOrEqual(1080);
+  });
+
+  it("inherited options it can't restore are stopped at once, never given 5 more minutes (Codex r27 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    __resetAccuracyBurstForTests(); // relaunched a minute into the burst
+    locationMocks.startLocationUpdatesAsync.mockRejectedValue(new Error("busy"));
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    await maybeEndAccuracyBurst(await capture());
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("two failed restores turn the trial off, and no burst starts again (kill switch, orchestrator 29 Oct 2026)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy")).mockRejectedValueOnce(new Error("busy"));
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(31_000);
+    await vi.advanceTimersByTimeAsync(31_000);
+    const state = await readAccuracyBurstState();
+    expect(state?.stopped?.reason).toBe("restore_failed");
+    vi.setSystemTime(new Date(2026, 10, 2, 12, 0));
+    await expect(maybeStartAccuracyBurst("arrival", await capture())).resolves.toBe(false);
+  });
+
+  it("a capture that ends mid-burst stops the burst at once, whatever its cleanup does (Codex r28 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    await maybeStartAccuracyBurst("departure", await capture());
+    locationMocks.stopLocationUpdatesAsync.mockClear();
+    captureState.current = false; // signed out; its cleanup failed
+    try {
+      (await import("./location/admissionGuard")).armLocationAdmissionGuard();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      captureState.current = true;
+    }
+  });
+
+  it("inherited options a stale guard stopped are started again once the owner is current and consenting (Codex r28 on #619)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 8, 0));
+    __resetAccuracyBurstForTests();
+    locationMocks.startLocationUpdatesAsync.mockRejectedValueOnce(new Error("busy"));
+    await maybeEndAccuracyBurst(await capture());
+    captureState.current = false; // A→B→A while the binding waits
+    try {
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(locationMocks.stopLocationUpdatesAsync).toHaveBeenCalled();
+    } finally {
+      captureState.current = true;
+    }
+    locationMocks.startLocationUpdatesAsync.mockClear();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledWith("DAYFRAME_LOCATION_LEARNING_TASK",
+      expect.objectContaining({ deferredUpdatesInterval: expect.any(Number) }));
+  });
+});
+

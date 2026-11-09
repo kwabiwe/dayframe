@@ -372,6 +372,7 @@ export async function runTimerStartMutation({
   beforeStart,
   dedupeRunning = false,
   guard,
+  isShownRunning,
   startAt
 }: {
   gate: TimerMutationGate;
@@ -404,6 +405,12 @@ export async function runTimerStartMutation({
    */
   dedupeRunning?: boolean;
   /**
+   * Whether the running block is shown running: false while an End it for it is held or saving (location v4 design §7),
+   * so a quick start for it starts a new block instead of reporting it already running (Codex r2 on #618). The
+   * snapshot itself (what is sent and kept) stays canonical.
+   */
+  isShownRunning?: (entry: NonNullable<BootstrapData["activeEntry"]>) => boolean;
+  /**
    * Checked inside the gate, against the snapshot this Start would replace, before anything is
    * shown: a message refuses the Start (Undo of a discard that would overlap; Codex r1 on #469).
    */
@@ -420,7 +427,8 @@ export async function runTimerStartMutation({
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
     const startedAt = startAt ?? now();
-    if (dedupeRunning && startMatchesRunning(acceptedSnapshot.activeEntry, { ...draft, categoryId: draft.categoryId || null })) {
+    const shownRunning = acceptedSnapshot.activeEntry && (isShownRunning?.(acceptedSnapshot.activeEntry) ?? true) ? acceptedSnapshot.activeEntry : null;
+    if (dedupeRunning && startMatchesRunning(shownRunning, { ...draft, categoryId: draft.categoryId || null })) {
       return { ok: true, own: true, alreadyRunning: true, unchanged: acceptedSnapshot.activeEntry, replaced: null, switchedAt: startedAt } as const;
     }
     onAccepted?.();
@@ -583,35 +591,25 @@ export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string)
 }
 
 /**
- * A split of the running block the server accepted (owner 28 Oct 2026): it ends at `splitAt`, and its second
- * part, `newEntryId`, runs from there with the same details, until the day's next load confirms it.
+ * A split or its Undo, as the server answered it (owner 28 Oct 2026): `blocks` as they are now, and `removedIds`
+ * gone. The running block is the one of them that runs; one of them that ran before and runs no longer leaves
+ * nothing running. Shown at once, so a failed reload never leaves a gone or ended block running on screen.
  */
-export function applyOptimisticTimerSplit(data: BootstrapData, splitAt: string, newEntryId: string) {
-  const active = data.activeEntry;
-  if (!active) return data;
-  const durationSeconds = Math.max(0, Math.floor((Date.parse(splitAt) - Date.parse(active.startedAt)) / 1000));
-  const first = { ...active, stoppedAt: splitAt, durationSeconds };
-  const second = { ...active, id: newEntryId, startedAt: splitAt, stoppedAt: null, updatedAt: splitAt, durationSeconds: 0 };
-  return replaceEntryCollections(replaceEntryCollections({ ...data, activeEntry: second }, first), second);
-}
-
-/** Undo of a split the server accepted: the first part takes the second's end again, and the second goes. */
-export function applyOptimisticTimerJoin(data: BootstrapData, entryId: string, splitEntryId: string) {
-  const all = [data.activeEntry, ...data.entries, ...data.historyEntries, ...data.dayEntries, ...data.weekEntries];
-  const first = all.find((entry) => entry?.id === entryId);
-  const second = all.find((entry) => entry?.id === splitEntryId);
-  if (!first || !second) return data;
-  const joined = { ...first, stoppedAt: second.stoppedAt, durationSeconds: first.durationSeconds + second.durationSeconds };
-  const without = (entries: TimeEntryRow[]) => entries.filter((entry) => entry.id !== splitEntryId);
-  const base = {
+export function applyServerTimerBlocks(data: BootstrapData, blocks: readonly TimeEntryRow[], removedIds: readonly string[] = []) {
+  const removed = new Set(removedIds);
+  const without = (entries: TimeEntryRow[]) => entries.filter((entry) => !removed.has(entry.id));
+  const touched = new Set([...removedIds, ...blocks.map((block) => block.id)]);
+  const running = blocks.find((block) => !block.stoppedAt) ?? null;
+  let next: BootstrapData = {
     ...data,
-    activeEntry: data.activeEntry?.id === splitEntryId ? joined : data.activeEntry,
+    activeEntry: running ?? (data.activeEntry && touched.has(data.activeEntry.id) ? null : data.activeEntry),
     entries: without(data.entries),
     historyEntries: without(data.historyEntries),
     dayEntries: without(data.dayEntries),
     weekEntries: without(data.weekEntries)
   };
-  return replaceEntryCollections(base, joined);
+  for (const block of blocks) next = replaceEntryCollections(next, block);
+  return next;
 }
 
 export function applyOptimisticTimerDelete(data: BootstrapData) {

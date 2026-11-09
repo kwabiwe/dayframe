@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../InsetDivider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
@@ -80,8 +81,8 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
       setShown((current) => current.epoch !== epoch || current.trips.some((other) => other.patternKey === trip.patternKey) ? current
         : { epoch, trips: [...current.trips, trip].sort((a, b) => b.stoppedAt.localeCompare(a.stoppedAt)) });
       const message = isRetryableMobileConnectivityFailure(error)
-        ? `${trip.label} still waits in Review. Try again when you're online.`
-        : `${trip.label} still waits in Review. Try again.`;
+        ? `${trip.label} is still asked in Calendar. Try again when you're online.`
+        : `${trip.label} is still asked in Calendar. Try again.`;
       setProblem(message);
       AccessibilityInfo.announceForAccessibility(message);
     } finally {
@@ -92,7 +93,7 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
   if (trips.length === 0) return null;
   return (
     <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>
-      <SettingsBlockGroup foot="Trips like these wait in Review instead of logging themselves." theme={theme} title="Trips you log yourself">
+      <SettingsBlockGroup foot="Trips like these are asked in Calendar instead of logging themselves." theme={theme} title="Trips you log yourself">
         {trips.map((trip, index) => (
           <Reanimated.View
             key={trip.patternKey}
@@ -100,8 +101,8 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
             exiting={localPresenceExiting(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
-            <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-trip-${index}`}>
-              <View accessible accessibilityLabel={`Trip ${trip.label}, waits in Review`} style={styles.placesRowMain}>
+            <View style={styles.placesRow} testID={`places-trip-${index}`}>
+              <View accessible accessibilityLabel={`Trip ${trip.label}, asked in Calendar`} style={styles.placesRowMain}>
                 <View style={styles.placesBlock}>
                   <DayframeIcon color={theme.textSecondary} glyph="route" size={18} />
                 </View>
@@ -118,6 +119,7 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
                   theme={theme}
                 />
               </View>
+              {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
             </View>
           </Reanimated.View>
         ))}

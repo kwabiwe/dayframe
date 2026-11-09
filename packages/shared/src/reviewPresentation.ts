@@ -28,6 +28,13 @@ export const REVIEW_PRESENTATION_LEARNED_NAME_FEATURE = "learned-name";
  * the iPhone's suggestion (location v3 PR 8); the iPhone looks the name up next to an Apple map.
  */
 export const REVIEW_PRESENTATION_VENUE_FEATURE = "venue";
+/**
+ * Feature: a timer-trip clash's Review item ("a block ran into your trip", #611) carries `timerTripClash`, the
+ * block it asks on and the trip, so a client reading every page counts clashes past the bootstrap's 100 items.
+ */
+export const REVIEW_PRESENTATION_TIMER_TRIP_CLASH_FEATURE = "timer-trip-clash";
+/** A clash never asks past 31 days of overlap (#611's lead bound). */
+export const REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS = 31 * 24 * 60 * 60;
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -36,6 +43,17 @@ export const REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS = 5_000;
 // Sixty local calendar days can include a DST rollback. The request remains
 // deliberately bounded even when a caller supplies absolute instants.
 export const REVIEW_PRESENTATION_MAX_WINDOW_MS = 61 * 24 * 60 * 60 * 1_000;
+
+/** A timer-trip clash's question on its Review record (the timer-trip-clash feature). */
+export const ReviewTimerTripClashPresentationSchema = z
+  .object({
+    timeEntryId: uuid,
+    tripId: z.string().min(1).max(200),
+    tripStartedAt: instant,
+    tripStoppedAt: instant,
+    overlapSeconds: z.number().int().nonnegative().max(REVIEW_PRESENTATION_TIMER_TRIP_CLASH_MAX_OVERLAP_SECONDS)
+  })
+  .strict();
 
 const pageCursor = z
   .string()
@@ -202,6 +220,8 @@ export const ReviewProposalPresentationSchema = z
     learnedName: z.literal(true).optional(),
     /** An Apple Place ID for an unsaved stay (only for clients sending the venue feature). */
     venuePlaceId: z.string().min(1).max(200).optional(),
+    /** The block a timer-trip clash asks on and the trip it ran into (only for clients sending the timer-trip-clash feature). */
+    timerTripClash: ReviewTimerTripClashPresentationSchema.optional(),
     outing: z.object({
       key: z.string().min(1).max(200),
       role: z.enum(["stay", "in", "out"]),

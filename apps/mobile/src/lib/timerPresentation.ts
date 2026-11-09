@@ -5,6 +5,7 @@ import {
 } from "@dayframe/shared";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "./api";
 import type { PendingTimerStop } from "./timerStopOutbox";
+import { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX } from "./runningSplitIdentity";
 
 type ActiveTimerEntry = MobileBootstrap["activeEntry"];
 type MobileTimeEntry = MobileBootstrap["entries"][number];
@@ -711,32 +712,28 @@ export function optimisticStartTimer(data: MobileBootstrap | null, pendingEntry:
   };
 }
 
-/**
- * Split (owner 28 Oct 2026, as Toggl): `entryId` ends at `splitAt` and its second part, `secondId`, starts
- * there with every detail. A running block's second part keeps running (the running block moves to it);
- * a block already ended keeps its end on the second part. Unchanged when the time is not inside the block.
- */
+/** Project the split only while the block that was split is still running. */
 export function optimisticSplitTimeEntry(
   data: MobileBootstrap | null,
   entryId: string,
   splitAt: string,
   secondId: string
 ) {
-  const entry = mobileTimeEntryById(data, entryId);
-  if (!data || !entry) return data;
+  const entry = data?.activeEntry;
+  if (!data || !entry || entry.id !== entryId || entry.stoppedAt) return data;
   const atMs = Date.parse(splitAt);
-  const endMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) : Number.POSITIVE_INFINITY;
-  if (!(atMs > Date.parse(entry.startedAt) && atMs < endMs)) return data;
-  const second: MobileTimeEntry = { ...entry, id: secondId, startedAt: splitAt, durationSeconds: 0 };
-  if (data.activeEntry?.id === entryId) return optimisticStartTimer(data, { ...second, stoppedAt: null });
-  const first = patchedMobileTimeEntry(entry, { stoppedAt: splitAt }, data.categories);
-  const withParts = (entries: MobileTimeEntry[]) => upsertMobileEntry(upsertMobileEntry(entries, first), second);
-  return {
-    ...data,
-    entries: withParts(data.entries),
-    dayEntries: data.dayEntries ? withParts(data.dayEntries) : data.dayEntries,
-    weekEntries: data.weekEntries ? withParts(data.weekEntries) : data.weekEntries
-  };
+  if (!(atMs >= Date.parse(entry.startedAt) + 60_000)) return data;
+  const { runningSplitSourceEntryId, ...source } = entry;
+  const priorId = entry.id.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX)
+    ? runningSplitSourceEntryId ?? entry.id
+    : entry.id;
+  return optimisticStartTimer(data, {
+    ...source,
+    id: secondId,
+    startedAt: splitAt,
+    durationSeconds: 0,
+    ...(secondId.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX) ? { runningSplitSourceEntryId: priorId } : {})
+  });
 }
 
 export function replaceOptimisticTimeEntryId(

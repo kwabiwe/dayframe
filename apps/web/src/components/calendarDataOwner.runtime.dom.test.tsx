@@ -136,6 +136,23 @@ const shown = () => screen.getByTestId("shown").textContent;
 const bootstrapRequests = () => server.requests.filter((request) => request.startsWith("GET /api/bootstrap"));
 
 describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
+  it("reports the reconciled shell snapshot for the refresh while End it projects a display copy", async () => {
+    vi.useFakeTimers();
+    page = "page";
+    render(tree());
+    await settle();
+    await act(async () => {
+      probe.runtime!.setProjectedEnds?.(new Map([["block-1", "2026-08-17T12:00:00.000Z"]]));
+    });
+    const onCommit = vi.fn();
+    server.revision = 2;
+    await act(async () => { await probe.runtime!.refresh({ onCommit }); });
+    expect(shown()).toBe("workspace-A@2026-08-17#r2");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit.mock.calls[0][0]).toBe(probe.runtime!.canonicalShellData);
+    expect(onCommit.mock.calls[0][0]).not.toBe(probe.runtime!.data);
+  });
+
   it("a Delete committed after a period change reloads the period shown, not the first one (WEB-UI-3)", async () => {
     vi.useFakeTimers();
     const view = render(tree());
@@ -170,8 +187,9 @@ describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
     expect(first).not.toHaveBeenCalled();
   });
 
-  it("a period change while a timer-state poll is in flight keeps the 3 s poll going (WEB-UI-4)", async () => {
+  it("a period change while a timer-state poll is in flight keeps the 10 s focused poll going (WEB-UI-4)", async () => {
     vi.useFakeTimers();
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     server.holdTimerState = true;
     const view = render(tree());
     await settle(10);
@@ -181,11 +199,13 @@ describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
     await navigate(view, "2026-08-10");
     await act(async () => { server.held.shift()?.(); await vi.advanceTimersByTimeAsync(10); });
     const before = polls();
-    for (let second = 0; second < 30; second += 1) {
+    for (let second = 0; second < 60; second += 1) {
       await act(async () => { server.held.shift()?.(); await vi.advanceTimersByTimeAsync(1_000); });
     }
-    // About one poll every 3 s: never a dead chain.
-    expect(polls() - before).toBeGreaterThanOrEqual(8);
+    // About one poll every 10 s while focused: never a dead chain.
+    expect(polls() - before).toBeGreaterThanOrEqual(5);
+    expect(polls() - before).toBeLessThanOrEqual(7);
+    focus.mockRestore();
   });
 
   it("a cached day is shown at once and then fetched again, so another device's change appears (WEB-UI-5)", async () => {

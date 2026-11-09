@@ -1,24 +1,23 @@
 import { DAYFRAME_APP_ICONS, type DayframeGlyph } from "@dayframe/shared";
 
-export type ShellSectionId = "today" | "calendar" | "review" | "reports" | "library";
+export type ShellSectionId = "today" | "calendar" | "reports" | "library";
 
 export type ShellSection = {
   id: ShellSectionId;
   label: string;
   href: string;
   glyph: DayframeGlyph;
-  /** The letter that follows G to jump here (the prototype's "G then T · C · R · P · L"). */
+  /** The letter that follows G to jump here ("G then T · C · P · L"). */
   letter: string;
   paths: readonly string[];
 };
 
-// The five Blocks sections, in sidebar order; G then a letter jumps to them (digits are kept
+// The four Blocks sections, in sidebar order; G then a letter jumps to them (digits are kept
 // for starting pinned activities). Activities, Tags and Places are the three Library tabs
 // until the Library page merges them.
 export const SHELL_SECTIONS: readonly ShellSection[] = [
   { id: "today", label: "Today", href: "/", glyph: DAYFRAME_APP_ICONS.today, letter: "t", paths: ["/"] },
   { id: "calendar", label: "Calendar", href: "/timeline", glyph: DAYFRAME_APP_ICONS.calendar, letter: "c", paths: ["/timeline"] },
-  { id: "review", label: "Review", href: "/review", glyph: DAYFRAME_APP_ICONS.review, letter: "r", paths: ["/review"] },
   { id: "reports", label: "Reports", href: "/reports", glyph: DAYFRAME_APP_ICONS.reports, letter: "p", paths: ["/reports"] },
   { id: "library", label: "Library", href: "/categories", glyph: DAYFRAME_APP_ICONS.library, letter: "l", paths: ["/categories", "/tags", "/places"] }
 ];
@@ -34,7 +33,7 @@ function matchesPath(pathname: string, path: string) {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-/** The section a path belongs to, or null for pages outside the five (Settings). */
+/** The section a path belongs to, or null for pages outside the four (Settings). */
 export function activeShellSection(pathname: string): ShellSection | null {
   return SHELL_SECTIONS.find((section) => section.paths.some((path) => matchesPath(pathname, path))) ?? null;
 }

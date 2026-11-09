@@ -45,6 +45,19 @@ export function scopedOpenReviewItems(
 }
 
 /**
+ * The scoped items to keep after a read (request-storm fix, 30 Oct 2026): the previous array itself when the read found
+ * the same items, so the Calendar's data, and everything keyed on it (the List's location timeline read, its checks),
+ * changes only when the items do. Every Review store change (each bootstrap, each sync pass, each cached Today window)
+ * re-reads them, and a fresh array each time read the selected day's timeline again for nothing.
+ */
+export function keepScopedReviewItems(previous: MobileReviewItem[], next: MobileReviewItem[]): MobileReviewItem[] {
+  if (previous === next) return previous;
+  if (previous.length !== next.length) return next;
+  if (!next.length) return previous;
+  return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+}
+
+/**
  * Whether the bootstrap's open list may be missing items: it reached its cap, or the server's open
  * count says there are more than it lists (a cached bootstrap with items decided here offline is
  * shorter than the cap but still incomplete).

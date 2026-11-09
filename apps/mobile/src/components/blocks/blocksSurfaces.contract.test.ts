@@ -7,7 +7,6 @@ const dashboard = read("../DayframeDashboard.tsx");
 const settings = read("../../../app/settings.tsx");
 const places = read("../../../app/places.tsx");
 const placeEditor = read("../../../app/place-editor.tsx");
-const review = read("../../../app/review.tsx");
 const entrySheet = read("../ActiveTimerEditSheet.tsx");
 const activityEditor = read("../settings/ActivityEditorSheet.tsx");
 
@@ -41,9 +40,6 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     expect(places).toContain('title: "Forget learned place?"');
     expect(places).toContain('tone: "neutral"');
     expect(placeEditor).toContain("onConfirm: () => void removePlace(place)");
-    expect(review).toContain('eyebrow: "Review all"');
-    expect(review).toContain("onCancel: () => { bulkSkipInFlight.current = false; }");
-    expect(review).toContain("if (!shown) bulkSkipInFlight.current = false;");
     expect(entrySheet).toContain('title: "Discard changes?"');
     expect(activityEditor).toContain("title: `Archive ${target.name}?`");
   });

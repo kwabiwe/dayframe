@@ -6,7 +6,10 @@ export function serverBuildMetadata() {
     deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
     backendId: backendIdentityFor(environment),
     environment,
-    syncContractVersion: 1
+    syncContractVersion: 1,
+    loggedVisitPlaceCorrections: true,
+    completedEntryCopy: true,
+    runningEntrySplit: true
   };
 }
 

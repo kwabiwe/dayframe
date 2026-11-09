@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   splitActiveEntry: vi.fn(),
   joinSplitEntries: vi.fn(),
   splitFinishedEntry: vi.fn(),
+  splitRunningEntry: vi.fn(),
   duplicateFinishedEntry: vi.fn(),
   scheduleLiveActivityNotification: vi.fn()
 }));
@@ -28,6 +29,7 @@ vi.mock("@/lib/event-service", () => ({
   splitActiveEntry: mocks.splitActiveEntry,
   joinSplitEntries: mocks.joinSplitEntries,
   splitFinishedEntry: mocks.splitFinishedEntry,
+  splitRunningEntry: mocks.splitRunningEntry,
   duplicateFinishedEntry: mocks.duplicateFinishedEntry,
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {},
   TimeEntryConflictError: class TimeEntryConflictError extends Error {},
@@ -43,6 +45,10 @@ vi.mock("@/lib/event-service", () => ({
       super(message);
       this.name = "TimerReplacementWindowError";
     }
+  },
+  TimerSwitchConflictError: class TimerSwitchConflictError extends Error {
+    code = "timer_switch_conflict";
+    status = 409;
   },
   TimerMutationBusyError: class TimerMutationBusyError extends Error {
     code = "timer_busy";
@@ -92,6 +98,22 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("requires an exact running block for an explicit switch and reports a conflict", async () => {
+    const { TimerSwitchConflictError } = await import("@/lib/event-service");
+    const expectedRunningEntryId = "11111111-1111-4111-8111-111111111111";
+    mocks.processActivityEvent.mockRejectedValueOnce(new TimerSwitchConflictError());
+    const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), expectedRunningEntryId }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("timer_switch_conflict");
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "timer_start" }),
+      session,
+      { expectedRunningEntryId }
+    );
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
+  });
+
   it("splits or duplicates a finished block by id, fenced and with its command id, and keeps a bare split for the timer (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: false });
@@ -119,9 +141,19 @@ describe("POST /api/time-entries", () => {
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: splitEntryId, replayed: false, running: true });
     const split = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
     expect(split.status).toBe(201);
-    expect(await split.json()).toEqual({ ok: true, id: entryId, newEntryId: splitEntryId, replayed: false, running: true });
+    // Both blocks as they are now come back with the answer, so the timer can show them at once.
+    expect(await split.json()).toEqual({
+      ok: true, id: entryId, newEntryId: splitEntryId, replayed: false, running: true,
+      entries: [{ id: "11111111-1111-4111-8111-111111111111" }, { id: "11111111-1111-4111-8111-111111111111" }]
+    });
     expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId,
       { splitAt: "2026-07-04T10:30:00.000Z", expectedUpdatedAt: undefined, clientCommandId: undefined, source: "mobile_app" }, session);
+
+    // A repeat is answered with both blocks as they are now too, so the client reads whether the part runs.
+    mocks.splitFinishedEntry.mockResolvedValueOnce({ id: entryId, newEntryId: splitEntryId, replayed: true });
+    const replay = await POST(jsonRequest({ mode: "split", source: "mobile_app", entryId, splitAt: "2026-07-04T10:30:00.000Z" }));
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true, entries: [expect.objectContaining({ id: entryId }), expect.anything()] });
 
     mocks.joinSplitEntries.mockResolvedValue({ id: entryId, replayed: false, running: true });
     const join = await POST(new Request("http://localhost/api/time-entries", {
@@ -135,6 +167,53 @@ describe("POST /api/time-entries", () => {
     const { TimeEntryValidationError } = await import("@/lib/event-service");
     mocks.joinSplitEntries.mockRejectedValueOnce(new TimeEntryValidationError("These blocks are no longer one split block, so they can't be put back together."));
     expect((await POST(jsonRequest({ mode: "join", entryId, splitEntryId }))).status).toBe(422);
+  });
+
+  it("requires the finished entry, version, and receipt ID for a durable copy", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const splitAt = "2026-07-04T10:30:00.000Z";
+    const expectedUpdatedAt = "2026-07-04T11:00:00.000Z";
+    const source = "mobile_app";
+    const clientCommandId = "mobile-copy-1";
+    const split = { mode: "copy-completed", action: "split", source, splitAt };
+    expect((await POST(jsonRequest(split))).status).toBe(400);
+    expect((await POST(jsonRequest({ ...split, entryId, expectedUpdatedAt }))).status).toBe(400);
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+
+    mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: null, replayed: false });
+    const response = await POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": clientCommandId },
+      body: JSON.stringify({ ...split, entryId, expectedUpdatedAt })
+    }));
+    expect(response.status).toBe(201);
+    expect(mocks.splitFinishedEntry).toHaveBeenCalledWith(entryId, {
+      splitAt, source, expectedUpdatedAt, clientCommandId, durableCopy: true
+    }, session);
+  });
+
+  it("keeps the fenced iPhone running split separate from the legacy split modes", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const splitAt = "2026-07-04T10:30:00.000Z";
+    const body = { mode: "split-running", entryId, splitAt };
+    expect((await POST(jsonRequest({ ...body, entryId: undefined }))).status).toBe(400);
+    expect((await POST(jsonRequest(body))).status).toBe(400);
+    expect(mocks.splitRunningEntry).not.toHaveBeenCalled();
+    const send = () => POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": "ios-running-split-1" },
+      body: JSON.stringify(body)
+    }));
+    const { TimeEntryConflictError } = await import("@/lib/event-service");
+    mocks.splitRunningEntry.mockRejectedValueOnce(new TimeEntryConflictError())
+      .mockResolvedValueOnce({ id: entryId, newEntryId: null, replayed: true });
+    expect((await send()).status).toBe(409);
+    expect((await send()).status).toBe(200);
+    expect(mocks.splitRunningEntry).toHaveBeenCalledWith(entryId,
+      { splitAt, clientCommandId: "ios-running-split-1" }, session);
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+    expect(mocks.splitFinishedEntry).not.toHaveBeenCalled();
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
   });
 
   it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
@@ -155,7 +234,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, split, duplicate, or join."
+      error: "mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();

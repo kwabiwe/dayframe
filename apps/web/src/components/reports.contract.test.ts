@@ -113,7 +113,6 @@ describe("Reports in Blocks audit fixes (W8)", () => {
   it("highlights today by its label only and uses coarse-pointer wording (UIA-306)", () => {
     expect(styles).not.toMatch(/\.df-wb\.is-today \{/);
     expect(rule(".df-wb.is-today .df-wb-label b")).not.toMatch(/--accent/);
-    expect(styles).toMatch(/@media \(pointer: coarse\) \{\s*\.df-hint-fine \{\s*display: none;/);
     expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-wb-label-full \{\s*display: none;/);
   });
 });

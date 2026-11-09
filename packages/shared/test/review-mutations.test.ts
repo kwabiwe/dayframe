@@ -87,6 +87,22 @@ describe("one card per outing acknowledgements (PRD D19)", () => {
   const envelope = (action: "confirm_outing" | "ignore_outing") => ReviewMutationEnvelopeSchema.parse({
     clientMutationId: "40000000-0000-4000-8000-000000000001", mutation: { action, memberReviewItemIds: members }
   });
+  it("a venue goes on confirm_outing only, and its Stay may log any number of blocks", () => {
+    const venue = { name: "Synthetic Cafe", applePlaceId: "ISYNTHETICVENUE1" };
+    const withVenue = ReviewMutationEnvelopeSchema.parse({ clientMutationId: "40000000-0000-4000-8000-000000000002",
+      mutation: { action: "confirm_outing", memberReviewItemIds: members, venue } });
+    const ids = [anchor, ...members];
+    const answer = (entryIds: string[]) => ({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids, entryIds });
+    // Each Move's block, and none, one or two of the Stay's.
+    expect(validReviewAcknowledgement(answer(["e1", "e2"]), withVenue, anchor)).toBe(true);
+    expect(validReviewAcknowledgement(answer(["e1", "e2", "e3", "e4"]), withVenue, anchor)).toBe(true);
+    expect(validReviewAcknowledgement(answer(["e1"]), withVenue, anchor)).toBe(false);
+    expect(validReviewAcknowledgement(answer(["e1", ""]), withVenue, anchor)).toBe(false);
+    expect(ReviewMutationSchema.safeParse({ action: "ignore_outing", memberReviewItemIds: members, venue }).success).toBe(false);
+    expect(ReviewMutationSchema.safeParse({ action: "confirm_outing", memberReviewItemIds: members, venue: { name: "No id" } }).success).toBe(false);
+    expect(ReviewMutationSchema.safeParse({ action: "confirm_outing", memberReviewItemIds: members, venue: { ...venue, extra: 1 } }).success).toBe(false);
+  });
+
   it("needs every member decided, each logged member with its block", () => {
     const ids = [anchor, ...members];
     expect(validReviewAcknowledgement({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids,

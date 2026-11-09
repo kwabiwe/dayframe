@@ -6,15 +6,16 @@ import type {
   KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
+import { previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
 import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { focusQuietly } from "@/components/blocks/TooltipHost";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
-import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
+import { FLOATING_LIST_HINTS, type FloatingListActivity } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
@@ -23,6 +24,7 @@ import { IconButton } from "@/components/ui/Primitives";
 import type { CalendarEntryCompactCreatePlan } from "@/lib/calendar-entry-compact-editor";
 import { TimeEntryQuickCreateModal } from "@/components/TimeEntryQuickEditor";
 import { RunningSplitDialog } from "@/components/RunningSplitDialog";
+import { SwitchActivityDialog } from "@/components/SwitchActivityDialog";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
@@ -42,6 +44,8 @@ import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
+const SWITCH_BLOCK_CHANGED = "The running block changed. Open Switch activity again.";
+const SWITCH_ACTIVITY_UNAVAILABLE = "That activity is no longer available.";
 
 type TimerNotice = {
   /**
@@ -66,7 +70,7 @@ export const COMMAND_PLACEHOLDER = "Try “Write report @work #client”";
 export const PREVIOUS_END_CHANGED_NOTICE = "Started now: an earlier block ends later than that, so the start wasn't moved.";
 export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
-export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
+export function PersistentTimerBar({ workspaceMode = false, onToday = false }: { workspaceMode?: boolean; onToday?: boolean }) {
   const clock = useClockFormat();
   // While typing, the start time shows exactly what was typed (Codex r2 on #446).
   const [startTimeTyping, setStartTimeTyping] = useState(false);
@@ -105,6 +109,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [switchSource, setSwitchSource] = useState<{
+    entryId: string;
+    workspaceId: string;
+    scope: string;
+  } | null>(null);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -410,7 +419,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     setTimerDraft((current) => ({ ...current, categoryId, description }));
   }
 
-  function startQuickAction(action: QuickAction) {
+  function startQuickAction(
+    action: Pick<QuickAction, "categoryId" | "color" | "label">,
+    switchTarget?: { expectedRunningEntryId: string; guard: (snapshot: BootstrapData) => string | null }
+  ) {
     const draft = quickActionTimerDraft(action.categoryId);
     // The Activities list is not closed here: a press on a quick start is a press outside it (which
     // closes it unless a Create is saving), and the new block's scope closes it the same way, so a
@@ -421,10 +433,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     // exactly the running block changes nothing and says so; a switch names the block it actually
     // replaced, timed to the switch. A Start superseded by a later one announces nothing. It is
     // asked for before the bar shows its draft, so the runtime keeps the outgoing block's edits.
-    const started = startTimer(draft, { dedupeRunning: true });
-    setTimerDraft(draft);
+    const started = startTimer(draft, { dedupeRunning: true, ...switchTarget });
+    // The guarded picker waits for the runtime to accept the switch before changing the draft.
+    if (!switchTarget) setTimerDraft(draft);
     void started.then((outcome) => {
-      if (!outcome.ok || !outcome.own) return;
+      if (!outcome.ok) {
+        if (switchTarget && (outcome.error === SWITCH_BLOCK_CHANGED || outcome.error === SWITCH_ACTIVITY_UNAVAILABLE)) {
+          setCommandNotice(outcome.error);
+        }
+        return;
+      }
+      if (!outcome.own) return;
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
       } else if (outcome.replaced) {
@@ -432,6 +451,32 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         announce(copy.message, swatch, copy.detail);
       }
     });
+  }
+
+  function switchActivity(activity: FloatingListActivity | null) {
+    setSwitchSource(null);
+    if (isTimerBusy || !switchSource) return;
+    const { entryId, workspaceId } = switchSource;
+    const guard = (snapshot: BootstrapData) => {
+      if (snapshot.workspace.id !== workspaceId || snapshot.activeEntry?.id !== entryId) {
+        return SWITCH_BLOCK_CHANGED;
+      }
+      if (activity && !snapshot.categories.some(({ id }) => id === activity.id)) {
+        return SWITCH_ACTIVITY_UNAVAILABLE;
+      }
+      return null;
+    };
+    const latest = readShellData();
+    const refusal = latest ? guard(latest) : SWITCH_BLOCK_CHANGED;
+    if (refusal) {
+      setCommandNotice(refusal);
+      return;
+    }
+    startQuickAction({
+      categoryId: activity?.id ?? null,
+      color: activity?.color ?? null,
+      label: activity?.name ?? "No activity"
+    }, { expectedRunningEntryId: entryId, guard });
   }
 
   // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
@@ -536,9 +581,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
     const swatch = selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined;
     const outcome = await splitActiveTimer(atMs);
-    if (!outcome.ok) return outcome.error;
+    if (!outcome.ok) {
+      // Nothing runs any more (the block went meanwhile): the dialog goes with it, so the reason is a notice.
+      if (!readShellData()?.activeEntry) {
+        setSplitDialogOpen(false);
+        announce(outcome.error);
+      }
+      return outcome.error;
+    }
     setSplitDialogOpen(false);
-    window.requestAnimationFrame(() => timerActionsTriggerRef.current?.focus({ preventScroll: true }));
+    // Back to "…" without its tip or ring, so at phone width the tip never covers Stop (owner, 28 Oct 2026).
+    window.requestAnimationFrame(() => focusQuietly(timerActionsTriggerRef.current));
     // One command id for this Undo, Try again included: a repeat of one that was done is answered as done.
     const split = { entryId: outcome.entryId, newEntryId: outcome.newEntryId, commandId: newBlockCommandId("join") };
     const token = ++noticeSequence.current;
@@ -610,7 +663,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     const outcome = await updateActiveStartTime(startedAt);
     if (outcome.ok) {
       setStartEditorOpen(false);
-      window.requestAnimationFrame(() => startEditorTriggerRef.current?.focus());
+      // Focus goes back to the clock without a ring box until the keyboard is used (owner, 30 Oct 2026).
+      window.requestAnimationFrame(() => focusQuietly(startEditorTriggerRef.current));
     } else setStartEditError(outcome.error);
   }
 
@@ -628,8 +682,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       className={[
         "df-cmd-wrap",
         active ? "is-running" : "is-idle",
-        workspaceMode ? "is-workspace" : ""
+        workspaceMode ? "is-workspace" : "",
+        // Phones show quick start on Today only (UI review decision C).
+        onToday ? "is-today" : ""
       ].filter(Boolean).join(" ")}
+      data-clock={clock}
       data-testid="persistent-timer"
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
@@ -658,6 +715,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             setSuggestionsOpen(false);
           }}
           open={categoryMenuOpen}
+          // The same 360 px as the bar's Tags and Suggestions lists, under the activity block.
+          panelWidth={360}
           portal
           scope={completionScope}
           selectedId={timerDraft.categoryId}
@@ -711,6 +770,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
             placeholder={active ? "Add a description" : narrowCommand ? COMMAND_PLACEHOLDER_NARROW : COMMAND_PLACEHOLDER}
             selectedTagNames={timerDraft.tagNames}
+            tagButtonFirst
             tags={data.tags}
             value={timerDraft.description}
           />
@@ -746,28 +806,30 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               }}
               ref={startEditorTriggerRef}
             >
+              {/* "since 07:36" sits in a fixed slot left of the digits, on their baseline (UI review round 2). */}
+              <small className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small>
               <Odometer value={formatClockDuration(durationSeconds)} />
-              <small>Started {formatTime(active.startedAt, clock)}</small>
             </button>
           ) : (
+            // UI review round 2 (owner 30 Oct 2026): one line in every state. "From 07:51" is a small text button in the
+            // same fixed slot "since" uses, then the idle clock in the same face, so nothing moves on Start or Stop.
             <div className="df-cmd-idle">
+              <span className="df-cmd-slot">
+                {previousEnd ? (
+                  <button
+                    aria-label={`Start from ${formatTime(previousEnd.startedAt, clock)}, after ${previousEnd.previousName}`}
+                    className="df-cmd-from-text"
+                    disabled={isTimerBusy}
+                    onClick={() => void startFromPreviousEnd(previousEnd)}
+                    type="button"
+                  >
+                    From <span className="tabular">{formatTime(previousEnd.startedAt, clock)}</span>
+                  </button>
+                ) : null}
+              </span>
               <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
                 {formatClockDuration(0)}
               </span>
-              {previousEnd ? (
-                <button
-                  aria-label={`Start from ${formatTime(previousEnd.startedAt, clock)}, after ${previousEnd.previousName}`}
-                  className="df-cmd-from"
-                  disabled={isTimerBusy}
-                  onClick={() => void startFromPreviousEnd(previousEnd)}
-                  type="button"
-                >
-                  {/* The same compact pill as the iPhone sheet (owner, 15 Oct 2026): the previous
-                      block's name is in the label only. */}
-                  <DayframeIcon glyph={DAYFRAME_APP_ICONS.startFromPreviousEnd} size={12} />
-                  <span>From <span className="tabular">{formatTime(previousEnd.startedAt, clock)}</span></span>
-                </button>
-              ) : null}
             </div>
           )}
 
@@ -826,7 +888,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                       aria-describedby={startEditError ? "active-start-time-error" : undefined}
                       aria-invalid={startEditError ? true : undefined}
                       autoComplete="off"
-                      className="df-start-time-input"
+                      className="ui-control df-start-time-input"
                       disabled={isTimerBusy}
                       id="active-start-time"
                       inputMode={clock === "12h" ? "text" : "numeric"}
@@ -872,7 +934,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                     disabled={isTimerBusy}
                     onClick={() => {
                       setStartEditorOpen(false);
-                      startEditorTriggerRef.current?.focus();
+                      focusQuietly(startEditorTriggerRef.current);
                     }}
                     type="button"
                   >
@@ -899,7 +961,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           type="button"
           aria-busy={(Boolean(active) && isStopPending) || undefined}
           aria-label={active ? (isStopPending ? "Stopping…" : "Stop recording") : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
-          title={active && isStopPending ? "Stopping…" : undefined}
+          // Proposed (round 2): Play and Stop are one round button, so it never moves; Start's words move to its tip.
+          title={active && isStopPending ? "Stopping…" : !active ? `${goLabel}${parsedCommand?.durationSeconds ? "" : " (Space)"}` : undefined}
           onClick={(event) => {
             if (active) {
               void stopTimer();
@@ -939,6 +1002,19 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 inert={!timerActionsOpen}
                 role="menu"
               >
+                <button
+                  onClick={() => {
+                    focusQuietly(timerActionsTriggerRef.current);
+                    setTimerActionsOpen(false);
+                    setSwitchSource({ entryId: active.id, workspaceId: data.workspace.id, scope: completionScope });
+                  }}
+                  ref={timerActionsFirstItemRef}
+                  role="menuitem"
+                  type="button"
+                >
+                  <DayframeIcon glyph="refresh-cw" size={16} />
+                  Switch activity
+                </button>
                 {/* Split beside Discard (owner 28 Oct 2026): the running block's split dialog. A block under two
                     minutes has nowhere to split yet. */}
                 <button
@@ -948,7 +1024,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                     setTimerActionsOpen(false);
                     setSplitDialogOpen(true);
                   }}
-                  ref={timerActionsFirstItemRef}
                   role="menuitem"
                   title={runningSplitBounds(active, Date.now()) ? undefined : "Split needs a block of two minutes or more"}
                   type="button"
@@ -1041,6 +1116,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           message={notice.label}
           onAction={notice.action && Boolean(active) === Boolean(notice.action.whileRunning) ? notice.action.onAction : undefined}
           swatchStyle={notice.swatch}
+        />
+      ) : null}
+
+      {active && switchSource?.entryId === active.id &&
+        switchSource.workspaceId === data.workspace.id && switchSource.scope === completionScope ? (
+        <SwitchActivityDialog
+          activities={data.categories}
+          currentId={active.categoryId}
+          fallbackFocus={() => timerActionsTriggerRef.current ?? addTimeButtonRef.current ?? descriptionInputRef.current}
+          onClose={() => setSwitchSource(null)}
+          onSwitch={switchActivity}
         />
       ) : null}
 

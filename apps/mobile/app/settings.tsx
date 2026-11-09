@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
@@ -32,7 +33,6 @@ import {
   RefreshControl,
   ScrollView,
   Share,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -51,6 +51,7 @@ import {
   localPresenceExiting,
   useReduceMotionPreference
 } from "@/lib/motion";
+import { AllActivitiesChip } from "@/components/ActivityChips";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityEditorSheet, type ActivityEditorDraft } from "@/components/settings/ActivityEditorSheet";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
@@ -114,10 +115,12 @@ import {
   locationAccessNeedsIosSettings,
   requestLocationAccess,
   refreshGeofencesForPlaces,
+  readAccuracyBurstState,
   setLocationLearningEnabled,
   startGeofences,
   type LocationVisitDiagnostics
 } from "@/lib/geofence";
+import { accuracyBurstDiagnostics, accuracyBurstStopped, accuracyBurstSummaryLine, type AccuracyBurstState } from "@/lib/location/accuracyBurst";
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
@@ -1169,7 +1172,7 @@ export default function SettingsScreen() {
     ? "Paused. Open Location to restart it."
     : shownLocation?.learningEnabled && !shownMonitoringAllowed
       ? "Needs Always location access"
-      : "Anything uncertain waits in Review";
+      : "Anything uncertain is asked in Calendar";
   // Display only (A4): this visit's Health types once read, otherwise the last-known ones.
   const shownHealthImportPreferences = healthImportPreferences ?? shownHealthPreferencesFrom(lastKnown?.healthImportPreferences);
   const healthWorkoutKeys = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
@@ -1186,7 +1189,7 @@ export default function SettingsScreen() {
       : shownLocation?.learningEnabled && !shownMonitoringAllowed
         ? "On, but needs Always location access"
         : shownLocation?.learningActive
-          ? "On. Anything uncertain waits in Review."
+          ? "On. Anything uncertain is asked in Calendar."
           : "Off";
   // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
   const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
@@ -1238,12 +1241,19 @@ export default function SettingsScreen() {
   // Sync help › Pauses and crashes: a light overview (no payloads), read on each visit once the
   // opening transition has finished (kept on this iPhone until shared).
   const [freezeSnapshot, setFreezeSnapshot] = useState<NativeDiagnosticsSnapshot | null>(null);
+  // Sync help › Accuracy trial (card K): this iPhone's departure and arrival bursts, read with the overview.
+  const [accuracyTrial, setAccuracyTrial] = useState<AccuracyBurstState | null>(null);
   useFocusEffect(useCallback(() => {
     if (!transitionReady) return undefined;
     let current = true;
-    const read = () => void readFreezeOverview().then((snapshot) => {
-      if (current) setFreezeSnapshot(snapshot);
-    });
+    const read = () => {
+      void readFreezeOverview().then((snapshot) => {
+        if (current) setFreezeSnapshot(snapshot);
+      });
+      void readAccuracyBurstState().then((state) => {
+        if (current) setAccuracyTrial(state);
+      }).catch(() => undefined);
+    };
     read();
     // Also on a return to the foreground while Settings stays open (Codex r2 on #525).
     const appState = AppState.addEventListener("change", (state) => {
@@ -1664,6 +1674,8 @@ export default function SettingsScreen() {
         readFreezeDiagnostics(),
         getStorageQuarantineDiagnostics().catch(() => null)
       ]);
+      // Read before the owner is checked again, so the share never waits after that check (Codex r1 on #619).
+      const accuracyTrialState = await readAccuracyBurstState().catch(() => null);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (freezes) setFreezeSnapshot(freezes);
       const snapshot = {
@@ -1714,6 +1726,10 @@ export default function SettingsScreen() {
         // Pauses of 3 s or more (thread, times, fixed task labels) and MetricKit hang/crash reports.
         freezes: supportFreezeDiagnostics(freezes),
         locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays),
+        // The accuracy trial's days: arm, burst count and seconds only (card K).
+        accuracyTrial: accuracyBurstDiagnostics(accuracyTrialState, new Date()),
+        // Whether the kill switch turned it off, and why: reason and local day only.
+        accuracyTrialStopped: accuracyBurstStopped(accuracyTrialState),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -1842,7 +1858,7 @@ export default function SettingsScreen() {
     void confirmForSession({
       eyebrow: "Location history",
       title: "Clear recent location history?",
-      message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
+      message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and things to check stay.",
       confirmLabel: "Clear history",
       confirmHint: "This can't be undone.",
       onConfirm: () => { void removeLocationEvidence(); }
@@ -2599,7 +2615,7 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                       >
                         <Pressable
                           accessibilityHint="Edits this activity"
@@ -2635,6 +2651,7 @@ export default function SettingsScreen() {
                             size={18}
                           />
                         </Pressable>
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -2647,7 +2664,7 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={category.id}
-                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        style={styles.settingsActivityRow}
                         testID={`activities-archived-${category.id}`}
                       >
                         <View style={styles.settingsActivityOpen}>
@@ -2665,6 +2682,7 @@ export default function SettingsScreen() {
                           onPress={() => void restoreArchivedActivity(category)}
                           theme={theme}
                         />
+                        {index > 0 ? <InsetDivider color={theme.border} edge="top" start={DIVIDER_INSET_PAST_TILE} /> : null}
                       </View>
                     );
                   })}
@@ -2738,7 +2756,7 @@ export default function SettingsScreen() {
               {liveSyncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
                   foot={needsAttentionFoot({
-                    tryAgain: timerStopSyncIssues.length > 0 ||
+                    tryAgain: timerStopSyncIssues.some((issue) => !issue.refusedSplit) ||
                       timeEntrySyncIssues.some((issue) => !issue.refusedStart) ||
                       reviewSyncIssues.length > 0 ||
                       queueDiagnostics.permanentFailedCount > 0,
@@ -2753,13 +2771,15 @@ export default function SettingsScreen() {
                 >
                   {timerStopSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt, clockFormat)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
+                      detail={issue.refusedSplit
+                        ? `Stop tapped ${formatQueueTime(issue.occurredAt, clockFormat)}. ${issue.lastError}`
+                        : `Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt, clockFormat)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
                       divider={index > 0}
                       key={issue.clientEventId}
                       theme={theme}
                       title="Couldn't stop the block"
                     >
-                      <SettingsPillButton accessibilityLabel="Try stopping the block again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      {issue.refusedSplit ? null : <SettingsPillButton accessibilityLabel="Try stopping the block again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />}
                       <SettingsPillButton accessibilityLabel="Discard this Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
@@ -2773,10 +2793,13 @@ export default function SettingsScreen() {
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
-                      title={issue.operation === "delete" ? "Couldn't delete a block" : "Couldn't save an edit"}
+                      title={issue.operation === "delete" ? "Couldn't delete a block"
+                        : issue.operation === "split" || issue.copy?.action.kind === "split" ? "Couldn't split a block"
+                        : issue.copy?.action.kind === "duplicate" ? "Couldn't duplicate a block"
+                        : "Couldn't save an edit"}
                     >
-                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
-                      <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
+                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel="Try this block change again" label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
+                      <SettingsPillButton accessibilityLabel="Discard this block change" danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {reviewSyncIssues.map((issue, index) => (
@@ -2885,6 +2908,14 @@ export default function SettingsScreen() {
                   title="Share location details"
                 />
                 <SettingsBlockRow
+                  // The per-place readings and silences the place sheets no longer show (Codex r1 on #620).
+                  onPress={() => router.push("./location-details")}
+                  subtitle="Today's places and trips: readings and the times with none"
+                  testID="sync-help-location-details"
+                  theme={theme}
+                  title="Location details"
+                />
+                <SettingsBlockRow
                   disabled={appleMaps.checking}
                   onPress={appleMaps.start}
                   subtitle={appleMaps.checking ? "Checking… about a minute" : appleMaps.note ?? "Counts only, without places or points"}
@@ -2921,6 +2952,13 @@ export default function SettingsScreen() {
                   testID="sync-help-location-energy"
                   theme={theme}
                   title="Location energy"
+                />
+                <SettingsBlockRow
+                  // Departure and arrival bursts (card K): 7 days on, 7 off, compared with the energy above.
+                  subtitle={accuracyBurstSummaryLine(accuracyTrial, new Date())}
+                  testID="sync-help-accuracy-trial"
+                  theme={theme}
+                  title="Accuracy trial"
                 />
               </SettingsBlockGroup>
             </View>
@@ -3020,7 +3058,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Dayframe only logs on its own at places you trust. Anything else waits in Review."
+                foot="Dayframe only logs on its own at places you trust. Anything else is asked in Calendar."
                 theme={theme}
                 title="Places"
               >
@@ -3055,7 +3093,7 @@ export default function SettingsScreen() {
           {settingsSection === "health" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsBlockGroup
-                foot="Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure."
+                foot="Each one becomes a block you confirm in Calendar, or logs itself when Dayframe is sure."
                 theme={theme}
                 title="Apple Health"
               >
@@ -3383,7 +3421,7 @@ function HealthTypeSheet({
             style={styles.activeEditScroller}
           >
             <SettingsBlockGroup
-              foot={enabled ? "Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure." : undefined}
+              foot={enabled ? "Each one becomes a block you confirm in Calendar, or logs itself when Dayframe is sure." : undefined}
               theme={theme}
               title="Import"
             >
@@ -3403,14 +3441,18 @@ function HealthTypeSheet({
                   layout={localLayoutTransition(reduceMotion)}
                 >
                 <SettingsBlockRow
-                  accessibilityHint={`Chooses the activity ${label} logs to`}
-                  onPress={() => {
-                    if (!closingRef.current) onPickActivity();
-                  }}
-                  testID={`health-activity-${healthKey}`}
+                  control={
+                    <AllActivitiesChip canCreate={false} count={categories.length}
+                      onPress={() => {
+                        if (closingRef.current) return;
+                        Keyboard.dismiss();
+                        onPickActivity();
+                      }}
+                      testID={`health-activity-${healthKey}`} theme={theme} />
+                  }
+                  subtitle={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
                   theme={theme}
                   title="Logs as"
-                  value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
                 />
                 </Reanimated.View>
               ) : null}
@@ -3441,7 +3483,7 @@ function HealthTypeSheet({
                   entering={localPresenceEntering(reduceMotion)}
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
-                  style={[styles.healthNameRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  style={styles.healthNameRow}>
                   <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
                   <TextInput
                     accessibilityLabel={`${label} name`}
@@ -3463,6 +3505,7 @@ function HealthTypeSheet({
                     }}
                     value={nameDraft}
                   />
+                  <InsetDivider color={theme.border} edge="top" />
                 </Reanimated.View>
               ) : null}
             </SettingsBlockGroup>
@@ -3479,8 +3522,8 @@ function HealthTypeSheet({
 
 /** Settings › Location › How suggestions work (UIA-022). */
 const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
-  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
-  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain waits in Review." },
+  { glyph: "inbox", lead: "Suggestions are asked in Calendar.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
+  { glyph: "check", lead: "Saved places and trips log on their own.", text: "A clear stay at a saved place with Log automatically on, or a clear trip between two known places while Log trips automatically is on, can be logged automatically; anything less certain is asked in Calendar." },
   { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
   { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
 ];

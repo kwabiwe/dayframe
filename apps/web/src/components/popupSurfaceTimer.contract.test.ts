@@ -104,7 +104,7 @@ describe("persistent timer floating surfaces", () => {
       /\.inline-tag-picker-trigger:hover,\s*\.inline-tag-picker-trigger\.is-open\s*\{[^}]*background:\s*transparent;/s
     );
     expect(tagSource).toContain("<TagIcon size={15} />");
-    expect(tagSource).toContain("pickerTriggerRef.current?.focus()");
+    expect(tagSource).toContain("pickerReturnRef.current?.focus()");
     // FloatingList keeps a closed list mounted, hidden and inert.
     expect(tagSource).toContain("isOpen={effectivePickerOpen}");
     expect(floatingListSource).toContain("inert={!isOpen}");

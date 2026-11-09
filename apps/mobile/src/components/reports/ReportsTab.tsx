@@ -29,7 +29,7 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { activityMarkerRadius, DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { mobileFailureKind } from "@/lib/friendlyError";
 import type { MobileBootstrap } from "@/lib/api";
@@ -63,6 +63,7 @@ import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
   ReportGoalStreak,
   ReportHero,
+  ReportLoadingFrame,
   ReportMonthGrid,
   ReportRangeSwitch,
   ReportWeekColumns,
@@ -174,7 +175,8 @@ function ReportsTabView({
   const reportsOwnerActive = useRef(isFocused && foreground);
   const filterRef = useRef<View>(null);
   const calendarRef = useRef<View>(null);
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width } = useWindowDimensions();
+  const stackedHeader = fontScale > 1 || width < 375;
   const { reduceMotion, resolved } = useResolvedReduceMotionPreference();
   const focusedNow = useRef(nowMs);
   activeFilterPresentation.current = filterPresentation;
@@ -669,9 +671,11 @@ function ReportsTabView({
         style={s.screen}
       >
         {measuredNumbers.probe}
-        {/* One row (UIA-002): the title, then the filter and Week · Month · More; on a narrow
-            screen or with large text the controls wrap under the title instead of shrinking. */}
-        <View style={s.titleRow}>
+        {/* Resolve the large-text layout before the range or its data can change. */}
+        <View
+          style={[s.titleRow, stackedHeader && s.stackedTitleRow]}
+          testID="reports-header"
+        >
           <Pressable
             accessible={false}
             onPress={() => setTooltipOutsidePress((value) => value + 1)}
@@ -723,24 +727,25 @@ function ReportsTabView({
                 </Text>
               ) : null}
             </Pressable>
-            <View style={s.switchSlot}>
-            <ReportRangeSwitch
-              choice={choice}
-              moreAccessibilityLabel={`Choose report dates, ${range.title}`}
-              moreLabel={moreLabel}
-              moreRef={calendarRef}
-              onChoose={(value) => {
-                if (value === choice) return;
-                playHaptic("tick");
-                setTooltipOutsidePress((current) => current + 1);
-                announceHero.current = true;
-                setFocusedDayKey(null);
-                setChoice(value);
-              }}
-              onMore={openRanges}
-              reduceMotion={reduceMotion}
-              theme={theme}
-            />
+            <View style={stackedHeader && s.stretchedSwitchSlot}>
+              <ReportRangeSwitch
+                choice={choice}
+                moreAccessibilityLabel={`Choose report dates, ${range.title}`}
+                moreLabel={moreLabel}
+                moreRef={calendarRef}
+                onChoose={(value) => {
+                  if (value === choice) return;
+                  playHaptic("tick");
+                  setTooltipOutsidePress((current) => current + 1);
+                  announceHero.current = true;
+                  setFocusedDayKey(null);
+                  setChoice(value);
+                }}
+                onMore={openRanges}
+                reduceMotion={reduceMotion}
+                stretch={stackedHeader}
+                theme={theme}
+              />
             </View>
           </View>
         </View>
@@ -802,14 +807,7 @@ function ReportsTabView({
             title={rangeFailure.offline ? "You're offline" : "Report didn't load"}
           />
         ) : !report ? (
-          <View style={s.unavailable}>
-            <Text
-              accessibilityLiveRegion="polite"
-              style={{ color: theme.textSecondary }}
-            >
-              Loading report range…
-            </Text>
-          </View>
+          <ReportLoadingFrame range={range} theme={theme} />
         ) : (
           <Pressable
             accessible={false}
@@ -875,10 +873,10 @@ function ReportsTabView({
 const s = StyleSheet.create({
   screen: { gap: 14 },
   titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 10 },
+  stackedTitleRow: { flexDirection: "column", flexWrap: "nowrap", alignItems: "stretch" },
   titlePress: { flexGrow: 1, flexShrink: 0 },
-  // The filter keeps its 44 points; the switch takes what is left and its labels shorten first.
-  headControls: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%", flexShrink: 1, minWidth: 0 },
-  switchSlot: { flexShrink: 1, minWidth: 0 },
+  headControls: { flexDirection: "row", alignItems: "center", gap: 8 },
+  stretchedSwitchSlot: { flex: 1, minWidth: 0 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
   outsideDismissSurface: { gap: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -918,27 +916,6 @@ const s = StyleSheet.create({
     borderRadius: 999,
   },
   chart: { alignItems: "center", paddingVertical: 8 },
-  categoryList: { gap: 0 },
-  category: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    alignItems: "center",
-    minHeight: 38,
-    paddingVertical: 5,
-    gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  // X3: activity markers are small rounded-square blocks, never round dots.
-  dot: { height: 10, width: 10, borderRadius: activityMarkerRadius(10) },
-  name: { flex: 1, minWidth: 0, fontSize: 14 },
-  numbers: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    flexShrink: 0,
-    alignItems: "baseline",
-  },
-  number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
-  unavailable: { paddingVertical: 24, gap: 12 },
 });
 
 // Memoised: the Dashboard re-renders every second while a block runs, and Reports formats every

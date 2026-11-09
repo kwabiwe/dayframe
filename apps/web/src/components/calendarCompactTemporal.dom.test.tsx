@@ -229,8 +229,9 @@ describe("Calendar compact temporal DOM", () => {
     renderEditor({ capturedNow: new Date(2026, 7, 4, 12), sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30") });
     const startDate = await screen.findByRole("button", { name: /Choose Start date, currently 2 August 2026/ });
     const finishDate = screen.getByRole("button", { name: /Choose End date, currently 2 August 2026/ });
-    expect(startDate.textContent).toBe("");
-    expect(finishDate.textContent).toBe("");
+    // Quiet text beside each label, no calendar icon (the card kit, owner 31 Oct 2026).
+    expect(startDate.textContent).toBe("Sun 2 Aug");
+    expect(finishDate.textContent).toBe("Sun 2 Aug");
 
     finishDate.focus();
     await user.keyboard("{Enter}");

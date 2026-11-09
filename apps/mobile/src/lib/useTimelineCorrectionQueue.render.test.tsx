@@ -73,4 +73,30 @@ describe("the List's queued corrections (location v4 step 12)", () => {
     await act(async () => { tree.update(createElement(Probe, { owner: null })); });
     expect(seen).toEqual({ pending: [], acknowledged: [], delivered: 0 });
   });
+
+  it("shows a Logs as acknowledged while a later correction's reply is still held (Codex r1 on #617)", async () => {
+    await act(async () => { create(createElement(Probe, { owner: OWNER })); });
+    await flush();
+    const log = await outbox.enqueueTimelineCorrection(OWNER, { kind: "log_place", subject: "place", itemId: "seg-stay",
+      categoryId: "6f000000-0000-4000-8000-0000000000c1" });
+    const later = await outbox.enqueueTimelineCorrection(OWNER, { kind: "delete", subject: "trip", itemId: "trip-9" });
+    let release!: () => void;
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, logged: { entryIds: ["e-stay", "e-trip"],
+        resolvedReviewItemIds: ["review-trip", "review-stay"] } }), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        release = () => resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      })));
+    const pass = outbox.synchroniseTimelineCorrections({ owner: OWNER });
+    await flush();
+    await flush();
+    // The later request is still out: the Logs as and the "?" it resolved are already shown.
+    expect(seen!.acknowledged).toEqual([expect.objectContaining({ clientCorrectionId: log.clientCorrectionId,
+      resolvedReviewItemIds: ["review-trip", "review-stay"] })]);
+    expect(seen!.pending.map((item) => item.clientCorrectionId)).toEqual([later.clientCorrectionId]);
+    await act(async () => { release(); await pass; });
+    await flush();
+    expect(seen!.acknowledged.map((item) => item.clientCorrectionId)).toEqual([log.clientCorrectionId, later.clientCorrectionId]);
+    expect(seen!.delivered).toBe(1);
+  });
 });

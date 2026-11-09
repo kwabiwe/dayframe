@@ -2,6 +2,42 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testTapSequenceRejectsBothStaggeredPinchReleasesAndAllowsTheNextTap() {
+    for firstToLift in [1, 2] {
+      var sequence = DayframeCalendarTapSequence<Int>()
+      sequence.begin([1])
+      XCTAssertTrue(sequence.allowsActivation)
+      sequence.begin([2])
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertFalse(sequence.end([firstToLift]))
+      XCTAssertFalse(sequence.allowsActivation)
+      XCTAssertTrue(sequence.end([3 - firstToLift]))
+      sequence.interrupt()
+      XCTAssertFalse(sequence.allowsActivation)
+
+      sequence.begin([3])
+      XCTAssertTrue(sequence.end([3]))
+      XCTAssertTrue(sequence.allowsActivation)
+    }
+  }
+
+  func testTapSequenceRejectsSimultaneousTouchesAndInterruption() {
+    var sequence = DayframeCalendarTapSequence<Int>()
+    sequence.begin([1, 2])
+    XCTAssertFalse(sequence.allowsActivation)
+    XCTAssertFalse(sequence.end([1], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.interrupt()
+    XCTAssertFalse(sequence.allowsActivation)
+
+    sequence.begin([3])
+    XCTAssertTrue(sequence.allowsActivation)
+    XCTAssertTrue(sequence.end([3], cancelled: true))
+    XCTAssertFalse(sequence.allowsActivation)
+    sequence.begin([4])
+    XCTAssertTrue(sequence.allowsActivation)
+  }
+
   func testEmptyStateIsCentredInTimelineAtTwoThirty() throws {
     let metrics = try XCTUnwrap(DayframeCalendarEmptyStateMath.metrics(
       availableWidth: 320,
@@ -661,6 +697,38 @@ final class DayframeCalendarCoreTests: XCTestCase {
     ))
   }
 
+  func testBracketNameFitsBelowTheHourLabelAtEveryZoom() throws {
+    for hourHeight in [48.0, 72, 128] {
+      let hour = 18 * hourHeight
+      let span = DayframeCalendarBracketSpan(top: hour, height: hourHeight / 2)
+      let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+        in: span, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+      ))
+      XCTAssertEqual(placement.offset, 8)
+      XCTAssertGreaterThanOrEqual(placement.maxLines, 1)
+      XCTAssertLessThanOrEqual(
+        placement.offset + Double(placement.maxLines) * DayframeCalendarBracketMath.labelLineHeight,
+        span.height - 2
+      )
+    }
+  }
+
+  func testBracketNameLeavesTheClockReadableEvenWhenNoLineFits() throws {
+    let hourHeight = 48.0
+    let hour = 18 * hourHeight
+    let beforeHour = DayframeCalendarBracketSpan(top: hour - 28, height: 24)
+    let placement = try XCTUnwrap(DayframeCalendarBracketMath.labelPlacement(
+      in: beforeHour, hourHeight: hourHeight, hourLabelGlyphHeight: 8
+    ))
+    XCTAssertEqual(placement.offset, 2)
+    XCTAssertEqual(placement.maxLines, 1)
+    XCTAssertNil(DayframeCalendarBracketMath.labelPlacement(
+      in: DayframeCalendarBracketSpan(top: hour - 8, height: 24), hourHeight: hourHeight, hourLabelGlyphHeight: 12
+    ))
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 0, hourHeight: hourHeight), 11)
+    XCTAssertEqual(DayframeCalendarBracketMath.hourLabelCenter(hour: 24, hourHeight: hourHeight), 24 * hourHeight - 11)
+  }
+
   func testBracketSpansItsPartsWhereAClockChangeDrawsThem() throws {
     // London's fall-back day (25 Oct 2026, 25 hours): a trip 01:40 BST → 01:20 GMT. Measured as one
     // block it would be a sliver at 01:40; its parts are drawn from 01:10 to just past 01:50.
@@ -1019,6 +1087,23 @@ final class DayframeCalendarCoreTests: XCTestCase {
       ),
       615
     )
+  }
+
+  func testBlockAskingDecodesTolerantly() throws {
+    // Location v4 design §7: a block's own "?" (the amber dot). An older model has no key: no dot.
+    let entry = """
+      {"actionId":"e1","actionKind":"completed","accessibilityLabel":"Open time block: Team sync, Needs a look",
+       "color":"#FF6248","continuesIntoNextDay":false,"entryId":"e1","isActive":false,"isReview":false,
+       "isUncategorized":false,"laneCount":1,"laneIndex":0,"layoutMode":"full","meta":"","offsetFraction":0,
+       "overlapCount":0,"overlapSeconds":0,"startedAtMs":1000,"startsBeforeDay":false,"stoppedAtMs":2000,
+       "textColor":"#0B1020","textDensity":"full","title":"Team sync","warningOverlapCount":0,"widthFraction":1,"zIndex":0%@}
+      """
+    let asking = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000,
+      entriesJSON: "[\(entry.replacingOccurrences(of: "%@", with: ",\"asking\":true"))]")
+    let older = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000,
+      entriesJSON: "[\(entry.replacingOccurrences(of: "%@", with: ""))]")
+    XCTAssertEqual(asking.entries.first?.asking, true)
+    XCTAssertNil(older.entries.first?.asking)
   }
 
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {
@@ -1519,6 +1604,99 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(layout["tick"])
   }
 
+  // Codex r1 and r2 on #610: every Places lane item gets a full 44 × 44-point target, centred on it.
+  func testPlacesLaneItemsGetA44PointTargetCentredOnThem() {
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 300, height: 4), DayframeCalendarBracketSpan(top: 600, height: 120)],
+      hourLabelWidth: 68,
+      timelineHeight: 24 * 72
+    )
+    XCTAssertEqual(frames[0], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 280, maxY: 324))
+    // A tall item keeps its own span.
+    XCTAssertEqual(frames[1], DayframeCalendarHitFrame(minX: 76, maxX: 122, minY: 600, maxY: 720))
+    XCTAssertGreaterThanOrEqual(DayframeCalendarPlacesLaneMath.itemWidth, 44)
+    XCTAssertEqual(DayframeCalendarPlacesLaneMath.width, 52)
+  }
+
+  func testPlacesLaneTargetsStayInsideTheDay() {
+    let edge = DayframeCalendarPlacesLaneMath.hitFrames(
+      spans: [DayframeCalendarBracketSpan(top: 0, height: 4), DayframeCalendarBracketSpan(top: 1724, height: 4)],
+      hourLabelWidth: 68,
+      timelineHeight: 1728
+    )
+    XCTAssertEqual(edge[0].minY, 0)
+    XCTAssertEqual(edge[0].maxY, 44)
+    XCTAssertEqual(edge[1].minY, 1684)
+    XCTAssertEqual(edge[1].maxY, 1728)
+  }
+
+  func testCloseLaneItemsKeepFull44PointTargetsAndATouchGoesToTheNearest() {
+    // Two 10-point items 12 points apart.
+    let spans = [DayframeCalendarBracketSpan(top: 500, height: 10), DayframeCalendarBracketSpan(top: 522, height: 10)]
+    let frames = DayframeCalendarPlacesLaneMath.hitFrames(spans: spans, hourLabelWidth: 68, timelineHeight: 1728)
+    for frame in frames {
+      XCTAssertEqual(frame.maxY - frame.minY, 44, accuracy: 0.001)
+      XCTAssertGreaterThanOrEqual(frame.maxX - frame.minX, 44)
+    }
+    // Centres at 505 and 527: a touch goes to the nearer, wherever the two targets overlap.
+    let hit = { (y: Double) in DayframeCalendarPlacesLaneMath.hitIndex(point: DayframeCalendarPoint(x: 90, y: y), spans: spans, frames: frames) }
+    XCTAssertEqual(hit(490), 0)
+    XCTAssertEqual(hit(515), 0)
+    XCTAssertEqual(hit(517), 1)
+    XCTAssertEqual(hit(545), 1)
+    XCTAssertNil(hit(560))
+    XCTAssertNil(DayframeCalendarPlacesLaneMath.hitIndex(point: DayframeCalendarPoint(x: 140, y: 505), spans: spans, frames: frames))
+    // A long press over either is over an item (the coordinator passes these frames with the blocks').
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(point: DayframeCalendarPoint(x: 90, y: 540), frames: frames))
+  }
+
+  // Codex r1 on #610: a trip across midnight shows only this day's legs, placed by the day-clipped span.
+  func testLegStripClipsATripAcrossMidnightToTheDayItIsDrawnOn() {
+    let hour = 3_600_000.0
+    let midnight = 24 * hour
+    let legs = [(startedAtMs: midnight - hour, stoppedAtMs: midnight - hour / 2), (startedAtMs: midnight - hour / 2, stoppedAtMs: midnight + hour)]
+    // The first day (23:00–24:00 drawn): the first leg fills the top half, the second the bottom half.
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = TimeZone(identifier: "UTC")!
+    let before = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 0, dayEndMs: midnight, height: 104, calendar: utc)
+    XCTAssertEqual(before.map(\.index), [0, 1])
+    XCTAssertEqual(before[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(before[0].height, 49, accuracy: 0.001)
+    XCTAssertEqual(before[1].top, 52, accuracy: 0.001)
+    XCTAssertEqual(before[1].height, 49, accuracy: 0.001)
+    // The next day (00:00–01:00 drawn): only the second leg, over the whole strip.
+    let after = DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: midnight, dayEndMs: 2 * midnight, height: 104, calendar: utc)
+    XCTAssertEqual(after.map(\.index), [1])
+    XCTAssertEqual(after[0].top, 2, accuracy: 0.001)
+    XCTAssertEqual(after[0].height, 99, accuracy: 0.001)
+    // Nothing on a day the block doesn't reach.
+    XCTAssertTrue(DayframeCalendarLegStripMath.segments(legs: legs, startedAtMs: midnight - hour, stoppedAtMs: midnight + hour,
+      dayStartMs: 2 * midnight, dayEndMs: 3 * midnight, height: 104, calendar: utc).isEmpty)
+  }
+
+  // Codex r2 on #610: across the UK clocks going back (25 Oct 2026), legs follow the block's wall-clock geometry.
+  func testLegStripUsesTheBlocksWallClockGeometryAcrossTheClockChange() throws {
+    var london = Calendar(identifier: .gregorian)
+    london.timeZone = TimeZone(identifier: "Europe/London")!
+    let iso = ISO8601DateFormatter()
+    func ms(_ text: String) -> Double { iso.date(from: text)!.timeIntervalSince1970 * 1000 }
+    let day = ms("2026-10-24T23:00:00Z"), end = ms("2026-10-26T00:00:00Z")
+    // 00:30 BST to 03:30 GMT: three wall-clock hours (four elapsed); the boundary at 02:30 GMT is two of them.
+    let start = ms("2026-10-24T23:30:00Z"), boundary = ms("2026-10-25T02:30:00Z"), stop = ms("2026-10-25T03:30:00Z")
+    let block = try XCTUnwrap(DayframeCalendarBlockMath.metrics(startedAtMs: start, stoppedAtMs: stop, nowMs: stop, dayStartMs: day, dayEndMs: end,
+      hourHeight: 72, calendar: london))
+    let leg = try XCTUnwrap(DayframeCalendarBlockMath.metrics(startedAtMs: start, stoppedAtMs: boundary, nowMs: stop, dayStartMs: day, dayEndMs: end,
+      hourHeight: 72, calendar: london))
+    let segments = DayframeCalendarLegStripMath.segments(legs: [(startedAtMs: start, stoppedAtMs: boundary), (startedAtMs: boundary, stoppedAtMs: stop)],
+      startedAtMs: start, stoppedAtMs: stop, dayStartMs: day, dayEndMs: end, height: block.height, calendar: london)
+    XCTAssertEqual(block.height, 216, accuracy: 0.001)
+    XCTAssertEqual(segments[1].top, 2 + (leg.height / block.height) * (block.height - 4), accuracy: 0.001)
+    XCTAssertEqual(segments[1].top, 143.333, accuracy: 0.001)
+    XCTAssertEqual(segments[0].top, 2, accuracy: 0.001)
+  }
+
   func testMomentsSitAtTheGutterEdgeWithA44PointTargetInsideTheDay() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1684,5 +1862,121 @@ final class DayframeCalendarCoreTests: XCTestCase {
       XCTAssertLessThan(entry.zIndex, late.zIndex, id)
     }
     XCTAssertLessThan(late.zIndex, DayframeCalendarDayLayout.momentZIndex)
+  }
+
+  // The Today pill on today (scroll to now).
+
+  func testScrollToNowPutsNowAThirdDownTheViewport() {
+    // 15:00 at 72 points an hour is 1080; a third of a 600-point viewport is 200.
+    XCTAssertEqual(
+      DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 900, hourHeight: 72, viewportHeight: 600),
+      880,
+      accuracy: 0.001
+    )
+    // It follows the zoom.
+    XCTAssertEqual(
+      DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 900, hourHeight: 100, viewportHeight: 600),
+      1300,
+      accuracy: 0.001
+    )
+  }
+
+  func testScrollToNowStaysInsideTheTimeline() {
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 10, hourHeight: 72, viewportHeight: 600), 0)
+    let maximum = DayframeCalendarZoomMath.maximumContentOffset(hourHeight: 72, viewportHeight: 600)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 1439, hourHeight: 72, viewportHeight: 600), maximum)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: .nan, hourHeight: 72, viewportHeight: 600), 0)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: .infinity, hourHeight: 72, viewportHeight: 600), 0)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.contentOffset(minuteOfDay: 720, hourHeight: 72, viewportHeight: 5_000), 0)
+  }
+
+  func testScrollToNowReadsTheMinuteInTheCalendarsZone() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/London"))
+    // 2026-10-22 16:05:30 UTC is 17:05:30 in London (BST).
+    let milliseconds = 1792685130000.0
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: milliseconds, calendar: calendar), 1025.5, accuracy: 0.001)
+    XCTAssertEqual(DayframeCalendarScrollToNowMath.minuteOfDay(milliseconds: .nan, calendar: calendar), 0)
+  }
+
+  func testScrollToNowDecisionDropsOffTodayOrUnderAFingerAndWaitsForAViewport() {
+    let decide = { (selected: String, today: String, viewport: Double?, finger: Bool) in
+      DayframeCalendarScrollToNowMath.decision(
+        selectedDayKey: selected,
+        todayKey: today,
+        viewportHeight: viewport,
+        fingerOnTimeline: finger
+      )
+    }
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 600, false), .run)
+    XCTAssertEqual(decide("2026-10-29", "2026-10-30", 600, false), .drop)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 600, true), .drop)
+    XCTAssertEqual(decide("", "", 600, false), .drop)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", 0, false), .wait)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", nil, false), .wait)
+    XCTAssertEqual(decide("2026-10-30", "2026-10-30", .nan, false), .wait)
+  }
+
+  func testScrollToNowGateNeverReplaysTheBaseline() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 7)
+    gate.receive(7)
+    XCTAssertFalse(gate.isWaiting)
+    XCTAssertFalse(gate.resolve(.run))
+  }
+
+  func testScrollToNowGateHoldsARequestUntilTheFirstValidLayoutThenRunsItOnce() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 0)
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.wait))
+    XCTAssertTrue(gate.isWaiting)
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.wait))
+    XCTAssertTrue(gate.resolve(.run))
+    XCTAssertFalse(gate.resolve(.run))
+    gate.receive(1)
+    XCTAssertFalse(gate.resolve(.run))
+  }
+
+  func testScrollToNowGateCollapsesRepeatsAndDropsCancelledRequests() {
+    var gate = DayframeCalendarScrollToNowGate(baseline: 0)
+    gate.receive(1)
+    gate.receive(2)
+    XCTAssertTrue(gate.resolve(.run))
+    XCTAssertFalse(gate.resolve(.run))
+
+    gate.receive(3)
+    XCTAssertFalse(gate.resolve(.drop))
+    XCTAssertFalse(gate.resolve(.run))
+
+    gate.receive(4)
+    gate.cancel()
+    XCTAssertFalse(gate.resolve(.run))
+  }
+
+  func testDaySwipeTicksOnceAndThinsFastSwipes() {
+    var gate = DayframeCalendarDaySwipeTickGate()
+    XCTAssertTrue(gate.shouldTick(at: 10))
+    XCTAssertFalse(gate.shouldTick(at: 10.05))
+    XCTAssertFalse(gate.shouldTick(at: 10.119))
+    XCTAssertTrue(gate.shouldTick(at: 10.13))
+    XCTAssertTrue(gate.shouldTick(at: 11))
+    // A clock that went backwards never silences it.
+    XCTAssertTrue(gate.shouldTick(at: 5))
+  }
+
+  func testScrollToNowRequestIsOptionalInTheModel() throws {
+    // An older bundle's model has no such key.
+    let olderData = try JSONEncoder().encode(DayframeCalendarPresentationRecord())
+    XCTAssertFalse(String(decoding: olderData, as: UTF8.self).contains("scrollToNowRequest"))
+    let older = try JSONDecoder().decode(DayframeCalendarPresentationRecord.self, from: olderData)
+    XCTAssertNil(older.scrollToNowRequest)
+
+    var next = DayframeCalendarPresentationRecord()
+    next.scrollToNowRequest = 3
+    let current = try JSONDecoder().decode(
+      DayframeCalendarPresentationRecord.self,
+      from: JSONEncoder().encode(next)
+    )
+    XCTAssertEqual(current.scrollToNowRequest, 3)
   }
 }

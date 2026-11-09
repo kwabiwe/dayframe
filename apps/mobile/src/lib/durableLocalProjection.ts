@@ -10,6 +10,7 @@ import {
   type MobileAccountOwner
 } from "./mobileAccount";
 import { isPermanentlyFailedQueuedEvent } from "./queuePermanence";
+import { projectCompletedEntryCopy } from "./completedEntryCopyProjection";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
 import {
@@ -32,7 +33,6 @@ type ProjectionOperation =
   | { kind: "start"; at: string; sequence: string; event: QueuedEvent }
   | { kind: "edit"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "delete"; at: string; sequence: string; command: PendingTimeEntryCommand }
-  | { kind: "split"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop }
   | { kind: "queued_stop"; at: string; sequence: string; entryId: string };
 
@@ -42,11 +42,11 @@ export function projectDurableLocalWork(
 ): MobileBootstrap {
   let projected: MobileBootstrap = serverBootstrap;
   const operations = projectionOperations(durableWork);
+  const resolveProjectedTimerId = projectionTimerIdLookup(durableWork);
 
   for (const operation of operations) {
     if (operation.kind === "start") {
-      const localId = operation.event.localId;
-      const entryId = durableWork.correlations.get(localId) ?? localId;
+      const entryId = resolveProjectedTimerId(operation.event.localId);
       projected = optimisticStartTimer(
         projected,
         queuedStartEntry(projected, operation.event, entryId)
@@ -57,7 +57,7 @@ export function projectDurableLocalWork(
     if (operation.kind === "stop") {
       const target = operation.stop.targetEntryId ?? (
         operation.stop.optimisticEntryId
-          ? durableWork.correlations.get(operation.stop.optimisticEntryId) ?? operation.stop.optimisticEntryId
+          ? resolveProjectedTimerId(operation.stop.optimisticEntryId)
           : null
       );
       if (target) projected = projectTargetedStop(projected, target, operation.stop.occurredAt);
@@ -74,21 +74,44 @@ export function projectDurableLocalWork(
       continue;
     }
 
-    const target = operation.command.targetEntryId ?? (
+    const target = operation.command.split?.receipt?.firstEntryId ?? operation.command.targetEntryId ?? (
       operation.command.optimisticEntryId
-        ? durableWork.correlations.get(operation.command.optimisticEntryId) ?? operation.command.optimisticEntryId
+        ? resolveProjectedTimerId(operation.command.optimisticEntryId)
         : null
     );
     if (!target) continue;
-    if (operation.kind === "split") {
-      // The second part shows under the server's id once the split has one, else its local id.
-      const localId = operation.command.splitEntryLocalId as string;
-      projected = optimisticSplitTimeEntry(
-        projected,
-        target,
-        operation.command.splitAt as string,
-        durableWork.correlations.get(localId) ?? localId
-      ) as MobileBootstrap;
+    if (operation.command.split) {
+      const { splitAt, secondLocalId, receipt } = operation.command.split;
+      const secondId = receipt?.secondEntryId ?? resolveProjectedTimerId(secondLocalId);
+      const cachedSecond = receipt ? mobileTimeEntryById(projected, secondId) : null;
+      if (receipt?.firstRemoved) projected = optimisticDeleteTimeEntry(projected, target) ?? projected;
+      if (cachedSecond && receipt?.secondRemoved) {
+        projected = optimisticDeleteTimeEntry(projected, secondId) ?? projected;
+      } else if (cachedSecond && receipt?.secondStoppedAt && receipt.secondUpdatedAt &&
+        Date.parse(cachedSecond.updatedAt ?? "") < Date.parse(receipt.secondUpdatedAt)) {
+        projected = projectTargetedStop(projected, secondId, receipt.secondStoppedAt);
+      }
+      // Bridge only an older copy of the exact source, without overriding newer edits or inventing a second block.
+      if (receipt) {
+        const staleFirst = receipt.firstUpdatedAt && projected.activeEntry?.id === target &&
+          Date.parse(projected.activeEntry.updatedAt ?? "") < Date.parse(receipt.firstUpdatedAt);
+        if (!staleFirst) continue;
+        const firstEnd = receipt.firstStoppedAt === undefined ? splitAt : receipt.firstStoppedAt;
+        if (receipt.secondRemoved || cachedSecond || firstEnd !== splitAt) {
+          if (firstEnd) projected = projectTargetedStop(projected, target, firstEnd);
+          continue;
+        }
+      }
+      projected = optimisticSplitTimeEntry(projected, target, splitAt, secondId) ?? projected;
+      if (receipt?.secondStoppedAt && projected.activeEntry?.id === secondId) {
+        projected = projectTargetedStop(projected, secondId, receipt.secondStoppedAt);
+      }
+      continue;
+    }
+    if (operation.command.copy) {
+      projected = projectCompletedEntryCopy(projected, target, operation.command.copy, {
+        acknowledged: operation.command.copyAcknowledged, removedOnServer: operation.command.copyRemovedOnServer
+      });
       continue;
     }
     projected = operation.kind === "delete"
@@ -101,6 +124,19 @@ export function projectDurableLocalWork(
   }
 
   return projected;
+}
+
+function projectionTimerIdLookup(work: DurableLocalWork) {
+  // The receipt can reach disk ahead of the transport correlation. Use its exact second ID for
+  // display immediately while keeping the transport map untouched.
+  const splitIds = new Map<string, string>();
+  for (const command of work.timeEntryCommands) {
+    const split = command.split;
+    if (!split?.receipt || command.failureKind === "permanent" ||
+      !mobileAccountOwnersEqual(command, work.owner)) continue;
+    splitIds.set(split.secondLocalId, split.receipt.secondEntryId);
+  }
+  return (localId: string) => splitIds.get(localId) ?? work.correlations.get(localId) ?? localId;
 }
 
 function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
@@ -121,15 +157,7 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       mobileAccountOwnersEqual(command, work.owner) &&
       command.failureKind !== "permanent"
     )
-    .map((command) => command.operation === "split"
-      ? {
-          // Its place among the Starts: a Stop or Edit of the second part made after it comes later.
-          kind: "split" as const,
-          at: command.createdAt,
-          sequence: `0:${command.createdAt}:${command.clientCommandId}`,
-          command
-        }
-      : command.operation === "delete"
+    .map((command, index) => command.operation === "delete"
       ? {
           kind: "delete" as const,
           at: command.createdAt,
@@ -139,7 +167,8 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       : {
           kind: "edit" as const,
           at: command.createdAt,
-          sequence: `1:${command.createdAt}:${command.clientCommandId}`,
+          // Storage order breaks ties between a sheet Edit and the Split it precedes.
+          sequence: `1:${String(index).padStart(8, "0")}`,
           command
         });
   const stops: ProjectionOperation[] = work.timerStops
@@ -166,9 +195,40 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
           entryId: event.rawPayload!.targetEntryId as string
         }]
       : []);
-  return [...starts, ...commands, ...stops, ...queuedStops].sort((left, right) =>
+  const chronological = [...starts, ...commands, ...stops, ...queuedStops].sort((left, right) =>
     Date.parse(left.at) - Date.parse(right.at) || left.sequence.localeCompare(right.sequence)
   );
+  const splits = new Map<string, ProjectionOperation>();
+  const producers = new Map<string, ProjectionOperation>();
+  for (const operation of commands) {
+    if (operation.kind === "edit" && operation.command.split) {
+      splits.set(operation.command.clientCommandId, operation);
+      producers.set(operation.command.split.secondLocalId, operation);
+    }
+  }
+  if (!splits.size) return chronological;
+  for (const operation of starts) {
+    if (operation.kind === "start") producers.set(operation.event.localId, operation);
+  }
+  const ordered: ProjectionOperation[] = [];
+  const emitted = new Set<ProjectionOperation>();
+  function emit(operation: ProjectionOperation) {
+    if (emitted.has(operation)) return;
+    emitted.add(operation);
+    if (operation.kind === "start") {
+      for (const id of operation.event.afterRunningSplitIds ?? []) {
+        const predecessor = splits.get(id);
+        if (predecessor) emit(predecessor);
+      }
+    } else if (operation.kind === "edit" && operation.command.split && operation.command.optimisticEntryId) {
+      const predecessor = producers.get(operation.command.optimisticEntryId);
+      if (predecessor) emit(predecessor);
+    }
+    ordered.push(operation);
+  }
+  // A clock tie or adjustment cannot put a later Switch ahead of the Split it waits for.
+  for (const operation of chronological) emit(operation);
+  return ordered;
 }
 
 /** A Lock Screen Stop still waiting to reach the server: entry-scoped, its block named, not refused. */

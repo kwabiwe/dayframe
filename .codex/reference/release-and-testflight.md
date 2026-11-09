@@ -8,10 +8,11 @@ Use this before saying a mobile/API fix is present or absent in production.
 - Stable staging: `https://dayframe-staging.vercel.app`, manually assigned to the one PR Preview selected for web/iPhone testing.
 - Production: `https://dayframe-web.vercel.app` using production Supabase.
 - Mobile `preview`: staging API only. Mobile `production`/TestFlight: production API only.
+- Server feature flags can differ by lane. `DAYFRAME_TIMER_TRIP_CHECKS=on` (a timer that ran into a trip asks on its block, location v4 design §7) is set for the staging (Vercel Preview) environment only; production leaves it off until the owner turns it on. Check the lane's flags before calling a staging result a production result.
 
 The staging alias does not move automatically. Before merging an implementation PR, confirm its Preview is Ready, apply migrations to staging, promote that deployment to the stable alias, and complete the relevant hands-on checks. Production credentials and data are not a PR test lane.
 
-Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. Always confirm the visible `STAGING` badge and baked API base before testing.
+Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. For a local signed Preview build, set `EXPO_PUBLIC_DAYFRAME_API_BASE=https://dayframe-staging.vercel.app` and `EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL=preview` before bundling. Verify the compiled API resolver defaults to the staging URL and confirm the visible `STAGING` badge on the device before submitting fixture credentials.
 
 App Group selection must use the same `DAYFRAME_APP_GROUP` setting in the host/extension entitlements and `DayframeSharedAppGroupIdentifier` Info.plist key. Run `npm run check:ios-config`, `bash scripts/validate-ios-shared-storage.sh`, then `npm run check:ios-config -- --built-app <Dayframe.app>` after building. Before device acceptance, run `npm run check:ios-config -- --signed-app <Dayframe.app>` to compare both products' signed App Groups with their baked identities. Missing/unresolved or cross-lane native configuration must fail closed, never fall back to production. Unsigned Simulator products prove configuration/compilation only; verify shared Shortcut queue/catalog and Live Activity Stop hand-off on the signed staging app with both app identities installed.
 
@@ -38,16 +39,35 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (124)` (2026-10-21)
+- Last repository-recorded verified build: `0.1.0 (147)` (2026-11-08)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `ca17dca4-5873-43ae-a424-150a67448cd2`
-- Archived commit: `6f45a03`
-- Performance gate reading (baseline for the next build): staging build of `6f45a03`, Today in front with a block running on the iPhone 17 over USB with Auto-Lock off (checked from screenshots): gate 1 6.9 % and −2.88 MiB per minute, gate 2 6.7 % and +0.63 MiB per minute (21 Oct). The five-minute warm-up's sampler timed out without a figure, but the app had run for more than five minutes before gate 1. Build 123: 6.4–6.8 %, at most +1.02 MiB per minute.
+- Delivery/build ID: `fbffb528-b302-4d38-9349-713aed715243`
+- Archived commit: `0f5ff1a95b6aab92cdadf86e49f5dbcfebd4fe92`, built in a detached worktree pinned to that SHA.
+- App Store Connect recorded the upload at 09:51:42 GMT on 8 Nov 2026. The Apple Distribution-signed app and extension use the production shared containers and `https://dayframe-web.vercel.app`.
+- Exact signed Staging passed sign-in on the wired iPhone 11. The 307.306 s warm-up measured 6.7461% of one core and +2.9974 MB/min. The warmed 307.270 s gate measured 6.7855% and +0.9950 MB/min. The disposable timer was visible at both endpoints. Cleanup removed the timer, fixture and runner and restored the prior app and stable alias.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 147 adds Split and Duplicate for finished blocks on iPhone (#707). Installed 147 on the wired iPhone 11 passed Keep as one, Split and Duplicate. The original stayed intact on cancellation. The offline copy survived a cold relaunch and arrived exactly once on reconnect. The two split parts and the copy stayed adjacent and preserved activity and tags. Today, Calendar and Reports rendered after reconnect. XCTest restored Airplane Mode and signed out. The installed Today warm-up measured 4.8257% of one core and +1.4997 MB/min over 309.396 s. The warmed production window measured 5.0389% and +0.8673 MB/min over 309.442 s. The displayed timer advanced 651 s across 650 s between captures. The disposable timer stopped, the phone signed out, the runner was removed, and all 11 scoped production cleanup counts were zero.
+- A separate installed 147 run on the wired iPhone 11 verified background delivery for an existing Live Activity. With Dayframe in the background, the Lock Screen showed the web-edited title and dismissed the Activity after web Stop. Production recorded one Start, one Stop, three delivered APNs revisions for the same registration and retirement after Stop. Fixture sign-out, runner removal and all 11 scoped production cleanup counts passed. Fresh background Start and Lock Screen Switch remain open.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 124 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 146 came from `c063214e0a1369ddd70b854934671f0317ad9d6c` and includes completed-block sync between web and iPhone (#705). App Store Connect verified build `c15c091a-c4ab-4fe0-8c06-359ae929f8c6` in Internal Health Debug after the 23:45:32 GMT upload on 7 Nov 2026. Exact signed Staging on the wired iPhone 11 measured 6.7232% of one core and +1.8742 MB/min in the 307.365 s warm-up, then 6.7967% and +0.8536 MB/min in the warmed 307.472 s gate. The same timer advanced 631 s over 631 s between screenshots. Staging cleanup removed the fixture and runner and restored the prior app and alias. Installed 146 passed two-way foreground add, edit and delete and an offline edit that reached the same block on reconnect. The warmed Today repeat measured 4.7643% and +0.3807 MB/min over 307.288 s. The displayed timer advanced 660 s over 659.607 s between capture timestamps. The original wrapper recorded the first timestamp after OCR. The iPhone signed out, Airplane Mode returned Off, and all nine disposable production counts were zero.
+
+Build 145 came from `20851581fc78530a4241503210be944336c80cbb` and includes Calendar Day pinch and named-trip labels from #702. App Store Connect verified build `c529745c-f57f-4138-8e61-a097a332e768` in Internal Health Debug after the 21:26:09 GMT upload on 7 Nov 2026. On the wired iPhone 11, exact signed Staging passed pinch, separate tap, scroll and VoiceOver. The 307.462 s warm-up measured 6.7490% of one core and +1.2182 MB/min. The warmed 307.342 s gate measured 6.6773% and +0.4990 MB/min. The same timer advanced 633 s over 632 s between screenshots, and cleanup restored the previous signed Staging app at Log in.
+
+Installed 145 passed staggered pinch release over a block and the Places lane, a separate tap, scrolling and VoiceOver for all three named-trip parts. The warmed 307.257 s production window measured 7.1383% of one core and +0.7551 MB/min. The 307.384 s warm-up measured 7.0646% and +3.8121 MB/min. The same timer advanced 723 s over 723 s. Cleanup removed the disposable timer, production fixture and runner, and the app returned to Log in.
+
+Build 144 came from `847dceb9` and includes the Calendar List place-filter fix from #698. Its signed Staging gate measured 6.8912% of one core and +1.0038 MB/min over 307.503 s on the wired iPhone 11. Installed 144 on the wired iPhone 11 passed Day → List and Today → Calendar with Reduce Motion off and on. The ordinary block held at 411.5 pt at the first XCTest observation and after settling. The first sign-in case missed the immediate owned Today row. Both Calendar cases verified that row after relaunch before changing preferences. The original Calendar and iOS settings were restored, sign-out passed, and scoped production cleanup found zero remaining fixture records.
+
+Build 143 came from `9430cd58`. The wired iPhone 11 passed the warmed signed Staging gate at 6.851% of one core and +0.3741 MB/min. Installed 143 passed Calendar day-strip, Reports range, the Unknown place picker, description-only logging and the off-day linked editor. The owner confirmed a staggered finger lift held Calendar Day position and ordinary vertical scrolling worked. The warmed installed Today repeat measured 6.748% of one core and +0.9622 MB/min over 307.53 s with the same disposable timer visible at both endpoints.
+
+Build 142 came from `76a7762b`. Its warmed signed staging gate passed at 6.7727% of one core and +0.6428 MB/min. The wired iPhone 11 passed installed Calendar day-strip switching and Reports Week → Month → Week. The warmed production repeat measured 6.5255% of one core and +0.926 MB/min over 385.381 s, using a recaptured end sample from the same process and timer after Instruments timed out.
+
+Build 141 came from `bb2440ec` and remains verified in Internal Health Debug. Its signed staging gate measured 5.26% of one core and +1.56 MB/min over 308.3 s on the wired iPhone 17 Pro. Installed 141 passed Calendar List day-strip switching and Reports Week → Month → Week. The production Today repeat on the same phone measured 6.74% of one core and −0.003 MB/min over 307.2 s after warm-up. Today and the running timer were visible at both endpoints.
+
+Build 140 came from `99f1a6c7` and remains verified in Internal Health Debug. Installed 140 passed Calendar day-strip switching, Reports range switching and the Today performance repeat at 5.47% of one core and +0.54 MB/min over 306.7 s. The installed web-to-iPhone timer refresh repeat remains open.
+
+Build 139 came from `3cf432dd` and is also verified in `Internal Health Debug`. The exact staging gate on the wired iPhone 11 measured 15.37% and 15.50% of one core with +0.44 and +1.32 MB/min. The owner accepted the CPU overage for build 139 only. Installed build 139 still needs its own smoke. Earlier release history is in Git history and dated investigations.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
@@ -55,14 +75,14 @@ Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel
 
 For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, the repository/PR lane means:
 
-1. Sync local `main` with `origin/main`.
+1. Fetch `origin`. Never check out, pull or fast-forward branches in the shared main checkout: other sessions build and release from it.
 2. Check repo status is clean.
 3. Check memory, tracker, GitHub PRs/issues, and latest TestFlight state.
 4. Confirm PR scope from `docs/feature-fix-tracker.md`.
-5. Create a focused branch using the active Codex/client branch-prefix convention.
+5. Create a focused branch from `origin/main` in its own git worktree, using the active Codex/client branch-prefix convention.
 6. Implement the change narrowly.
 7. Add or update regression tests for the changed behavior.
-8. Update `docs/feature-fix-tracker.md` in the PR.
+8. Update `docs/feature-fix-tracker.md` in the PR. For a change to iPhone behaviour, add its device checks to the next-TestFlight staging checklist: one local list (outside Git) for the next build, not a per-build numbered one. The build that ships keeps that list as its record, and a new next list starts.
 9. Run validation:
    - `npm run test`
    - `npm run typecheck`
@@ -72,25 +92,26 @@ For any Dayframe implementation PR that changes shipped app, API, database, mobi
    - `git diff --check`
 10. Commit, push, and open the PR with summary and validation notes.
 11. Wait for GitHub/Vercel checks; fix failures and rerun validation if needed.
-12. Merge to `main` and sync local `main`.
+12. Merge to `main` with `gh pr merge` run from a folder outside any git checkout, then fetch `origin`. Run inside the shared checkout, `gh pr merge` fast-forwarded the shared `main` during a TestFlight archive.
 13. Update the tracker after merge if the merged PR number/status/build evidence changed.
 
 If mobile/native/runtime configuration changed or TestFlight is an explicit success criterion, continue with the release lane:
 
-1. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
-2. Run `npm run testflight:preflight`.
-3. Temporarily increment the iOS build number for release.
-4. Archive with full Xcode from merged `main`.
-5. Export and upload the `.ipa` to App Store Connect.
-6. Wait for Apple processing to become `VALID`.
-7. Set export compliance/encryption answer.
-8. Add/update TestFlight notes.
-9. Assign or verify the internal testing group.
-10. Verify TestFlight state is `IN_BETA_TESTING`.
-11. Restore the repo iOS build number back to its default if it was changed only for upload.
-12. Tell KB the exact build number, delivery UUID, verification state, and what changed.
+1. Create a detached git worktree pinned to the release SHA (`git worktree add --detach <path> <sha>`) and build the staging app and the release archive there, never in the shared main checkout: the shared checkout moved mid-archive once (TestFlight 134).
+2. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Take it on a fresh launch of that build (force-quit, then launch), after the warm-up window: on 29 Oct 2026 a TestFlight 134 process that had been used for a while read +4.43 MiB a minute, a false fail, and a clean relaunch passed. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
+3. Run `npm run testflight:preflight`.
+4. Temporarily increment the iOS build number for release.
+5. Archive with full Xcode from the pinned worktree.
+6. Export and upload the `.ipa` to App Store Connect.
+7. Wait for Apple processing to become `VALID`.
+8. Set export compliance/encryption answer.
+9. Add/update TestFlight notes.
+10. Assign or verify the internal testing group.
+11. Verify TestFlight state is `IN_BETA_TESTING`.
+12. Restore the repo iOS build number back to its default if it was changed only for upload.
+13. Tell KB the exact build number, delivery UUID, verification state, and what changed.
 
-Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged, and local `main` synced.
+Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged (with `gh` run outside any checkout), and `origin` fetched.
 
 ## TestFlight Build Identity
 
@@ -134,8 +155,8 @@ When a PR adds or changes a local Expo native module, run CocoaPods installation
 
 The preflight checks the failure points that have disrupted recent Dayframe releases:
 
-- full Xcode is installed
-- release commands should pin `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools
+- the Xcode selected for the archive provides a working `xcodebuild` and can resolve the project's release build settings
+- set the same `DEVELOPER_DIR` for preflight and archive when using a specific Xcode installation. A selection that only provides Command Line Tools fails preflight
 - `apps/mobile/ios/Podfile.lock` matches `apps/mobile/ios/Pods/Manifest.lock`
 - Dayframe has an App Store provisioning profile for team `65M773ZG6M`
 - Keychain has an **Apple Distribution** or **iPhone Distribution** signing identity with its private key
@@ -156,7 +177,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 The current working pattern is:
 
 1. Set the temporary iOS build number, for example `0.1.0 (13)`.
-2. Archive from merged `main` with `xcodebuild archive`.
+2. Archive from the detached worktree pinned to the merged release SHA with `xcodebuild archive`.
 3. Export the archive with the App Store Connect export options and the Dayframe App Store provisioning profile.
 4. Upload the exported `.ipa` with the App Store Connect API key path under `.codex-dayframe-qa/testflight/appstoreconnect/`.
 5. Save archive/export/upload logs under `.codex-dayframe-qa/testflight/`.

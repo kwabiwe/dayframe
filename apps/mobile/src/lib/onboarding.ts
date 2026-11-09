@@ -102,12 +102,12 @@ export function locationResultText(choice: LocationChoice, suggestions: Suggesti
     case "always":
       if (suggestions === "failed") return "Suggestions couldn't be switched on. Try again, or turn them on later in Settings.";
       if (suggestions === "paused") return "Suggestions are on, but location capture isn't running. Retry to start it.";
-      if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Review.";
+      if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Calendar.";
       return "Location is on, including when your phone is locked.";
     case "while":
       return "Location works while Dayframe is open. Visit and journey suggestions need Always, which you can switch on in Settings › Location.";
     case "off":
-      return "Location is off. Blocks, Review and Apple Health still work. You can turn it on later in Settings.";
+      return "Location is off. Blocks, Calendar and Apple Health still work. You can turn it on later in Settings.";
   }
 }
 
@@ -145,7 +145,7 @@ export function remindersResultText(choice: RemindersChoice) {
     case "on":
       return "Evening reminders are on.";
     case "off":
-      return "No reminders. Review still shows a count on Today.";
+      return "No reminders. Today and Calendar still show what there is to check.";
     case "denied":
       return "Notifications are off for Dayframe in iPhone Settings. Allow them there, then turn on Evening reminder in Settings.";
     case "failed":

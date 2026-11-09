@@ -11,17 +11,14 @@ vi.mock("react-native", () => ({ AccessibilityInfo: { announceForAccessibility: 
 const outbox = vi.hoisted(() => ({
   enqueue: vi.fn(async () => ({ clientCommandId: "mobile-time-entry:split-1" })),
   release: vi.fn(async () => 1),
-  remove: vi.fn(async () => 1),
-  pending: vi.fn(async () => [] as Array<{ clientCommandId: string; optimisticEntryId?: string }>),
-  dispatched: vi.fn(() => false)
+  undo: vi.fn(async (_owner: unknown, _commandId: string, isStillRunning: () => boolean) => isStillRunning())
 }));
 vi.mock("./timeEntryOutbox", () => ({
+  OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX: "optimistic-active-timer:split:",
   createTimeEntryCommandHoldLease: () => ({ ended: false, end: vi.fn() }),
   enqueueTimeEntrySplit: outbox.enqueue,
   releaseTimeEntryCommands: outbox.release,
-  removeTimeEntryCommands: outbox.remove,
-  readPendingTimeEntryCommands: outbox.pending,
-  wereTimeEntryCommandsDispatched: outbox.dispatched,
+  undoHeldTimeEntrySplit: outbox.undo,
   extendTimeEntryCommandHold: vi.fn(),
   enqueueTimeEntryDelete: vi.fn()
 }));
@@ -39,6 +36,10 @@ function bootstrap(): MobileBootstrap {
   };
   return {
     user: { id: OWNER.userId, email: "a@example.com", name: "A" }, workspace: { id: OWNER.workspaceId, name: "A" },
+    serverBuild: {
+      runningEntrySplit: true, sourceSha: null, deploymentId: null,
+      backendId: "fixture", environment: "local", syncContractVersion: 1
+    },
     activeEntry: running, projects: [], categories: [], entries: [running], places: [], reviewItems: []
   } as MobileBootstrap;
 }
@@ -53,6 +54,7 @@ describe("useRunningSplit", () => {
       read: () => data,
       update: (change) => { data = change(data); },
       owner: () => OWNER,
+      generation: () => 1,
       persistedId: (id) => id,
       isOnline: () => true,
       deliver,
@@ -73,7 +75,7 @@ describe("useRunningSplit", () => {
   it("shows the split at once, holds it, and Undo puts back one running block without sending anything", async () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe />); });
-    await act(async () => { await api.split(Date.parse("2026-08-22T10:30:00.000Z")); });
+    await act(async () => { await api.split(RUNNING, Date.parse("2026-08-22T10:30:00.000Z")); });
     const secondId = data!.activeEntry!.id;
     expect(secondId).toMatch(/^optimistic-active-timer:split:/);
     expect(data!.entries.find((entry) => entry.id === RUNNING)?.stoppedAt).toBe("2026-08-22T10:30:00.000Z");
@@ -82,10 +84,8 @@ describe("useRunningSplit", () => {
       deliverAfter: "2026-08-22T11:00:06.000Z"
     }));
     expect(api.held).toMatchObject({ title: "Draft chapter", commandId: "mobile-time-entry:split-1" });
-    // An Edit of the second part made in the window goes with it.
-    outbox.pending.mockResolvedValueOnce([{ clientCommandId: "mobile-time-entry:edit-2", optimisticEntryId: secondId }]);
     await act(async () => { expect(await api.undo()).toBe(true); });
-    expect(outbox.remove).toHaveBeenCalledWith(["mobile-time-entry:split-1", "mobile-time-entry:edit-2"]);
+    expect(outbox.undo).toHaveBeenCalledWith(OWNER, "mobile-time-entry:split-1", expect.any(Function));
     expect(data!.activeEntry).toMatchObject({ id: RUNNING, stoppedAt: null });
     expect(data!.entries.map((entry) => entry.id)).toEqual([RUNNING]);
     expect(api.held).toBeNull();
@@ -97,26 +97,47 @@ describe("useRunningSplit", () => {
   it("lets it go when the window closes, and refuses a late Undo once the second part stopped", async () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe />); });
-    await act(async () => { await api.split(Date.parse("2026-08-22T10:30:00.000Z")); });
+    await act(async () => { await api.split(RUNNING, Date.parse("2026-08-22T10:30:00.000Z")); });
     await act(async () => { vi.advanceTimersByTime(5_000); await Promise.resolve(); });
     expect(outbox.release).toHaveBeenCalledWith(["mobile-time-entry:split-1"], { owner: OWNER, requestImmediateDelivery: true });
     await act(async () => { await Promise.resolve(); });
-    expect(deliver).toHaveBeenCalledWith(OWNER);
+    expect(deliver).toHaveBeenCalledWith(OWNER, "mobile-time-entry:split-1");
     expect(api.held).toBeNull();
 
-    await act(async () => { await api.split(Date.parse("2026-08-22T10:45:00.000Z")); });
+    await act(async () => { await api.split(data!.activeEntry!.id, Date.parse("2026-08-22T10:45:00.000Z")); });
     data = { ...data!, activeEntry: null };
     await act(async () => { expect(await api.undo()).toBe(false); });
-    expect(outbox.remove).not.toHaveBeenCalled();
+    expect(outbox.undo).toHaveBeenCalledOnce();
     act(() => tree.unmount());
   });
 
   it("never splits outside the running block", async () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<Probe />); });
-    await act(async () => { expect(await api.split(Date.parse("2026-08-22T09:59:00.000Z"))).toBe(false); });
-    await act(async () => { expect(await api.split(Date.parse("2026-08-22T11:01:00.000Z"))).toBe(false); });
+    await act(async () => { expect(await api.split(RUNNING, Date.parse("2026-08-22T09:59:00.000Z"))).toBe(false); });
+    await act(async () => { expect(await api.split(RUNNING, Date.parse("2026-08-22T11:01:00.000Z"))).toBe(false); });
     expect(outbox.enqueue).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it("refuses a replacement before enqueue or while the pinned split is being saved", async () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe />); });
+    const time = Date.parse("2026-08-22T10:30:00.000Z");
+    await act(async () => { expect(await api.split("older-sheet-entry", time)).toBe(false); });
+    expect(outbox.enqueue).not.toHaveBeenCalled();
+    let finish!: (value: { clientCommandId: string }) => void;
+    outbox.enqueue.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await act(async () => {
+      const attempt = api.split(RUNNING, time);
+      const replacement = { ...data!.activeEntry!, id: "replacement" };
+      data = { ...data!, activeEntry: replacement, entries: [replacement] };
+      finish({ clientCommandId: "mobile-time-entry:split-1" });
+      expect(await attempt).toBe(false);
+    });
+    expect(data?.activeEntry?.id).toBe("replacement");
+    expect(api.held).toBeNull();
+    expect(outbox.undo).toHaveBeenCalledWith(OWNER, "mobile-time-entry:split-1", expect.any(Function));
     act(() => tree.unmount());
   });
 });

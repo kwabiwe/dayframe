@@ -35,7 +35,7 @@ describe("web category identity contract", () => {
   });
 
   it("shows Calendar › List rows with the activity block, neutral for no activity (UIA-203)", () => {
-    expect(entries).toContain('className={`timeline-task-block${entry.categoryId ? " df-block" : ""}`}');
+    expect(entries).toContain('className={`timeline-task-block${entry.categoryId ? " df-block" : ""}${asking ? " is-asking" : ""}`}');
     expect(styles).toMatch(/\.timeline-task-block\.df-block \{[^}]*background: var\(--block\);/);
     expect(entries).not.toContain("timeline-task-category-dot");
   });

@@ -387,9 +387,6 @@ function HistoricalSuggestionRow({
       )}
       testID={`historical-suggestion-row-${index}`}
     >
-      {index > 0 ? (
-        <View pointerEvents="none" style={styles.taskSuggestionRowDivider} />
-      ) : null}
       {/* UIA-021: the Switch sheet's row — the activity as a small block, the name, then the
           activity and tags — on a fill-led list. */}
       <ActivityBlockMark
@@ -411,6 +408,9 @@ function HistoricalSuggestionRow({
           </Text>
         ) : null}
       </View>
+      {index > 0 ? (
+        <View pointerEvents="none" style={styles.taskSuggestionRowDivider} />
+      ) : null}
     </Pressable>
   );
 }

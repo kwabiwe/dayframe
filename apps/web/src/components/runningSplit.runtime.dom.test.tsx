@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
@@ -36,11 +37,11 @@ describe("AppShellRuntime split of the running block", () => {
         await splitPending;
         const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
         serverData = bootstrap(second, [second, { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }]);
-        return response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: true }, 201);
+        return response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: true, entries: [{ ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }, entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" })] }, 201);
       }
       if (url === "/api/time-entries" && body?.mode === "join") {
         serverData = bootstrap(running);
-        return response({ ok: true, id: FIRST, replayed: false, running: true });
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: running });
       }
       if (url === "/api/events") {
         serverData = bootstrap(null, [{ ...running, stoppedAt: "2026-08-17T04:30:00.000Z" }, entry({ id: SECOND, stoppedAt: "2026-08-17T05:00:00.000Z" })]);
@@ -90,7 +91,7 @@ describe("AppShellRuntime split of the running block", () => {
       if (body) bodies.push(body);
       if (url === "/api/time-entries" && body?.mode === "join") {
         serverData = bootstrap(running);
-        return response({ ok: true, id: FIRST, replayed: false, running: true });
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: running });
       }
       if (url.startsWith("/api/bootstrap")) return response(serverData);
       if (url === "/api/timer-state") return response({ activeEntryId: serverData.activeEntry?.id ?? null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
@@ -133,7 +134,7 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     let releaseJoin: (() => void) | undefined;
     const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
     const requests = server({
-      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true }); },
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
       bootstrap: () => response({ error: "down" }, 503)
     });
     render(
@@ -154,10 +155,267 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     }));
   });
 
+  it("never lets Undo lose edits typed into the second part and not saved yet", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    const requests = server({ join: () => response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }) });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(screen.getByTestId("undo").textContent).toContain("Save your edits"));
+    expect(requests.some((request) => request.body?.mode === "join")).toBe(false);
+  });
+
+  it("keeps text typed while the Undo is on its way, on the joined block (Codex r3 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(mocks.clientFetch.mock.calls.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    expect(screen.getByTestId("draft").textContent).toBe("Typed, not saved");
+  });
+
+  it("shows nothing running when the split's answer leaves out the block (deleted elsewhere meanwhile) (Codex r3 on #607)", async () => {
+    const running = entry({ id: FIRST });
+    server({
+      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: true, entries: [
+        entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z", stoppedAt: "2026-08-17T04:50:00.000Z" })
+      ] }),
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(running)} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
+  });
+
+  it("reconciles a repeat answered with no second part (it was put back since) and an empty list (Codex r4 on #607)", async () => {
+    const running = entry({ id: FIRST });
+    server({
+      split: () => response({ ok: true, id: FIRST, newEntryId: null, replayed: true, entries: [] }),
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(running)} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
+  });
+
+  it("saves text carried over by an Undo once the Undo lets go, even when the reload is slow and fails (Codex r4 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    const requests = server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    mocks.clientFetch.mockImplementation(((original) => async (url: string, options?: RequestInit) => {
+      if (url === `/api/time-entries/${FIRST}`) {
+        const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+        requests.push({ url, ...(body ? { body } : {}) });
+        return response({ ok: true, id: FIRST, updatedAt: "2026-08-17T05:01:00.000Z" });
+      }
+      return original(url, options);
+    })(mocks.clientFetch.getMockImplementation()!));
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${FIRST}` && request.body?.description === "Typed, not saved")).toBe(true));
+  });
+
+  it("a Stop pressed while the carried text saves waits for it, then stops the joined block (Codex r5 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    let releasePatch: (() => void) | undefined;
+    const patchPending = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const requests = server({
+      join: async () => { await joinPending; return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } }); },
+      bootstrap: () => response({ error: "down" }, 503)
+    });
+    mocks.clientFetch.mockImplementation(((original) => async (url: string, options?: RequestInit) => {
+      if (url === `/api/time-entries/${FIRST}`) {
+        const body = typeof options?.body === "string" ? JSON.parse(options.body) as Record<string, unknown> : undefined;
+        requests.push({ url, ...(body ? { body } : {}) });
+        await patchPending;
+        return response({ ok: true, id: FIRST, updatedAt: "2026-08-17T05:01:00.000Z" });
+      }
+      return original(url, options);
+    })(mocks.clientFetch.getMockImplementation()!));
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    await act(async () => { releaseJoin?.(); await joinPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${FIRST}`)).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(requests.some((request) => request.url === "/api/events")).toBe(false);
+    await act(async () => { releasePatch?.(); await patchPending; });
+    await waitFor(() => expect(requests.some((request) => request.url === "/api/events")).toBe(true));
+    const save = requests.findIndex((request) => request.url === `/api/time-entries/${FIRST}`);
+    const stop = requests.findIndex((request) => request.url === "/api/events");
+    expect(save).toBeLessThan(stop);
+    expect(requests[save].body).toMatchObject({ description: "Typed, not saved" });
+    expect(requests[stop].body).toEqual(expect.objectContaining({ rawPayload: { origin: "web_timer", stopScope: "entry", targetEntryId: FIRST } }));
+  });
+
+  function slowUndo(first: TimeEntryRow, options: { patch?: () => Promise<Response>; bootstrap?: () => Promise<Response> }) {
+    let releaseJoin: (() => void) | undefined;
+    const joinPending = new Promise<void>((resolve) => { releaseJoin = resolve; });
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    mocks.clientFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+      requests.push({ url, ...(body ? { body } : {}) });
+      if (url === "/api/time-entries" && body?.mode === "join") {
+        await joinPending;
+        return response({ ok: true, id: FIRST, replayed: false, running: true, entry: { ...first, stoppedAt: null } });
+      }
+      if (url === `/api/time-entries/${FIRST}`) return options.patch ? options.patch() : response({ ok: true, id: FIRST, updatedAt: "2026-08-17T05:01:00.000Z" });
+      if (url === "/api/events") return response({ eventId: "stop", stopOutcome: "stopped" }, 201);
+      if (url.startsWith("/api/bootstrap")) return options.bootstrap ? options.bootstrap() : response({ error: "down" }, 503);
+      if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+      return response({}, 500);
+    });
+    return { requests, release: async () => { await act(async () => { releaseJoin?.(); await joinPending; }); } };
+  }
+
+  it("saves text typed on during the Undo's slow reload once the reload ends, even when it fails (Codex r6 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    let releaseReload: (() => void) | undefined;
+    const reloadPending = new Promise<void>((resolve) => { releaseReload = resolve; });
+    let reloads = 0;
+    const undo = slowUndo(first, {
+      bootstrap: async () => { reloads += 1; if (reloads > 0) await reloadPending; return response({ error: "down" }, 503); }
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(undo.requests.some((request) => request.body?.mode === "join")).toBe(true));
+    await undo.release();
+    await waitFor(() => expect(reloads).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Type more" }));
+    await act(async () => { releaseReload?.(); await reloadPending; });
+    await waitFor(() => expect(undo.requests.some((request) => request.url === `/api/time-entries/${FIRST}` && request.body?.description === "Typed more")).toBe(true));
+  });
+
+  it("a Stop queued during the Undo still reports that the carried text was not saved (Codex r6 on #607)", async () => {
+    const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+    const second = entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+    const undo = slowUndo(first, {
+      patch: async () => response({ error: "changed", code: "time_entry_details_conflict", entry: { ...first, stoppedAt: null, description: "Elsewhere" } }, 409)
+    });
+    render(
+      <AppShellRuntimeProvider>
+        <PersistentTimerBar />
+        <Harness initial={bootstrap(second, [second, first])} />
+      </AppShellRuntimeProvider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${SECOND}@2026-08-17T04:30:00.000Z`));
+    fireEvent.click(screen.getByRole("button", { name: "Undo split" }));
+    await waitFor(() => expect(undo.requests.some((request) => request.body?.mode === "join")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await undo.release();
+    await waitFor(() => expect(undo.requests.some((request) => request.url === "/api/events")).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("error").textContent).toMatch(/^Stopped\./));
+  });
+
+  for (const action of ["Split", "Undo split"] as const) {
+    it(`saves edits typed while a failed ${action === "Split" ? "split" : "Undo"} reloads the day (Codex r7 on #607)`, async () => {
+      const first = entry({ id: FIRST, stoppedAt: "2026-08-17T04:30:00.000Z" });
+      const runningId = action === "Split" ? FIRST : SECOND;
+      const running = action === "Split" ? entry({ id: FIRST }) : entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z" });
+      let releaseReload: (() => void) | undefined;
+      const reloadPending = new Promise<void>((resolve) => { releaseReload = resolve; });
+      let reloads = 0;
+      const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+      mocks.clientFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+        requests.push({ url, ...(body ? { body } : {}) });
+        if (url === "/api/time-entries") return response({ error: "down" }, 503);
+        if (url === `/api/time-entries/${runningId}`) return response({ ok: true, id: runningId, updatedAt: "2026-08-17T05:01:00.000Z" });
+        if (url.startsWith("/api/bootstrap")) { reloads += 1; await reloadPending; return response({ error: "down" }, 503); }
+        if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+        return response({}, 500);
+      });
+      render(
+        <AppShellRuntimeProvider>
+          <Harness initial={bootstrap(running, action === "Split" ? [running] : [running, first])} />
+        </AppShellRuntimeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+      await waitFor(() => expect(screen.getByTestId("active").textContent).toContain(runningId));
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      await waitFor(() => expect(reloads).toBeGreaterThan(0));
+      fireEvent.click(screen.getByRole("button", { name: "Type more" }));
+      await act(async () => { releaseReload?.(); await reloadPending; });
+      await waitFor(() => expect(requests.some((request) => request.url === `/api/time-entries/${runningId}` && request.body?.description === "Typed more")).toBe(true));
+    });
+  }
+
   it("shows nothing running when the block had stopped by the time the split arrived", async () => {
     const running = entry({ id: FIRST });
     server({
-      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: false }, 201),
+      split: () => response({ ok: true, id: FIRST, newEntryId: SECOND, replayed: false, running: false, entries: [
+        { ...running, stoppedAt: "2026-08-17T04:30:00.000Z" },
+        entry({ id: SECOND, startedAt: "2026-08-17T04:30:00.000Z", stoppedAt: "2026-08-17T04:50:00.000Z" })
+      ] }, 201),
       bootstrap: () => response({ error: "down" }, 503)
     });
     render(
@@ -169,16 +427,23 @@ describe("AppShellRuntime split of the running block: Codex r1 on #607", () => {
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe(`${FIRST}@2026-08-17T04:00:00.000Z`));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
     await waitFor(() => expect(mocks.clientFetch.mock.calls.some(([url]) => String(url).startsWith("/api/bootstrap"))).toBe(true));
-    expect(screen.getByTestId("active").textContent).not.toContain(SECOND);
+    // Nothing runs: neither the second part nor the block it was split from (Codex r2 on #607).
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("idle"));
   });
 });
 
 function Harness({ initial }: { initial: BootstrapData }) {
-  const { data, hydrate, joinSplitTimer, splitActiveTimer } = useAppShellRuntime();
+  const { data, hydrate, joinSplitTimer, setTimerDraft, splitActiveTimer, timerDraft, timerError } = useAppShellRuntime();
+  const [undo, setUndo] = useState("");
   return <>
+    <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed, not saved" }))}>Type</button>
+    <output data-testid="undo">{undo}</output>
+    <output data-testid="draft">{timerDraft.description}</output>
+    <output data-testid="error">{timerError ?? ""}</output>
+    <button onClick={() => setTimerDraft((draft) => ({ ...draft, description: "Typed more" }))}>Type more</button>
     <button onClick={() => hydrate(initial)}>Hydrate</button>
     <button onClick={() => void splitActiveTimer(SPLIT_AT)}>Split</button>
-    <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND })}>Undo split</button>
+    <button onClick={() => void joinSplitTimer({ entryId: FIRST, newEntryId: SECOND }).then((outcome) => setUndo(outcome.ok ? "ok" : outcome.error))}>Undo split</button>
     <output data-testid="active">{data?.activeEntry ? `${data.activeEntry.id}@${data.activeEntry.startedAt}` : "idle"}</output>
   </>;
 }

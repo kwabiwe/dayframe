@@ -1,10 +1,11 @@
 // Location v4 step 14, iPhone part 3b: a suggestion is answered where it sits, on its row in Calendar ›
 // List, with exactly the effects the Review deck's "Log it" and "Skip" have. Both call the one rule here,
 // so a choice saves the same mutation wherever it is made.
-import { formatClockTime, placeQuestion, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
+import { formatClockTime, placeQuestion, timerTripClashQuestion, timerTripClashWords, type ClockFormat, type ReviewMutation } from "@dayframe/shared";
 import type { MobileReviewItem } from "./api";
 import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem } from "./review";
 import { reviewDeckOutingMutation } from "./reviewDeckOutings";
+import { keepableVenue } from "./venueGuessEligibility";
 import type { ReviewLogAsEdit } from "./reviewLogAs";
 
 /**
@@ -21,14 +22,39 @@ export type ReviewAnswerVenue = { name: string; street: string | null; applePlac
 export function reviewAnswerMutation(
   item: MobileReviewItem,
   logged: boolean,
-  options: { edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null } = {}
+  options: {
+    edit?: ReviewLogAsEdit | null; outingMemberIds?: readonly string[]; venue?: ReviewAnswerVenue | null;
+    /** Yes to a guessed venue with an activity picked under Logs as (Codex r1 on #620): recorded there once, as that activity. */
+    logAsCategoryId?: string | null;
+    logAsDescription?: string;
+  } = {}
 ): ReviewMutation {
+  // "A block ran into your trip" (location v4 design §7): End it accepts the proposal as it was shown (its hash), so
+  // a question that changed meanwhile is refused (409 `proposal_changed`); Keep it ignores it once, for good.
+  if (timerTripClashQuestion(item)) {
+    if (!logged) return { action: "ignore_once" };
+    const hash = timerTripClashProposalHash(item);
+    if (!hash) throw new Error("This question can't be answered on this iPhone yet. Refresh and try again.");
+    return { action: "accept", expectedProposalHash: hash };
+  }
   const edit = logged ? options.edit ?? null : null;
-  if (options.outingMemberIds?.length) return reviewDeckOutingMutation(options.outingMemberIds, logged, edit);
+  const logAsEdit = options.logAsCategoryId || options.logAsDescription ? {
+    categoryId: options.logAsCategoryId ?? null,
+    ...(options.logAsDescription ? { description: options.logAsDescription } : {})
+  } : null;
+  if (options.outingMemberIds?.length) {
+    // Yes to "Visited {Apple place}?" on an outing: the stay is recorded there once, its trips logged with it (#642).
+    // Only with an Apple Place ID (`keepableVenue`); Not now never carries one.
+    const applePlaceId = logged ? options.venue?.applePlaceId : null;
+    const venue = options.venue && applePlaceId ? { name: options.venue.name, applePlaceId } : null;
+    return reviewDeckOutingMutation(options.outingMemberIds, logged,
+      edit ?? (venue ? logAsEdit : null), venue);
+  }
   // Yes to "Visited {Apple place}?": the visit is recorded there once, as the editor's pick from Nearby does —
   // a one-time place, never a saved place or a rule (card B part 2).
   if (logged && options.venue && hasV2LocationEvidence(item)) {
-    return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}) };
+    return { action: "record_poi_once", name: options.venue.name, ...(options.venue.applePlaceId ? { applePlaceId: options.venue.applePlaceId } : {}),
+      ...(logAsEdit ? { edit: logAsEdit } : {}) };
   }
   if (edit) return { action: "edit_and_confirm", edit };
   if (logged) return hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" };
@@ -39,32 +65,43 @@ export function reviewAnswerMutation(
 export type ReviewAnswerQuestion = {
   question: string;
   detail: string | null;
-  /** Null when the suggestion has no complete window: the outbox refuses every answer without one. */
+  /**
+   * Null when the suggestion has no complete window, or has a change of its own waiting: the outbox refuses every
+   * answer then, and the List only says why (step 15: there is no Review screen to open it on).
+   */
   logLabel: string | null;
   skipLabel: string | null;
-  /** No complete window: it is answered on its own screen ("Open it") instead of here. */
-  opens: boolean;
-  /** A place can be picked or named on the suggestion's own screen ("More…"), a trip edited there ("Edit"). */
-  more: boolean;
-  /** The words on that button when they are not "More…". */
-  moreLabel?: string;
 };
+
+/** A clash item's proposal hash as the server sent it (bootstrap `proposalHash`), when it is a valid one. */
+export function timerTripClashProposalHash(item: Pick<MobileReviewItem, "proposalHash">) {
+  return typeof item.proposalHash === "string" && /^[a-f0-9]{64}$/.test(item.proposalHash) ? item.proposalHash : null;
+}
 
 export function reviewAnswerQuestion(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
   options: { outing?: boolean; pendingChange?: boolean; venue?: ReviewAnswerVenue | null } = {}
 ): ReviewAnswerQuestion {
-  const question = reviewAnswerWords(item, clockFormat, options);
-  // A waiting or rejected change of its own: the deck locks the card, so it opens instead (Codex r10 on #582).
-  if (options.pendingChange) {
-    return { ...question, detail: "A change to it is waiting or wasn't accepted, so it can't be answered here.", logLabel: null, skipLabel: null, more: false, opens: true };
+  const clash = timerTripClashQuestion(item);
+  if (clash) {
+    // On its block's sheet: the one Yes is End it (only with the proposal it is sent with: an older server's item has
+    // none, so it offers Keep it alone), and Keep it. Never "timer" in the words.
+    const words = timerTripClashWords(item, clash, null, clockFormat);
+    if (options.pendingChange) {
+      return { question: words.question, detail: "A change to it is waiting or wasn't accepted, so it can't be answered yet.", logLabel: null, skipLabel: null };
+    }
+    return { question: words.question, detail: null, logLabel: timerTripClashProposalHash(item) ? words.endLabel : null, skipLabel: words.keepLabel };
   }
-  // Every answer needs the whole window, as on the suggestion's deck card, which only moves such a card
-  // back (Codex r1 and r3 on #582): it opens on its own screen instead.
+  const question = reviewAnswerWords(item, clockFormat, options);
+  // A waiting or rejected change of its own: the deck locked the card (Codex r10 on #582); it can't be answered yet.
+  if (options.pendingChange) {
+    return { ...question, detail: "A change to it is waiting or wasn't accepted, so it can't be answered yet.", logLabel: null, skipLabel: null };
+  }
+  // Every answer needs the whole window, as the deck's card did (Codex r1 and r3 on #582): it can't be answered.
   return hasSuggestedTimeWindow(item)
     ? question
-    : { ...question, detail: "It has no complete time yet, so it can't be answered here.", logLabel: null, skipLabel: null, more: false, opens: true };
+    : { ...question, detail: "It has no complete time yet, so it can't be answered.", logLabel: null, skipLabel: null };
 }
 
 function reviewAnswerWords(
@@ -78,42 +115,39 @@ function reviewAnswerWords(
   const at = window ? `, ${window}` : "";
   const title = item.title?.trim() || "this";
   if (item.eventType === "health_sleep_import") {
-    return { question: `Log your sleep${at}?`, detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false };
+    return { question: `Log your sleep${at}?`, detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep" };
   }
   if (item.eventType === "health_workout_import") {
     const activity = item.categoryName?.trim() || "Workout";
-    return { question: `Log the workout${at}?`, detail: "From Apple Health.", logLabel: `Log as ${activity}`, skipLabel: "Not a workout", more: false, opens: false };
+    return { question: `Log the workout${at}?`, detail: "From Apple Health.", logLabel: `Log as ${activity}`, skipLabel: "Not a workout" };
   }
 
   // A trip asks by its own title, "Getting around, 14:44–16:31?" (card A, owner feedback 25 Oct): Yes logs it,
-  // Edit opens it on its own screen, Not now leaves it.
+  // Edit is its sheet's, Not now leaves it.
   if (item.eventType === "commute_detected") {
     const name = title === "this" ? "Getting around" : title;
     return { question: `${name}${at}?`, detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
-      logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
+      logLabel: "Yes", skipLabel: "Not now" };
   }
   // A place asks "Visited {guess}?" with its times, or "Where were you?" (card B): Yes confirms the place it
-  // names (an outing's trips there and back with it), Edit opens it on its own screen to pick or name another,
+  // names (an outing's trips there and back with it), Edit (its sheet) picks or names another,
   // Not now leaves it. With no guess, only Edit names it.
   // An unnamed visit with an Apple place the iPhone guessed nearby (card B part 2): "Visited {place}?", its
   // street and times under it; Yes records it there once.
-  if (!options.outing && options.venue && hasV2LocationEvidence(item)) {
+  if (keepableVenue(options.venue, Boolean(options.outing)) && options.venue && hasV2LocationEvidence(item)) {
     return { question: `Visited ${options.venue.name}?`, detail: [options.venue.street, window].filter(Boolean).join(" · ") || null,
-      logLabel: "Yes", skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false };
+      logLabel: "Yes", skipLabel: "Not now" };
   }
   if (options.outing || isLocationReviewItem(item)) {
     const { question, guess } = placeQuestion(item.title);
     const edit = hasV2LocationEvidence(item);
     // A place from before Location V2 has no editor to name it: it keeps "Log it" (Codex r1 on #594).
-    return { question, detail: window, logLabel: guess ? "Yes" : edit ? null : "Log it", skipLabel: "Not now", more: edit,
-      ...(edit ? { moreLabel: "Edit" } : {}), opens: false };
+    return { question, detail: window, logLabel: guess ? "Yes" : edit ? null : "Log it", skipLabel: "Not now" };
   }
   return {
     question: `Log ${title}${at}?`,
     detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
     logLabel: "Log it",
-    skipLabel: "Skip",
-    more: false,
-    opens: false
+    skipLabel: "Skip"
   };
 }

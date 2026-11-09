@@ -1,3 +1,4 @@
+import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -361,7 +362,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   return (
     <View
       onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.row.${entry.id}`, event)}
-      style={[styles.row, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
+      style={styles.row}>
       {replayable ? (
         <Reanimated.View
           accessibilityElementsHidden
@@ -461,6 +462,9 @@ export const TodayBlockRow = memo(function TodayBlockRow({
           </Pressable>
         </Reanimated.View>
       </GestureDetector>
+      {/* Last, so it draws above the opaque swipe surface; it belongs to the row, so it stays put while the
+          surface slides and after a cancelled swipe springs back. Past the block (a child row is indented 16). */}
+      {divider ? <InsetDivider color={theme.border} edge="top" start={child ? DIVIDER_INSET_PAST_BLOCK + 16 : DIVIDER_INSET_PAST_BLOCK} /> : null}
     </View>
   );
 });
@@ -485,7 +489,7 @@ function PartsStrip({ parts, theme }: { parts: { entry: Entry; seconds: number }
 const styles = StyleSheet.create({
   section: { gap: 10 },
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between" },
-  heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
+  heading: { flexShrink: 1, fontSize: 17, fontWeight: "600", letterSpacing: -0.2 },
   caption: { fontSize: 13 },
   card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
   empty: { gap: 2, minHeight: 64, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 10 },
@@ -493,17 +497,17 @@ const styles = StyleSheet.create({
   under: { alignItems: "center", bottom: 0, flexDirection: "row", gap: 8, left: 0, paddingHorizontal: 22, position: "absolute", right: 0, top: 0 },
   underLeft: { justifyContent: "flex-start" },
   underRight: { justifyContent: "flex-end" },
-  underText: { fontSize: 14, fontWeight: "800" },
+  underText: { fontSize: 14, fontWeight: "500" },
   main: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 64, paddingLeft: 14, paddingRight: 16, paddingVertical: 10 },
   mainChild: { minHeight: 56, paddingLeft: 30 },
   pressed: { opacity: 0.82 },
   count: { alignItems: "center", borderRadius: 14, height: 28, justifyContent: "center", minWidth: 28, paddingHorizontal: 6 },
-  countText: { fontSize: 13, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  countText: { fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] },
   blockSlot: { alignItems: "center", justifyContent: "center", width: ROW_BLOCK.width },
   text: { flex: 1, minWidth: 0 },
-  title: { fontSize: 15, fontWeight: "700" },
+  title: { fontSize: 15, fontWeight: "500" },
   meta: { fontSize: 12.5, fontVariant: ["tabular-nums"] },
-  duration: { fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "700" },
+  duration: { fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "600" },
   strip: { flexDirection: "row", gap: 2, height: 4, marginTop: 6 },
   stripPart: { borderRadius: 2, flexBasis: 0, minWidth: 4 },
 });

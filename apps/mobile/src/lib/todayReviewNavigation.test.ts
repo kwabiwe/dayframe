@@ -5,13 +5,15 @@ import type { TodayActivity } from "./todayReviewPresentation";
 const id = "10000000-0000-4000-8000-000000000001";
 
 describe("todayReviewNavigationTarget", () => {
-  it("routes each source to its exact existing destination", () => {
+  it("opens a suggestion's \"?\" in Calendar › List, and an older needs-review entry today's List (step 15)", () => {
     expect(todayReviewNavigationTarget(activity({ source: { kind: "review", reviewItemId: id }, reviewSourceKind: "generic" })))
-      .toEqual({ kind: "generic_review", pathname: "/review", params: { focusReviewId: id } });
+      .toEqual({ kind: "check", reviewItemId: id });
     expect(todayReviewNavigationTarget(activity({ source: { kind: "review", reviewItemId: id }, reviewSourceKind: "location_v2" })))
-      .toEqual({ kind: "location_evidence", pathname: "/review/[id]", params: { from: "today", id } });
+      .toEqual({ kind: "check", reviewItemId: id });
     expect(todayReviewNavigationTarget(activity({ source: { kind: "legacy_review_entry", entryId: id } })))
-      .toEqual({ kind: "legacy_entry", pathname: "/review", params: { focusEntryId: id } });
+      .toEqual({ kind: "today_checks" });
+    // Nothing routes to the removed Review screens.
+    expect(JSON.stringify(todayReviewNavigationTarget(activity()))).not.toContain("/review");
   });
 
   it("keeps unresolved saved intent in existing diagnostics and never guesses an invalid ID", () => {

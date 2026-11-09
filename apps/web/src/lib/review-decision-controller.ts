@@ -56,6 +56,12 @@ export type ReviewDecisionState = {
 /** "gone": decided elsewhere; hidden until the data drops it, but not this visit's decision. */
 type Active = { decision: ReviewDecision; status: "saving" | "saved" | "gone" };
 
+/** What a decision's label is about: "Logged Lunch" → "Lunch"; "Ended Team sync at 09:42" → "Team sync". */
+function decisionSubject(label: string) {
+  if (/^Ended /.test(label)) return label.replace(/^Ended /, "").replace(/ at [^ ]+( [AP]M)?$/, "");
+  return label.replace(/^(Logged|Skipped|Kept) /, "");
+}
+
 export class ReviewDecisionController {
   private active = new Map<number, Active>();
   private error: string | null = null;
@@ -152,6 +158,31 @@ export class ReviewDecisionController {
   }
 
   /**
+   * Items the server resolved another way (a correction's receipt, or an answer from the Grid; Codex r6 on #609):
+   * a held decision for one is dropped without restoring it, and one saving can no longer restore it on failure.
+   * Both stay hidden until fresh data no longer lists the item, so Undo has nothing to bring back.
+   */
+  settleResolved(itemIds: Iterable<string>) {
+    const ids = new Set(itemIds);
+    let changed = false;
+    if (this.pending && ids.has(this.pending.itemId)) {
+      const decision = this.pending;
+      this.clearTimer();
+      this.pending = null;
+      this.startNoticeExit(decision.token);
+      this.active.set(decision.token, { decision, status: "gone" });
+      changed = true;
+    }
+    for (const [token, active] of this.active) {
+      if (active.status === "saving" && ids.has(active.decision.itemId)) {
+        this.active.set(token, { decision: active.decision, status: "gone" });
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  /**
    * A saved decision stays hidden until fresh data no longer lists its item, so a stale snapshot
    * never flashes the card back.
    */
@@ -187,13 +218,15 @@ export class ReviewDecisionController {
           this.active.set(decision.token, { decision, status: "gone" });
         } else {
           this.active.delete(decision.token);
-          this.error = `“${decision.label.replace(/^(Logged|Skipped) /, "")}” changed, so it was not saved. Review it again.`;
+          this.error = `“${decisionSubject(decision.label)}” changed, so it was not saved. Review it again.`;
           this.markRestored(decision.itemId);
         }
         this.emit();
       })
       .catch((error: unknown) => {
-        if (!this.active.has(decision.token)) return;
+        // Settled meanwhile (saved, decided elsewhere, or resolved by another receipt): final, so a late failure of
+        // its request neither brings it back nor reports an error (Codex r7 on #609).
+        if (this.active.get(decision.token)?.status !== "saving") return;
         this.active.delete(decision.token);
         this.error = error instanceof Error && error.message
           ? `${error.message} It’s back in the queue.`

@@ -9,11 +9,8 @@ describe("connectivity status ownership", () => {
     const content = [
       source("./ActiveTimerEditSheet.tsx"),
       source("./DateSheet.tsx"),
-      source("./OverflowMenu.tsx"),
       source("../../app/place-editor.tsx"),
       source("../../app/places.tsx"),
-      source("../../app/review.tsx"),
-      source("../../app/review/[id].tsx"),
       source("../../app/settings.tsx")
     ].join("\n");
 
@@ -95,8 +92,9 @@ describe("connectivity status ownership", () => {
     expect(settings).toContain("Couldn't stop the block");
     expect(settings).toContain("retryTimerStopSyncIssue");
     expect(settings).toContain("discardTimerStopSyncIssue");
-    // Each rejected Stop keeps its own Try again and Discard (Sync help › Needs attention).
-    expect(settings).toContain('accessibilityLabel="Try stopping the block again"');
+    // Normal Stops can retry. A Stop whose Split was refused shows the tap and reason with Discard.
+    expect(settings).toContain('{issue.refusedSplit ? null : <SettingsPillButton accessibilityLabel="Try stopping the block again"');
+    expect(settings).toContain('${formatQueueTime(issue.occurredAt, clockFormat)}. ${issue.lastError}');
     expect(settings).toContain('accessibilityLabel="Discard this Stop"');
     expect(settings).toContain("onPress={() => retryTimerStopIssue(issue.clientEventId)}");
     expect(settings).toContain("onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)}");

@@ -753,6 +753,127 @@ public struct DayframeCalendarPinchStart: Equatable {
   }
 }
 
+/// The header's Today pill, tapped on today: where the Grid's one scroll owner goes, and when it goes.
+/// JS sends a new request number; only the scroll coordinator moves the timeline.
+public enum DayframeCalendarScrollToNowMath {
+  /// Now sits a third of the way down the viewport, so the coming hours are the larger part of the view.
+  public static let viewportAnchor = 1.0 / 3.0
+
+  public static func minuteOfDay(milliseconds: Double, calendar: Calendar = .current) -> Double {
+    guard milliseconds.isFinite else { return 0 }
+    let components = calendar.dateComponents(
+      [.hour, .minute, .second],
+      from: Date(timeIntervalSince1970: milliseconds / 1000)
+    )
+    return Double(components.hour ?? 0) * 60
+      + Double(components.minute ?? 0)
+      + Double(components.second ?? 0) / 60
+  }
+
+  public static func contentOffset(minuteOfDay: Double, hourHeight: Double, viewportHeight: Double) -> Double {
+    let minute = min(24 * 60, max(0, minuteOfDay.isFinite ? minuteOfDay : 0))
+    let viewport = max(0, viewportHeight.isFinite ? viewportHeight : 0)
+    let nowY = minute / 60 * DayframeCalendarZoomMath.clampHourHeight(hourHeight)
+    return DayframeCalendarZoomMath.clampContentOffset(
+      nowY - viewport * viewportAnchor,
+      hourHeight: hourHeight,
+      viewportHeight: viewport
+    )
+  }
+
+  /// What a waiting request does now. Off today, or with a finger owning the timeline (a drag, a pinch or a
+  /// create drag), it is dropped; with no viewport yet it waits; otherwise it runs. A finger arriving after it
+  /// runs stops the scroll itself.
+  public static func decision(
+    selectedDayKey: String,
+    todayKey: String,
+    viewportHeight: Double?,
+    fingerOnTimeline: Bool
+  ) -> DayframeCalendarScrollToNowDecision {
+    guard !selectedDayKey.isEmpty, selectedDayKey == todayKey, !fingerOnTimeline else { return .drop }
+    guard let viewportHeight, viewportHeight.isFinite, viewportHeight > 0 else { return .wait }
+    return .run
+  }
+}
+
+/// One light tick per day a swipe changes, thinned for very fast swipes (the JavaScript List's gate in
+/// `daySwipeHaptic.ts` uses the same interval).
+public struct DayframeCalendarDaySwipeTickGate: Equatable {
+  public static let minimumInterval: TimeInterval = 0.12
+  private var lastTick: TimeInterval?
+
+  public init() {}
+
+  public mutating func shouldTick(at now: TimeInterval) -> Bool {
+    if let lastTick, now - lastTick < Self.minimumInterval, now >= lastTick { return false }
+    lastTick = now
+    return true
+  }
+}
+
+public enum DayframeCalendarScrollToNowDecision: Equatable {
+  case drop
+  case run
+  case wait
+}
+
+/// Which scroll-to-now request is outstanding. Starts from the number already in the model, so a request made
+/// before this timeline existed never replays; a newer one waits here until it can run, and runs once.
+public struct DayframeCalendarScrollToNowGate: Equatable {
+  public private(set) var handledRequest: Int
+  public private(set) var isWaiting = false
+
+  public init(baseline: Int) {
+    handledRequest = baseline
+  }
+
+  public mutating func receive(_ request: Int) {
+    guard request != handledRequest else { return }
+    handledRequest = request
+    isWaiting = true
+  }
+
+  public mutating func resolve(_ decision: DayframeCalendarScrollToNowDecision) -> Bool {
+    guard isWaiting else { return false }
+    switch decision {
+    case .run:
+      isWaiting = false
+      return true
+    case .drop:
+      isWaiting = false
+      return false
+    case .wait:
+      return false
+    }
+  }
+
+  public mutating func cancel() {
+    isWaiting = false
+  }
+}
+
+struct DayframeCalendarTapSequence<Touch: Hashable> {
+  private var activeTouches: Set<Touch> = []
+  private(set) var allowsActivation = true
+
+  mutating func begin(_ touches: Set<Touch>) {
+    if activeTouches.isEmpty { allowsActivation = true }
+    activeTouches.formUnion(touches)
+    if activeTouches.count > 1 { allowsActivation = false }
+  }
+
+  mutating func end(_ touches: Set<Touch>, cancelled: Bool = false) -> Bool {
+    activeTouches.subtract(touches)
+    if cancelled { allowsActivation = false }
+    return activeTouches.isEmpty
+  }
+
+  mutating func interrupt() {
+    if !activeTouches.isEmpty { allowsActivation = false }
+    activeTouches.removeAll()
+  }
+}
+
 public enum DayframeCalendarZoomMath {
   public static func clampHourHeight(_ value: Double) -> Double {
     min(
@@ -1063,6 +1184,12 @@ public enum DayframeCalendarBlockMath {
       startsBeforeDay: startedAtMs < dayStartMs,
       top: (startMinute / 60.0) * safeHourHeight
     )
+  }
+
+  /// A time's minute on the day's wall clock, as a block's top and bottom are placed (a clock change keeps its
+  /// wall-clock place); the day's end is minute 1440.
+  public static func wallClockMinute(milliseconds: Double, dayEndMs: Double, calendar: Calendar = .current) -> Double {
+    localMinute(milliseconds: milliseconds, dayEndMs: dayEndMs, calendar: calendar)
   }
 
   private static func localMinute(
@@ -1700,6 +1827,86 @@ public enum DayframeCalendarMomentMath {
   }
 }
 
+/// The Places lane (location v4 step 17): its width left of the blocks, and its items' touch targets, shared by
+/// the entries layer (where it draws and places each button) and the scroll coordinator (where a long press must
+/// not start a new block) (Codex r1 on #610).
+public enum DayframeCalendarPlacesLaneMath {
+  /// The room the lane takes left of the blocks (the presentation's entryLeadingInset).
+  public static let width = 52.0
+  /// An item's drawn width inside the lane.
+  public static let itemWidth = width - 6
+  /// Every item is at least this tall to touch (AGENTS: 44-point targets), grown evenly about the item.
+  public static let targetHeight = 44.0
+
+  /// Where the lane's items start: where the blocks would, past the hour labels.
+  public static func minX(hourLabelWidth: Double) -> Double { hourLabelWidth + 8 }
+
+  /// Each item's target, in the order given: a full 44 × 44-point square (the item's width is wider), centred on
+  /// the item's drawn span, or the span itself when taller, kept inside the day (Codex r2 on #610). Neighbours closer
+  /// than that overlap; `hitIndex` decides which one a touch is for.
+  public static func hitFrames(spans: [DayframeCalendarBracketSpan], hourLabelWidth: Double, timelineHeight: Double) -> [DayframeCalendarHitFrame] {
+    let minX = minX(hourLabelWidth: hourLabelWidth)
+    return spans.map { span in
+      let height = max(targetHeight, span.height)
+      var minY = span.top + span.height / 2 - height / 2
+      minY = min(max(0, minY), max(0, timelineHeight - height))
+      return DayframeCalendarHitFrame(minX: minX, maxX: minX + itemWidth, minY: minY, maxY: minY + height)
+    }
+  }
+
+  /// The one arbitration for a touch on the lane, shared by its buttons and the scroll coordinator: of the items
+  /// whose target holds the point, the one whose drawn centre is nearest (the earlier on a tie); nil when none.
+  public static func hitIndex(point: DayframeCalendarPoint, spans: [DayframeCalendarBracketSpan], frames: [DayframeCalendarHitFrame]) -> Int? {
+    var best: (index: Int, distance: Double)?
+    for (index, frame) in frames.enumerated() where index < spans.count && frame.contains(point) {
+      let distance = abs(point.y - (spans[index].top + spans[index].height / 2))
+      if best == nil || distance < best!.distance { best = (index, distance) }
+    }
+    return best?.index
+  }
+}
+
+/// A trip block's leg strip (location v4 step 16): each leg clipped to the part of the trip this day draws, and
+/// placed by that day-clipped span, so a trip across midnight shows only this day's legs (Codex r1 on #610).
+public enum DayframeCalendarLegStripMath {
+  public struct Segment: Equatable {
+    public let index: Int
+    public let top: Double
+    public let height: Double
+  }
+
+  /// Segments inside a strip `height` tall (2 points of inset at each end), for the block from `startedAtMs` to
+  /// `stoppedAtMs` drawn on the day from `dayStartMs` to `dayEndMs`. Each leg's ends are placed on the day's wall
+  /// clock, as the block's own top and bottom are (`DayframeCalendarBlockMath.wallClockMinute`), so a clock change
+  /// inside the trip moves its legs with the block (Codex r2 on #610). A leg not on this day has no segment.
+  public static func segments(
+    legs: [(startedAtMs: Double, stoppedAtMs: Double)],
+    startedAtMs: Double,
+    stoppedAtMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    height: Double,
+    calendar: Calendar = .current
+  ) -> [Segment] {
+    let fromMs = max(startedAtMs, dayStartMs)
+    let toMs = min(stoppedAtMs, dayEndMs)
+    guard toMs > fromMs, height.isFinite else { return [] }
+    let minute = { (ms: Double) in DayframeCalendarBlockMath.wallClockMinute(milliseconds: ms, dayEndMs: dayEndMs, calendar: calendar) }
+    let top = minute(fromMs)
+    let span = max(1, minute(toMs) - top)
+    let usable = max(0, height - 4)
+    return legs.enumerated().compactMap { index, leg in
+      let start = max(fromMs, leg.startedAtMs)
+      let end = min(toMs, leg.stoppedAtMs)
+      guard end > start else { return nil }
+      // Inside a repeated hour the wall clock can step back: a leg never starts above the block or ends below it.
+      let startY = min(max(0, (minute(start) - top) / span), 1)
+      let endY = min(max(startY, (minute(end) - top) / span), 1)
+      return Segment(index: index, top: startY * usable + 2, height: max(2, (endY - startY) * usable - 1))
+    }
+  }
+}
+
 public struct DayframeCalendarBracketSpan: Equatable {
   public let top: Double
   public let height: Double
@@ -1711,6 +1918,38 @@ public struct DayframeCalendarBracketSpan: Equatable {
 }
 
 public enum DayframeCalendarBracketMath {
+  public static let labelLineHeight = 12.0
+
+  public static func hourLabelCenter(hour: Int, hourHeight: Double) -> Double {
+    min(24 * hourHeight - 11, max(11, Double(hour) * hourHeight))
+  }
+
+  /// Fits the decorative name into the first gap between clock labels within its rail.
+  public static func labelPlacement(
+    in span: DayframeCalendarBracketSpan,
+    hourHeight: Double,
+    hourLabelGlyphHeight: Double
+  ) -> (offset: Double, maxLines: Int)? {
+    let bottom = span.top + span.height - 2
+    var top = span.top + 2
+    guard bottom.isFinite, top.isFinite, hourHeight.isFinite, hourHeight > 0,
+          hourLabelGlyphHeight.isFinite, bottom - top >= labelLineHeight else { return nil }
+    let hourLabelClearance = max(0, hourLabelGlyphHeight) / 2 + 4
+
+    for hour in 0...24 {
+      let center = hourLabelCenter(hour: hour, hourHeight: hourHeight)
+      guard center + hourLabelClearance > top else { continue }
+      let gapEnd = min(bottom, center - hourLabelClearance)
+      if gapEnd - top >= labelLineHeight {
+        return (top - span.top, Int((gapEnd - top) / labelLineHeight))
+      }
+      top = center + hourLabelClearance
+      guard bottom - top >= labelLineHeight else { return nil }
+    }
+
+    return (top - span.top, Int((bottom - top) / labelLineHeight))
+  }
+
   /// A named pattern's bracket (location v3 PR 14b) runs from its first part's drawn top to its last
   /// part's drawn bottom: each part measured as the block it is (its minimum height, a clock change's
   /// wall-clock place), never the trip as one block, so it stays beside its parts at every zoom.

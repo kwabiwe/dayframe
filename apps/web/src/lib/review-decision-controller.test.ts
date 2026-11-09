@@ -127,4 +127,24 @@ describe("ReviewDecisionController", () => {
     await vi.advanceTimersByTimeAsync(REVIEW_DECISION_UNDO_MS);
     expect(commits).toHaveLength(1);
   });
+  it("keeps a decision settled by another receipt final: its request failing later restores nothing and says nothing (Codex r7 on #609)", async () => {
+    vi.useFakeTimers();
+    let state: ReviewDecisionState | null = null;
+    let fail: (error: Error) => void = () => undefined;
+    const controller = new ReviewDecisionController((next) => { state = next; }, () => "id-1");
+    controller.setCommit(() => new Promise((_, reject) => { fail = reject; }));
+    controller.decide(request("a", "skip"));
+    // Sent at once (leaving the List), then the Grid's Logs as resolves it.
+    controller.flush();
+    controller.settleResolved(["a"]);
+    // The original request fails afterwards.
+    fail(new Error("Offline."));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state!.error).toBeNull();
+    expect(state!.restored).toBeNull();
+    expect(state!.hiddenIds.has("a")).toBe(true);
+    // And Undo has nothing to bring back.
+    controller.undo();
+    expect(state!.hiddenIds.has("a")).toBe(true);
+  });
 });

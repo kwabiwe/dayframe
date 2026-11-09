@@ -34,7 +34,9 @@ describe("web Settings contracts", () => {
     const order = ['label: "Midnight"', 'label: "Daylight"', 'label: "System"'].map((label) => themeSource.indexOf(label));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(themeSource).toContain('label="Appearance"');
+    // The card is Appearance; its row is Theme (UI review W15, owner 29 Oct 2026: no "Appearance › Appearance").
+    expect(themeSource).toContain('label="Theme"');
+    expect(themeSource).toContain('ariaLabel="Theme"');
     expect(themeSource).toContain('value: "system"');
     expect(themeSource).toContain('value: "light"');
     expect(themeSource).toContain('value: "dark"');
@@ -100,7 +102,8 @@ describe("web Settings contracts", () => {
   });
 
   it("keeps Settings rows inset and the mobile account trigger at 44 pixels", () => {
-    expect(globalStyles).toMatch(/\.settings-group \.ui-settings-row \+ \.ui-settings-row::before \{[^}]*left: 52px;[^}]*right: 18px;/s);
+    // Inset on both sides through the shared row-divider values (owner rule, 28 Oct 2026).
+    expect(globalStyles).toMatch(/\.settings-group \.ui-settings-row \+ \.ui-settings-row::before \{[^}]*--divider-inset: 18px;[^}]*--divider-inset-start: 52px;/s);
     expect(globalStyles).toMatch(/\.df-mtop-button,\s*\.df-mtop-avatar \{[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;/s);
   });
 

@@ -32,9 +32,9 @@ describe("buttons (web UI audit P3)", () => {
   it("draws every button pill with the df-rbtn geometry (WUI-012)", () => {
     for (const selector of [".df-rbtn", ".ui-button"]) {
       expect(rule(selector), selector).toMatch(/padding: 0 16px;/);
-      expect(rule(selector), selector).toMatch(/font-weight: 700;/);
+      expect(rule(selector), selector).toMatch(/font-weight: var\(--fw-medium\);/);
     }
-    expect(styles).toMatch(/\.calendar-compact-save,\n\.calendar-compact-cancel \{[^}]*padding: 0 16px;[^}]*font-weight: 700;/);
+    expect(styles).toMatch(/\.calendar-compact-save,\n\.calendar-compact-cancel \{[^}]*padding: 0 16px;[^}]*font-weight: var\(--fw-medium\);/);
   });
 
   it("keeps Cancel a ghost button", () => {

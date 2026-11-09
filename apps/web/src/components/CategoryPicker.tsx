@@ -32,8 +32,10 @@ import {
   FloatingList,
   FloatingListActivityOption,
   FloatingListSearch,
-  restoreFocusIfDropped
+  restoreFocusIfDropped,
+  type FloatingListActivity
 } from "@/components/FloatingList";
+import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention } from "@/lib/command-parse";
 
@@ -54,6 +56,7 @@ export function CategoryPicker({
   onOpenChange,
   onSelect,
   open,
+  panelWidth,
   portal: portalProp = false,
   scope,
   selectedId,
@@ -66,8 +69,13 @@ export function CategoryPicker({
    * Description, where the typed `@` list opens), and becomes the phone sheet under it.
    */
   anchorRef?: RefObject<HTMLElement | null>;
+  /**
+   * Proposed (UI review round 2): the list's fixed width, under its own trigger, the same as the timer bar's other
+   * floating lists (Tags, Suggestions), instead of the Description's width.
+   */
+  panelWidth?: number;
   ariaLabelledBy?: string;
-  categories: CategoryRow[];
+  categories: readonly FloatingListActivity[];
   className?: string;
   disabled?: boolean;
   label?: string;
@@ -132,6 +140,7 @@ export function CategoryPicker({
   const searchable = variant === "more" || blockPanel;
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchFocusRing = useKeyboardFocusRing();
   const selectedCategory = categories.find((category) => category.id === selectedId) ?? null;
   const trimmedQuery = query.trim();
   const listedCategories = useMemo(() => {
@@ -293,7 +302,15 @@ export function CategoryPicker({
   useLayoutEffect(() => {
     if (!open || !portal) return undefined;
 
+    // A scaled dialog temporarily contains fixed descendants. Wait for its entrance before
+    // positioning the list in viewport coordinates, or focusing search can scroll the dialog.
+    const entrance = listPanel ? triggerRef.current?.closest("dialog")?.getAnimations?.().find(
+      (animation) => animation.playState === "running" && "animationName" in animation && animation.animationName === "ui-dialog-in"
+    ) : undefined;
+    let waiting = Boolean(entrance);
+    let disposed = false;
     function updatePosition() {
+      if (waiting || disposed) return;
       const trigger = triggerRef.current;
       const root = rootRef.current;
       const menu = menuRef.current;
@@ -307,13 +324,13 @@ export function CategoryPicker({
       const margin = 12;
       const gap = 6;
       // The block's Activities list lines up with the Description field, where `@` opens it.
-      const anchor = blockPanel ? anchorRef?.current ?? root : null;
+      const anchor = blockPanel && !panelWidth ? anchorRef?.current ?? root : null;
       const triggerRect = (anchor ?? trigger).getBoundingClientRect();
       const rootRect = (anchor ?? root).getBoundingClientRect();
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
       // The "All activities" chip is narrow; its menu takes a comfortable width of its own.
       const width = Math.min(
-        blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width,
+        panelWidth ?? (blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width),
         availableWidth
       );
       // The typed lists' 19rem plus the search field (22.5rem), so as many rows show; they scroll inside.
@@ -344,7 +361,15 @@ export function CategoryPicker({
       });
     }
 
-    updatePosition();
+    if (entrance) {
+      const finish = () => {
+        waiting = false;
+        updatePosition();
+      };
+      void entrance.finished.then(finish, finish);
+    } else {
+      updatePosition();
+    }
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
     if (rootRef.current) observer?.observe(rootRef.current);
     if (menuRef.current) observer?.observe(menuRef.current);
@@ -353,13 +378,21 @@ export function CategoryPicker({
     window.visualViewport?.addEventListener("resize", updatePosition);
     window.visualViewport?.addEventListener("scroll", updatePosition);
     return () => {
+      disposed = true;
       observer?.disconnect();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [anchorRef, blockPanel, listPanel, open, portal, searchable, triggerRef]);
+  }, [anchorRef, blockPanel, listPanel, open, panelWidth, portal, searchable, triggerRef]);
+
+  const listVisible = listPanel && open && (!portal || portalPosition !== null);
+  useEffect(() => {
+    if (!listVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => searchRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [listVisible]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -400,8 +433,7 @@ export function CategoryPicker({
     setActiveIndex(focus === "last" ? (listPanel ? fullCount : optionValues.length) - 1 : searchable ? fullIndex : selectedIndex);
     setQuery("");
     onOpenChange(true);
-    // The block's list keeps focus in its search field (the combobox); ↑/↓ move the highlight.
-    if (searchable && (!focus || listPanel)) window.requestAnimationFrame(() => searchRef.current?.focus());
+
     if (focus && !listPanel) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
@@ -656,6 +688,17 @@ export function CategoryPicker({
     }
   }
 
+  function dismissCreateLayer(restoreIconFocus: boolean) {
+    if (isColorMenuOpen) {
+      closeColorMenu(true);
+    } else if (isIconGridOpen) {
+      setIsIconGridOpen(false);
+      if (restoreIconFocus) iconTriggerRef.current?.focus();
+    } else {
+      cancelCreate();
+    }
+  }
+
   function createInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -665,15 +708,14 @@ export function CategoryPicker({
       event.preventDefault();
       event.stopPropagation();
       event.nativeEvent.stopImmediatePropagation();
-      // With the icon choices open, Escape closes them and keeps the draft (Codex r2 on #593).
-      if (isIconGridOpen) setIsIconGridOpen(false);
-      else cancelCreate();
+      // The inner palette owns Escape even before its deferred focus has landed.
+      dismissCreateLayer(false);
     }
   }
 
   const wrapperClass = menuVariant === "timer"
     ? `swiss-category-field ${className}`.trim()
-    : `calendar-compact-category-field ${className}`.trim();
+    : `${variant === "more" ? "df-all-activities-field" : "calendar-compact-category-field"} ${className}`.trim();
   const menuClass = menuVariant === "timer"
     ? `ui-floating-surface swiss-category-menu${open ? " is-open" : ""}`
     : "calendar-compact-category-menu";
@@ -691,13 +733,7 @@ export function CategoryPicker({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
-              // Escape closes the icon choices first and keeps the draft (Codex r1 on #593).
-              if (isIconGridOpen) {
-                setIsIconGridOpen(false);
-                iconTriggerRef.current?.focus();
-                return;
-              }
-              cancelCreate();
+              dismissCreateLayer(true);
             }}
             role="dialog"
           >
@@ -879,6 +915,7 @@ export function CategoryPicker({
           ref={assignTrigger}
           type="button"
         >
+          <DayframeIcon glyph="search" size={16} />
           All activities
           <span aria-hidden="true" className="df-tnum">{categories.length}</span>
         </button>
@@ -926,7 +963,7 @@ export function CategoryPicker({
         heading="Activities"
         hints={FLOATING_LIST_HINTS.activities}
         id={menuId}
-        isOpen={open}
+        isOpen={listVisible}
         onBlur={closeOnFocusLeave}
         // A Create being saved holds the list open (as Escape, a press outside and the block do), so
         // its outcome — the new activity or the error beside the kept name — is always seen.
@@ -1021,6 +1058,8 @@ export function CategoryPicker({
               aria-label="Search activities"
               autoComplete="off"
               className="ui-control category-picker-search"
+              data-focus-ring={searchFocusRing.focusRing}
+              {...searchFocusRing.handlers}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setActiveIndex(0);
@@ -1144,7 +1183,7 @@ function CategoryOption({
   variant
 }: {
   active: boolean;
-  category: CategoryRow | null;
+  category: FloatingListActivity | null;
   onFocus: () => void;
   onSelect: () => void;
   selected: boolean;

@@ -119,7 +119,7 @@ describe("TodayRibbon", () => {
     const { tree, onOpenBlock } = render();
     const track = () => tree.root.findByProps({ testID: "today-ribbon-track" });
     expect(track().props.accessibilityRole).toBe("adjustable");
-    expect(track().props.accessibilityValue.text).toBe("2 blocks, 1 waiting for review. Swipe up or down to step through them.");
+    expect(track().props.accessibilityValue.text).toBe("2 blocks, 1 to check. Swipe up or down to step through them.");
     act(() => track().props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }));
     expect(track().props.accessibilityValue.text).toBe("Deep work, 06:00 to 09:00, 3 hours");
     act(() => track().props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }));

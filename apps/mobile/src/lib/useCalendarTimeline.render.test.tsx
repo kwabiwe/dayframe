@@ -7,7 +7,7 @@ vi.mock("react", async () => {
   return import("../../../../node_modules/react/index.js");
 });
 
-import { useCalendarTimeline } from "./useCalendarTimeline";
+import { useCalendarTimelineSnapshot } from "./useCalendarTimeline";
 
 // Location v4 step 9 (Codex r1 on #570): synthetic days, no places.
 const day = (date: string, id = date): LocationTimeline =>
@@ -26,17 +26,35 @@ function harness(initial: { dayKey: string; owner: string | null; refreshKey?: u
     reads.push({ dayKey, signal: options.signal, reply });
     return reply.promise;
   });
-  const seen: Array<LocationTimeline | null> = [];
+  const seen: Array<ReturnType<typeof useCalendarTimelineSnapshot>> = [];
   function Probe(props: { dayKey: string; owner: string | null; refreshKey?: unknown }) {
-    seen.push(useCalendarTimeline({ enabled: true, fetchTimeline, refreshKey: props.refreshKey ?? 0, ...props }));
+    seen.push(useCalendarTimelineSnapshot({ enabled: true, fetchTimeline, refreshKey: props.refreshKey ?? 0, ...props }));
     return null;
   }
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<Probe {...initial} />); });
-  return { reads, latest: () => seen[seen.length - 1], update: (props: Parameters<typeof Probe>[0]) => act(() => tree.update(<Probe {...props} />)) };
+  return { reads, latest: () => seen[seen.length - 1].timeline, loading: () => seen[seen.length - 1].loading, unmount: () => act(() => tree.unmount()), update: (props: Parameters<typeof Probe>[0]) => act(() => tree.update(<Probe {...props} />)) };
 }
 
 describe("useCalendarTimeline (location v4 step 9)", () => {
+  it("limits the first display wait even if a refresh restarts the read", () => {
+    vi.useFakeTimers();
+    const view = harness({ dayKey: "2026-10-22", owner: "w:u", refreshKey: 1 });
+    try {
+      expect(view.loading()).toBe(true);
+      act(() => { vi.advanceTimersByTime(700); });
+      view.update({ dayKey: "2026-10-22", owner: "w:u", refreshKey: 2 });
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(view.loading()).toBe(false);
+      expect(view.latest()).toBeNull();
+      view.update({ dayKey: "2026-10-23", owner: "w:u", refreshKey: 2 });
+      expect(view.loading()).toBe(true);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("never lets a superseded read land over a newer one, even when it finishes last", async () => {
     const view = harness({ dayKey: "2026-10-22", owner: "w:u", refreshKey: 1 });
     view.update({ dayKey: "2026-10-22", owner: "w:u", refreshKey: 2 });

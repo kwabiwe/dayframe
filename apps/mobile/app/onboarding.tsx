@@ -3,6 +3,7 @@
 // Each permission explains itself before iOS asks, every step can wait ("Not now" / "Later"),
 // and nothing here starts a timer or logs time. The screen owns permissions and the step state;
 // `src/lib/onboarding.ts` holds the order and the words.
+import { InsetDivider } from "../src/components/InsetDivider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
@@ -352,7 +353,7 @@ export default function OnboardingScreen() {
         return;
       }
       // The categories Health imports log as, as Settings prepares them; bounded, and not fatal:
-      // suggestions still reach Review without them.
+      // suggestions are still asked in Calendar without them.
       const kinds = [pick.sleep ? "sleep" as const : null, pick.workouts ? "health" as const : null].filter((kind) => kind !== null);
       await Promise.race([
         ensureAutomaticLoggingCategories(kinds).catch(() => undefined),
@@ -364,7 +365,7 @@ export default function OnboardingScreen() {
     });
   }
 
-  // The evening Review reminder: iOS asks once; the reminder itself is this account's choice.
+  // The evening reminder of things to check: iOS asks once; the reminder itself is this account's choice.
   function turnOnReminders() {
     void run(async (epoch) => {
       const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
@@ -534,7 +535,7 @@ export default function OnboardingScreen() {
           {content.lede ? (
             <Text {...mobileTextProps("body")} style={[styles.lede, { color: theme.textSecondary }]}>{content.lede}</Text>
           ) : null}
-          {step === "location" && answers.locationStage === "explain" && !answers.location ? <ReviewPreview theme={theme} /> : null}
+          {step === "location" && answers.locationStage === "explain" && !answers.location ? <CalendarPreview theme={theme} /> : null}
           {step === "motion" && !answers.motion ? <MotionPreview theme={theme} /> : null}
           {step === "health" && !answers.health ? <HealthPicks disabled={busy} onToggle={togglePick} pick={answers.healthPick} theme={theme} /> : null}
           {step === "reminders" && !answers.reminders ? <NotificationPreview theme={theme} /> : null}
@@ -627,7 +628,7 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers, alwaysNee
       return {
         glyph: null,
         title: "Your day, built from blocks.",
-        lede: "Dayframe turns what you do, where you go and how you move into a day you can see. Suggestions wait for you in Review, and nothing is logged until you say so.",
+        lede: "Dayframe turns what you do, where you go and how you move into a day you can see. Suggestions are asked in Calendar, and nothing is logged until you say so.",
         bullets: [],
         privacy: null,
         result: null
@@ -643,7 +644,7 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers, alwaysNee
             : "iOS will now ask whether Dayframe can use location when it isn't open. Choose Change to Always Allow so trips aren't missed while your phone is in your pocket."
           : "Dayframe notices when you arrive, leave and travel, and suggests them as blocks for you to confirm.",
         bullets: upgrade || answers.location ? [] : [
-          { glyph: "check", text: "You stay in charge. Suggestions go to Review. Only places you trust can log on their own, and only if you turn that on." },
+          { glyph: "check", text: "You stay in charge. Suggestions are asked in Calendar. Only places you trust can log on their own, and only if you turn that on." },
           { glyph: "route", text: "Always works best. iOS asks twice: first while using the app, then for Always." }
         ],
         privacy: upgrade ? null : "Precise location stays private to your account. It is never used for ads or analytics, and you can export or delete it any time.",
@@ -679,8 +680,8 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers, alwaysNee
     case "reminders":
       return {
         glyph: { name: "bell", color: "blue" },
-        title: "A nudge when Review fills up",
-        lede: "One quiet notification in the evening when suggestions are waiting. Never more than one a day, and never for anything Dayframe logged on its own.",
+        title: "A nudge when there are things to check",
+        lede: "One quiet notification in the evening when there are things to check. Never more than one a day, and never for anything Dayframe logged on its own.",
         bullets: [],
         privacy: "Notifications never include where you were. You can change the time or turn them off in Settings.",
         result: answers.reminders ? { on: answers.reminders === "on", text: remindersResultText(answers.reminders) } : null
@@ -951,15 +952,15 @@ function WelcomeBlock({ color, index, name, play, theme, weight }: { color: Dayf
   );
 }
 
-/** What Location suggestions look like in Review (sample): hatched blocks, as on Today's ribbon (UIA-090). */
-function ReviewPreview({ theme }: { theme: MobileTheme }) {
+/** What Location suggestions look like in Calendar (sample): hatched blocks, as on Today's ribbon (UIA-090). */
+function CalendarPreview({ theme }: { theme: MobileTheme }) {
   const rows: [DayframePaletteKey, string, string, string][] = [
     ["graphite", "08:36", "Drive to School", "2 min · 0.8 km"],
     ["amber", "08:38", "School", "9 min"]
   ];
   return (
-    <View accessibilityLabel="Example: what you'll see in Review" accessible style={[styles.preview, { backgroundColor: theme.surface }]}>
-      <Text {...mobileTextProps("counter")} style={[styles.previewEyebrow, { color: theme.textMuted }]}>WHAT YOU&apos;LL SEE IN REVIEW</Text>
+    <View accessibilityLabel="Example: what you'll see in Calendar" accessible style={[styles.preview, { backgroundColor: theme.surface }]}>
+      <Text {...mobileTextProps("counter")} style={[styles.previewEyebrow, { color: theme.textMuted }]}>WHAT YOU&apos;LL SEE IN CALENDAR</Text>
       {rows.map(([color, time, title, meta]) => {
         const fill = blockColorsFor(color, theme.mode).fill;
         return (
@@ -1024,7 +1025,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
             accessibilityLabel={[row.title, row.state === "on" ? "on" : row.state === "later" ? "later" : null, row.detail].filter(Boolean).join(", ")}
             accessible
             key={row.key}
-            style={[styles.summaryRow, index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}
+            style={styles.summaryRow}
           >
             <View style={[styles.summaryGlyph, { backgroundColor: block.fill }]}>
               <DayframeIcon color={block.text} glyph={glyph} size={18} />
@@ -1042,6 +1043,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
                 </Text>
               </View>
             )}
+            {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={62} /> : null}
           </View>
         );
       })}
@@ -1050,7 +1052,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
         <View
           accessibilityLabel={`Quick starts on Today: ${pinned.map((item) => item.name).join(", ")}`}
           accessible
-          style={[styles.doneTiles, { borderTopColor: theme.border }]}
+          style={styles.doneTiles}
           testID="onboarding-done-tiles"
         >
           {pinned.map((item) => {
@@ -1062,6 +1064,7 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
               </View>
             );
           })}
+          <InsetDivider color={theme.border} edge="top" end={14} start={14} />
         </View>
       ) : null}
     </View>
@@ -1189,7 +1192,6 @@ function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; o
             onPress={() => onToggle(choice.key)}
             style={({ pressed }) => [
               styles.summaryRow,
-              index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
               pressed ? { backgroundColor: theme.surfaceMuted } : null
             ]}
             testID={`onboarding-health-${choice.key}`}
@@ -1204,6 +1206,7 @@ function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; o
             <View style={[styles.check, { backgroundColor: checked ? theme.success : theme.surfaceMuted }]}>
               {checked ? <DayframeIcon color={theme.background} glyph="check" size={14} strokeWidth={3} /> : null}
             </View>
+            {index > 0 ? <InsetDivider color={theme.border} edge="top" end={14} start={62} /> : null}
           </Pressable>
         );
       })}
@@ -1214,13 +1217,13 @@ function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; o
 /** An example of the evening notification (sample). */
 function NotificationPreview({ theme }: { theme: MobileTheme }) {
   return (
-    <View accessibilityLabel="Example notification: Dayframe, 3 suggestions are ready to review." accessible style={[styles.banner, { backgroundColor: theme.surface }]}>
+    <View accessibilityLabel="Example notification: Dayframe, 3 things to check from the last 7 days." accessible style={[styles.banner, { backgroundColor: theme.surface }]}>
       <View style={[styles.bannerIcon, { backgroundColor: theme.surfaceMuted }]}>
         <DayframeIcon color={theme.textPrimary} glyph="bell" size={16} />
       </View>
       <View style={styles.summaryText}>
         <Text {...mobileTextProps("itemTitle")} style={[styles.summaryTitle, { color: theme.textPrimary }]}>Dayframe</Text>
-        <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>3 suggestions are ready to review.</Text>
+        <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>3 things to check from the last 7 days.</Text>
       </View>
       <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>20:00</Text>
     </View>
@@ -1299,7 +1302,8 @@ const styles = StyleSheet.create({
   summaryState: { fontSize: 13, fontWeight: "700" },
   summaryPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 28, paddingHorizontal: 12 },
   summaryDot: { borderRadius: 4, height: 8, width: 8 },
-  doneTiles: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 12 },
+  // Padded as the summary rows (14 a side), so the tiles and their line never meet the card's edges.
+  doneTiles: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingBottom: 14, paddingHorizontal: 14, paddingTop: 12 },
   doneTile: { alignItems: "center", borderRadius: 10, flexDirection: "row", gap: 6, maxWidth: "100%", minHeight: 32, paddingHorizontal: 10 },
   doneTileText: { flexShrink: 1, fontSize: 12, fontWeight: "700" },
   check: { alignItems: "center", borderRadius: 12, height: 24, justifyContent: "center", width: 24 },

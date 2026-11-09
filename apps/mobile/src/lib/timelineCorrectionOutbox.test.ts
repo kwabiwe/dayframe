@@ -90,6 +90,27 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
       .toEqual(["6f000000-0000-4000-8000-000000000001", "6f000000-0000-4000-8000-000000000002"]);
   });
 
+  it("retries an unreadable new-place receipt and projects the acknowledged place by its server ID", async () => {
+    const request = { kind: "save_visit_place", subject: "place", itemId: "seg-a", name: "Bakery", visitStartedAt: "2026-08-27T12:00:00.000Z",
+      radiusMeters: 100, clientCorrectionId: createId() } as const;
+    const [first, repeat] = await Promise.all([request, { ...request, clientCorrectionId: createId() }].map((item) =>
+      outbox.enqueueTimelineCorrections(OWNER_A, [{ request: item, preview: { name: "Bakery", refreshBlocks: true } }])));
+    expect(repeat[0].clientCorrectionId).toBe(first[0].clientCorrectionId);
+    const fetch = vi.fn(async (_url: string, _init: RequestInit) => json(200, { ok: true }))
+      .mockImplementationOnce(async () => json(400, { error: "Invalid request." }))
+      .mockImplementationOnce(async () => json(200, { ok: true, correction: { kind: "place", target: { placeId: "invalid" } } }))
+      .mockImplementationOnce(async () => json(200, { ok: true, correction: { kind: "place", target: { placeId: PLACE_ID } } }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toEqual([]);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(fetch.mock.calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([request, request, request]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toMatchObject([{
+      request: { kind: "place", placeId: PLACE_ID }, preview: { name: "Bakery", refreshBlocks: true }
+    }]);
+  });
+
   it("keeps a refusal for the List to say why, moves on to the next, and drops it when told", async () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-in-block" }, { createId });
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-c" }, { createId });
@@ -212,14 +233,17 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a delivered correction a while for the List, and says so once per pass (Codex r1 on #598)", async () => {
+  it("keeps a delivered correction a while for the List, says so as each settles, and reads the timeline once per pass (Codex r1 on #598, #617)", async () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-a" }, { createId });
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
     const listener = vi.fn();
     outbox.subscribeTimelineCorrectionOutbox(listener);
     vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true })));
+    const revision = outbox.readTimelineCorrectionRefreshRevision();
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A });
-    expect(listener).toHaveBeenCalledTimes(1);
+    // Each acknowledgement as it settles, then the pass's end (its one timeline read).
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(outbox.readTimelineCorrectionRefreshRevision()).toBe(revision + 1);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.request.itemId)).toEqual(["trip-a", "trip-b"]);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_B)).toEqual([]);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A, Date.now() + 6 * 60_000)).toEqual([]);
@@ -232,5 +256,31 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "delete", subject: "trip", itemId: "trip-b" }, { createId });
     const [head] = await outbox.readPendingTimelineCorrections(OWNER_A);
     expect(await outbox.getTimelineCorrectionDiagnostics(OWNER_A)).toMatchObject({ pendingCount: 2, nextRetryAt: head.nextAttemptAt });
+  });
+
+  it("keeps an outing Logs as's resolved \"?\", the trips' too, once, even when a lost reply made it go again with its id (#612)", async () => {
+    const CATEGORY = "6f000000-0000-4000-8000-0000000000c1";
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-stay", categoryId: CATEGORY }, { createId });
+    // The first reply is lost: kept on the phone, sent again with the same id.
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Network request failed"); }));
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A })).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toEqual([]);
+    // The retry gets the blocks the first attempt made back: the place's, then each trip's (the server's own receipt).
+    const delivered = vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-stay", "entry-trip-in", "entry-trip-out"],
+      resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"] } }));
+    vi.stubGlobal("fetch", delivered);
+    expect(await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true })).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(JSON.parse((delivered.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).clientCorrectionId)
+      .toBe("6f000000-0000-4000-8000-000000000001");
+    const acknowledged = outbox.readAcknowledgedTimelineCorrections(OWNER_A);
+    expect(acknowledged).toHaveLength(1);
+    expect(acknowledged[0]).toMatchObject({ clientCorrectionId: "6f000000-0000-4000-8000-000000000001", request: { kind: "log_place" },
+      resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"] });
+    // A Logs as on a place that was no outing's stay: its own "?" only, unchanged.
+    await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: CATEGORY }, { createId });
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-cafe"], resolvedReviewItemIds: ["review-cafe"] } })));
+    await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.resolvedReviewItemIds))
+      .toEqual([["review-trip-in", "review-trip-out", "review-stay"], ["review-cafe"]]);
   });
 });

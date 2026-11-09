@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { ReviewItemRow } from "@/lib/queries";
@@ -18,18 +18,49 @@ export function useReviewDecisions(
    * How a restore (Undo, or a refused save) reaches the page: the List runs it through its own
    * transition. Read once, when the controller is made: pass a stable function.
    */
-  applyRestore?: (update: () => void) => void
+  applyRestore?: (update: () => void) => void,
+  /**
+   * Whose decisions these are (workspace and user). Another owner starts a new controller with an empty state;
+   * the previous one's held decision is sent at once, and anything it reports later (a save, a refusal, a
+   * restore) is ignored, so it never shows in the next owner's lifetime (Codex r4 on #609).
+   */
+  owner = "",
+  /**
+   * What a saved answer's acknowledgement said (a block that ran into a trip reports `stoppedRunningTimer` when End it
+   * stopped the running block, so the timer refreshes too). Read once, when the controller is made: pass a stable function.
+   */
+  onAcknowledged?: (body: Record<string, unknown>) => void
 ) {
   const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
-  const [controller] = useState(() => {
+  const onAcknowledgedRef = useRef(onAcknowledged);
+  // One controller per owner lifetime; a retired one's later reports are dropped.
+  const make = (forOwner: string) => {
     let restoredSequence = 0;
-    return new ReviewDecisionController((next) => {
+    let active = true;
+    const controller = new ReviewDecisionController((next) => {
+      if (!active) return;
       const restoring = next.restored !== null && next.restored.sequence !== restoredSequence;
       if (next.restored) restoredSequence = next.restored.sequence;
-      if (restoring && applyRestore) applyRestore(() => setState(next));
+      // The restore may run later (the List's transition): it applies only while this lifetime still is the current
+      // one, and installs the controller's state as it is then — never the snapshot from when it was queued, so a
+      // newer answer made meanwhile is kept (Codex r5, r6 on #609).
+      if (restoring && applyRestore) applyRestore(() => { if (active) setState(controller.getState()); });
       else setState(next);
     });
-  });
+    return { owner: forOwner, controller, activate: () => { active = true; }, retire: () => { active = false; } };
+  };
+  const [lifetime, setLifetime] = useState(() => make(owner));
+  if (lifetime.owner !== owner) {
+    // Another owner: the old controller is silenced at once (its held decision is still sent, below).
+    lifetime.retire();
+    setLifetime(make(owner));
+    setState(initialReviewDecisionState);
+  }
+  const controller = lifetime.controller;
+  useEffect(() => {
+    lifetime.activate();
+    return () => lifetime.retire();
+  }, [lifetime]);
   // The save reads the newest data: a held suggestion a refresh changed is not what the user
   // decided about. One a refresh no longer lists (decided elsewhere, or past the newest 100) is
   // still sent, and the server says.
@@ -68,6 +99,12 @@ export function useReviewDecisions(
         void refresh().catch(() => undefined);
         return "gone";
       }
+      // A question that changed before it was answered (a block that ran into a trip whose block or trip changed):
+      // nothing saved; the day is read again and the question comes back as it is now (location v4 design §7).
+      if (response.status === 409 && body.code === "proposal_changed") {
+        void refresh().catch(() => undefined);
+        return "changed";
+      }
       if (!response.ok) {
         const message = typeof body.message === "string" ? body.message : typeof body.error === "string" ? body.error : null;
         throw new Error(message ?? "Couldn’t save that decision.");
@@ -75,6 +112,7 @@ export function useReviewDecisions(
       if (!validReviewAcknowledgement(body, envelope, decision.itemId)) {
         throw new Error("Couldn’t confirm that decision was saved.");
       }
+      onAcknowledgedRef.current?.(body);
       void refresh().catch(() => undefined);
       return "saved";
     });
@@ -100,6 +138,10 @@ export function useReviewDecisions(
     state,
     decide: useCallback((request: Parameters<ReviewDecisionController["decide"]>[0]) => controller.decide(request), [controller]),
     undo: useCallback(() => controller.undo(), [controller]),
+    /** Saves a held decision now and resolves once every save in flight has settled. */
+    settle: useCallback(() => controller.flushAndSettle(), [controller]),
+    /** Items the server resolved another way: their held or saving decisions can't be undone or restored. */
+    settleResolved: useCallback((itemIds: Iterable<string>) => controller.settleResolved(itemIds), [controller]),
     clearError: useCallback(() => controller.clearError(), [controller])
   };
 }
