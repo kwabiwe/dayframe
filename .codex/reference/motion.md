@@ -483,6 +483,15 @@ Removed in location v4 step 15: the web Review page and its card deck are gone; 
 - Async outcome: no optimistic split before the server answers (the second part's id comes from it); success shows the parts at once from the answer and loads the day again inside the timer queue; Undo, or its Try again after a failure, is one request and a reload.
 - Accessibility: focus starts on the line (a slider with a spoken value: the time and both halves); Reduce Motion keeps the web dialog rule; the toast is a polite status.
 
+## iPhone running block Split
+
+- Trigger: Actions beside Done opens the running editor's Split. It uses the same compact panel, divider, native minute wheel and preview as a finished block. Back and Keep as one restore the editor and its scroll offset. Stop remains in the running editor's footer.
+- Owner: the existing sheet owns presentation and dismissal. The shared panel owns the fade, and its native horizontal pan owns the divider. The pan holds its range until release and only commits changed whole minutes to React. The running preview reuses the open editor's clock and adds no interval.
+- Surrounding layout: the editor stays mounted and inaccessible behind the split panel. At normal text sizes the previews and confirmation fit together. At larger sizes the panel scrolls within the sheet and the action row stays available.
+- Interruption: only the selected timer can be split. The panel stays open while its draft saves. A stale timer or refusal leaves the editor open with feedback. Stop closes the Undo window and targets the second part. A new split replaces the prior toast by token.
+- Async outcome: the iPhone persists the split before applying it. The first part ends at the chosen minute and the second preview says it keeps running. A five-second Undo cancels the held request while the second part runs. A server refusal restores server truth and settles dependent commands. The Live Activity uses the existing reconciliation owner. Once ActivityKit confirms the pending second part, the replaced timer’s Activity ends. A newer native timer can remain visible until the app refreshes. The second part enables Lock Screen Stop after its server ID and Activity registration are verified. Undo restores the original timer’s Activity and Stop.
+- Accessibility: the split-time control supports VoiceOver adjustment and activation. Keep as one or Back restores focus to Actions. Reduce Motion uses the shared panel fade and keeps direct divider tracking. The existing toast owns Undo feedback.
+
 ## Web Today (Blocks parity step 12a)
 
 - Trigger: entries change (start, stop, edit, delete, Undo, refresh), the clock (each second while a block records, otherwise every 20 s), pointer movement over the ribbon, a row delete (button, editor, Backspace/Delete) and Undo (toast button or ⌘Z/Ctrl+Z).

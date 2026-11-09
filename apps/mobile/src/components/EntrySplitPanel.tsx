@@ -46,6 +46,8 @@ export function EntrySplitPanel({
   const rangeEnd = running ? "Now" : formatClockTime(stopMs, clockFormat);
   const [stacked, setStacked] = useState(false);
   const trackWidth = useSharedValue(0);
+  const range = useSharedValue(bounds);
+  const dragRange = useSharedValue(bounds);
   const dragOrigin = useSharedValue(valueMs);
   const position = useSharedValue(valueMs);
   const snapped = useSharedValue(valueMs);
@@ -53,29 +55,34 @@ export function EntrySplitPanel({
   const changeRef = useRef(onDividerChange);
   changeRef.current = onDividerChange;
   useEffect(() => {
+    range.value = { startMs, stopMs, minMs, maxMs };
     if (!dragging.value) {
       position.value = valueMs;
       snapped.value = valueMs;
     }
-  }, [dragging, position, snapped, valueMs]);
+  }, [dragging, maxMs, minMs, position, range, snapped, startMs, stopMs, valueMs]);
   const change = useCallback((nextMs: number) => changeRef.current(nextMs), []);
   const changeFromDrag = useCallback((nextMs: number) => {
     change(nextMs);
     playHaptic("tick");
   }, [change]);
+  const canDrag = !busy && minMs < maxMs;
   const pan = useMemo(() => Gesture.Pan()
-    .enabled(!busy && minMs < maxMs)
+    .enabled(canDrag)
     .activeOffsetX([-4, 4])
     .failOffsetY([-8, 8])
     .onStart(() => {
+      // The running clock can advance during a swipe. Keep this gesture's scale until release.
+      dragRange.value = range.value;
       dragging.value = true;
       dragOrigin.value = snapped.value;
     })
     .onUpdate((event) => {
       if (trackWidth.value <= 0) return;
-      const next = dragOrigin.value + event.translationX * span / trackWidth.value;
-      position.value = Math.max(minMs, Math.min(maxMs, next));
-      const minute = Math.max(minMs, Math.min(maxMs, Math.round(next / MINUTE_MS) * MINUTE_MS));
+      const drag = dragRange.value;
+      const next = dragOrigin.value + event.translationX * (drag.stopMs - drag.startMs) / trackWidth.value;
+      position.value = Math.max(drag.minMs, Math.min(drag.maxMs, next));
+      const minute = Math.max(drag.minMs, Math.min(drag.maxMs, Math.round(next / MINUTE_MS) * MINUTE_MS));
       if (minute === snapped.value) return;
       snapped.value = minute;
       runOnJS(changeFromDrag)(minute);
@@ -88,11 +95,16 @@ export function EntrySplitPanel({
         runOnJS(change)(dragOrigin.value);
       }
       position.value = snapped.value;
-    }), [busy, change, changeFromDrag, dragOrigin, dragging, maxMs, minMs, position, snapped, span, trackWidth]);
-  const fill = useAnimatedStyle(() => ({ width: `${(position.value - startMs) / span * 100}%` }));
-  const handle = useAnimatedStyle(() => ({
-    transform: [{ translateX: (position.value - startMs) / span * trackWidth.value - 12 }]
-  }));
+    }), [canDrag, change, changeFromDrag, dragOrigin, dragRange, dragging, position, range, snapped, trackWidth]);
+  const fill = useAnimatedStyle(() => {
+    const ruler = dragging.value ? dragRange.value : range.value;
+    return { width: `${(position.value - ruler.startMs) / (ruler.stopMs - ruler.startMs) * 100}%` };
+  });
+  const handle = useAnimatedStyle(() => {
+    const ruler = dragging.value ? dragRange.value : range.value;
+    const fraction = (position.value - ruler.startMs) / (ruler.stopMs - ruler.startMs);
+    return { transform: [{ translateX: fraction * trackWidth.value - 12 }] };
+  });
 
   return (
     <Reanimated.View
@@ -181,7 +193,8 @@ export function EntrySplitPanel({
         {error ? <Text {...mobileTextProps("body")} style={{ color: theme.dangerText }}>{error}</Text> : null}
         <View style={[styles.row, stacked ? styles.column : null]}>
           <SplitPreview label="First block" range={`${rangeStart}–${selectedTime}`} seconds={(valueMs - startMs) / 1000} theme={theme} />
-          <SplitPreview label="Second block" range={`${selectedTime}–${rangeEnd}`} seconds={(stopMs - valueMs) / 1000} theme={theme} />
+          <SplitPreview label="Second block" range={`${selectedTime}–${rangeEnd}`} seconds={(stopMs - valueMs) / 1000}
+            keepsRunning={running} theme={theme} />
         </View>
       </ScrollView>
       <View style={[styles.row, stacked ? styles.column : null]}>
@@ -199,12 +212,20 @@ export function EntrySplitPanel({
   );
 }
 
-function SplitPreview({ label, range, seconds, theme }: { label: string; range: string; seconds: number; theme: MobileTheme }) {
+function SplitPreview({ label, range, seconds, keepsRunning, theme }: {
+  label: string;
+  range: string;
+  seconds: number;
+  keepsRunning?: boolean;
+  theme: MobileTheme;
+}) {
   return (
     <View style={[styles.preview, { backgroundColor: theme.surfaceMuted }]}>
       <Text {...mobileTextProps("control")} style={[styles.previewLabel, { color: theme.textPrimary }]}>{label}</Text>
       <Text {...mobileTextProps("metadata")} style={[styles.timeText, { color: theme.textSecondary }]}>{range}</Text>
-      <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>{formatDuration(seconds)}</Text>
+      <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>
+        {keepsRunning ? `${formatDuration(seconds)} · Keeps running` : formatDuration(seconds)}
+      </Text>
     </View>
   );
 }

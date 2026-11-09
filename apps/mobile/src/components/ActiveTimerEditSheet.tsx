@@ -82,6 +82,7 @@ import {
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import type { MobileAccountOwner } from "@/lib/mobileAccount";
 import { useEntryLastStop } from "@/lib/useEntryLastStop";
+import { runningSplitBounds } from "@/lib/runningSplitBounds";
 import {
   HISTORICAL_SUGGESTION_ROLLBACK_ANNOUNCEMENT,
   historicalSuggestionAppliedAnnouncement
@@ -177,6 +178,8 @@ type ActiveTimerEditSheetProps = {
   onCopyCompletedEntry?: (entry: MobileTimeEntry, action: CompletedEntryCopyAction) =>
     Promise<{ ok: true } | { ok: false; message: string }>;
   onDelete?: (entryId: string) => Promise<boolean>;
+  isRunningSplitTarget?: (entryId: string) => boolean;
+  onSplit?: (entryId: string, atMs: number) => Promise<boolean>;
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
@@ -225,6 +228,8 @@ export function ActiveTimerEditSheet({
   onCreateActivity,
   onCopyCompletedEntry,
   onDelete,
+  isRunningSplitTarget,
+  onSplit,
   onPresented,
   onApplySuggestion,
   onSave,
@@ -290,7 +295,15 @@ export function ActiveTimerEditSheet({
   // A11b time wheel (owner decisions 12 Oct 2026): one inline native wheel under the time cards,
   // aimed at one card. It writes the draft live (React owns it); `timeWheelRevision` counts outside
   // changes (the dial, a date, the previous-end chip) so the wheel re-aims only for those.
-  const [splitDraft, setSplitDraft] = useState<{ sheetId: number; sessionId: number; wheelId: number | null; valueMs: number; revision: number } | null>(null);
+  const [splitDraft, setSplitDraft] = useState<{
+    sheetId: number;
+    sessionId: number;
+    entryId: string;
+    runningStartMs?: number;
+    wheelId: number | null;
+    valueMs: number;
+    revision: number;
+  } | null>(null);
   const splitSequence = useRef(0);
   const [actionsPosition, setActionsPosition] = useState<{ id: number; top: number; left: number; width: number } | null>(null);
   const editorScrollBeforeSplit = useRef<{ x: number; y: number } | null>(null);
@@ -1287,7 +1300,7 @@ export function ActiveTimerEditSheet({
       return false;
     } else if (split) {
       if (split.wheelId !== null) toggleSplitWheel();
-      else closeCompletedSplit();
+      else closeEntrySplit();
       return false;
     } else if (draftHasUnsavedChanges) {
       presentDiscardConfirmation();
@@ -1548,12 +1561,17 @@ export function ActiveTimerEditSheet({
   const headTitle = isRunningMode ? "Running block" : isAddMode ? "New block" : "Edit block";
   const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);
   const canCopyCompletedEntry = !isRunningMode && !isAddMode && Boolean(onCopyCompletedEntry && entry?.stoppedAt && entry.updatedAt);
-  const completedSplitBounds = canCopyCompletedEntry && entry ? splitBounds(entry) : null;
-  const split = splitDraft?.sheetId === presentation.id && completedSplitBounds && !draftHasUnsavedChanges
-    ? splitDraft
+  const canSplitRunningEntry = isRunningMode && Boolean(entry && onSplit && onSave);
+  const activeSplitDraft = splitDraft?.sheetId === presentation.id ? splitDraft : null;
+  const editorSplitBounds = canSplitRunningEntry
+    ? runningSplitBounds(activeSplitDraft?.runningStartMs ?? parsedStart.date?.getTime() ?? Number.NaN, dialNowMs)
+    : canCopyCompletedEntry && entry ? splitBounds(entry) : null;
+  const split = activeSplitDraft && editorSplitBounds && (isRunningMode || !draftHasUnsavedChanges)
+    ? { ...activeSplitDraft, valueMs: clampSplit(editorSplitBounds, activeSplitDraft.valueMs) }
     : null;
   const completedCopyError = copyError?.sheetId === presentation.id ? copyError.text : null;
   const copyLocked = busy || draftHasUnsavedChanges;
+  const splitLocked = isRunningMode ? busy : copyLocked;
   const lastStopStartMs = parsedStart.date?.getTime() ?? null;
   const lastStopEndMs = hasStoppedTime ? parsedStop.date?.getTime() ?? Number.NaN : dialNowMs;
   const lastStopCutoffMs = lastStopAppliedRef.current?.startMs === lastStopStartMs
@@ -1564,7 +1582,7 @@ export function ActiveTimerEditSheet({
     entries: lastStopEntries, deletedIds: lastStopDeletedIds,
     projectedIds: lastStopProjectedIds, bootstrapGeneration: lastStopBootstrapGeneration
   });
-  const hasEntryActions = isFinishedMode && (canCopyCompletedEntry || canStartAgain || canDelete);
+  const hasEntryActions = canSplitRunningEntry || (isFinishedMode && (canCopyCompletedEntry || canStartAgain || canDelete));
   const actionsOpen = hasEntryActions && actionsPosition?.id === presentation.id && !split;
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
@@ -1867,7 +1885,7 @@ export function ActiveTimerEditSheet({
     }
     if (split && !busy) {
       if (split.wheelId !== null) toggleSplitWheel();
-      else closeCompletedSplit();
+      else closeEntrySplit();
       return;
     }
     // Escape with the wheel open sets the time and closes only the wheel (A11b).
@@ -1887,7 +1905,10 @@ export function ActiveTimerEditSheet({
     requestUserDismiss();
   }
 
-  async function saveChanges(afterSave?: (patch: TimeEntryUpdatePatch) => void) {
+  async function saveChanges(
+    afterSave?: (patch: TimeEntryUpdatePatch) => void,
+    runningSplit?: { entryId: string; atMs: number }
+  ) {
     if (busy || !entry || !onSave) return;
     const parsed = parsedStart;
     if (parsed.error || !parsed.date) {
@@ -1942,7 +1963,21 @@ export function ActiveTimerEditSheet({
     const token = beginMutation("saving");
     if (token === null) return;
     setValidationError(null);
-    const ok = await resolveMutation(() => onSave(entry.id, patch));
+    const ok = await resolveMutation(async () => {
+      const targetId = runningSplit?.entryId ?? entry.id;
+      if (runningSplit && !isRunningSplitTarget?.(targetId)) {
+        showCompletedCopyError("This block changed. Open the running block again to split it.");
+        return false;
+      }
+      if ((!runningSplit || draftHasUnsavedChanges) && !await onSave(targetId, patch)) return false;
+      if (!runningSplit) return true;
+      if (presentationRef.current.id !== presentation.id) return false;
+      const accepted = await onSplit?.(targetId, runningSplit.atMs);
+      if (!accepted && presentationRef.current.id === presentation.id) {
+        showCompletedCopyError("Couldn't split this running block. Check its start time and try again.");
+      }
+      return Boolean(accepted);
+    });
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
     if (accepted && ok) {
       requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
@@ -2008,15 +2043,17 @@ export function ActiveTimerEditSheet({
     });
   }
 
-  function openCompletedSplit() {
-    if (!completedSplitBounds || copyLocked || split) return;
+  function openEntrySplit() {
+    if (!entry || !editorSplitBounds || splitLocked || split) return;
     editorScrollBeforeSplit.current = contentScrollOffsetRef.current;
     closeEntryActions(false);
     dismissTransientEditingSurfaces();
     setCopyError(null);
+    setValidationError(null);
     setSplitDraft({
-      sheetId: presentation.id, sessionId: ++splitSequence.current, wheelId: null,
-      valueMs: defaultSplit(completedSplitBounds), revision: 0
+      sheetId: presentation.id, sessionId: ++splitSequence.current, entryId: entry.id, wheelId: null,
+      ...(isRunningMode ? { runningStartMs: editorSplitBounds.startMs } : {}),
+      valueMs: defaultSplit(editorSplitBounds), revision: 0
     });
     focusEntryControl(splitValueRef);
   }
@@ -2029,7 +2066,7 @@ export function ActiveTimerEditSheet({
     editorScrollBeforeSplit.current = null;
   }
 
-  function closeCompletedSplit() {
+  function closeEntrySplit() {
     setSplitDraft(null);
     setCopyError(null);
     const id = presentation.id;
@@ -2040,17 +2077,17 @@ export function ActiveTimerEditSheet({
   }
 
   function toggleSplitWheel() {
-    if (!split || copyLocked) return;
+    if (!split || splitLocked) return;
     const wheelId = split.wheelId === null ? ++splitSequence.current : null;
     setSplitDraft((draft) => draft?.sessionId === split.sessionId ? { ...draft, wheelId } : draft);
   }
 
-  function changeCompletedSplit(input: { sessionId: number; valueMs: number; wheelId?: number; revision?: number }) {
-    if (!completedSplitBounds || copyLocked || mutationGateRef.current !== null || !Number.isFinite(input.valueMs)) return;
+  function changeEntrySplit(input: { sessionId: number; valueMs: number; wheelId?: number; revision?: number }) {
+    if (!editorSplitBounds || splitLocked || mutationGateRef.current !== null || !Number.isFinite(input.valueMs)) return;
     setSplitDraft((draft) => {
       if (draft?.sheetId !== presentation.id || draft.sessionId !== input.sessionId) return draft;
       if (input.wheelId !== undefined && (draft.wheelId !== input.wheelId || draft.revision !== input.revision)) return draft;
-      const valueMs = clampSplit(completedSplitBounds, input.valueMs);
+      const valueMs = clampSplit(editorSplitBounds, input.valueMs);
       if (valueMs === draft.valueMs) return draft;
       return { ...draft, valueMs, revision: draft.revision + Number(input.wheelId === undefined) };
     });
@@ -2754,7 +2791,7 @@ export function ActiveTimerEditSheet({
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen || datePickerDismissGuarded}
-              gestureHandleOnly={isFinishedMode || layoutDensity === "condensed"}
+              gestureHandleOnly={isFinishedMode || Boolean(split) || layoutDensity === "condensed"}
               dismissGestureRef={sheetDismissGestureRef}
               handleStyle={styles.sheetHandle}
               keyboardInset={keyboardInset}
@@ -2805,21 +2842,25 @@ export function ActiveTimerEditSheet({
               translateYOffset={0}
               visible={visible}
             >
-              {split && completedSplitBounds ? (
+              {split && editorSplitBounds ? (
                 <EntrySplitPanel
-                  bounds={completedSplitBounds}
+                  bounds={editorSplitBounds}
                   busy={busy}
                   clockFormat={clockFormat}
-                  error={completedCopyError}
-                  onBack={closeCompletedSplit}
-                  onConfirm={() => void copyCompletedEntry({ kind: "split", splitAt: new Date(split.valueMs).toISOString() })}
-                  onDividerChange={(valueMs) => changeCompletedSplit({ sessionId: split.sessionId, valueMs })}
+                  error={completedCopyError ?? (isRunningMode ? validationError : null)}
+                  onBack={closeEntrySplit}
+                  onConfirm={() => {
+                    if (isRunningMode) void saveChanges(undefined, { entryId: split.entryId, atMs: split.valueMs });
+                    else void copyCompletedEntry({ kind: "split", splitAt: new Date(split.valueMs).toISOString() });
+                  }}
+                  onDividerChange={(valueMs) => changeEntrySplit({ sessionId: split.sessionId, valueMs })}
                   onToggleWheel={toggleSplitWheel}
-                  onWheelChange={(change) => changeCompletedSplit({
+                  onWheelChange={(change) => changeEntrySplit({
                     sessionId: split.sessionId, wheelId: change.presentationId, revision: change.revision, valueMs: change.valueMs
                   })}
                   reduceMotion={reduceMotion}
                   revision={split.revision}
+                  running={isRunningMode}
                   theme={theme}
                   timeControlRef={splitValueRef}
                   valueMs={split.valueMs}
@@ -2897,26 +2938,29 @@ export function ActiveTimerEditSheet({
                   style={[sheetStyles.menu, { backgroundColor: theme.surfaceRaised, shadowColor: theme.shadow, top: actionsPosition.top, left: actionsPosition.left, width: actionsPosition.width }]}
                   testID="time-entry-actions-options"
                 >
-                  {canCopyCompletedEntry ? <>
+                  {canCopyCompletedEntry || canSplitRunningEntry ? (
                     <EntryActionRow
-                      rowRef={firstActionRef} disabled={copyLocked || !completedSplitBounds}
-                      glyph={DAYFRAME_APP_ICONS.split} hint={draftHasUnsavedChanges ? "Save your changes first." : !completedSplitBounds ? "This block is too short to split." : undefined}
-                      label="Split" onPress={openCompletedSplit} testID="time-entry-split" theme={theme}
+                      rowRef={firstActionRef} disabled={splitLocked || !editorSplitBounds}
+                      glyph={DAYFRAME_APP_ICONS.split}
+                      hint={!isRunningMode && draftHasUnsavedChanges ? "Save your changes first." : !editorSplitBounds ? "This block is too short to split." : undefined}
+                      label="Split" onPress={openEntrySplit} testID="time-entry-split" theme={theme}
                     />
+                  ) : null}
+                  {canCopyCompletedEntry ? (
                     <EntryActionRow
                       disabled={copyLocked} glyph="copy"
                       hint={draftHasUnsavedChanges ? "Save your changes first." : "Adds a copy immediately after this block."}
                       label="Duplicate" onPress={() => { closeEntryActions(); void copyCompletedEntry({ kind: "duplicate" }); }}
                       testID="time-entry-duplicate" theme={theme}
                     />
-                  </> : null}
+                  ) : null}
                   {canStartAgain ? <EntryActionRow
                     rowRef={!canCopyCompletedEntry ? firstActionRef : undefined} disabled={busy}
                     glyph={DAYFRAME_APP_ICONS.startAgain} hint="Saves your changes and starts this block again"
                     label="Start again" onPress={() => { closeEntryActions(); startAgainFromSheet(); }}
                     testID="time-entry-sheet-start-again" theme={theme}
                   /> : null}
-                  {canDelete ? <>
+                  {isFinishedMode && canDelete ? <>
                     {canCopyCompletedEntry || canStartAgain ? <View style={[sheetStyles.menuDivider, { backgroundColor: theme.border }]} /> : null}
                     <EntryActionRow
                       rowRef={!canCopyCompletedEntry && !canStartAgain ? firstActionRef : undefined} danger disabled={busy}

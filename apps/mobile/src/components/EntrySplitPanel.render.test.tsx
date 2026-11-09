@@ -17,7 +17,7 @@ vi.mock("react-native-reanimated", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   const { useRef } = await import("../../../../node_modules/react/index.js");
   return { default: { View: "AnimatedView" }, runOnJS: (fn: unknown) => fn,
-    useAnimatedStyle: (get: () => unknown) => get(), useSharedValue: (value: number | boolean) => useRef({ value }).current };
+    useAnimatedStyle: (get: () => unknown) => get(), useSharedValue: <T,>(value: T) => useRef({ value }).current };
 });
 const native = vi.hoisted(() => ({ start: vi.fn(), update: vi.fn(), finalize: vi.fn(), tick: vi.fn() }));
 vi.mock("react-native-gesture-handler", () => ({ GestureDetector: ({ children }: { children: unknown }) => children, Gesture: {
@@ -83,6 +83,36 @@ describe("compact block Split panel", () => {
     expect(text()).toContain(theme.onAccent);
     await act(async () => { get("time-entry-split-keep").props.onPress(); });
     expect(back).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  it("keeps the drag scale stable while the running preview grows", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    let root!: ReactTestRenderer;
+    function Preview({ until }: { until: number }) {
+      const [valueMs, setValue] = useState(startMs + 25 * minute);
+      return <EntrySplitPanel bounds={{ ...bounds, stopMs: until, maxMs: until - minute }} busy={false}
+        clockFormat="24h" error={null} onBack={() => undefined} onConfirm={() => undefined}
+        onDividerChange={setValue} onToggleWheel={() => undefined} onWheelChange={() => undefined}
+        reduceMotion revision={0} running theme={theme} timeControlRef={null}
+        valueMs={valueMs} wheelId={null} wheelHeight={180} />;
+    }
+    await act(async () => { root = create(<Preview until={stopMs} />); });
+    const text = () => JSON.stringify(root.toJSON());
+    expect(text()).toContain("11:31–Now");
+    expect(text()).toContain("25m · Keeps running");
+    await act(async () => {
+      const divider = root.root.find((node) => typeof node.type === "string" && node.props.testID === "time-entry-split-divider");
+      divider.props.onLayout({ nativeEvent: { layout: { width: 300 } } });
+      native.start();
+    });
+    await act(async () => { root.update(<Preview until={stopMs + 20 * minute} />); });
+    await act(async () => { native.update({ translationX: 30 }); });
+    expect(text()).toContain("11:36–Now");
+    expect(text()).toContain("40m · Keeps running");
+    await act(async () => { native.finalize({}, false); });
+    expect(text()).toContain("11:31–Now");
+    expect(text()).toContain("45m · Keeps running");
     await act(async () => root.unmount());
   });
 });

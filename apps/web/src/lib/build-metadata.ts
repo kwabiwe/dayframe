@@ -8,7 +8,8 @@ export function serverBuildMetadata() {
     environment,
     syncContractVersion: 1,
     loggedVisitPlaceCorrections: true,
-    completedEntryCopy: true
+    completedEntryCopy: true,
+    runningEntrySplit: true
   };
 }
 

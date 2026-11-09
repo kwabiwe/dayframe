@@ -5,6 +5,7 @@ import {
 } from "@dayframe/shared";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "./api";
 import type { PendingTimerStop } from "./timerStopOutbox";
+import { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX } from "./runningSplitIdentity";
 
 type ActiveTimerEntry = MobileBootstrap["activeEntry"];
 type MobileTimeEntry = MobileBootstrap["entries"][number];
@@ -709,6 +710,30 @@ export function optimisticStartTimer(data: MobileBootstrap | null, pendingEntry:
     dayEntries: data.dayEntries ? withReplacement(data.dayEntries) : data.dayEntries,
     weekEntries: data.weekEntries ? withReplacement(data.weekEntries) : data.weekEntries
   };
+}
+
+/** Project the split only while the block that was split is still running. */
+export function optimisticSplitTimeEntry(
+  data: MobileBootstrap | null,
+  entryId: string,
+  splitAt: string,
+  secondId: string
+) {
+  const entry = data?.activeEntry;
+  if (!data || !entry || entry.id !== entryId || entry.stoppedAt) return data;
+  const atMs = Date.parse(splitAt);
+  if (!(atMs >= Date.parse(entry.startedAt) + 60_000)) return data;
+  const { runningSplitSourceEntryId, ...source } = entry;
+  const priorId = entry.id.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX)
+    ? runningSplitSourceEntryId ?? entry.id
+    : entry.id;
+  return optimisticStartTimer(data, {
+    ...source,
+    id: secondId,
+    startedAt: splitAt,
+    durationSeconds: 0,
+    ...(secondId.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX) ? { runningSplitSourceEntryId: priorId } : {})
+  });
 }
 
 export function replaceOptimisticTimeEntryId(

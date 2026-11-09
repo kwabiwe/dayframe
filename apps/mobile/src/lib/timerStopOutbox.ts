@@ -26,6 +26,7 @@ export type PendingTimerStop = TimerStopOwner & {
   failedAt?: string;
   lastError?: string;
   lastStatusCode?: number;
+  refusedSplit?: true;
 };
 
 export async function getOrCreatePendingStop(input: {
@@ -126,7 +127,7 @@ export async function retryTimerStopSyncIssue(
     const next = outbox.map((stop) => {
       if (
         stop.clientEventId !== clientEventId ||
-        stop.failureKind !== "permanent" ||
+        stop.failureKind !== "permanent" || stop.refusedSplit ||
         !timerStopOwnerMatches(stop, resolvedOwner)
       ) {
         return stop;
@@ -212,6 +213,24 @@ export async function resolvePendingTimerStopTargets(
     });
     if (changed) await writePendingTimerStops(next);
     return next;
+  });
+}
+
+/** Keep a dependent Stop visible in Sync help without sending it against any other timer. */
+export async function rejectPendingTimerStopsForTarget(owner: TimerStopOwner, optimisticEntryId: string, message: string) {
+  return withTimerStopOutboxMutation(async () => {
+    const all = await readPendingTimerStopsUnlocked();
+    let changed = false;
+    const next = all.map((stop): PendingTimerStop => {
+      if (!timerStopOwnerMatches(stop, owner) || stop.optimisticEntryId !== optimisticEntryId ||
+        (stop.failureKind === "permanent" && stop.lastError === message && stop.refusedSplit)) return stop;
+      changed = true;
+      return {
+        ...stop, failureKind: "permanent", lastError: message, refusedSplit: true,
+        failedAt: new Date().toISOString(), failureCount: (stop.failureCount ?? 0) + 1
+      };
+    });
+    if (changed) await writePendingTimerStops(next);
   });
 }
 
@@ -306,6 +325,7 @@ function parsePendingTimerStop(value: unknown): PendingTimerStop | null {
       : {}),
     ...(failedAt ? { failedAt } : {}),
     ...(lastError ? { lastError } : {}),
+    ...(item.refusedSplit === true ? { refusedSplit: true } : {}),
     ...(typeof item.lastStatusCode === "number" && Number.isFinite(item.lastStatusCode)
       ? { lastStatusCode: Math.trunc(item.lastStatusCode) }
       : {})

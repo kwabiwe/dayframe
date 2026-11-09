@@ -220,6 +220,8 @@ export type MobileTimeEntry = {
   updatedAt?: string;
   /** Local only. A split part or duplicate awaiting canonical data must not be edited. */
   pendingCompletedCopy?: true;
+  /** Local only. The timer whose Live Activity a pending running Split replaces. */
+  runningSplitSourceEntryId?: string;
   durationSeconds: number;
   tagNames?: string[];
   tags?: MobileTag[];
@@ -268,7 +270,7 @@ export type MobileOpenTrip = {
 export type MobileBootstrap = {
   completedEntryRevision?: string;
   openTrip?: MobileOpenTrip | null;
-  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean;completedEntryCopy?:boolean};
+  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean;completedEntryCopy?:boolean;runningEntrySplit?:boolean};
   user: {
     id: string;
     email: string;
@@ -475,6 +477,10 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   userId: string;
   workspaceId: string;
   healthOwner?: HealthCaptureOwner;
+  /** Local delivery dependencies. A Start admitted after a running Split cannot replace its source first. */
+  afterRunningSplitIds?: string[];
+  /** Local receipt for the exact active second block this Start replaced. */
+  runningSplitPredecessorId?: string;
   failedAt?: string;
   failureCount?: number;
   lastError?: string;
@@ -595,6 +601,7 @@ type ActivityEventDraft = {
   owner?: MobileAccountOwner;
   healthOwner?: HealthCaptureOwner;
   requestImmediateDelivery?: boolean;
+  replacesRunningSplitEntryId?: string;
 };
 
 type ApiErrorPayload = {
@@ -950,6 +957,7 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
           owner: _owner,
           healthOwner: _healthOwner,
           requestImmediateDelivery,
+          replacesRunningSplitEntryId,
           ...eventInput
         } = input;
         const parsed = ActivityEventInputSchema.parse({
@@ -978,12 +986,16 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
           lastOwner = owner;
           continue;
         }
+        const runningSplitOrdering = parsed.type === "timer_start"
+          ? await runningSplitOrderingForStart(owner, queuedLocalId, replacesRunningSplitEntryId)
+          : {};
         const nextItem: QueuedEvent = {
           ...queuedEventFromParsedEvent(parsed),
           localId: queuedLocalId,
           queuedAt: new Date().toISOString(),
           userId: owner.userId,
           workspaceId: owner.workspaceId,
+          ...runningSplitOrdering,
           ...(healthOwner ? {healthOwner} : {})
         };
         // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
@@ -1628,6 +1640,12 @@ async function syncQueueItems(
     let locationTransfer: Awaited<ReturnType<typeof import("./location/store").openLegacyLocationTransfer>> = undefined;
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
+      if (item.type === "timer_start" && item.afterRunningSplitIds?.length &&
+        !await deliverRunningSplitDependencies(item.afterRunningSplitIds, owner, options)) {
+        remaining.push(item, ...queue.slice(index + 1));
+        stopped = true;
+        break;
+      }
       const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
       if (sessionRead.status !== "authenticated") {
         remaining.push(item, ...queue.slice(index + 1));
@@ -1731,6 +1749,13 @@ async function syncQueueItems(
           localId: item.localId,
           timeEntryId: payload.timeEntryId
         });
+        if (item.runningSplitPredecessorId) {
+          await settleRunningSplitSwitchReceipt(owner, item.runningSplitPredecessorId, options.signal);
+        }
+      }
+      if (item.type === "timer_stop" && item.rawPayload?.stopScope === "entry" &&
+        typeof item.rawPayload.targetEntryId === "string") {
+        await settleRunningSplitSecondReceipt(owner, item.rawPayload.targetEntryId, options.signal);
       }
       if (item.source === "health_sleep" || item.source === "health_workout") {
         if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
@@ -1797,6 +1822,46 @@ async function syncQueueItems(
     stopped,
     timerEntryIdCorrelations
   );
+}
+
+async function runningSplitOrderingForStart(owner: MobileAccountOwner, localId: string, replacesEntryId?: string) {
+  const { readPendingTimeEntryCommands } = await import("./timeEntryOutbox");
+  const commands = await readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+  const afterRunningSplitIds: string[] = [];
+  for (const command of commands) {
+    if (!command.split || command.failureKind === "permanent") continue;
+    // A recovered native Start can be admitted after the Split that depends on it.
+    if (command.optimisticEntryId === localId) break;
+    if (!command.split.receipt || command.split.receipt.correlationPending) {
+      afterRunningSplitIds.push(command.clientCommandId);
+    }
+  }
+  const predecessor = replacesEntryId && commands.find((command) => command.split &&
+    (command.split.secondLocalId === replacesEntryId || command.split.receipt?.secondEntryId === replacesEntryId));
+  return {
+    ...(afterRunningSplitIds.length ? { afterRunningSplitIds } : {}),
+    ...(predecessor ? { runningSplitPredecessorId: predecessor.clientCommandId } : {})
+  };
+}
+
+async function deliverRunningSplitDependencies(
+  commandIds: readonly string[],
+  owner: MobileAccountOwner,
+  options: SyncQueueOptions
+) {
+  const { readPendingTimeEntryCommands, synchroniseTimeEntryCommands } = await import("./timeEntryOutbox");
+  const ids = new Set(commandIds);
+  const stillWaiting = async () => (await readPendingTimeEntryCommands(owner)).some((command) =>
+    command.split && command.failureKind !== "permanent" && ids.has(command.clientCommandId)
+  );
+  if (!await stillWaiting()) return true;
+  await synchroniseTimeEntryCommands({
+    owner,
+    correlations: await readTimerEntryIdCorrelations(owner),
+    force: options.forceRetry,
+    signal: options.signal
+  });
+  return !options.signal?.aborted && !await stillWaiting();
 }
 
 export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner };
@@ -1958,6 +2023,7 @@ export async function deliverPendingTimerStop(
       return { status: "session_changed", pendingStop };
     }
     if (response.ok) {
+      await settleRunningSplitSecondReceipt(owner, pendingStop.targetEntryId, signal);
       await removePendingTimerStop(pendingStop.clientEventId);
       return { status: "delivered", pendingStop };
     }
@@ -2030,13 +2096,13 @@ export async function fetchEntryLastStops(input: {
   return body;
 }
 
-export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner): Promise<MobileTimeEntry> {
+export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner, signal?: AbortSignal): Promise<MobileTimeEntry> {
   const session = await readOwnedAuthenticatedSessionSnapshot(owner);
   if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
   if (session.status !== "authenticated") throw new AuthRequiredError();
   const { response, body } = await mobileJsonRequest<MobileTimeEntry | null>(
     `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,
-    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store" },
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal },
     { timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS, timeoutMessage: "This block is taking too long to load.",
       isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
       validate: (value, response) => {
@@ -2050,6 +2116,30 @@ export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner)
   if (!response.ok) throw new MobileHttpResponseError(response.status, "Couldn't open this block.");
   if (!body) throw new InvalidMobileAcknowledgementError();
   return body;
+}
+
+/** Settle only the exact Split second block that was active when the user tapped Switch. */
+async function settleRunningSplitSwitchReceipt(owner: MobileAccountOwner, commandId: string, signal?: AbortSignal) {
+  const { readPendingTimeEntryCommands } = await import("./timeEntryOutbox");
+  const commands = await readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+  const receipt = commands.find((command) => command.clientCommandId === commandId)?.split?.receipt;
+  if (receipt) await settleRunningSplitSecondReceipt(owner, receipt.secondEntryId, signal);
+}
+
+/** Keep the canonical state for a retained Split receipt before dropping the operation that ended it. */
+async function settleRunningSplitSecondReceipt(owner: MobileAccountOwner, entryId: string, signal?: AbortSignal) {
+  const { hasRunningSplitReceiptForSecondEntry, recordRunningSplitSecondState } = await import("./timeEntryOutbox");
+  if (!await hasRunningSplitReceiptForSecondEntry(owner, entryId)) return;
+  try {
+    const entry = await fetchOwnedTimeEntry(entryId, owner, signal);
+    const updatedAt = validIsoString(entry.updatedAt);
+    const stoppedAt = entry.stoppedAt === null ? null : validIsoString(entry.stoppedAt);
+    if (!updatedAt || stoppedAt === undefined) throw new InvalidMobileAcknowledgementError();
+    await recordRunningSplitSecondState(owner, entryId, { updatedAt, stoppedAt });
+  } catch (error) {
+    if (!(error instanceof MobileHttpResponseError) || error.statusCode !== 404) throw error;
+    await recordRunningSplitSecondState(owner, entryId, { removed: true });
+  }
 }
 
 export async function deleteTimeEntry(id: string) {
@@ -2821,6 +2911,8 @@ function migrateQueuedEvent(
   delete queueItem.workspaceId;
   delete queueItem.userId;
   delete queueItem.clientEventId;
+  delete queueItem.afterRunningSplitIds;
+  delete queueItem.runningSplitPredecessorId;
   const userId = optionalQueueOwnerText(item.userId) ?? legacyOwner?.userId;
   const workspaceId = optionalQueueOwnerText(item.workspaceId) ?? legacyOwner?.workspaceId;
   if (!userId || !workspaceId) return null;
@@ -2845,6 +2937,9 @@ function migrateQueuedEvent(
     : lastStatusCode && permanentStatusCodes.has(lastStatusCode)
       ? "permanent"
       : undefined;
+  const afterRunningSplitIds = item.type === "timer_start" && Array.isArray(item.afterRunningSplitIds)
+    ? item.afterRunningSplitIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
 
   return {
     ...queueItem,
@@ -2856,6 +2951,9 @@ function migrateQueuedEvent(
     queuedAt,
     userId,
     workspaceId,
+    ...(afterRunningSplitIds.length ? { afterRunningSplitIds } : {}),
+    ...(item.type === "timer_start" && typeof item.runningSplitPredecessorId === "string" && item.runningSplitPredecessorId
+      ? { runningSplitPredecessorId: item.runningSplitPredecessorId } : {}),
     failedAt: unscopedLegacyTimerStop
       ? validIsoString(item.failedAt) ?? queuedAt
       : validIsoString(item.failedAt),

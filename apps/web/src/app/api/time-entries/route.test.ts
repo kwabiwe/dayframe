@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   splitActiveEntry: vi.fn(),
   joinSplitEntries: vi.fn(),
   splitFinishedEntry: vi.fn(),
+  splitRunningEntry: vi.fn(),
   duplicateFinishedEntry: vi.fn(),
   scheduleLiveActivityNotification: vi.fn()
 }));
@@ -28,6 +29,7 @@ vi.mock("@/lib/event-service", () => ({
   splitActiveEntry: mocks.splitActiveEntry,
   joinSplitEntries: mocks.joinSplitEntries,
   splitFinishedEntry: mocks.splitFinishedEntry,
+  splitRunningEntry: mocks.splitRunningEntry,
   duplicateFinishedEntry: mocks.duplicateFinishedEntry,
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {},
   TimeEntryConflictError: class TimeEntryConflictError extends Error {},
@@ -190,6 +192,30 @@ describe("POST /api/time-entries", () => {
     }, session);
   });
 
+  it("keeps the fenced iPhone running split separate from the legacy split modes", async () => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const splitAt = "2026-07-04T10:30:00.000Z";
+    const body = { mode: "split-running", entryId, splitAt };
+    expect((await POST(jsonRequest({ ...body, entryId: undefined }))).status).toBe(400);
+    expect((await POST(jsonRequest(body))).status).toBe(400);
+    expect(mocks.splitRunningEntry).not.toHaveBeenCalled();
+    const send = () => POST(new Request("http://localhost/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dayframe-Client-Command-Id": "ios-running-split-1" },
+      body: JSON.stringify(body)
+    }));
+    const { TimeEntryConflictError } = await import("@/lib/event-service");
+    mocks.splitRunningEntry.mockRejectedValueOnce(new TimeEntryConflictError())
+      .mockResolvedValueOnce({ id: entryId, newEntryId: null, replayed: true });
+    expect((await send()).status).toBe(409);
+    expect((await send()).status).toBe(200);
+    expect(mocks.splitRunningEntry).toHaveBeenCalledWith(entryId,
+      { splitAt, clientCommandId: "ios-running-split-1" }, session);
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+    expect(mocks.splitFinishedEntry).not.toHaveBeenCalled();
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+  });
+
   it("answers a block changed elsewhere with 409 and the block, and a refused split with 422 (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     const { TimeEntryConflictError, TimeEntryValidationError } = await import("@/lib/event-service");
@@ -208,7 +234,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, split, duplicate, join, or copy-completed."
+      error: "mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();

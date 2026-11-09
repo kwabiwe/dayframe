@@ -183,4 +183,40 @@ describeWithDatabase("Split a running block on disposable PostgreSQL", () => {
     expect(await joinSplitEntries(running, { splitEntryId: split.newEntryId! }, session)).toMatchObject({ running: false });
     expect((await blocks()).map((row) => [row.id, row.stoppedAt?.toISOString()])).toEqual([[running, stoppedAt]]);
   });
+
+  it("refuses stale iPhone splits and replays a committed receipt before checking running state", async () => {
+    const { processActivityEvent, splitRunningEntry, TimeEntryConflictError, TimeEntryValidationError } = await import("./event-service");
+    const initial = await blocks();
+    const splitAt = ago(2);
+    const targetStartedAt = ago(4);
+    const start = await processActivityEvent({
+      source: "mobile_app", type: "timer_start", occurredAt: targetStartedAt,
+      clientEventId: "mobile-start-fenced-split", rawPayload: { startedAt: targetStartedAt }
+    }, session);
+    const target = start.timeEntryId!;
+    await expect(splitRunningEntry(running, { splitAt: ago(20), clientCommandId: "stale-mobile-split" }, session))
+      .rejects.toBeInstanceOf(TimeEntryConflictError);
+    await expect(splitRunningEntry(target, { splitAt: new Date(Date.parse(splitAt) + 1000).toISOString(),
+      clientCommandId: "off-minute-mobile-split" }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    const command = { splitAt, clientCommandId: "fenced-mobile-split" };
+    const first = await splitRunningEntry(target, command, session);
+    const second = first.newEntryId!;
+    expect(first).toMatchObject({ id: target, running: true, replayed: false });
+    const stoppedAt = ago(1);
+    const stop = await processActivityEvent({
+      source: "mobile_app", type: "timer_stop", occurredAt: stoppedAt, clientEventId: "mobile-stop-fenced-split",
+      rawPayload: { origin: "mobile_timer_stop", stopScope: "entry", targetEntryId: second }
+    }, session);
+    expect(stop.timeEntryId).toBe(second);
+    await expect(splitRunningEntry(target, command, session)).resolves.toEqual({
+      id: target, newEntryId: second, replayed: true
+    });
+    await expect(splitRunningEntry(second, command, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    const rows = await blocks();
+    expect(rows).toHaveLength(initial.length + 2);
+    expect(rows.slice(0, initial.length)).toEqual(initial);
+    expect(rows.slice(-2).map((row) => [row.id, row.stoppedAt?.toISOString()])).toEqual([
+      [target, splitAt], [second, stoppedAt]
+    ]);
+  });
 });

@@ -6,6 +6,8 @@ import {
   getOrCreatePendingStop,
   pendingTimerStopsForOwner,
   readPendingTimerStops,
+  rejectPendingTimerStopsForTarget,
+  removePendingTimerStopsForTarget,
   resolvePendingTimerStopTargets,
   type PendingTimerStop,
   type TimerStopTarget,
@@ -83,6 +85,23 @@ export function synchronisePendingTimerStops(input: {
       input.owner
     );
     const owned = pendingTimerStopsForOwner(resolved, input.owner);
+    const unresolved = owned.flatMap((pendingStop) =>
+      !pendingStop.targetEntryId && pendingStop.optimisticEntryId ? [pendingStop.optimisticEntryId] : []
+    );
+    if (unresolved.length > 0) {
+      const {
+        OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX, REFUSED_SPLIT_STOP_MESSAGE, readRefusedStartFenceEntryIds
+      } = await import("./timeEntryOutbox");
+      const refused = new Set(await readRefusedStartFenceEntryIds(input.owner));
+      for (const optimisticEntryId of new Set(unresolved)) {
+        if (!refused.has(optimisticEntryId)) continue;
+        if (optimisticEntryId.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX)) {
+          await rejectPendingTimerStopsForTarget(input.owner, optimisticEntryId, REFUSED_SPLIT_STOP_MESSAGE);
+        } else {
+          await removePendingTimerStopsForTarget(input.owner, { optimisticEntryId });
+        }
+      }
+    }
     const deliverable = owned.filter((pendingStop) =>
       pendingStop.targetEntryId && pendingStop.failureKind !== "permanent"
     );

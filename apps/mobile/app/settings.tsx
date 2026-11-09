@@ -2756,7 +2756,7 @@ export default function SettingsScreen() {
               {liveSyncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
                   foot={needsAttentionFoot({
-                    tryAgain: timerStopSyncIssues.length > 0 ||
+                    tryAgain: timerStopSyncIssues.some((issue) => !issue.refusedSplit) ||
                       timeEntrySyncIssues.some((issue) => !issue.refusedStart) ||
                       reviewSyncIssues.length > 0 ||
                       queueDiagnostics.permanentFailedCount > 0,
@@ -2771,13 +2771,15 @@ export default function SettingsScreen() {
                 >
                   {timerStopSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt, clockFormat)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
+                      detail={issue.refusedSplit
+                        ? `Stop tapped ${formatQueueTime(issue.occurredAt, clockFormat)}. ${issue.lastError}`
+                        : `Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt, clockFormat)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
                       divider={index > 0}
                       key={issue.clientEventId}
                       theme={theme}
                       title="Couldn't stop the block"
                     >
-                      <SettingsPillButton accessibilityLabel="Try stopping the block again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      {issue.refusedSplit ? null : <SettingsPillButton accessibilityLabel="Try stopping the block again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />}
                       <SettingsPillButton accessibilityLabel="Discard this Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
@@ -2792,7 +2794,7 @@ export default function SettingsScreen() {
                       key={issue.clientCommandId}
                       theme={theme}
                       title={issue.operation === "delete" ? "Couldn't delete a block"
-                        : issue.copy?.action.kind === "split" ? "Couldn't split a block"
+                        : issue.operation === "split" || issue.copy?.action.kind === "split" ? "Couldn't split a block"
                         : issue.copy?.action.kind === "duplicate" ? "Couldn't duplicate a block"
                         : "Couldn't save an edit"}
                     >

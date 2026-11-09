@@ -912,6 +912,343 @@ describe("mobile API client", () => {
     });
   });
 
+  it("keeps queued Start, held Split and later Switch in durable causal order after relaunch", async () => {
+    storeBoundSession("session-token");
+    const outbox = await import("./timeEntryOutbox");
+    const original = "optimistic-active-timer:original";
+    const secondLocalId = "optimistic-active-timer:split:second";
+    const secondId = "80000000-0000-4000-8000-000000000002";
+    const later = "optimistic-active-timer:later";
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const firstUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const switchedAt = "2026-08-22T11:02:00.000Z";
+    await enqueueEvent({ owner: TIMER_STOP_OWNER, localId: original, source: "mobile_app", type: "timer_start" });
+    const split = await outbox.enqueueTimeEntrySplit({
+      owner: TIMER_STOP_OWNER, target: { optimisticEntryId: original },
+      splitAt, splitEntryLocalId: secondLocalId,
+      deliverAfter: new Date(Date.now() + 30_000).toISOString()
+    });
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: later, source: "mobile_app", type: "timer_start",
+      replacesRunningSplitEntryId: secondLocalId
+    });
+    outbox.__resetTimeEntryOutboxForTests();
+    expect((await readQueue()).map((event) => [event.localId, event.afterRunningSplitIds, event.runningSplitPredecessorId])).toEqual([
+      [original, undefined, undefined], [later, [split.clientCommandId], split.clientCommandId]
+    ]);
+    const calls: string[] = [];
+    let splitReplyLost = true;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, request: RequestInit) => {
+      if (url.endsWith(`/api/time-entries/${secondId}`)) {
+        calls.push("canonical-second");
+        return jsonResponse({ entry: { id: secondId, startedAt: splitAt, stoppedAt: switchedAt, updatedAt: switchedAt } });
+      }
+      const body = JSON.parse(String(request.body));
+      if (url.endsWith("/api/time-entries")) {
+        calls.push("split");
+        expect(body).toMatchObject({ mode: "split-running", entryId: TIMER_TARGET_A });
+        expect(new Headers(request.headers).get("X-Dayframe-Client-Command-Id")).toBe(split.clientCommandId);
+        if (splitReplyLost) {
+          splitReplyLost = false;
+          throw new TypeError("Network request failed");
+        }
+        return jsonResponse({
+          newEntryId: secondId, replayed: true,
+          entries: [{ id: TIMER_TARGET_A, stoppedAt: splitAt, updatedAt: firstUpdatedAt },
+            { id: secondId, stoppedAt: null, updatedAt: firstUpdatedAt }]
+        });
+      }
+      expect(body).not.toHaveProperty("afterRunningSplitIds");
+      expect(body).not.toHaveProperty("runningSplitPredecessorId");
+      expect(body).not.toHaveProperty("replacesRunningSplitEntryId");
+      calls.push(body.clientEventId);
+      return jsonResponse({
+        eventId: `receipt-${body.clientEventId}`,
+        timeEntryId: body.clientEventId === original ? TIMER_TARGET_A : "80000000-0000-4000-8000-000000000003"
+      });
+    }));
+    await expect(syncQueue({ eventScope: "timer_mutations", forceRetry: true }))
+      .resolves.toMatchObject({ synced: [original], remainingCount: 1, stopped: true });
+    expect(calls).toEqual([original]);
+    await outbox.releaseTimeEntryCommands([split.clientCommandId]);
+    await expect(syncQueue({ eventScope: "timer_mutations", forceRetry: true }))
+      .resolves.toMatchObject({ synced: [], remainingCount: 1, stopped: true });
+    expect(calls).toEqual([original, "split"]);
+    outbox.__resetTimeEntryOutboxForTests();
+    await expect(syncQueue({ eventScope: "timer_mutations", forceRetry: true }))
+      .resolves.toMatchObject({ synced: [later], remainingCount: 0, stopped: false });
+    expect(calls).toEqual([original, "split", "split", later, "canonical-second"]);
+    const receipts = await outbox.readPendingTimeEntryCommands(TIMER_STOP_OWNER, { includeRunningSplitReceipts: true });
+    expect(receipts[0]?.split?.receipt).toMatchObject({ secondEntryId: secondId, secondStoppedAt: switchedAt });
+  });
+
+  it("settles only the exact predecessor when Switch is queued after the split is acknowledged", async () => {
+    storeBoundSession("session-token");
+    const owner = TIMER_STOP_OWNER;
+    const outbox = await import("./timeEntryOutbox");
+    const secondId = "80000000-0000-4000-8000-000000000002";
+    const otherFirst = "80000000-0000-4000-8000-000000000003";
+    const otherSecond = "80000000-0000-4000-8000-000000000004";
+    const nextTimer = "80000000-0000-4000-8000-000000000005";
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const splitUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const switchedAt = "2026-08-22T11:02:00.000Z";
+    const firstSplit = await outbox.enqueueTimeEntrySplit({
+      owner, target: { targetEntryId: TIMER_TARGET_A }, splitAt, splitEntryLocalId: "optimistic-active-timer:split:first"
+    });
+    const unrelatedSplit = await outbox.enqueueTimeEntrySplit({
+      owner, target: { targetEntryId: otherFirst }, splitAt, splitEntryLocalId: "optimistic-active-timer:split:other"
+    });
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/api/time-entries")) {
+        const { entryId } = JSON.parse(String(request.body));
+        const newEntryId = entryId === TIMER_TARGET_A ? secondId : otherSecond;
+        return jsonResponse({
+          id: entryId, newEntryId,
+          entries: [{ id: entryId, stoppedAt: splitAt, updatedAt: splitUpdatedAt },
+            { id: newEntryId, stoppedAt: null, updatedAt: splitUpdatedAt }]
+        });
+      }
+      if (url.endsWith("/api/events")) return jsonResponse({ eventId: "switch-receipt", timeEntryId: nextTimer });
+      fetched.push(url);
+      return jsonResponse({ entry: { id: secondId, startedAt: splitAt, stoppedAt: switchedAt, updatedAt: switchedAt } });
+    }));
+    await expect(outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 2, waitingCount: 0 });
+    const later = "optimistic-active-timer:later";
+    await enqueueEvent({
+      owner, localId: later, source: "mobile_app", type: "timer_start", replacesRunningSplitEntryId: secondId
+    });
+    outbox.__resetTimeEntryOutboxForTests();
+    const [queued] = await readQueue();
+    expect(queued?.afterRunningSplitIds).toBeUndefined();
+    expect(queued?.runningSplitPredecessorId).toBe(firstSplit.clientCommandId);
+    await expect(syncQueue({ eventScope: "timer_mutations", forceRetry: true }))
+      .resolves.toMatchObject({ synced: [later], remainingCount: 0 });
+    expect(fetched).toEqual([`https://dayframe.test/api/time-entries/${secondId}`]);
+    const receipts = await outbox.readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+    expect(receipts.find((item) => item.clientCommandId === firstSplit.clientCommandId)?.split?.receipt)
+      .toMatchObject({ secondEntryId: secondId, secondStoppedAt: switchedAt });
+    const unrelatedReceipt = receipts.find((item) => item.clientCommandId === unrelatedSplit.clientCommandId)?.split?.receipt;
+    expect(unrelatedReceipt?.secondEntryId).toBe(otherSecond);
+    expect(unrelatedReceipt?.secondStoppedAt).toBeUndefined();
+  });
+
+  it.each(["unchanged", "changed", "missing"])(
+    "keeps concurrent Stop settled when the Split response's first row is %s",
+    async (firstRow) => {
+      storeBoundSession("session-token");
+      const owner = TIMER_STOP_OWNER;
+      const outbox = await import("./timeEntryOutbox");
+      const secondId = "80000000-0000-4000-8000-000000000002";
+      const secondLocalId = "optimistic-active-timer:split:second";
+      const splitAt = "2026-08-22T10:30:00.000Z";
+      const firstEnd = firstRow === "changed" ? "2026-08-22T10:25:00.000Z" : splitAt;
+      const splitUpdatedAt = "2026-08-22T11:00:00.000Z";
+      const stoppedAt = "2026-08-22T11:05:00.000Z";
+      await outbox.enqueueTimeEntrySplit({ owner, target: { targetEntryId: TIMER_TARGET_A }, splitAt, splitEntryLocalId: secondLocalId });
+      const stop = await getOrCreatePendingStop({ owner, target: { optimisticEntryId: secondLocalId }, occurredAt: stoppedAt });
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (url: string, request: RequestInit) => {
+        if (url.endsWith("/api/time-entries")) {
+          calls.push("split");
+          return jsonResponse({
+            id: TIMER_TARGET_A, newEntryId: secondId,
+            entries: [
+              ...(firstRow === "missing" ? [] : [{ id: TIMER_TARGET_A, stoppedAt: firstEnd, updatedAt: splitUpdatedAt }]),
+              { id: secondId, stoppedAt: null, updatedAt: splitUpdatedAt }
+            ]
+          });
+        }
+        if (url.endsWith("/api/events")) {
+          calls.push("stop");
+          expect(JSON.parse(String(request.body))).toMatchObject({
+            clientEventId: stop.clientEventId, occurredAt: stoppedAt, rawPayload: { targetEntryId: secondId }
+          });
+          return jsonResponse({ eventId: "stop-receipt" });
+        }
+        calls.push("canonical-second");
+        expect(url).toBe(`https://dayframe.test/api/time-entries/${secondId}`);
+        return jsonResponse({ entry: { id: secondId, startedAt: splitAt, stoppedAt, updatedAt: stoppedAt } });
+      }));
+      const correlationVisible = deferred<void>();
+      const finishCorrelationWrite = deferred<void>();
+      const storageWrite = vi.mocked(AsyncStorage.setItem);
+      const originalWrite = storageWrite.getMockImplementation()!;
+      storageWrite.mockImplementation(async (key, value) => {
+        await originalWrite(key, value);
+        if (key === "dayframe.timerEntryIdCorrelations.v1") {
+          correlationVisible.resolve();
+          await finishCorrelationWrite.promise;
+        }
+      });
+      const splitPass = outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true });
+      try {
+        await Promise.race([
+          correlationVisible.promise,
+          splitPass.then(() => { throw new Error("Split finished before publishing its correlation"); })
+        ]);
+        expect(calls).toEqual(["split"]);
+        await expect(synchronisePendingTimerStops({ owner, correlations: await readTimerEntryIdCorrelations(owner) }))
+          .resolves.toMatchObject({ deliveredCount: 1, remaining: [] });
+        expect(calls).toEqual(["split", "stop", "canonical-second"]);
+        const during = await outbox.readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+        expect(during[0]?.split?.receipt).toMatchObject({
+          firstEntryId: TIMER_TARGET_A, secondEntryId: secondId, secondStoppedAt: stoppedAt, correlationPending: true
+        });
+      } finally {
+        finishCorrelationWrite.resolve();
+        await splitPass;
+        storageWrite.mockImplementation(originalWrite);
+      }
+      expect(await readPendingTimerStops()).toEqual([]);
+      outbox.__resetTimeEntryOutboxForTests();
+      const timeEntryCommands = await outbox.readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+      const receipt = timeEntryCommands[0]?.split?.receipt;
+      expect(receipt?.correlationPending).toBeUndefined();
+      expect(receipt?.secondStoppedAt).toBe(stoppedAt);
+      const first = { ...timerRecoveryEntry(TIMER_TARGET_A), updatedAt: "2026-08-22T10:00:00.000Z" };
+      const second = { ...first, id: secondId, startedAt: splitAt, updatedAt: splitUpdatedAt };
+      const work = { owner, timeEntryCommands, activityEvents: [], timerStops: [], correlations: new Map<string, string>() };
+      const fromFirst = projectDurableLocalWork(timerRecoveryBootstrap(first), work);
+      expect(fromFirst.activeEntry).toBeNull();
+      expect(fromFirst.entries.find((entry) => entry.id === TIMER_TARGET_A)?.stoppedAt)
+        .toBe(firstRow === "missing" ? undefined : firstEnd);
+      const fromSecond = projectDurableLocalWork(timerRecoveryBootstrap(second), work);
+      expect(fromSecond.activeEntry).toBeNull();
+      expect(fromSecond.entries.find((entry) => entry.id === secondId)?.stoppedAt).toBe(stoppedAt);
+    }
+  );
+
+  it("keeps a queued Stop visible after relaunch before and after repairing the Split correlation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T11:00:00.000Z"));
+    storeBoundSession("session-token");
+    const owner = TIMER_STOP_OWNER;
+    const outbox = await import("./timeEntryOutbox");
+    const secondId = "80000000-0000-4000-8000-000000000002";
+    const secondLocalId = "optimistic-active-timer:split:second";
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const splitUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const stoppedAt = "2026-08-22T11:05:00.000Z";
+    await outbox.enqueueTimeEntrySplit({ owner, target: { targetEntryId: TIMER_TARGET_A }, splitAt, splitEntryLocalId: secondLocalId });
+    await getOrCreatePendingStop({ owner, target: { optimisticEntryId: secondLocalId }, occurredAt: stoppedAt });
+    const fetch = vi.fn(async () => jsonResponse({
+      id: TIMER_TARGET_A, newEntryId: secondId,
+      entries: [{ id: TIMER_TARGET_A, stoppedAt: splitAt, updatedAt: splitUpdatedAt },
+        { id: secondId, stoppedAt: null, updatedAt: splitUpdatedAt }]
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const storageWrite = vi.mocked(AsyncStorage.setItem);
+    const originalWrite = storageWrite.getMockImplementation()!;
+    storageWrite.mockImplementation(async (key, value) => {
+      if (key === "dayframe.timerEntryIdCorrelations.v1") throw new Error("Storage unavailable");
+      await originalWrite(key, value);
+    });
+    try {
+      await expect(outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true }))
+        .resolves.toMatchObject({ deliveredCount: 0, waitingCount: 1, reason: "retryable_failure" });
+    } finally {
+      storageWrite.mockImplementation(originalWrite);
+    }
+    const first = { ...timerRecoveryEntry(TIMER_TARGET_A), updatedAt: "2026-08-22T10:00:00.000Z" };
+    const second = { ...first, id: secondId, startedAt: splitAt, updatedAt: splitUpdatedAt };
+    async function readAfterRelaunch() {
+      outbox.__resetTimeEntryOutboxForTests();
+      const timeEntryCommands = await outbox.readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+      const timerStops = await readPendingTimerStops();
+      const correlations = await readTimerEntryIdCorrelations(owner);
+      const work = { owner, timeEntryCommands, activityEvents: [], timerStops, correlations };
+      return { correlations, timeEntryCommands, timerStops, projections: [first, second].map((cached) =>
+        projectDurableLocalWork(timerRecoveryBootstrap(cached), work)) };
+    }
+    const beforeRepair = await readAfterRelaunch();
+    expect(beforeRepair.timeEntryCommands[0]?.split?.receipt?.correlationPending).toBe(true);
+    expect(beforeRepair.correlations.size).toBe(0);
+    expect(beforeRepair.timerStops[0]?.targetEntryId).toBeUndefined();
+    await expect(synchronisePendingTimerStops({ owner, correlations: beforeRepair.correlations }))
+      .resolves.toMatchObject({ deliveredCount: 0 });
+    await expect(outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    const afterRepair = await readAfterRelaunch();
+    expect(afterRepair.correlations.get(secondLocalId)).toBe(secondId);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(afterRepair.projections).toEqual(beforeRepair.projections);
+    for (const projected of beforeRepair.projections) {
+      expect(projected.activeEntry).toBeNull();
+      expect(projected.entries.find((entry) => entry.id === secondId)?.stoppedAt).toBe(stoppedAt);
+    }
+  });
+
+  it("settles the exact Stop end before removing the Stop and does not resurrect the split on relaunch", async () => {
+    storeBoundSession("session-token");
+    const outbox = await import("./timeEntryOutbox");
+    const owner = TIMER_STOP_OWNER;
+    const secondId = "80000000-0000-4000-8000-000000000002";
+    const splitAt = "2026-08-22T10:30:00.000Z";
+    const firstUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const stoppedAt = "2026-08-22T11:05:00.000Z";
+    const updatedAt = "2026-08-22T11:07:00.000Z";
+    const secondLocalId = "optimistic-active-timer:split:second";
+    await outbox.enqueueTimeEntrySplit({ owner, target: { targetEntryId: TIMER_TARGET_A }, splitAt, splitEntryLocalId: secondLocalId });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      newEntryId: secondId,
+      entries: [{ id: TIMER_TARGET_A, stoppedAt: splitAt, updatedAt: firstUpdatedAt },
+        { id: secondId, stoppedAt: null, updatedAt: firstUpdatedAt }]
+    })));
+    await outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true });
+    const pending = await getOrCreatePendingStop({
+      owner, target: { targetEntryId: secondId }, occurredAt: "2026-08-22T11:06:00.000Z"
+    });
+    const ids: string[] = [];
+    let getFails = true;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/api/events")) {
+        const event = JSON.parse(String(request.body));
+        ids.push(event.clientEventId);
+        expect(event.rawPayload.targetEntryId).toBe(secondId);
+        return jsonResponse({ eventId: "stop-receipt", duplicate: ids.length > 1 });
+      }
+      expect(url).toBe(`https://dayframe.test/api/time-entries/${secondId}`);
+      if (getFails) {
+        getFails = false;
+        return jsonResponse({ error: "Please retry" }, 503);
+      }
+      return jsonResponse({ entry: { id: secondId, startedAt: splitAt, stoppedAt, updatedAt } });
+    }));
+    await expect(deliverPendingTimerStop(pending, owner)).resolves.toMatchObject({ status: "retryable_failure" });
+    expect((await readPendingTimerStops())[0]?.clientEventId).toBe(pending.clientEventId);
+    await expect(deliverPendingTimerStop(pending, owner)).resolves.toMatchObject({ status: "delivered" });
+    expect(ids).toEqual([pending.clientEventId, pending.clientEventId]);
+    expect(await readPendingTimerStops()).toEqual([]);
+    outbox.__resetTimeEntryOutboxForTests();
+    const timeEntryCommands = await outbox.readPendingTimeEntryCommands(owner, { includeRunningSplitReceipts: true });
+    expect(timeEntryCommands[0]?.split?.receipt).toMatchObject({
+      secondEntryId: secondId, secondStoppedAt: stoppedAt, secondUpdatedAt: updatedAt
+    });
+    const original = {
+      id: TIMER_TARGET_A, startedAt: "2026-08-22T10:00:00.000Z",
+      stoppedAt: null, updatedAt: "2026-08-22T10:00:00.000Z", categoryId: null
+    } as MobileBootstrap["entries"][number];
+    const second = { ...original, id: secondId, startedAt: splitAt, updatedAt: firstUpdatedAt };
+    function project(activeEntry: typeof original, entries = [activeEntry]) {
+      return projectDurableLocalWork(
+        { activeEntry, entries, categories: [] } as unknown as MobileBootstrap,
+        { owner, timeEntryCommands, activityEvents: [], timerStops: [], correlations: new Map() }
+      );
+    }
+    for (const cached of [original, second]) {
+      const after = project(cached);
+      expect(after.activeEntry).toBeNull();
+      expect(after.entries.find((entry) => entry.id === secondId)?.stoppedAt).toBe(stoppedAt);
+    }
+    const newer = { ...second, updatedAt: "2026-08-22T11:08:00.000Z" };
+    expect(project(newer).activeEntry).toEqual(newer);
+    const replacement = { ...newer, id: "another-timer" };
+    expect(project(replacement, [replacement, second]).activeEntry).toEqual(replacement);
+  });
+
   // Codex r2 on #532: a failed settlement write, then Clear in Sync help, left the refused Start's Edit
   // waiting forever (`dependency_wait`) and holding unrelated Edits behind it.
   it("settles a refused Start's Edit before Clear removes the Start, holding it while storage fails", async () => {

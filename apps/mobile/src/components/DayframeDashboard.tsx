@@ -273,6 +273,7 @@ import type { BlockQuestion } from "@/components/calendar/BlockQuestionCard";
 import { bootstrapBlocksById, clashChecksByBlock, clashEndsFor, clashStillAsksHere, locallyDeletedBlockIds, projectTimerTripClashEnds, runningForStart, createDeleteTombstones, createAcknowledgedEndLedger } from "@/lib/timerTripClashBlocks";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
 import { settledCheckBase, useCalendarCheckAnswers, type WaitingAnswersHidden } from "@/components/calendar/useCalendarCheckAnswers";
+import { useRunningSplit } from "@/lib/useRunningSplit";
 import { useCheckLinks, useCompletedLoadCount } from "@/components/calendar/useCheckLinks";
 import { lookupReviewLinkItem } from "@/lib/reviewLinkLookup";
 import { reprocessHealthOnCalendarFront } from "@/lib/calendarHealthReprocess";
@@ -2033,6 +2034,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  const runningSplit = useRunningSplit({
+    read: () => latestData.current,
+    update: updateDashboardData,
+    owner: timerStopOwner,
+    generation: () => noticeSessionGeneration.current,
+    persistedId: persistedTimerEntryId,
+    isOnline: () => connectivityCurrent.current.isOnline,
+    deliver: (owner, commandId) => deliverQueuedTimeEntry(owner, commandId, true),
+    onStorageFailure: () => Alert.alert(
+      "Block not split",
+      "Dayframe could not save this split on your iPhone. Check available storage and try again."
+    )
+  });
   // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
   // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
   // Location timeline corrections still on the phone (step 12), this account's.
@@ -2831,6 +2845,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     startedAt?: string | null;
     tagNames?: string[];
   }, options: { blankStartToken?: number } = {}) {
+    const generation = noticeSessionGeneration.current;
+    const undoInFlight = runningSplit.undoInFlight();
+    if (undoInFlight) await undoInFlight;
+    if (generation !== noticeSessionGeneration.current) return false;
     if (!latestData.current) return false;
     commitPendingActiveDeletionBeforeTimerStart();
     const trimmedDescription = input.description?.trim() ?? "";
@@ -2854,6 +2872,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
     const previousData = latestData.current;
+    if (previousData.activeEntry) runningSplit.finishBeforeTimerChange(previousData.activeEntry.id);
     try {
       const queue = await enqueueEvent({
         owner: timerStopOwner(previousData),
@@ -2861,6 +2880,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         source: "mobile_app",
         type: "timer_start",
         occurredAt: new Date(pendingEntry.startedAt),
+        replacesRunningSplitEntryId: previousData.activeEntry?.id,
         categoryId: pendingEntry.categoryId ?? undefined,
         description: pendingEntry.description?.trim() || undefined,
         rawPayload: {
@@ -2976,8 +2996,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function saveActiveTimerEdit(entryId: string, patch: TimeEntryUpdatePatch) {
+    const activeId = latestData.current?.activeEntry?.id;
+    const targetId = activeId && timerEntryIdentity(activeId) === timerEntryIdentity(entryId) ? activeId : entryId;
     return saveTimeEntryOptimistically(
-      entryId,
+      targetId,
       patch,
       "Block not saved",
       { awaitPersistence: true }
@@ -3071,7 +3093,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
-  function deliverQueuedTimeEntry(owner: TimerStopOwner, clientCommandId: string) {
+  function deliverQueuedTimeEntry(owner: TimerStopOwner, clientCommandId: string, followTimerStops = false) {
     if (!connectivityCurrent.current.isOnline) return;
     void (async () => {
       const correlations = await readTimerEntryIdCorrelations(owner);
@@ -3087,6 +3109,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         return Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner));
       };
       if (!ownerCurrent()) return;
+      const current = latestData.current;
+      if (followTimerStops && result.deliveredCount > 0 && current) {
+        await deliverOwnedPendingTimerStops(current, { reloadAfterDelivery: false });
+      }
       const rejected = await isTimeEntryCommandRejected(owner, clientCommandId);
       if (!ownerCurrent()) return;
       if (result.deliveredCount > 0 || result.needsAttentionCount > 0 || rejected) {
@@ -3317,13 +3343,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   stopActiveTimerRef.current = stopActiveTimer;
   async function stopActiveTimer() {
+    const generation = noticeSessionGeneration.current;
+    const undoInFlight = runningSplit.undoInFlight();
+    if (undoInFlight) await undoInFlight;
+    if (generation !== noticeSessionGeneration.current) return false;
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
     if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) return false;
     const bootstrap = latestData.current;
     if (!bootstrap) return false;
-    const generation = noticeSessionGeneration.current;
     const stoppedAt = new Date().toISOString();
+    runningSplit.finishBeforeTimerChange(activeEntry.id);
     let pendingStop: PendingTimerStop;
     let stopBackgroundReservation: Promise<void> | null;
     try {
@@ -4406,7 +4436,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             theme={theme}
           />
         ) : null}
-        {pendingDeletion?.phase === "active" ? (
+        {runningSplit.held && authState === "authenticated" &&
+          runningSplit.held.generation === noticeSessionGeneration.current ? (
+          <BlocksToast
+            key={`split-${runningSplit.held.token}`}
+            actionAccessibilityLabel={`Undo splitting ${runningSplit.held.title}`}
+            actionLabel="Undo"
+            actionTestID="today-split-undo"
+            message={`Split ${runningSplit.held.title} at ${formatClockTime(runningSplit.held.splitAt, clockFormat)}`}
+            onAction={() => {
+              void runningSplit.undo().then((undone) => { if (undone) playHaptic("undoRestore"); });
+            }}
+            reduceMotion={reduceMotion}
+            swatchColor={toastSwatchColor(runningSplit.held.swatchEntry, theme.mode)}
+            testID="today-split-toast"
+            theme={theme}
+          />
+        ) : pendingDeletion?.phase === "active" ? (
           // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
           // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
           <BlocksToast
@@ -4504,6 +4550,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onDelete={deleteActiveTimer}
+        isRunningSplitTarget={(entryId) => {
+          const current = latestData.current?.activeEntry;
+          return Boolean(current && timerEntryIdentity(current.id) === timerEntryIdentity(entryId));
+        }}
+        onSplit={data?.serverBuild?.runningEntrySplit ? runningSplit.split : undefined}
         onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}

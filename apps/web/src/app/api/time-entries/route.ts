@@ -7,6 +7,7 @@ import {
   processActivityEvent,
   splitActiveEntry,
   splitFinishedEntry,
+  splitRunningEntry,
   TimeEntryConflictError,
   TimeEntryNotFoundError,
   TimeEntryValidationError,
@@ -32,9 +33,9 @@ export async function POST(request: Request) {
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, split, duplicate, join, or copy-completed.");
+      throw new BadRequestError("mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed.");
     }
     const durableCopy = modeResult.data === "copy-completed";
     const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
@@ -97,25 +98,36 @@ export async function POST(request: Request) {
     // Card G: Split (at `splitAt`) or Duplicate a block, `entryId`, with every detail, in one transaction;
     // `expectedUpdatedAt` refuses a block changed elsewhere (409), and the client command id header makes
     // a retry safe. A running block splits too: its second part keeps running (owner 28 Oct 2026).
-    const finishedEntryId = (mode === "split" || mode === "duplicate") ? optionalUuid(body.entryId, "entryId") : undefined;
-    if (durableCopy && !finishedEntryId) throw new BadRequestError("entryId is required.");
-    if (finishedEntryId) {
-      entryId = finishedEntryId;
+    const splitRunning = mode === "split-running";
+    const copyEntryId = (mode === "split" || mode === "duplicate" || splitRunning)
+      ? optionalUuid(body.entryId, "entryId")
+      : undefined;
+    if ((durableCopy || splitRunning) && !copyEntryId) throw new BadRequestError("entryId is required.");
+    if (copyEntryId) {
+      entryId = copyEntryId;
       const expectedUpdatedAt = body.expectedUpdatedAt == null ? undefined : ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
       const clientCommandId = requestClientCommandId(request);
       if (durableCopy && (!expectedUpdatedAt || !clientCommandId)) {
         throw new BadRequestError("A durable copy requires the block version and a client command ID.");
       }
       const command = { expectedUpdatedAt, clientCommandId, ...(durableCopy ? { durableCopy } : {}) };
-      const result = mode === "split"
-        ? await splitFinishedEntry(finishedEntryId, {
+      let result;
+      if (splitRunning) {
+        if (!clientCommandId) throw new BadRequestError("A running split requires a client command ID.");
+        result = await splitRunningEntry(copyEntryId, {
+          clientCommandId, splitAt: requiredTimestamp(body.splitAt, "splitAt")
+        }, session);
+      } else if (mode === "split") {
+        result = await splitFinishedEntry(copyEntryId, {
           ...command, splitAt: requiredTimestamp(body.splitAt, "splitAt"), source: eventSource
-        }, session)
-        : await duplicateFinishedEntry(finishedEntryId, command, session);
+        }, session);
+      } else {
+        result = await duplicateFinishedEntry(copyEntryId, command, session);
+      }
       scheduleLiveActivityNotification(session);
       // Both blocks as they are now (on a repeat too): whether the second part runs is read from them.
       const reader = session;
-      const entries = (await Promise.all([finishedEntryId, result.newEntryId].map((id) => id ? getTimeEntryById(reader, id) : null)))
+      const entries = (await Promise.all([copyEntryId, result.newEntryId].map((id) => id ? getTimeEntryById(reader, id) : null)))
         .filter((entry) => entry !== null);
       return NextResponse.json({ ok: true, ...result, entries }, { status: result.replayed ? 200 : 201 });
     }

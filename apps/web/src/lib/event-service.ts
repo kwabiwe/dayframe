@@ -3087,6 +3087,15 @@ export async function splitFinishedEntry(
   return copyFinishedEntry(id, { kind: "split", ...input }, session);
 }
 
+/** An offline iPhone Split still applies only to the exact block that is running. */
+export async function splitRunningEntry(
+  id: string,
+  input: { splitAt: string; clientCommandId: string; now?: Date },
+  session: RequestSession
+) {
+  return copyFinishedEntry(id, { kind: "split", ...input, runningOnly: true, source: "mobile_app" }, session);
+}
+
 /**
  * Whether a split block still has the details both parts had at the split (`e`: the split's event, which keeps
  * them): its activity, project, place, one-time place name, description and tags (Codex r2 on #607).
@@ -3194,11 +3203,12 @@ async function copyFinishedEntry(
   id: string,
   input: {
     kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string;
-    durableCopy?: boolean; source?: "manual_app" | "mobile_app"; now?: Date;
+    durableCopy?: boolean; runningOnly?: boolean; source?: "manual_app" | "mobile_app"; now?: Date;
   },
   session: RequestSession
 ) {
-  const clientEventId = input.clientCommandId ? `time_entry_${input.kind}:${input.clientCommandId}` : null;
+  const operation = input.runningOnly ? "running_split" : input.kind;
+  const clientEventId = input.clientCommandId ? `time_entry_${operation}:${input.clientCommandId}` : null;
   let copyId: string | null = null;
   if (input.durableCopy) {
     if (!input.clientCommandId || !input.expectedUpdatedAt) {
@@ -3222,18 +3232,23 @@ async function copyFinishedEntry(
     if (clientEventId) {
       // Already done (its reply was lost): the block it made, not a second one. The event is the receipt,
       // so a repeat after that block has gone (an Undo joined it back) is answered too, with no block.
-      const earlier = await client.query<{ entryId: string | null; copyId: string | null }>(
-        `select te.id as "entryId", e.raw_payload->>'completedCopyId' as "copyId" from activity_events e
+      const earlier = await client.query<{
+        entryId: string | null; copyId: string | null; splitFrom: string | null; occurredAt: Date;
+      }>(
+        `select te.id as "entryId", e.raw_payload->>'completedCopyId' as "copyId",
+                e.raw_payload->>'splitFrom' as "splitFrom", e.occurred_at as "occurredAt" from activity_events e
          left join time_entries te on te.created_from_event_id = e.id and te.workspace_id = e.workspace_id
          where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
         [session.workspaceId, session.userId, clientEventId]
       );
-      if (earlier.rows[0]) {
-        if (copyId && earlier.rows[0].copyId !== copyId) {
+      const receipt = earlier.rows[0];
+      if (receipt) {
+        if ((copyId && receipt.copyId !== copyId) || (input.runningOnly &&
+          (receipt.splitFrom !== id || receipt.occurredAt.getTime() !== Date.parse(input.splitAt ?? "")))) {
           throw new TimeEntryValidationError("This command ID belongs to another block change.");
         }
         await client.query("commit");
-        return { id, newEntryId: earlier.rows[0].entryId, replayed: true as const };
+        return { id, newEntryId: receipt.entryId, replayed: true as const };
       }
     }
     if (!locked.rows[0]) throw new TimeEntryNotFoundError();
@@ -3257,6 +3272,7 @@ async function copyFinishedEntry(
     );
     const row = stored.rows[0];
     if (!row) throw new TimeEntryNotFoundError();
+    if (input.runningOnly && row.stoppedAt) throw new TimeEntryConflictError();
     if (input.expectedUpdatedAt && versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
     if (!row.stoppedAt && input.kind === "duplicate") throw new TimeEntryValidationError("Stop this block before duplicating it.");
     if (!row.stoppedAt && input.durableCopy) throw new TimeEntryValidationError("Stop this block before splitting it.");
@@ -3275,6 +3291,9 @@ async function copyFinishedEntry(
         if (!bounds || atMs % RUNNING_SPLIT_MARGIN_MS !== 0 || atMs < bounds.minMs || atMs > bounds.maxMs) {
           throw new TimeEntryValidationError("Choose a whole minute with at least one minute on each side.");
         }
+      }
+      if (input.runningOnly && atMs % RUNNING_SPLIT_MARGIN_MS !== 0) {
+        throw new TimeEntryValidationError("Choose a whole minute for the split.");
       }
       // A running block keeps a minute either side: never its first minute or the last minute before now.
       if (running && (atMs - startMs < RUNNING_SPLIT_MARGIN_MS || stopMs - atMs < RUNNING_SPLIT_MARGIN_MS)) {

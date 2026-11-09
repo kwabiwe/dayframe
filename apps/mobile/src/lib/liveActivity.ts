@@ -3,10 +3,11 @@ import { paletteColorFor } from "@dayframe/shared";
 import type { MobileBootstrap } from "./api";
 import { registerLiveActivity } from "./api";
 import { DAYFRAME_API_BASE } from "./config";
+import { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX } from "./runningSplitIdentity";
 
 type LiveActivityEntry = Pick<
   NonNullable<MobileBootstrap["activeEntry"]>,
-  "categoryColor" | "categoryName" | "description" | "id" | "startedAt"
+  "categoryColor" | "categoryName" | "description" | "id" | "startedAt" | "runningSplitSourceEntryId"
 >;
 
 type NativeActivitySnapshot = {
@@ -45,6 +46,9 @@ type DayframeLiveActivityModule = {
 const nativeLiveActivity = NativeModules.DayframeLiveActivityModule as DayframeLiveActivityModule | undefined;
 
 let lastSyncedLiveActivityKey: string | null = null;
+let pendingSplitActivity: { key: string; activityId: string } | null = null;
+const bridgeOptimisticActivityIds = new Set<string>();
+const MAX_BRIDGE_OPTIMISTIC_ACTIVITY_IDS = 8;
 let requestedEntry: LiveActivityEntry | null = null;
 let requestedGeneration = 0;
 let reconciliation: Promise<void> | null = null;
@@ -71,16 +75,22 @@ async function reconcileLatestEntry() {
     const entry = requestedEntry;
     const generation = requestedGeneration;
     const requestedKey = liveActivityKey(entry);
+    const pendingSplit = entry?.id.startsWith(OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX) ?? false;
+    if (!pendingSplit) pendingSplitActivity = null;
 
     if (!entry) {
       const convergence = await convergeNativeActivities(null, generation, null);
       if (generation !== requestedGeneration) continue;
-      if (convergence.converged) lastSyncedLiveActivityKey = requestedKey;
-      else lastSyncedLiveActivityKey = null;
+      if (convergence.converged) {
+        lastSyncedLiveActivityKey = requestedKey;
+        bridgeOptimisticActivityIds.clear();
+      } else {
+        lastSyncedLiveActivityKey = null;
+      }
       return;
     }
 
-    if (!isUuid(entry.id)) {
+    if (!pendingSplit && !isUuid(entry.id)) {
       if (lastSyncedLiveActivityKey === requestedKey) return;
       const result = await startNativeActivity(entry).catch(() => false);
       if (generation !== requestedGeneration) continue;
@@ -88,13 +98,19 @@ async function reconcileLatestEntry() {
       return;
     }
 
-    const shouldStart = lastSyncedLiveActivityKey !== requestedKey;
-    let preferredActivityId: string | null = null;
+    let preferredActivityId = pendingSplit && pendingSplitActivity?.key === requestedKey
+      ? pendingSplitActivity.activityId
+      : null;
+    const shouldStart = pendingSplit ? !preferredActivityId : lastSyncedLiveActivityKey !== requestedKey;
     if (shouldStart) {
       const result = await startNativeActivity(entry).catch(() => false);
+      preferredActivityId = typeof result === "object" && result.started ? result.activityId ?? null : null;
+      // A repeat of the same pending key may arrive while the native start is in flight.
+      if (pendingSplit && preferredActivityId && liveActivityKey(requestedEntry) === requestedKey) {
+        pendingSplitActivity = { key: requestedKey, activityId: preferredActivityId };
+      }
       if (generation !== requestedGeneration) continue;
-      if (!nativeStartSucceeded(result)) return;
-      preferredActivityId = typeof result === "object" ? result.activityId ?? null : null;
+      if (!nativeStartSucceeded(result) || (pendingSplit && !preferredActivityId)) return;
     }
 
     const convergence = await convergeNativeActivities(
@@ -104,20 +120,26 @@ async function reconcileLatestEntry() {
     );
     if (generation !== requestedGeneration) continue;
     if (!convergence.snapshotAvailable) {
-      lastSyncedLiveActivityKey = null;
+      if (!pendingSplit) lastSyncedLiveActivityKey = null;
       return;
     }
     if (!convergence.converged || !convergence.survivorActivityId) {
+      if (pendingSplit) {
+        // Keep the verified canonical key when a pending start cannot take over.
+        // Undo can then keep the original Activity and its enabled Stop.
+        if (!convergence.survivorActivityId) pendingSplitActivity = null;
+        return;
+      }
       lastSyncedLiveActivityKey = null;
       // A same-key foreground pass can discover that ActivityKit ended the
-      // cached activity outside this JS process. Retry once through start;
-      // a failed/newly delayed start remains retryable on the next lifecycle.
+      // cached activity outside this JS process. Retry once through start.
       if (!shouldStart) continue;
       return;
     }
 
     lastSyncedLiveActivityKey = requestedKey;
-    if (nativeLiveActivity?.pushToken) {
+    if (!pendingSplit) bridgeOptimisticActivityIds.clear();
+    if (!pendingSplit && nativeLiveActivity?.pushToken) {
       queueRemoteRegistration(
         convergence.survivorActivityId,
         entry.id,
@@ -180,15 +202,21 @@ async function matchingNativeActivityState(
     };
   }
 
+  const canonical = isUuid(entry.id);
   const matching = active.filter((activity) =>
-    activity.isRunning && activity.entryId === entry.id
+    activity.isRunning && (canonical
+      ? activity.entryId === entry.id
+      : activity.entryId == null && activity.activityId === preferredActivityId)
   );
   const survivor = matching.find((activity) => activity.activityId === preferredActivityId) ?? matching[0] ?? null;
-  const staleActivityIds = active
-    .filter((activity) => activity.activityId !== survivor?.activityId)
-    .map((activity) => activity.activityId);
+  // A native Shortcut can create a newer canonical Activity before bootstrap catches up.
+  const staleActivityIds = active.filter((activity) =>
+    activity.activityId !== survivor?.activityId && (canonical || (survivor &&
+      ((entry.runningSplitSourceEntryId != null && activity.entryId === entry.runningSplitSourceEntryId) ||
+        (activity.entryId == null && bridgeOptimisticActivityIds.has(activity.activityId)))))
+  ).map((activity) => activity.activityId);
   return {
-    converged: Boolean(survivor) && active.length === 1 && staleActivityIds.length === 0,
+    converged: Boolean(survivor) && staleActivityIds.length === 0,
     snapshotAvailable: true,
     staleActivityIds,
     survivorActivityId: survivor?.activityId ?? null
@@ -214,17 +242,26 @@ function liveActivityFills(entry: LiveActivityEntry) {
   };
 }
 
-function startNativeActivity(entry: LiveActivityEntry) {
+async function startNativeActivity(entry: LiveActivityEntry) {
   const fills = liveActivityFills(entry);
-  return nativeLiveActivity!.start(
+  const canonicalId = isUuid(entry.id) ? entry.id : null;
+  const result = await nativeLiveActivity!.start(
     displayLiveActivityTitle(entry),
-    isUuid(entry.id) ? entry.id : null,
+    canonicalId,
     DAYFRAME_API_BASE,
     entry.categoryName,
     fills.dark,
     entry.startedAt,
     fills.light
   );
+  if (!canonicalId && typeof result === "object" && result.started && result.activityId) {
+    bridgeOptimisticActivityIds.add(result.activityId);
+    if (bridgeOptimisticActivityIds.size > MAX_BRIDGE_OPTIMISTIC_ACTIVITY_IDS) {
+      const oldest = bridgeOptimisticActivityIds.values().next().value;
+      if (oldest) bridgeOptimisticActivityIds.delete(oldest);
+    }
+  }
+  return result;
 }
 
 function nativeStartSucceeded(

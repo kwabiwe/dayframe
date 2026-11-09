@@ -156,6 +156,155 @@ describe("Live Activity sync", () => {
     expect(mocks.enableStop).toHaveBeenCalledWith("activity-canonical-2", entry.id);
   });
 
+  it("keeps only the second part visible through a held running split and its receipt", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    const second = canonicalEntry("80000000-0000-4000-8000-000000000002", {
+      startedAt: "2026-08-19T08:20:00.000Z"
+    });
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+    const firstActivity = activities[0]?.activityId;
+    const pending = { ...second, id: "optimistic-active-timer:split:fixture", runningSplitSourceEntryId: first.id };
+
+    await syncLiveActivityForEntry(pending);
+    expect(activities).toEqual([expect.objectContaining({ activityId: "activity-optimistic-2", entryId: null })]);
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith([firstActivity]);
+    expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.enableStop).toHaveBeenCalledTimes(1);
+    expect(mocks.start.mock.calls[1]?.[5]).toBe(second.startedAt);
+
+    await syncLiveActivityForEntry(pending);
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+    await syncLiveActivityForEntry(second);
+    expect(activities).toEqual([expect.objectContaining({ activityId: "activity-canonical-3", entryId: second.id })]);
+    await vi.waitFor(() => expect(mocks.enableStop).toHaveBeenLastCalledWith("activity-canonical-3", second.id));
+    expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores the original canonical Activity when a held split is undone", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+
+    await syncLiveActivityForEntry({
+      ...first, id: "optimistic-active-timer:split:undone", runningSplitSourceEntryId: first.id, startedAt: "2026-08-19T08:20:00.000Z"
+    });
+    await syncLiveActivityForEntry(first);
+
+    expect(activities).toEqual([expect.objectContaining({ activityId: "activity-canonical-3", entryId: first.id })]);
+    await vi.waitFor(() => expect(mocks.enableStop).toHaveBeenLastCalledWith("activity-canonical-3", first.id));
+    expect(mocks.registerLiveActivity.mock.calls.map(([registration]) => registration.activeEntryId)).toEqual([first.id, first.id]);
+  });
+
+  it("preserves the previous Activity until the exact pending split appears in the snapshot", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+    addActivity("unrelated-unbound", null);
+    mocks.start.mockResolvedValueOnce({ started: true, activityId: "not-in-snapshot" });
+    vi.useFakeTimers();
+    const pending = { ...first, id: "optimistic-active-timer:split:delayed", runningSplitSourceEntryId: first.id, startedAt: "2026-08-19T08:20:00.000Z" };
+
+    const waiting = syncLiveActivityForEntry(pending);
+    await vi.advanceTimersByTimeAsync(1_250);
+    await waiting;
+
+    expect(mocks.cleanupActivities).not.toHaveBeenCalled();
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["activity-canonical-1", "unrelated-unbound"]);
+    await syncLiveActivityForEntry(pending);
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["unrelated-unbound", "activity-optimistic-2"]);
+  });
+
+  it("reuses the exact native split start when the same request arrives before it resolves", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+    const pending = { ...first, id: "optimistic-active-timer:split:fixture", runningSplitSourceEntryId: first.id, startedAt: "2026-08-19T08:20:00.000Z" };
+
+    let finishStart!: () => void;
+    mocks.start
+      .mockImplementationOnce(() => new Promise(resolve => {
+        finishStart = () => {
+          addActivity("activity-exact-pending", null);
+          resolve({ started: true, activityId: "activity-exact-pending" });
+        };
+      }))
+      .mockResolvedValueOnce({ started: false });
+    const original = syncLiveActivityForEntry(pending);
+    const repeat = syncLiveActivityForEntry(pending);
+    finishStart();
+    await Promise.all([original, repeat]);
+
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["activity-exact-pending"]);
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a newer native Shortcut Activity observed before JS refreshes the timer", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    const nativeReplacement = canonicalEntry("80000000-0000-4000-8000-000000000002", {
+      startedAt: "2026-08-19T08:24:00.000Z"
+    });
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+    const pending = { ...first, id: "optimistic-active-timer:split:fixture", runningSplitSourceEntryId: first.id, startedAt: "2026-08-19T08:20:00.000Z" };
+
+    mocks.start.mockImplementationOnce(async () => {
+      addActivity("activity-exact-pending", null);
+      addActivity("activity-new-native-shortcut", nativeReplacement.id);
+      return { started: true, activityId: "activity-exact-pending" };
+    });
+    await syncLiveActivityForEntry(pending);
+
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["activity-exact-pending", "activity-new-native-shortcut"]);
+  });
+
+  it("keeps the restored original Stop available after the pending snapshot fails", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = canonicalEntry();
+    let originalStopEnabled = false;
+    const nativeStart = mocks.start.getMockImplementation()!;
+    mocks.start.mockImplementation(async (...args: unknown[]) => {
+      const result = await nativeStart(...args);
+      if (args[1] === first.id && result.activityId === "activity-canonical-1") originalStopEnabled = false;
+      return result;
+    });
+    mocks.enableStop.mockImplementation(async (activityId: string) => {
+      if (activityId === "activity-canonical-1") originalStopEnabled = true;
+      return true;
+    });
+    await syncLiveActivityForEntry(first);
+    await vi.waitFor(() => expect(originalStopEnabled).toBe(true));
+
+    mocks.activitySnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+    await syncLiveActivityForEntry({
+      ...first, id: "optimistic-active-timer:split:fixture", runningSplitSourceEntryId: first.id, startedAt: "2026-08-19T08:20:00.000Z"
+    });
+    await syncLiveActivityForEntry(first);
+
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["activity-canonical-1"]);
+    await vi.waitFor(() => expect(originalStopEnabled).toBe(true));
+  });
+
+  it("replaces a bridge-created offline Start Activity when its pending split appears", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const first = { ...canonicalEntry(), id: "optimistic-active-timer:queued" };
+    await syncLiveActivityForEntry(first);
+    addActivity("unrelated-unbound", null);
+    await syncLiveActivityForEntry({
+      ...first, id: "optimistic-active-timer:split:queued", runningSplitSourceEntryId: first.id,
+      startedAt: "2026-08-19T08:20:00.000Z"
+    });
+
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-optimistic-1"]);
+    expect(activities.map(({ activityId }) => activityId)).toEqual(["unrelated-unbound", "activity-optimistic-2"]);
+    expect(mocks.enableStop).not.toHaveBeenCalled();
+  });
+
   it("retries when cleanup resolves true but ActivityKit still reports the stale sibling", async () => {
     vi.useFakeTimers();
     const entry = canonicalEntry();
