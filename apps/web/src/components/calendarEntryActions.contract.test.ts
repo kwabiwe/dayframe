@@ -90,7 +90,9 @@ describe("shared web time-entry quick editor", () => {
     // The labels are the card kit's one label, Add time's too (cardKit.contract.test.ts).
     expect(styles).toMatch(/\.calendar-compact-field-label,\n\.calendar-compact-editor-description > label,/);
     // The touch rule comes after the "All activities" chip's 32 px, so it wins (Codex r1 on #465).
-    const moreChip = styles.indexOf(".df-ed-chips .calendar-compact-category-field > .df-rchip--more {");
+    const moreChip = styles.indexOf(".df-rchip--more {");
+    expect(categoryPicker).toContain('variant === "more" ? "df-all-activities-field"');
+    expect(styles).toMatch(/\.df-all-activities-field \{[^}]*display:\s*inline-flex;/s);
     const coarseChips = styles.indexOf("@media (any-pointer: coarse) {\n  .df-ed-chips .df-rchip,");
     expect(moreChip).toBeGreaterThan(-1);
     expect(coarseChips).toBeGreaterThan(moreChip);
