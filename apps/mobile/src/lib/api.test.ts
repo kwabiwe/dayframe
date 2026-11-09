@@ -10,6 +10,16 @@ import { createDeletionCoordinator } from "./historyDeletion";
 
 const locationLifecycle = vi.hoisted(() => ({bind:vi.fn(async()=>true),end:vi.fn(async()=>undefined)}));
 vi.mock("./location/runtime",()=>({bindLocationCaptureOwner:locationLifecycle.bind,endLocationCaptureOwnership:locationLifecycle.end,beginLocationLogout:()=>()=>undefined,isLocationLogoutCurrent:()=>false}));
+// Queue tests here exercise delivery outcomes with an eligible capture session. The real
+// permission, revocation and retained-work behavior runs in locationSession.sqlite.test.ts.
+vi.mock("./location/store", () => ({
+  openLegacyLocationTransfer: async (_owner: unknown, signal?: AbortSignal) => ({
+    signal: signal ?? new AbortController().signal,
+    isCurrent: () => !signal?.aborted,
+    mayDispatch: async () => !signal?.aborted,
+    release: () => undefined
+  })
+}));
 
 const TIMER_STOP_OWNER = { userId: "user-a", workspaceId: "workspace-a" };
 const ACCOUNT_B_OWNER = { userId: "user-b", workspaceId: "workspace-b" };

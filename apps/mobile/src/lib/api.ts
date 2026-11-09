@@ -5,6 +5,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { AppState } from "react-native";
 import {
+  isLegacyAutomaticLocationSource,
+  isPausedLegacyLocationEvent
+} from "./location/automaticTransferPause";
+import {
   ActivityEventInputSchema,
   LocationReviewEvidenceDtoSchema,
   TimelineItemEvidenceDtoSchema,
@@ -1571,6 +1575,7 @@ async function syncQueueItems(
   const now = new Date();
   // At most one slow retry of a parked Health or location event per pass (see isParkedRetryDue).
   let parkedRetryBudget = 1;
+  let locationPausedThisPass = false;
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
@@ -1578,6 +1583,12 @@ async function syncQueueItems(
       remaining.push(item, ...queue.slice(index + 1));
       stopped = true;
       break;
+    }
+    const legacyLocation = isLegacyAutomaticLocationSource(item.source);
+    if (legacyLocation && (locationPausedThisPass ||
+        (!options.forceRetry && !options.retryFailed && isPausedLegacyLocationEvent(item)))) {
+      remaining.push(item);
+      continue;
     }
     // A journal-owned Health event whose delivery is no longer owed (discarded, acknowledged or gone
     // with its account's journal) leaves the queue unsent (Codex r3 on #549).
@@ -1626,6 +1637,7 @@ async function syncQueueItems(
     }
 
     const attemptedAt = new Date().toISOString();
+    let locationTransfer: Awaited<ReturnType<typeof import("./location/store").openLegacyLocationTransfer>> = undefined;
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
       if (item.type === "timer_start" && item.afterRunningSplitIds?.length &&
@@ -1640,6 +1652,17 @@ async function syncQueueItems(
         stopped = true;
         break;
       }
+      if (legacyLocation) {
+        const { openLegacyLocationTransfer } = await import("./location/store");
+        locationTransfer = await openLegacyLocationTransfer(owner, options.signal);
+        if (!locationTransfer) {
+          locationPausedThisPass = true;
+          if (parkedRetry) parkedRetryBudget += 1;
+          remaining.push(item);
+          continue;
+        }
+      }
+      const transfer = locationTransfer;
       const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
         `${DAYFRAME_API_BASE}/api/events`,
         {
@@ -1651,10 +1674,21 @@ async function syncQueueItems(
             [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
           },
           body: JSON.stringify(queuedEventRequestBody(item)),
-          signal: options.signal
+          signal: locationTransfer?.signal ?? options.signal
         },
         {
-          isCurrent: async () => queuedEventMatchesOwner(item,owner) && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
+          isCurrent: async () => queuedEventMatchesOwner(item,owner) &&
+            mobileAccountOwnersEqual(await readActiveMobileAccount(),owner) &&
+            (!transfer || transfer.isCurrent()) &&
+            isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+          beforeDispatch: transfer ? async () => {
+            if (!await transfer.mayDispatch()) throw new StaleMobileSessionResponseError();
+          } : undefined,
+          onDispatch: transfer ? () => {
+            if (!transfer.isCurrent() || !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
+              throw new StaleMobileSessionResponseError();
+            }
+          } : undefined,
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1739,6 +1773,12 @@ async function syncQueueItems(
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
+      if (locationTransfer && !options.signal?.aborted && !locationTransfer.isCurrent()) {
+        locationPausedThisPass = true;
+        if (parkedRetry) parkedRetryBudget += 1;
+        remaining.push(item);
+        continue;
+      }
       if (error instanceof StaleMobileSessionResponseError || options.signal?.aborted || error instanceof Error && error.name === "AbortError") {
         remaining.push(item,...queue.slice(index+1));stopped=true;break;
       }
@@ -1753,6 +1793,8 @@ async function syncQueueItems(
       remaining.push(failedItem, ...queue.slice(index + 1));
       stopped = true;
       break;
+    } finally {
+      locationTransfer?.release();
     }
   }
 

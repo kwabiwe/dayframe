@@ -14,7 +14,7 @@ const geofenceSource = source("../geofence.ts");
 const settingsSource = source("../../../app/settings.tsx");
 
 describe("location finalisation replay contracts", () => {
-  it("runs the local journal replay only for the diagnostics export and forces one server replay on foreground", () => {
+  it("runs the local journal replay only for the diagnostics export and routes foreground through the server replay policy", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
     // 13 Oct (investigation 2026-10-12): the local replay is a diagnostic projection over the whole
     // seven-day journal, so it is throttled and never runs after each stored sample. 22 Oct stability
@@ -41,8 +41,8 @@ describe("location finalisation replay contracts", () => {
     expect(runtimeSource).not.toContain("await processPendingLocationEvidence()");
     const persistPath = storeSource.slice(storeSource.indexOf("async function persistLocationEvidenceUnsafe"), storeSource.indexOf("export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS"));
     expect(persistPath).not.toContain("processPendingLocationEvidenceUnsafe()");
-    expect(runtimeSource).toMatch(/syncLocationEvidence\(\{ forceReplay: true,\s*\.\.\.options \}\)/);
-    expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly})");
+    expect(runtimeSource).toMatch(/syncLocationEvidence\(\{ foregroundReplay: true,\s*\.\.\.options \}\)/);
+    expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground({foregroundReplay:!context?.dueOnly})");
     expect(dashboardSource).not.toContain("syncLocationIntelligenceOnForeground");
   });
 
@@ -79,7 +79,7 @@ describe("location finalisation replay contracts", () => {
   it("does not let a pass's own location evidence queue another pass (13 Oct, TestFlight 117)", () => {
     expect(recoveryOwnerSource).toContain("durableWorkArrived(");
     expect(recoveryOwnerSource).toContain("currentCoordinator.snapshot().inFlight");
-    expect(recoveryOwnerSource).toContain("previousLocationCount.current = durableWork.locationCount");
+    expect(recoveryOwnerSource).toContain("previousLocationCount.current = runnableLocationCount");
     expect(recoveryOwnerSource).not.toContain("durableWork.pendingCount > previousPendingCount.current");
   });
 });
