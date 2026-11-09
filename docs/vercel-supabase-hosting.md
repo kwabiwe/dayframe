@@ -71,7 +71,7 @@ Before changing the staging alias, confirm the deployment is a Preview, its sche
 
 Vercel Authentication is disabled for this project because it intercepted the stable `.vercel.app` staging alias and native iOS cannot complete Vercel's interactive SSO flow. Dayframe's own provider authentication remains the application boundary: anonymous API requests fail closed, signups remain controlled by the configured allowlist/switch, and no database credentials are exposed to clients.
 
-Create the Vercel project from the repository root so npm workspaces can install `packages/shared`. Keep the framework preset as Next.js, set the build command to `npm run build`, and use the default Next.js output from `apps/web/.next`.
+Import the Git repository into Vercel and set its Root Directory to `apps/web`. Keep source files outside that directory available to the build so npm workspaces can install `packages/shared`. Use the Next.js preset and its default build and output settings.
 
 Set these Vercel environment variables for Production and Preview:
 
@@ -116,9 +116,10 @@ newest state before the immediate provider request. Network failures, 429, and
 stop, and invalid or expired tokens are invalidated. Authenticated bootstrap
 rebuilds the desired state and reconciles due rows after responding. The
 lightweight timer-state route does not enqueue or deliver pushes.
-`vercel.json` adds a protected daily sweep,
-which is the highest cron frequency available on this project's current Hobby
-plan; do not silently change that schedule without checking the Vercel plan.
+`apps/web/vercel.json` defines the protected daily Live Activity sweep and
+Location evidence retention. Their configured times are 03:47 UTC and 03:17 UTC,
+respectively. Vercel reads the file from the configured `apps/web` project root.
+Delivery precision depends on the Vercel plan.
 Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
 but never device tokens, provider keys, or session credentials.
 
