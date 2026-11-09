@@ -38,6 +38,7 @@ import {
   refreshDurableWorkSnapshot,
   subscribeDurableWork
 } from "@/lib/durableWorkMonitor";
+import { isPausedLegacyLocationEvent } from "@/lib/location/automaticTransferPause";
 import { syncLocationIntelligenceOnForeground } from "@/lib/location/runtime";
 import {
   mobileAccountKey,
@@ -191,9 +192,10 @@ export function ConnectivityRecoveryOwner() {
     const currentCoordinator = coordinator.current;
     if (!currentCoordinator) return;
     const accountChanged = previousAccountKey.current !== durableWork.accountKey;
+    const runnableLocationCount = durableWork.retryLanes?.location.pending ?? durableWork.locationCount;
     const workArrived = durableWorkArrived(
       { pendingCount: previousPendingCount.current, locationCount: previousLocationCount.current },
-      durableWork,
+      { pendingCount: durableWork.pendingCount, locationCount: runnableLocationCount },
       currentCoordinator.snapshot().inFlight
     );
     if (accountChanged && previousAccountKey.current !== null) {
@@ -202,7 +204,7 @@ export function ConnectivityRecoveryOwner() {
     }
     previousAccountKey.current = durableWork.accountKey;
     previousPendingCount.current = durableWork.pendingCount;
-    previousLocationCount.current = durableWork.locationCount;
+    previousLocationCount.current = runnableLocationCount;
     if (
       durableWork.accountKey &&
       (accountChanged || workArrived) &&
@@ -396,7 +398,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
             });
             changed ||= result.syncedCount>0;
             if (result.firstError?.failureKind === "network") return "transport_failure";
-            return result.remaining.some((event) => event.failureKind !== "permanent")
+            return result.remaining.some(event => event.failureKind !== "permanent" && !isPausedLegacyLocationEvent(event))
               ? "application_failure"
               : "continue";
           }
@@ -444,7 +446,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
             ) {
               return "continue";
             }
-            const result=await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly});
+            const result=await syncLocationIntelligenceOnForeground({foregroundReplay:!context?.dueOnly});
             changed ||= locationSyncChangedDashboard(result);
             return locationConnectivityRecoveryStepResult(result);
           }

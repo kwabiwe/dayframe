@@ -650,6 +650,8 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 3. Airplane mode: run a Start Shortcut, reopen Dayframe after reconnecting; the queued Start is delivered once.
 4. Leave Dayframe backgrounded with location on for several days of normal use: no new `0xdead10cc` report in Settings › Privacy & Security › Analytics Data or in App Store Connect.
 
+For automatic Location transfer, cover retained V1 events in the shared outbox as well as the location evidence journal. With iOS Always revoked or Dayframe Location off, the legacy items stay queued. Re-enable Location and verify one delivery. An opt-out aborts an in-flight automatic request as soon as the app observes it, and unrelated queued events still drain. Revoke Always during the last ownership lookup and verify that evidence and replay do not dispatch. A replay that loses permission before dispatch leaves the cooldown and diagnostics unchanged. While paused, verify that queued items remain in diagnostics and do not keep the automatic retry scheduler running. A foreground request that joins a deferred replay gets its own replay eligibility check.
+
 ## Native Location status and signal journal (iPhone)
 
 Automated: `nativeMainThreadBlocking.contract.test.ts` (banned synchronous calls on main-thread native paths: throwaway `CLLocationManager`s, `locationServicesEnabled()` off a background queue, authorisation reads outside the delegate callback, journal reads or `sync` in `status()`, journal rewrites on append), `bash scripts/validate-ios-location-signals.sh` (compiles and runs `DayframeLocationSignalStore` on macOS: append-only writes, duplicates, a cut-short record, a multibyte torn tail, out-of-order expiry, a journal unreadable until unlock, retention, remove, a busy store), and a clean native iOS build (adding the store file needs `pod install`). The Simulator cannot prove locationd contention.
@@ -741,3 +743,9 @@ Archive exact base `packages/shared/src` outside the worktree and run `npx tsx s
 ## Owner-only event and entry writes (hosted RLS, 17 Oct 2026)
 
 - `DATABASE_URL=<local *_test> npm run validate:event-entry-rls` after `scripts/setup-validation-db.ts base` and `ordered` (CI runs both): applies the hosted base RLS, `202610170003` and `202610170004`, then as Supabase's `authenticated` role checks that a member reads the workspace's events and entries, writes only their own (no change, delete, hand-over to another user, move into a workspace they are not in, or insert for someone else; a move between their own workspaces is allowed), that an outsider and `anon` see nothing, that entry tags follow their entry (read across the workspace, added or removed only by the entry's user, hidden from another workspace), and that both migrations are re-runnable. Without either migration its checks fail (a member deletes another member's row or entry tags).
+
+
+### Location replay and permission
+
+- On a signed staging iPhone build, verify no automatic Location evidence upload or server replay with Never, While Using, or Dayframe opt-out, including Sync now. Restore Always and the opt-in and verify previously queued samples sync without duplicates. Check an opt-out during a request separately from a request that already committed.
+- Compare two foreground/recovery passes within 30 seconds on staging, with no new Location upload. Expect one successful replay, then no duplicate. Confirm a new evidence upload, a due replay, and explicit Sync now still replay. Measure database response bytes separately from iPhone HTTP response bytes.

@@ -70,6 +70,7 @@ describe("durable-work monitor wiring", () => {
     const source = readFileSync(new URL("./durableWorkMonitor.ts", import.meta.url), "utf8");
     expect(source).toContain("subscribeLocationStore(locationGate.locationChanged)");
     expect(source).not.toContain("subscribeLocationStore(request)");
-    expect(source).toContain('if (state === "active") locationGate.appBecameActive();');
+    expect(source).toContain('if (state !== "active") return;');
+    expect(source).toContain("locationGate.appBecameActive();");
   });
 });

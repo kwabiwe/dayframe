@@ -23,6 +23,7 @@ import {
   isLocationCaptureSnapshotCurrent,
   isLocationCaptureAdmissionSuspended,
   locationCaptureRevision,
+  locationSyncAllowed,
   persistLocationEvidence,
   refreshLocalJournalReplayIfDue,
   readLocationCaptureBinding,
@@ -37,6 +38,7 @@ import {
 } from "./store";
 import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
 import { armLocationAdmissionGuard } from "./admissionGuard";
+import { setAutomaticLocationTransferPaused } from "./automaticTransferPause";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 import { withJsTask } from "../jsTasks";
@@ -135,7 +137,9 @@ export function enableLocationCaptureOwnership(owner: MobileAccountOwner, revisi
     if (!ownerIsCurrent(owner, revision)) return false;
     const geofence = await import("../geofence");
     await geofence.writeLocationLearningPreference(owner, true);
-    return bindOwnerUnsafe(owner, revision, true);
+    const bound = await bindOwnerUnsafe(owner, revision, true);
+    if (bound && ownerIsCurrent(owner, revision)) setAutomaticLocationTransferPaused(owner, false);
+    return bound;
   });
 }
 
@@ -189,6 +193,7 @@ export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "o
     if (!mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return Promise.resolve();
     const duringLogout = isLocationLogoutCurrent(owner);
     const revision = duringLogout ? locationCaptureRevision() : invalidateLocationCaptureOwnership();
+    setAutomaticLocationTransferPaused(owner, true);
     // Acceptance above authorises this scoped decision. Keep it in intent order
     // on the existing lane, even if logout/401 cancels its capture work. A later
     // authorised opt-in writes after it, so old off work cannot overwrite on.
@@ -301,8 +306,9 @@ export function syncLocationIntelligenceOnForeground(options: LocationSyncOption
   armLocationAdmissionGuard();
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
-    await drainNativeLocationSignalsInBatches();
-    return syncLocationEvidence({ forceReplay: true, ...options });
+    const capture = await captureLocationOwnership();
+    if (await locationSyncAllowed(capture)) await drainNativeLocationSignalsInBatches();
+    return syncLocationEvidence({ foregroundReplay: true, ...options });
   });
 }
 
