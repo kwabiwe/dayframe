@@ -10,9 +10,14 @@ const session = {
 const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
-  replayRetainedLocationEvidence: vi.fn()
+  replayRetainedLocationEvidence: vi.fn(),
+  after: vi.fn()
 }));
 
+vi.mock("next/server", async importOriginal => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after
+}));
 vi.mock("@/lib/review-count", () => ({
   openReviewCountFor: reviewCountMock,
   withReviewCount: (body: object, reviewCount?: number) => reviewCount === undefined ? body : { ...body, reviewCount }
@@ -110,6 +115,8 @@ describe("POST /api/location/replay", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
+    expect(mocks.after).toHaveBeenCalledExactlyOnceWith(expect.any(Promise));
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.replayRetainedLocationEvidence.mock.invocationCallOrder[0]);
     expect(mocks.replayRetainedLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({
       signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
       onLocationTiming: expect.any(Function), onLocationCount: expect.any(Function), onSyncTiming: expect.any(Function)
@@ -126,6 +133,7 @@ describe("POST /api/location/replay", () => {
     expect(response.status).toBe(400);
     expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
     expect(mocks.replayRetainedLocationEvidence).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
     const payload = JSON.parse(log.mock.calls[0]![1] as string);
     expect(payload.timing.stages.request_body).toMatchObject({ completed: true });
     log.mockRestore();

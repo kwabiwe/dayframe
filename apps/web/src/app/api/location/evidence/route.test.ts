@@ -66,6 +66,7 @@ describe("POST /api/location/evidence", () => {
     expect(response.status).toBe(413);
     expect(mocks.resolveRequestSession).not.toHaveBeenCalled();
     expect(mocks.ingestLocationEvidence).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it("returns 201 for a newly ingested private batch", async () => {
@@ -79,6 +80,8 @@ describe("POST /api/location/evidence", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
+    expect(mocks.after).toHaveBeenCalledExactlyOnceWith(expect.any(Promise));
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.ingestLocationEvidence.mock.invocationCallOrder[0]);
     expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
   });
 
@@ -102,6 +105,7 @@ describe("POST /api/location/evidence", () => {
     }));
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: "location_processing_busy" });
+    await expect(mocks.after.mock.calls[0]![0]).resolves.toBeUndefined();
   });
 
   it("correlates a private failure without trusting inbound IDs or database text", async () => {
@@ -146,11 +150,11 @@ describe("POST /api/location/evidence", () => {
     }));
     await vi.waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(1));
     expect(mocks.after).toHaveBeenCalledTimes(1);
-    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.query.mock.invocationCallOrder[0]);
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.withSyncTransaction.mock.invocationCallOrder[0]);
     expect(mocks.withSyncTransaction).toHaveBeenCalledWith("location_evidence_delete", expect.any(Function));
 
     controller.abort();
-    const completion = mocks.after.mock.calls[0]![0]();
+    const completion = mocks.after.mock.calls[0]![0] as Promise<void>;
     let finished = false;
     void completion.then(() => { finished = true; });
     await Promise.resolve();

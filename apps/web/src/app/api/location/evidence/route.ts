@@ -1,6 +1,7 @@
+import { retainLocationRequestWork } from "@/lib/location/location-request-lifetime";
 import { locationRequestDiagnostics } from "@/lib/location/location-sync-diagnostics";
 import { SyncOperationError, syncFailureMetadata, withSyncTransaction } from "@/lib/sync-transaction";
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { authErrorResponse } from "@/lib/api-errors";
@@ -45,7 +46,9 @@ export async function POST(request: Request) {
     } catch {
       return respond({ error: "Location evidence body must be valid JSON." }, 400);
     }
-    const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage});
+    const result = await retainLocationRequestWork(() => ingestLocationEvidence(body, session, undefined, {
+      signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage
+    }));
     // The phone schedules its evening Review reminder from this count.
     return respond(withReviewCount(result, await openReviewCountFor(session, { cards: wantsReviewCardCount(request) })), result.duplicateBatch ? 200 : 201);
   } catch (error) {
@@ -77,20 +80,17 @@ export async function DELETE(request: Request) {
   try {
     const session = await resolveRequestSession(request);
     // A confirmed Clear history should finish even if the client disconnects.
-    // Register its lifetime before starting the bounded, owner-scoped deletion.
-    let deletion: Promise<number> | undefined;
-    after(async () => {
-      await deletion?.catch(() => undefined);
-    });
-    deletion = withSyncTransaction("location_evidence_delete", async ({ client }) => {
-      const result = await client.query(
-        `delete from location_evidence
-         where workspace_id = $1 and user_id = $2`,
-        [session.workspaceId, session.userId]
-      );
-      return result.rowCount ?? 0;
-    });
-    return privateJson({ ok: true, deletedEvidenceCount: await deletion });
+    const deletedEvidenceCount = await retainLocationRequestWork(() =>
+      withSyncTransaction("location_evidence_delete", async ({ client }) => {
+        const result = await client.query(
+          `delete from location_evidence
+           where workspace_id = $1 and user_id = $2`,
+          [session.workspaceId, session.userId]
+        );
+        return result.rowCount ?? 0;
+      })
+    );
+    return privateJson({ ok: true, deletedEvidenceCount });
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

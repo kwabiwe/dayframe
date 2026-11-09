@@ -1,3 +1,4 @@
+import { retainLocationRequestWork } from "@/lib/location/location-request-lifetime";
 import { locationRequestDiagnostics } from "@/lib/location/location-sync-diagnostics";
 import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
 import { NextResponse } from "next/server";
@@ -55,14 +56,14 @@ export async function POST(request: Request) {
       return respond({ error: "Location replay body must be valid JSON." }, 400);
     }
     diagnostics.onLocationTiming({ stage: "request_body", state: "completed" });
-    const result = await replayRetainedLocationEvidence(body, session, undefined, {
+    const result = await retainLocationRequestWork(() => replayRetainedLocationEvidence(body, session, undefined, {
       signal: request.signal,
       deadlineAt: startedAt + 8_000,
       onLocationStage: diagnostics.onLocationStage,
       onLocationTiming: diagnostics.onLocationTiming,
       onLocationCount: diagnostics.onLocationCount,
       onSyncTiming: diagnostics.onSyncTiming
-    });
+    }));
     // The phone schedules its evening Review reminder from this count. Only clients that ask get it:
     // older iPhone builds parse this reply strictly and would reject an extra field.
     const reviewCount = request.headers.get(REVIEW_COUNT_REQUEST_HEADER) === "1" || wantsReviewCardCount(request)
