@@ -40,6 +40,7 @@ import {
   type MobilePlace
 } from "@/lib/api";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { AllActivitiesChip } from "@/components/ActivityChips";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
@@ -914,15 +915,17 @@ export default function PlaceEditorScreen() {
                     exiting={localPresenceExiting(reduceMotion)}
                   >
                     <SettingsBlockRow
-                      accessibilityHint="Chooses the activity a visit here is suggested as"
-                      onPress={() => {
-                        Keyboard.dismiss();
-                        setActivityPickerOpen(true);
-                      }}
-                      testID="place-editor-logs-as"
+                      control={
+                        <AllActivitiesChip canCreate={false} count={categories.length}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            setActivityPickerOpen(true);
+                          }}
+                          testID="place-editor-logs-as" theme={theme} />
+                      }
+                      subtitle={defaultActivityLabel ?? "No default activity"}
                       theme={theme}
                       title="Logs as"
-                      value={defaultActivityLabel ?? "No default activity"}
                     />
                     {defaultCategoryId ? (
                       <Reanimated.View

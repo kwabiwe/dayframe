@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
@@ -28,10 +28,12 @@ import { playHaptic } from "../../lib/haptics";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import { formatPlaceDistance } from "../../lib/placeCategories";
-import type { MobileTheme } from "../../lib/mobileTheme";
+import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import type { ChoosableActivity } from "../../lib/activityChoice";
 import { SheetNearbySearch, type SheetSavedRow } from "./SheetNearbySearch";
-import { ActivityChip, activityChipStyles } from "../ActivityChips";
+import { ActivityChip, AllActivitiesChip, activityChipStyles } from "../ActivityChips";
+import { ActivityPickerSheet } from "../ActivityPickerSheet";
 import type { ReviewAnswerVenue } from "../../lib/reviewAnswer";
 import { nearbyProposalKey } from "../../lib/nearbyProposal";
 import { keepableVenue } from "../../lib/venueGuessEligibility";
@@ -124,6 +126,7 @@ export function LocationCorrectionSheet({
   editBlocks = [],
   logAs,
   onEditBlock,
+  pickerStyles,
   places,
   presentationId,
   question,
@@ -189,14 +192,15 @@ export function LocationCorrectionSheet({
   editBlocks?: ReadonlyArray<{ id: string; title: string }>;
   onEditBlock?: (id: string, dismiss: () => void) => Promise<boolean> | boolean;
   onDismissStart?: (presentationId: number) => void;
+  pickerStyles: MobileStyles;
   /**
    * "Logs as" (step 12 part 4c): the activities to pick from, and what logging the place as one does (held for
    * Undo, then sent); absent when the place can't be logged here (a question, a block, or not ended).
    */
   logAs?: {
-    activities: ReadonlyArray<{ id: string; name: string; color?: string | null; icon?: string | null }>;
+    activities: readonly ChoosableActivity[];
     /** Every activity, for "All activities", when there are more than `activities`. */
-    allActivities?: ReadonlyArray<{ id: string; name: string; color?: string | null; icon?: string | null }>;
+    allActivities?: readonly ChoosableActivity[];
     /** Logs the place now (held for Undo): the sheet has no corrections of its own to go first. */
     onLog: (categoryId: string | undefined, description?: string) => void;
     /**
@@ -409,7 +413,8 @@ export function LocationCorrectionSheet({
   const activityFirst = Boolean(logAs && target.kind === "place" && !target.place.placeId && !target.place.learnedPlaceId);
   const hasLogDraft = Boolean(logCategoryId || (activityFirst && description));
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
-  const [allActivities, setAllActivities] = useState(false);
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
+  const pendingActivityPick = useRef<string | null>(null);
   const [moreOptions, setMoreOptions] = useState(false);
   const moreRow = useRef<View | null>(null);
   // Opened and not yet scrolled to: its first layout does it.
@@ -679,23 +684,28 @@ export function LocationCorrectionSheet({
         reduceMotion={reduceMotion} savedRows={savedRows} theme={theme} />
     </View>
   ) : null;
-  type SheetActivity = NonNullable<typeof logAs>["activities"][number];
-  function activityChip(activity: SheetActivity) {
+  function activityChip(activity: ChoosableActivity) {
     return (
       <ActivityChip key={activity.id} activity={activity} compact role="radio" selected={logCategoryId === activity.id}
-        onPress={() => { if (!frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
+        onPress={() => { if (!stale && !frozen()) setLogCategoryId((current) => current === activity.id ? null : activity.id); }}
         testID={`location-correction-log-${activity.id}`} theme={theme} />
     );
   }
   const suggestedActivities = logAs?.activities ?? [];
   const availableActivities = logAs?.allActivities ?? suggestedActivities;
-  const recommendedActivities = suggestedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT);
-  const remainingActivities = availableActivities.filter((activity) => !recommendedActivities.some(({ id }) => id === activity.id));
+  const previewActivities = activityFirst ? suggestedActivities.slice(0, SHEET_ACTIVITY_PREVIEW_COUNT) : suggestedActivities;
+  const hasMoreActivities = availableActivities.some((activity) => !previewActivities.some(({ id }) => id === activity.id));
+  const selectionOutsidePreview = activeCategory && !previewActivities.some(({ id }) => id === activeCategory.id);
   const activityChips = logAs && (
     <View accessibilityLabel={activityFirst ? "Activity" : "Logs as"} accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-      {(allActivities ? availableActivities : suggestedActivities).map(activityChip)}
-      {!allActivities && (logAs.allActivities?.length ?? 0) > logAs.activities.length ? (
-        <ShapeAction label="All activities" onPress={() => setAllActivities(true)} testID="location-correction-log-all" theme={theme} />
+      {previewActivities.map(activityChip)}
+      {hasMoreActivities ? (
+        <AllActivitiesChip canCreate={false} compact count={availableActivities.length} disabled={stale || frozen()}
+          onPress={() => {
+            if (stale || frozen()) return;
+            Keyboard.dismiss();
+            setActivityPickerOpen(true);
+          }} testID="location-correction-log-all" theme={theme} />
       ) : null}
     </View>
   );
@@ -728,6 +738,23 @@ export function LocationCorrectionSheet({
       ))}
     </View>
   ) : null;
+  const activityPicker = activityPickerOpen ? (
+    <ActivityPickerSheet
+      activities={availableActivities}
+      onClose={() => {
+        const id = pendingActivityPick.current;
+        pendingActivityPick.current = null;
+        setActivityPickerOpen(false);
+        if (!stale && !frozen() && availableActivities.some((activity) => activity.id === id)) setLogCategoryId(id);
+      }}
+      onPick={(id) => { if (!stale && !frozen()) pendingActivityPick.current = id; }}
+      recentIds={[]}
+      reduceMotion={reduceMotion}
+      selectedId={logCategoryId}
+      styles={pickerStyles}
+      theme={theme}
+    />
+  ) : null;
   return (
     <BottomSheetShell
       action={savingOnlyPlace ? "Save place" : activityFirst && !editingActivityTimes ? "Log activity"
@@ -743,6 +770,7 @@ export function LocationCorrectionSheet({
       onApply={apply}
       onDismissStart={onDismissStart}
       onDismissed={onDismissed}
+      overSheet={activityPicker}
       presentationId={presentationId}
       reduceMotion={reduceMotion}
       rootHosted={rootHosted}
@@ -783,26 +811,21 @@ export function LocationCorrectionSheet({
             <View style={styles.activityFirst}>
               <View style={styles.activityHeading}>
                 <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
-                <Text {...mobileTextProps("metadata")} numberOfLines={1}
-                  style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
-                  testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
+                {selectionOutsidePreview ? (
+                  <Pressable accessibilityLabel={`Clear ${activeCategory.name}`} accessibilityRole="button"
+                    onPress={() => { if (!stale && !frozen()) setLogCategoryId(null); }} hitSlop={COMPACT_PILL_HIT_SLOP}
+                    style={styles.activityValueClear} testID="location-correction-clear-picked-activity">
+                    <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ flexShrink: 1, color: theme.textSecondary }}
+                      testID="location-correction-activity-value">{activeCategory.name}</Text>
+                    <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.close} size={14} />
+                  </Pressable>
+                ) : (
+                  <Text {...mobileTextProps("metadata")} numberOfLines={1}
+                    style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
+                    testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
+                )}
               </View>
-              <View style={styles.activityPreview}>
-                <View accessibilityLabel="Activity" accessibilityRole="radiogroup" style={activityChipStyles.compactWrap}>
-                  {recommendedActivities.map(activityChip)}
-                  {remainingActivities.length ? (
-                    <ActivityDisclosure expanded={allActivities} onPress={() => setAllActivities((open) => !open)} theme={theme} />
-                  ) : null}
-                </View>
-                {remainingActivities.length ? (
-                  <InlineReveal open={allActivities} reduceMotion={reduceMotion}>
-                    <View accessibilityLabel="More activities" accessibilityRole="radiogroup"
-                      style={[activityChipStyles.compactWrap, styles.moreActivities]}>
-                      {remainingActivities.map(activityChip)}
-                    </View>
-                  </InlineReveal>
-                ) : null}
-              </View>
+              <View style={styles.activityPreview}>{activityChips}</View>
             </View>
           ) : null}
           {placeSection ? (
@@ -910,6 +933,10 @@ export function LocationCorrectionSheet({
               // Compact activity chips; none picked logs nothing, so Clear is only a quiet way back once one is picked.
               <Section label="Logs as" testID="location-correction-logs-as" theme={theme}>
                 {activityChips}
+                {selectionOutsidePreview ? (
+                  <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]}
+                    testID="location-correction-activity-value">{activeCategory.name}</Text>
+                ) : null}
                 {logCategoryId ? (
                   <TextInput accessibilityLabel={logDescription.length > 0 ? "Description (optional)" : undefined}
                     editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
@@ -1019,29 +1046,6 @@ function InlineReveal({ children, onHeightChange, open, reduceMotion, testID }: 
         </Reanimated.View>
       ) : null}
     </Reanimated.View>
-  );
-}
-
-/** Keep the disclosure in the same wrapped slot as its label changes. */
-function ActivityDisclosure({ expanded, onPress, theme }: {
-  expanded: boolean; onPress: () => void; theme: MobileTheme;
-}) {
-  const label = expanded ? "Fewer activities" : "All activities";
-  const typography = mobileTextProps("control");
-  return (
-    <Pressable accessibilityLabel={label} accessibilityRole="button" accessibilityState={{ expanded }}
-      hitSlop={COMPACT_PILL_HIT_SLOP} onPress={onPress} testID="location-correction-log-all"
-      style={({ pressed }) => [activityChipStyles.compact, styles.activityDisclosure,
-        { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}>
-      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.activityDisclosureText}>
-        <Text {...typography} numberOfLines={1} style={[activityChipStyles.compactText, styles.activityDisclosureMeasure]}>
-          Fewer activities
-        </Text>
-        <Text {...typography} numberOfLines={1} style={[activityChipStyles.compactText, StyleSheet.absoluteFill, { color: theme.textPrimary }]}>
-          {label}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 
@@ -1205,12 +1209,9 @@ function TimesSection({ clockFormat, onChange, onReveal, problem, reduceMotion, 
 
 const styles = StyleSheet.create({
   activityFirst: { gap: 8 },
-  activityHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  activityHeading: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 },
   activityPreview: { paddingVertical: 6 },
-  activityDisclosure: { borderColor: "transparent", paddingLeft: 12 },
-  activityDisclosureText: { flexShrink: 1 },
-  activityDisclosureMeasure: { opacity: 0 },
-  moreActivities: { paddingTop: 12 },
+  activityValueClear: { flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "42%", minHeight: 32 },
   inlineClip: { overflow: "hidden" },
   inlineMeasure: { position: "absolute", left: 0, right: 0, top: 0 },
   inlineChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 },

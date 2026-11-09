@@ -82,6 +82,7 @@ export function BottomSheetShell({
   action,
   disabled = false,
   fixedHeader,
+  overSheet,
   testID,
   commitRef,
   discardRef,
@@ -110,6 +111,8 @@ export function BottomSheetShell({
   action: string;
   disabled?: boolean;
   fixedHeader?: React.ReactNode;
+  /** A child picker presents from the same native host and owns focus and keyboard until it leaves. */
+  overSheet?: React.ReactNode;
   /** The sheet's test id; its body, scroll and action are `${testID}-body`, `-scroll`, `-action`. */
   testID: string;
   /**
@@ -159,7 +162,10 @@ export function BottomSheetShell({
   const [closing, setClosing] = useState(false);
   const [nativeExitId, setNativeExitId] = useState<number | null>(null);
   const neutralAction = (actionTone ?? (calendarLayout ? "neutral" : "accent")) === "neutral";
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [systemKeyboardInset, setKeyboardInset] = useState(0);
+  const covered = Boolean(overSheet);
+  const keyboardInset = covered ? 0 : systemKeyboardInset;
+  const inactive = closing || covered;
   const bottomGeometry = bottomSheetGeometry({
     rootHosted,
     safeAreaBottom: insets.bottom,
@@ -225,14 +231,14 @@ export function BottomSheetShell({
   const requestCommit = () => {
     if (outcome.current?.presentationId !== presentationId)
       outcome.current = null;
-    if (disabled || outcome.current) return;
+    if (disabled || covered || outcome.current) return;
     if (onApply() === false) return;
     outcome.current = { presentationId, value: "commit" };
     setClosing(true);
     sheetRef.current?.dismiss();
   };
 
-  const requestDiscard = () => sheetRef.current?.dismiss();
+  const requestDiscard = () => { if (!covered) sheetRef.current?.dismiss(); };
   useEffect(() => {
     if (!commitRef) return;
     commitRef.current = requestCommit;
@@ -253,8 +259,8 @@ export function BottomSheetShell({
       testID={`${testID}-action`}
       accessibilityRole="button"
       accessibilityLabel={action}
-      accessibilityState={{ disabled: disabled || closing }}
-      disabled={disabled || closing}
+      accessibilityState={{ disabled: disabled || inactive }}
+      disabled={disabled || inactive}
       onPress={requestCommit}
       style={[
         s.apply,
@@ -307,7 +313,7 @@ export function BottomSheetShell({
             bottom: bottomGeometry.backdropBottom,
           },
         ]}
-        disabled={closing}
+        disabled={inactive}
         gestureHandleOnly
         handleStyle={[s.handle, { backgroundColor: theme.borderStrong }]}
         keyboardInset={keyboardInset}
@@ -344,9 +350,9 @@ export function BottomSheetShell({
         visible
       >
         <View
-          accessibilityElementsHidden={closing}
-          importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
-          pointerEvents={closing ? "none" : "auto"}
+          accessibilityElementsHidden={inactive}
+          importantForAccessibility={inactive ? "no-hide-descendants" : "auto"}
+          pointerEvents={inactive ? "none" : "auto"}
           style={[
             s.sheetContent,
             calendarLayout ? s.dateSheetContent : s.filterSheetContent,
@@ -374,7 +380,7 @@ export function BottomSheetShell({
               onScroll={(event) => { scrollMetrics.current.offset = event.nativeEvent.contentOffset.y; }}
               scrollEventThrottle={32}
               keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
+              automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets && !covered}
               contentContainerStyle={s.body}
               showsVerticalScrollIndicator={false}
               style={s.scroll}
@@ -388,8 +394,8 @@ export function BottomSheetShell({
               <Pressable
                 testID={secondaryAction.testID}
                 accessibilityRole="button"
-                accessibilityState={{ disabled: Boolean(secondaryAction.disabled) || closing }}
-                disabled={Boolean(secondaryAction.disabled) || closing}
+                accessibilityState={{ disabled: Boolean(secondaryAction.disabled) || inactive }}
+                disabled={Boolean(secondaryAction.disabled) || inactive}
                 hitSlop={4}
                 onPress={secondaryAction.onPress}
                 style={({ pressed }) => [s.secondary, { opacity: pressed ? 0.6 : 1 }]}
@@ -412,6 +418,7 @@ export function BottomSheetShell({
         style={StyleSheet.absoluteFill}
       >
         {overlay}
+        {overSheet}
       </View>
     );
   }
@@ -419,6 +426,7 @@ export function BottomSheetShell({
   return rootHosted ? (
     <FullWindowOverlay unstable_accessibilityContainerViewIsModal>
       {overlay}
+      {overSheet}
     </FullWindowOverlay>
   ) : (
     <Modal
@@ -433,6 +441,7 @@ export function BottomSheetShell({
       visible={nativeExitId !== presentationId}
     >
       {overlay}
+      {overSheet}
     </Modal>
   );
 }
