@@ -653,7 +653,7 @@ function SwipeDismissSheet({
         onLayout?.(event);
       }}
       pointerEvents={visible ? "auto" : "none"}
-      style={[style, sheetAnimatedStyle]}
+      style={[style, animateContentSize ? CLIP_RESIZING_CONTENT_STYLE : null, sheetAnimatedStyle]}
       testID={testID}
     >
       {dismissHandle}
@@ -687,6 +687,9 @@ function SwipeDismissSheet({
     </>
   );
 });
+
+// The incoming editor lays out at its final size before the animated sheet reaches it.
+const CLIP_RESIZING_CONTENT_STYLE: ViewStyle = { overflow: "hidden" };
 
 const BACKDROP_PRESSABLE_STYLE: ViewStyle = {
   flex: 1

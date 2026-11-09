@@ -2790,6 +2790,7 @@ export function ActiveTimerEditSheet({
               reduceMotion={reduceMotion}
               style={[
                 styles.activeEditSheet,
+                isFinishedMode ? styles.finishedEditSheetShadow : null,
                 keyboardAwareSheetStyle,
                 { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) }
               ]}
