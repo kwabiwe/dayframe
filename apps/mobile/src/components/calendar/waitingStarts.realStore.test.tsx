@@ -159,7 +159,7 @@ describe("late starts of waiting answers, over the real store (Codex r14 on #610
     const DATA_B = placesData("user-b");
     const hookRef: { current: ReturnType<typeof useLocationCorrections> | null } = { current: null };
     function Places({ value }: { value: MobileBootstrap }) {
-      hookRef.current = useLocationCorrections({ acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
+      hookRef.current = useLocationCorrections({ pickerStyles: {} as never,  acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
         showNotice: () => undefined, theme: {} as never, timeline });
       return hookRef.current.sheet;
     }
@@ -193,7 +193,7 @@ describe("late starts of waiting answers, over the real store (Codex r14 on #610
     const DATA_B = placesData("user-b");
     const hookRef: { current: ReturnType<typeof useLocationCorrections> | null } = { current: null };
     function Places({ value }: { value: MobileBootstrap }) {
-      hookRef.current = useLocationCorrections({ acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
+      hookRef.current = useLocationCorrections({ pickerStyles: {} as never,  acknowledged: [], clockFormat: "24h", data: value, pending: [], reduceMotion: false,
         showNotice: () => undefined, theme: {} as never, timeline });
       return hookRef.current.sheet;
     }

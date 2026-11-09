@@ -12391,10 +12391,20 @@ dialog.ui-dialog.df-palette {
   text-align: start;
 }
 
+/* All activities uses the same one-line pill in the block editor and Calendar corrections. */
+.df-all-activities-field {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .df-rchip--more {
+  padding: 0 12px;
   background: var(--surface-muted);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .df-rchip--more span {
@@ -12410,7 +12420,7 @@ dialog.ui-dialog.df-palette {
   cursor: pointer;
 }
 
-.df-ed-chips .df-rchip:not(.is-checked) {
+.df-ed-chips .df-rchip:not(.is-checked):not(.df-rchip--more) {
   background: var(--surface-inset);
 }
 
@@ -12635,31 +12645,10 @@ dialog.ui-dialog.df-palette {
   }
 }
 
-/* "All activities" is one more chip at the end of the flow, the chips' height and shape, not a
-   44 px inset field on a row of its own (owner, 16 Oct 2026). */
-.df-ed-chips .calendar-compact-category-field {
-  display: inline-flex;
-  flex: 0 0 auto;
-}
-
-.df-ed-chips .calendar-compact-category-field > .df-rchip--more {
-  display: inline-flex;
-  width: auto;
-  min-height: 32px;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: var(--surface-inset);
-  font-size: 13px;
-  font-weight: var(--fw-medium);
-  white-space: nowrap;
-}
-
-/* The editor's chips and pills are 44 px wherever touch is the input, whatever the viewport width
-   (after the "All activities" chip's own 32 px, which it overrides; Codex r1 on #465). */
+/* Activity choices and their search pill share a 44 px target on touch, at any viewport width. */
 @media (any-pointer: coarse) {
   .df-ed-chips .df-rchip,
-  .df-ed-chips .calendar-compact-category-field > .df-rchip--more {
+  .location-correction-logs-as .df-rchip {
     min-height: 44px;
   }
 }
@@ -14866,7 +14855,6 @@ button.timeline-location-hit:focus-visible {
 
 .location-correction-logs-as .df-rchip {
   position: relative;
-  min-height: 32px;
   background: var(--surface-muted);
   cursor: pointer;
 }

@@ -84,7 +84,7 @@ const account = (userId: string) => ({ categories: [{ id: "cat-errands", name: "
 let api: ReturnType<typeof useLocationCorrections> | null = null;
 function Probe(props: { data: ReturnType<typeof account> | null; pending?: never[]; showNotice?: (message: string) => void; timeline?: LocationTimeline | null;
   onLogged?: () => void; acknowledged?: never[]; resolveEditBlock?: Parameters<typeof useLocationCorrections>[0]["resolveEditBlock"] }) {
-  api = useLocationCorrections({ acknowledged: props.acknowledged, clockFormat: "24h", data: props.data, onLogged: props.onLogged,
+  api = useLocationCorrections({ pickerStyles: {} as never,  acknowledged: props.acknowledged, clockFormat: "24h", data: props.data, onLogged: props.onLogged,
     pending: props.pending ?? [], reduceMotion: false, resolveEditBlock: props.resolveEditBlock,
     showNotice: props.showNotice ?? (() => undefined), theme: {} as never, timeline: props.timeline === undefined ? timeline : props.timeline });
   return api.sheet;

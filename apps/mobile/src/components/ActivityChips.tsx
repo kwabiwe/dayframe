@@ -103,6 +103,8 @@ export function ActivityChip({
 
 /** "All activities N": a filled neutral pill with the search glyph that opens the picker. */
 export function AllActivitiesChip({
+  canCreate = true,
+  compact = false,
   count,
   disabled = false,
   onLayout,
@@ -111,6 +113,8 @@ export function AllActivitiesChip({
   testID,
   theme
 }: {
+  canCreate?: boolean;
+  compact?: boolean;
   count: number;
   disabled?: boolean;
   onLayout?: (event: LayoutChangeEvent) => void;
@@ -121,18 +125,18 @@ export function AllActivitiesChip({
 }) {
   return (
     <Pressable
-      accessibilityHint="Search every activity, or create one"
+      accessibilityHint={canCreate ? "Search every activity, or create one" : "Search every activity"}
       accessibilityLabel={`All activities, ${count}`}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       disabled={disabled}
-      hitSlop={CHIP_HIT_SLOP}
+      hitSlop={compact ? COMPACT_CHIP_HIT_SLOP : CHIP_HIT_SLOP}
       onLayout={onLayout}
       onPress={onPress}
       style={({ pressed }) => [
-        activityChipStyles.chip,
+        compact ? activityChipStyles.compact : activityChipStyles.chip,
         activityChipStyles.chipMore,
-        { backgroundColor: theme.surfaceMuted },
+        { backgroundColor: theme.surfaceMuted, borderColor: "transparent" },
         pressed ? pressedStyle ?? { opacity: 0.72 } : null
       ]}
       testID={testID}

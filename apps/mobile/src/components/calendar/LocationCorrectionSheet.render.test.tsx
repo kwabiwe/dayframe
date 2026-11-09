@@ -1,3 +1,4 @@
+import { Keyboard } from "react-native";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { TimelinePlace, TimelineTrip } from "@dayframe/shared";
@@ -16,7 +17,7 @@ vi.mock("react", async () => {
 });
 vi.mock("react-native", () => ({
   Dimensions: { get: () => ({ width: 390, height: 844 }) },
-  Keyboard: { addListener: () => ({ remove: vi.fn() }), dismiss: vi.fn() },
+  Keyboard: { addListener: vi.fn(() => ({ remove: vi.fn() })), dismiss: vi.fn() },
   Modal: "Modal",
   Platform: { OS: "ios" },
   Pressable: "Pressable",
@@ -31,7 +32,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ b
 vi.mock("react-native-screens", () => ({ FullWindowOverlay: "FullWindowOverlay" }));
 vi.mock("@/lib/reportsTypography", async () => import("../../lib/reportsTypography"));
 vi.mock("@/lib/editSheetKeyboard", async () => import("../../lib/editSheetKeyboard"));
-vi.mock("@/components/SwipeDismissSheet", async () => {
+const mockSheet = vi.hoisted(() => async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   const React = await import("../../../../../node_modules/react/index.js");
   const SwipeDismissSheet = React.forwardRef((props: Record<string, any>, ref: React.ForwardedRef<unknown>) => {
@@ -44,6 +45,8 @@ vi.mock("@/components/SwipeDismissSheet", async () => {
   });
   return { SwipeDismissSheet };
 });
+vi.mock("@/components/SwipeDismissSheet", mockSheet);
+vi.mock("../SwipeDismissSheet", mockSheet);
 const chain = vi.hoisted(() => () => {
   const builder: Record<string, unknown> = {};
   for (const name of ["duration", "reduceMotion", "withInitialValues"]) builder[name] = () => builder;
@@ -109,11 +112,11 @@ function openMore(tree: ReturnType<typeof create>) {
 
 type Queue = (corrections: unknown[], options: { closing: boolean }) => Promise<void>;
 function mount(target: LocationCorrectionTarget, onQueue = vi.fn<Queue>(async () => undefined), onSavePlace?: (name: string, rest: unknown[]) => Promise<void>,
-  logAs?: { activities: Array<{ id: string; name: string }>; onLog: (categoryId: string | undefined, description?: string) => void }) {
+  logAs?: Parameters<typeof LocationCorrectionSheet>[0]["logAs"]) {
   const onDismissed = vi.fn();
   let tree!: ReturnType<typeof create>;
   const element = (next: LocationCorrectionTarget, stale = false) => (
-    <LocationCorrectionSheet clockFormat="24h" evidence={nearSaved} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace} logAs={logAs}
+    <LocationCorrectionSheet pickerStyles={{} as never} clockFormat="24h" evidence={nearSaved} onDismissed={onDismissed} onQueue={onQueue} onSavePlace={onSavePlace} logAs={logAs}
       places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
       stale={stale} target={next} theme={theme} />
   );
@@ -163,7 +166,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
   it("puts the item's map first, holding its frame while it loads and saying so when it can't be read (owner feedback, 27 Oct 2026)", () => {
     let loading!: ReturnType<typeof create>;
     act(() => {
-      loading = create(<LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={vi.fn()} onQueue={vi.fn()} places={[]}
+      loading = create(<LocationCorrectionSheet pickerStyles={{} as never} clockFormat="24h" evidence={null} onDismissed={vi.fn()} onQueue={vi.fn()} places={[]}
         presentationId={1} reduceMotion={false} rootHosted={false} target={{ kind: "place", place, label: "Unknown place" }} theme={theme} />);
     });
     expect(loading.root.findAllByType("LocationEvidenceMap" as never)).toHaveLength(0);
@@ -171,7 +174,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const evidence = { map: { acceptedSamples: [] }, segment: { kind: "stay" } } as never;
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<LocationCorrectionSheet clockFormat="24h" evidence={evidence} onDismissed={vi.fn()} onQueue={vi.fn()} places={[]}
+      tree = create(<LocationCorrectionSheet pickerStyles={{} as never} clockFormat="24h" evidence={evidence} onDismissed={vi.fn()} onQueue={vi.fn()} places={[]}
         presentationId={1} reduceMotion rootHosted={false} target={{ kind: "trip", trip, legIndex: 1 }} theme={theme} />);
     });
     // On the leg view too: the map is there before anything else to change.
@@ -185,7 +188,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const mountLogged = () => {
       let tree!: ReturnType<typeof create>;
       act(() => {
-        tree = create(<LocationCorrectionSheet allowLoggedPlaceChange clockFormat="24h" evidence="unavailable" onDismissed={vi.fn()}
+        tree = create(<LocationCorrectionSheet pickerStyles={{} as never} allowLoggedPlaceChange clockFormat="24h" evidence="unavailable" onDismissed={vi.fn()}
           onQueue={queue} onSavePlace={savePlace} places={[{ id: SAVED, name: "Exampleton Library", role: null }]}
           presentationId={1} reduceMotion rootHosted={false} target={{ kind: "place", place: logged, label: "Unknown place" }} theme={theme} />);
       });
@@ -391,7 +394,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
 
   it("logs a place as the activity picked, after its own changes are kept, and Don't log leaves it as it is (step 12 part 4c)", async () => {
     const onLog = vi.fn();
-    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const logAs = { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog };
     const plain = mount({ kind: "place", place, label: "Unknown place" }, undefined, undefined, logAs);
     expect(plain.tree.root.findByProps({ testID: "location-correction-log-cat-errands" }).props.selected).toBe(false);
     plain.press("location-correction-log-cat-errands");
@@ -415,7 +418,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const onSavePlace = vi.fn(async (_name: string, _rest: unknown[]) => undefined);
     const onLog = vi.fn();
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace,
-      { activities: [{ id: "cat-errands", name: "Errands" }], onLog });
+      { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog });
     sheet.press("location-correction-log-cat-errands");
     sheet.press("location-correction-place-picker");
     act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
@@ -441,7 +444,7 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     });
     const onLog = vi.fn();
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace as never,
-      { activities: [{ id: "cat-errands", name: "Errands" }], onLog, onLogAfter } as never);
+      { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog, onLogAfter } as never);
     sheet.press("location-correction-log-cat-errands");
     sheet.press("location-correction-place-picker");
     act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
@@ -483,7 +486,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
   function sheetWith(props: Partial<Parameters<typeof LocationCorrectionSheet>[0]>) {
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<LocationCorrectionSheet clockFormat="24h" evidence={nearSaved} onDismissed={vi.fn()} onQueue={vi.fn(async () => undefined)}
+      tree = create(<LocationCorrectionSheet pickerStyles={{} as never} clockFormat="24h" evidence={nearSaved} onDismissed={vi.fn()} onQueue={vi.fn(async () => undefined)}
         places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion rootHosted={false}
         target={{ kind: "place", place, label: "Unknown place" }} theme={theme} {...props} />);
     });
@@ -594,7 +597,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const onAnswer = vi.fn();
     const answerAfter = vi.fn();
     const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
-    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const logAs = { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog };
     const done = sheetWith({ logAs, question });
     tap(done, "location-correction-log-cat-errands");
     tap(done, "location-correction-sheet-action");
@@ -610,7 +613,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const onAnswer = vi.fn();
     const answerAfter = vi.fn();
     const question = { text: "Visited Pret?", detail: null, yesLabel: "Yes", noLabel: "Not now", onAnswer, answerAfter };
-    const logAs = { activities: [{ id: "cat-errands", name: "Errands" }], onLog };
+    const logAs = { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog };
     // Yes with Errands picked and a place change: the change is kept with Logs as waiting for it (log_place only once
     // the server has acknowledged the change, Codex r4 on #610; #609 then closes the "?").
     const order: string[] = [];
@@ -823,7 +826,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
   };
   const inOrder = (seen: string[]) => everyOrder.filter((id) => seen.includes(id));
   const ask = { text: "Where were you?", detail: null, yesLabel: null, noLabel: "Not now", onAnswer: vi.fn() };
-  const logs = { activities: [{ id: "cat-errands", name: "Errands", color: "teal", icon: null }], onLog: vi.fn() };
+  const logs = { activities: [{ id: "cat-errands", isPinned: false, name: "Errands", color: "teal", icon: null }], onLog: vi.fn() };
   const stay = (count: number) => ({
     map: { acceptedSamples: [], centre: null, nearbySavedPlaces: [], gaps: [{ startedAt: iso(5), stoppedAt: iso(20) }] },
     segment: { kind: "stay", evidenceCount: count }, evidenceExpired: false
@@ -968,44 +971,72 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.awaitingCentre).toBe(true);
   });
 
-  it("keeps the same three choices and shows the selected activity in the heading when the full list closes", () => {
+  it("keeps the preview and correction sheet stationary while searching, selecting and cancelling", () => {
     const activities = [
       ...logs.activities,
-      { id: "cat-work", name: "Work", color: "teal", icon: null },
-      { id: "cat-lunch", name: "Lunch", color: "teal", icon: null },
-      { id: "cat-gym", name: "Gym", color: "teal", icon: null },
-      { id: "cat-walk", name: "Walk", color: "teal", icon: null }
+      { id: "cat-work", isPinned: false, name: "Work" },
+      { id: "cat-lunch", isPinned: false, name: "Lunch" },
+      { id: "cat-gym", isPinned: false, name: "Gym" },
+      { id: "cat-walk", isPinned: false, name: "Walk" }
     ];
     const tree = sheetWith({ logAs: { ...logs, activities } });
-    const chips = () => tree.root.findAll((node) => node.type === ("Pressable" as never)
-      && node.props.testID?.startsWith("location-correction-log-cat-"));
-    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
-    expect(chips().every((chip) => !chip.props.accessibilityState.checked)).toBe(true);
-    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Optional");
+    const chips = () => tree.root.findAllByType("Pressable" as never)
+      .filter((node) => node.props.testID?.startsWith("location-correction-log-cat-"));
+    const expectedPreview = ["Errands", "Work", "Lunch"];
+    const shownPreview = () => chips().map((chip) => chip.props.accessibilityLabel);
+    const shownChoice = () => tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children;
     const preview = tree.root.find((node) => node.type === ("View" as never) && node.props.accessibilityLabel === "Activity");
-    const disclosure = () => preview.findByProps({ testID: "location-correction-log-all" });
-    const style = (node: ReturnType<typeof disclosure>) => Object.assign({}, ...node.props.style({ pressed: false }));
+    const trigger = preview.findAllByType("Pressable" as never).find((node) => node.props.testID === "location-correction-log-all")!;
+    const style = (node: typeof trigger) => flat(node.props.style({ pressed: false }));
+    const search = (text: string) => act(() => tree.root.findByProps({ testID: "activity-picker-search" }).props.onChangeText(text));
+    const keyboardEvent = (name: string) => vi.mocked(Keyboard.addListener).mock.calls.filter(([event]) => event === name).at(-1)![1];
+    expect(shownPreview()).toEqual(expectedPreview);
+    expect(shownChoice()).toBe("Optional");
     expect(preview.props.style.flexWrap).toBe("wrap");
-    expect(style(disclosure()).minHeight).toBe(style(chips()[0]).minHeight);
-    expect(disclosure().props.hitSlop).toEqual(chips()[0].props.hitSlop);
-    expect(disclosure().props).toMatchObject({
-      accessibilityLabel: "All activities", accessibilityRole: "button", accessibilityState: { expanded: false }
-    });
-    const labelSize = () => disclosure().find((node) => node.type === ("Text" as never)
-      && node.props.style.some((part: { opacity?: number }) => part.opacity === 0)).props.children;
-    expect(labelSize()).toBe("Fewer activities");
+    expect(style(trigger).minHeight).toBe(style(chips()[0]).minHeight);
+    expect(trigger.props.hitSlop).toEqual(chips()[0].props.hitSlop);
+    expect(trigger.props).toMatchObject({ accessibilityLabel: "All activities, 5", accessibilityRole: "button" });
+    expect(trigger.findByType("DayframeIcon" as never).props.glyph).toBe("search");
     tap(tree, "location-correction-log-all");
-    expect(disclosure().props).toMatchObject({
-      accessibilityLabel: "Fewer activities", accessibilityRole: "button", accessibilityState: { expanded: true }
-    });
-    expect(labelSize()).toBe("Fewer activities");
-    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch", "Gym", "Walk"]);
-    tap(tree, "location-correction-log-cat-gym");
+    const sheet = () => tree.root.findAllByType("SwipeDismissSheet" as never).find((node) => node.props.testID === "location-correction-sheet")!;
+    expect(action(tree).props.disabled).toBe(true);
+    const [host, picker] = tree.root.findAllByType("Modal" as never);
+    expect(host.findAllByType("Modal" as never, { deep: true }).includes(picker)).toBe(true);
+    act(() => { keyboardEvent("keyboardWillChangeFrame")({ endCoordinates: { screenY: 500 } } as never); });
+    expect(sheet().props.keyboardInset).toBe(0);
+    expect(shownPreview()).toEqual(expectedPreview);
+    search("gym");
+    expect(tree.root.findAllByProps({ testID: "activity-picker-row-results-cat-walk" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: "activity-picker-create" })).toHaveLength(0);
+    act(() => { keyboardEvent("keyboardWillHide")({} as never); });
+    tap(tree, "activity-picker-row-results-cat-gym");
+    expect(shownPreview()).toEqual(expectedPreview);
+    expect(shownChoice()).toBe("Gym");
+    expect(action(tree).props.disabled).toBe(false);
     tap(tree, "location-correction-log-all");
-    expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual(["Errands", "Work", "Lunch"]);
-    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Gym");
+    search("gym");
+    expect(tree.root.findByProps({ testID: "activity-picker-row-results-cat-gym" }).props.accessibilityState.selected).toBe(true);
+    tap(tree, "activity-picker-cancel");
+    expect(shownChoice()).toBe("Gym");
+    tap(tree, "location-correction-clear-picked-activity");
+    expect(shownChoice()).toBe("Optional");
     const few = sheetWith({ logAs: { ...logs, allActivities: logs.activities } });
-    expect(few.root.findAll((node) => node.props.testID === "location-correction-log-all")).toHaveLength(0);
+    expect(few.root.findAllByProps({ testID: "location-correction-log-all" })).toHaveLength(0);
+  });
+
+  it("picks and clears an activity outside a named visit's Logs as preview", () => {
+    const activity = { id: "cat-gym", isPinned: false, name: "Gym" };
+    const tree = sheetWith({
+      logAs: { ...logs, allActivities: [...logs.activities, activity] },
+      target: { kind: "place", place: { ...place, placeId: SAVED, name: "Exampleton Library" }, label: "Exampleton Library" }
+    });
+    tap(tree, "location-correction-log-all");
+    act(() => tree.root.findByProps({ testID: "activity-picker-search" }).props.onChangeText("gym"));
+    tap(tree, "activity-picker-row-results-cat-gym");
+    expect(tree.root.findByProps({ testID: "location-correction-activity-value" }).props.children).toBe("Gym");
+    expect(tree.root.findAllByType("Pressable" as never).find((node) => node.props.testID === "location-correction-log-cat-errands")!.props.accessibilityState.checked).toBe(false);
+    tap(tree, "location-correction-log-none");
+    expect(tree.root.findAllByProps({ testID: "location-correction-activity-value" })).toHaveLength(0);
   });
 
   it("closes More options at once with Reduce Motion, and after the scroll back otherwise", () => {

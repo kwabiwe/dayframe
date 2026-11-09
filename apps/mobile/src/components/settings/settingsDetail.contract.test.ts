@@ -16,6 +16,7 @@ describe("Settings detail (audit A8b)", () => {
     expect(health).not.toContain("healthNameInput");
     const sheet = settings.slice(settings.indexOf("function HealthTypeSheet("), settings.indexOf("function LocationInformationSheet("));
     expect(sheet).toContain('title="Logs as"');
+    expect(sheet).toContain("<AllActivitiesChip canCreate={false} count={categories.length}");
     expect(sheet).toContain("healthNameInput");
     expect(sheet).toContain('label="Use default"');
     // The picker opens over the type's sheet, inside it.

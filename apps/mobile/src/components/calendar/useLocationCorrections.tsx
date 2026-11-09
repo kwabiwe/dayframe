@@ -10,7 +10,7 @@ import {
   type TimelineTrip
 } from "@dayframe/shared";
 import { createPlace, fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
-import type { MobileTheme } from "../../lib/mobileTheme";
+import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { canSayDidntLeave, canSayNotHere, type QueuedCorrection } from "../../lib/locationCorrectionDraft";
 import { REVIEW_DECK_UNDO_MS } from "../../lib/reviewDeckHold";
 import {
@@ -46,6 +46,7 @@ export function useLocationCorrections({
   clockFormat,
   data,
   onLogged,
+  pickerStyles,
   pending,
   questionFor,
   reduceMotion,
@@ -63,6 +64,7 @@ export function useLocationCorrections({
   resolveEditBlock?: (id: string) => { title: string | null; prepare: () => Promise<() => void> } | null;
   /** A correction that can change the day's blocks reached the server. */
   onLogged?: () => void;
+  pickerStyles: MobileStyles;
   /** The queue as the List shows it (useTimelineCorrectionQueue). */
   pending: readonly PendingTimelineCorrection[];
   reduceMotion: boolean;
@@ -426,9 +428,7 @@ export function useLocationCorrections({
     };
   };
   const allActivities = useMemo(() => [...(data?.categories ?? [])]
-    .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name))
-    // Each with its colour and icon, for the compact activity chips (owner feedback, 29 Oct 2026).
-    .map((category) => ({ id: category.id, name: category.name, color: category.color ?? null, icon: category.icon ?? null })), [data?.categories]);
+    .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name)), [data?.categories]);
   const activities = useMemo(() => allActivities.slice(0, 8), [allActivities]);
 
   // A refusal (the item changed, or is in a block now): each said once, then dropped; the List already shows the
@@ -475,6 +475,7 @@ export function useLocationCorrections({
       key={`location-correction-${open.id}`}
       clockFormat={clockFormat}
       evidence={shownEvidence}
+      pickerStyles={pickerStyles}
       onDismissStart={(id) => { exitingPresentationId.current = id; }}
       onDismissed={(id) => {
         const wasActive = activePresentationId.current === id;

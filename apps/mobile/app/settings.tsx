@@ -51,6 +51,7 @@ import {
   localPresenceExiting,
   useReduceMotionPreference
 } from "@/lib/motion";
+import { AllActivitiesChip } from "@/components/ActivityChips";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityEditorSheet, type ActivityEditorDraft } from "@/components/settings/ActivityEditorSheet";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
@@ -3438,14 +3439,18 @@ function HealthTypeSheet({
                   layout={localLayoutTransition(reduceMotion)}
                 >
                 <SettingsBlockRow
-                  accessibilityHint={`Chooses the activity ${label} logs to`}
-                  onPress={() => {
-                    if (!closingRef.current) onPickActivity();
-                  }}
-                  testID={`health-activity-${healthKey}`}
+                  control={
+                    <AllActivitiesChip canCreate={false} count={categories.length}
+                      onPress={() => {
+                        if (closingRef.current) return;
+                        Keyboard.dismiss();
+                        onPickActivity();
+                      }}
+                      testID={`health-activity-${healthKey}`} theme={theme} />
+                  }
+                  subtitle={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
                   theme={theme}
                   title="Logs as"
-                  value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
                 />
                 </Reanimated.View>
               ) : null}
