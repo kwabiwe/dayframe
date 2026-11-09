@@ -122,6 +122,21 @@ plan; do not silently change that schedule without checking the Vercel plan.
 Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
 but never device tokens, provider keys, or session credentials.
 
+## Location request cancellation
+
+The Vercel project config at `apps/web/vercel.json` enables client-disconnect
+cancellation for the Location evidence and replay functions. Upload and replay
+use the request signal with bounded transactions. A confirmed Clear history
+shares the evidence function. Its bounded, account-scoped delete is registered
+with the Next.js request lifecycle so it can finish after disconnect and
+return the committed count when the client stays connected.
+
+Verify the effective function settings and both disconnect outcomes on an
+isolated Preview before changing stable staging. An aborted upload or replay
+before commit must release the owner lock and leave its writes uncommitted.
+An authenticated deletion already in progress must remove only that account's
+recent evidence. Use disposable accounts and verify cleanup.
+
 ## Web Place Search And Review Maps
 
 For local development, create a Geoapify project/key and set

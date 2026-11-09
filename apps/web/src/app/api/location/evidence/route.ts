@@ -1,8 +1,8 @@
 import { locationRequestDiagnostics } from "@/lib/location/location-sync-diagnostics";
-import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
-import { NextResponse } from "next/server";
+import { SyncOperationError, syncFailureMetadata, withSyncTransaction } from "@/lib/sync-transaction";
+import { NextResponse, after } from "next/server";
 import { ZodError } from "zod";
-import { isLockNotAvailableError, isStatementTimeoutError, query } from "@/lib/db";
+import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
@@ -76,12 +76,21 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const session = await resolveRequestSession(request);
-    const result = await query(
-      `delete from location_evidence
-       where workspace_id = $1 and user_id = $2`,
-      [session.workspaceId, session.userId]
-    );
-    return privateJson({ ok: true, deletedEvidenceCount: result.rowCount ?? 0 });
+    // A confirmed Clear history should finish even if the client disconnects.
+    // Register its lifetime before starting the bounded, owner-scoped deletion.
+    let deletion: Promise<number> | undefined;
+    after(async () => {
+      await deletion?.catch(() => undefined);
+    });
+    deletion = withSyncTransaction("location_evidence_delete", async ({ client }) => {
+      const result = await client.query(
+        `delete from location_evidence
+         where workspace_id = $1 and user_id = $2`,
+        [session.workspaceId, session.userId]
+      );
+      return result.rowCount ?? 0;
+    });
+    return privateJson({ ok: true, deletedEvidenceCount: await deletion });
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

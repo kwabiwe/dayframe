@@ -11,9 +11,19 @@ const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   ingestLocationEvidence: vi.fn(),
-  query: vi.fn()
+  query: vi.fn(),
+  withSyncTransaction: vi.fn(),
+  after: vi.fn()
 }));
 
+vi.mock("next/server", async importOriginal => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after
+}));
+vi.mock("@/lib/sync-transaction", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/sync-transaction")>(),
+  withSyncTransaction: mocks.withSyncTransaction
+}));
 vi.mock("@/lib/review-count", () => ({
   openReviewCountFor: reviewCountMock,
   withReviewCount: (body: object, reviewCount?: number) => reviewCount === undefined ? body : { ...body, reviewCount }
@@ -36,6 +46,7 @@ describe("POST /api/location/evidence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.withSyncTransaction.mockImplementation((_operation, work) => work({ client: { query: mocks.query } }));
     mocks.ingestLocationEvidence.mockResolvedValue({
       ok: true,
       duplicateBatch: false,
@@ -117,10 +128,39 @@ describe("POST /api/location/evidence", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+    expect(await response.json()).toEqual({ ok: true, deletedEvidenceCount: 3 });
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining("workspace_id = $1 and user_id = $2"),
       [session.workspaceId, session.userId]
     );
+  });
+
+  it("keeps the same confirmed deletion alive after a client disconnects", async () => {
+    const controller = new AbortController();
+    let finishDeletion!: (result: { rowCount: number; rows: [] }) => void;
+    const deletion = new Promise<{ rowCount: number; rows: [] }>(resolve => { finishDeletion = resolve; });
+    mocks.query.mockReturnValueOnce(deletion);
+
+    const response = DELETE(new Request("https://dayframe.test/api/location/evidence", {
+      method: "DELETE", signal: controller.signal
+    }));
+    await vi.waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(1));
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.query.mock.invocationCallOrder[0]);
+    expect(mocks.withSyncTransaction).toHaveBeenCalledWith("location_evidence_delete", expect.any(Function));
+
+    controller.abort();
+    const completion = mocks.after.mock.calls[0]![0]();
+    let finished = false;
+    void completion.then(() => { finished = true; });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+
+    finishDeletion({ rowCount: 1, rows: [] });
+    expect(await (await response).json()).toEqual({ ok: true, deletedEvidenceCount: 1 });
+    await completion;
+    expect(finished).toBe(true);
+    expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 });
 
