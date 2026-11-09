@@ -20,8 +20,6 @@ import {
   adjustTimeEntryDial,
   roundTimeEntryDialDuration,
   roundTimeEntryDialStop,
-  TIME_ENTRY_DIAL_MAX_DURATION_MS,
-  TIME_ENTRY_DIAL_MIN_DURATION_MS,
   type TimeEntryDialInterval
 } from "@/lib/timeEntryDurationDial";
 import type { TimeEntrySheetLayoutDensity } from "@/lib/timeEntrySheetDraft";
@@ -31,7 +29,6 @@ type TimeEntryDurationDialProps = {
   activityColor?: string | null;
   disabled: boolean;
   endMs: number;
-  lastStoppedAt: string | null;
   layoutDensity: TimeEntrySheetLayoutDensity;
   mode: "running" | "stopped";
   nowMs: number;
@@ -58,7 +55,6 @@ export function TimeEntryDurationDial({
   activityColor = null,
   disabled,
   endMs,
-  lastStoppedAt,
   layoutDensity,
   mode,
   nowMs,
@@ -157,22 +153,7 @@ export function TimeEntryDurationDial({
     }
   }
 
-  const lastStopMs = lastStoppedAt ? new Date(lastStoppedAt).getTime() : Number.NaN;
-  // Offered only when it would move the start, and keeps the block within the dial's limits.
-  const lastStopAllowed = Number.isFinite(lastStopMs) &&
-    Math.abs(lastStopMs - startMs) >= 60_000 &&
-    effectiveEndMs - lastStopMs >= TIME_ENTRY_DIAL_MIN_DURATION_MS &&
-    effectiveEndMs - lastStopMs <= TIME_ENTRY_DIAL_MAX_DURATION_MS;
-
   const shortcuts: { accessibilityLabel: string; apply: () => TimeEntryDialInterval; label: string; testID: string }[] = [];
-  if (lastStopAllowed) {
-    shortcuts.push({
-      accessibilityLabel: `Set start to the last stop time, ${formatClockTime(lastStopMs, clockFormat)}`,
-      apply: () => ({ startMs: lastStopMs, endMs: effectiveEndMs }),
-      label: `Last stop ${formatClockTime(lastStopMs, clockFormat)}`,
-      testID: "time-entry-set-last-stop-time"
-    });
-  }
   if (mode === "stopped") {
     shortcuts.push({
       accessibilityLabel: "Round stop time",

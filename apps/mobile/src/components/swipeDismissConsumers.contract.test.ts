@@ -97,8 +97,8 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(editSource).toContain("presentDiscardConfirmation();\n      return false;");
   });
 
-  it("keeps Delete in a fixed density-adaptive sheet without form scrolling", () => {
-    expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
+  it("keeps Delete reachable in the density-adaptive editor", () => {
+    expect(editSource).toContain("const showDeleteButton = !isFinishedMode && (canDelete || isAddMode)");
     expect(editSource).toContain("timeEntrySheetLayoutDensity({");
     expect(editSource).toContain('testID="time-entry-sheet-form"');
     expect(editSource).not.toContain("scrollEnabled={false}");
@@ -182,7 +182,7 @@ describe("shared swipe-dismiss ownership integration", () => {
   it("keeps form interaction and deferred focus behind presentation ownership", () => {
     expect(editSource).toContain("const presentationInteractionReady = Boolean(");
     expect(editSource).toContain(
-      'pointerEvents={presentationInteractionReady ? "auto" : "none"}'
+      'pointerEvents={presentationInteractionReady && !split ? "auto" : "none"}'
     );
     expect(editSource).toContain("cancelPendingTagFocus();");
     expect(editSource).toContain("classifyTimeEntrySheetDeferredFocus({");

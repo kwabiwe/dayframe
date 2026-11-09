@@ -3,7 +3,7 @@ import type { MobileBootstrap } from "./api";
 export type RecoveredDashboardBootstrapEvent =
   | { publicationId: number; type: "started" }
   | { publicationId: number; type: "abandoned" }
-  | { bootstrap: MobileBootstrap; publicationId: number; type: "completed" };
+  | { bootstrap: MobileBootstrap; serverBootstrap: MobileBootstrap; publicationId: number; type: "completed" };
 
 const listeners = new Set<(event: RecoveredDashboardBootstrapEvent) => void>();
 let publicationSequence = 0;
@@ -18,10 +18,10 @@ export function beginRecoveredDashboardBootstrapPublication() {
       settled = true;
       publish({ publicationId, type: "abandoned" });
     },
-    publish(bootstrap: MobileBootstrap) {
+    publish(bootstrap: MobileBootstrap, serverBootstrap: MobileBootstrap) {
       if (settled) return;
       settled = true;
-      publish({ bootstrap, publicationId, type: "completed" });
+      publish({ bootstrap, serverBootstrap, publicationId, type: "completed" });
     }
   };
 }
