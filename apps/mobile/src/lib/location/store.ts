@@ -61,6 +61,9 @@ import {
 
 const DATABASE_NAME = "dayframe-location-v2.db";
 const DATABASE_VERSION = 1;
+const EVIDENCE_GAP_NOTICE = "evidence_gap";
+const SHADOW_UPLOAD_NOTICE = "V2 shadow mode stored evidence without emitting user-visible semantics.";
+const SHADOW_REPLAY_NOTICE = "V2 shadow mode stored segments without emitting user-visible semantics.";
 const MAX_LOCAL_EVIDENCE_ITEMS = 5_000;
 // Core Motion records arrive far more often than location (about 900 a day on
 // an iPhone left overnight), so they have their own cap and never displace
@@ -1141,8 +1144,12 @@ async function runPermittedLocationSync(owner: MobileAccountOwner, options: Perm
   const batches = await db.getFirstAsync<{pending:number;nextRetryAt:string|null}>(`select count(*) as pending,min(next_attempt_at) as nextRetryAt
     from location_upload_outbox where account_key=? and state='pending'`, accountKey(owner));
   const remaining = counts?.pending ?? 0;
+  // These notices describe completed output and remain available in diagnostics.
+  const warningsRequireFollowUp = result.warnings?.some(warning =>
+    warning !== EVIDENCE_GAP_NOTICE && warning !== SHADOW_UPLOAD_NOTICE && warning !== SHADOW_REPLAY_NOTICE
+  );
   const outcome: SyncLaneOutcome = result.outcome ?? (!result.synced ? "server_busy" : counts?.rejected ? "needs_attention" : remaining > 0 ?
-    batches?.nextRetryAt && Date.parse(batches.nextRetryAt) > Date.now() ? "backoff" : "partial" : result.warnings?.length ? "partial" : "complete");
+    batches?.nextRetryAt && Date.parse(batches.nextRetryAt) > Date.now() ? "backoff" : "partial" : warningsRequireFollowUp ? "partial" : "complete");
   return { ...result, synced: outcome === "complete", outcome, remainingEvidenceCount: remaining, remainingBatchCount: batches?.pending ?? 0,
     remainingPendingEvidence: remaining, remainingBatches: batches?.pending ?? 0, rejectedEvidenceCount: counts?.rejected ?? 0, nextRetryAt: batches?.nextRetryAt ?? null };
 }
@@ -1600,8 +1607,8 @@ async function requestServerLocationReplay(
       };
     }
     // These describe completed output. Other warnings may mean work was deferred.
-    const completedReplay = payload.warnings.every(warning => warning === "evidence_gap" ||
-      (payload.rolloutMode === "v2_shadow" && warning === "V2 shadow mode stored segments without emitting user-visible semantics."));
+    const completedReplay = payload.warnings.every(warning => warning === EVIDENCE_GAP_NOTICE ||
+      (payload.rolloutMode === "v2_shadow" && warning === SHADOW_REPLAY_NOTICE));
     if (!options.signal?.aborted && isLocationCaptureSnapshotCurrent(options.capture) &&
         payload.clientAcknowledgedMode && payload.rolloutMode === prepared.requestedMode &&
         completedReplay && (!isSemanticMode(payload.rolloutMode) || prepared.semanticModeAcknowledgedAt)) {

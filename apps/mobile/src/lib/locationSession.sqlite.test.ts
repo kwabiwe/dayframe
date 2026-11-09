@@ -1010,12 +1010,20 @@ describe("automatic Location transfer permissions and replay", () => {
     vi.setSystemTime(T0 + 5_000);
     expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(1);
+    const shadowUploadNotice = "V2 shadow mode stored evidence without emitting user-visible semantics.";
     routes["/api/location/evidence"] = init => {
       const body = JSON.parse(String(init.body));
-      return json({ ok: true, acknowledgedEvidenceIds: body.evidence.map((e: { clientEvidenceId: string }) => e.clientEvidenceId), rolloutMode: "v2_shadow" });
+      return json({
+        ok: true,
+        acknowledgedEvidenceIds: body.evidence.map((e: { clientEvidenceId: string }) => e.clientEvidenceId),
+        rolloutMode: "v2_shadow",
+        warnings: [shadowUploadNotice]
+      });
     };
     await learningTask()({ data: { locations: [fix(T0 + 5_000)] }, error: null });
-    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
+    expect(await runtime.syncLocationIntelligenceOnForeground()).toMatchObject({
+      replayed: true, synced: true, outcome: "complete", warnings: [shadowUploadNotice]
+    });
     vi.setSystemTime(T0 + 5_001);
     expect((await runtime.syncLocationIntelligenceOnForeground({ forceReplay: true })).replayed).toBe(true);
     vi.setSystemTime(T0 + 35_001);
@@ -1036,9 +1044,14 @@ describe("automatic Location transfer permissions and replay", () => {
       rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0,
       warnings: ["semantic_replay_deferred"]
     });
-    expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(true);
-    mockReplay(200, ["evidence_gap", "V2 shadow mode stored segments without emitting user-visible semantics."]);
-    expect((await runtime.syncLocationIntelligenceOnForeground())).toMatchObject({ replayed: true, warnings: expect.arrayContaining(["evidence_gap"]) });
+    expect(await runtime.syncLocationIntelligenceOnForeground()).toMatchObject({
+      replayed: true, synced: false, outcome: "partial", warnings: ["semantic_replay_deferred"]
+    });
+    const completedWarnings = ["evidence_gap", "V2 shadow mode stored segments without emitting user-visible semantics."];
+    mockReplay(200, completedWarnings);
+    expect(await runtime.syncLocationIntelligenceOnForeground()).toMatchObject({
+      replayed: true, synced: true, outcome: "complete", warnings: completedWarnings
+    });
     expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(3);
   });
