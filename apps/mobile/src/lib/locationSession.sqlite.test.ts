@@ -949,10 +949,11 @@ describe("failed Location operation recovery", () => {
 });
 
 describe("automatic Location transfer permissions and replay", () => {
-  function mockReplay(status = 200, warnings: string[] = []) {
+  const shadowReplayNotice = "V2 shadow mode stored segments without emitting user-visible semantics.";
+  function mockReplay(status = 200, warnings: string[] = [], rolloutMode: LocationRolloutMode = "v2_shadow") {
     routes["/api/location/replay"] = () => json({
       ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-      rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings
+      rolloutMode, finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings
     }, status);
   }
 
@@ -1039,21 +1040,49 @@ describe("automatic Location transfer permissions and replay", () => {
     calls.length = 0;
     mockReplay(503);
     expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
-    routes["/api/location/replay"] = () => json({
-      ok: true, clientAcknowledgedMode: true, replayVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-      rolloutMode: "v2_shadow", finalisedSegmentCount: 0, semanticSegmentCount: 0,
-      warnings: ["semantic_replay_deferred"]
-    });
+    const deferredWarnings = [shadowReplayNotice, "semantic_replay_deferred"];
+    mockReplay(200, deferredWarnings);
     expect(await runtime.syncLocationIntelligenceOnForeground()).toMatchObject({
-      replayed: true, synced: false, outcome: "partial", warnings: ["semantic_replay_deferred"]
+      replayed: true, synced: false, outcome: "partial", warnings: deferredWarnings
     });
-    const completedWarnings = ["evidence_gap", "V2 shadow mode stored segments without emitting user-visible semantics."];
+    const completedWarnings = ["evidence_gap", shadowReplayNotice];
     mockReplay(200, completedWarnings);
     expect(await runtime.syncLocationIntelligenceOnForeground()).toMatchObject({
       replayed: true, synced: true, outcome: "complete", warnings: completedWarnings
     });
     expect((await runtime.syncLocationIntelligenceOnForeground()).replayed).toBe(false);
     expect(calls.filter(path => path === "/api/location/replay")).toHaveLength(3);
+    expect((await store.getLocationStoreDiagnostics()).semanticWarnings).toEqual(completedWarnings);
+  });
+
+  it("keeps a shadow notice actionable when returned by a semantic replay", async () => {
+    await signInThroughApi(A, [place], true, "v2_review");
+    mockReplay(200, [shadowReplayNotice], "v2_review");
+    expect(await runtime.syncLocationIntelligenceOnForeground({ forceReplay: true })).toMatchObject({
+      replayed: true, synced: false, outcome: "partial", warnings: [shadowReplayNotice]
+    });
+    mockReplay(200, ["evidence_gap"], "v2_review");
+    expect(await runtime.syncLocationIntelligenceOnForeground({ forceReplay: true })).toMatchObject({
+      replayed: true, synced: true, outcome: "complete", warnings: ["evidence_gap"]
+    });
+  });
+
+  it("keeps a retained batch in backoff after its journal rows expire", async () => {
+    await signInThroughApi(A, [place]);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const batch = await store.prepareLocationUploadBatch(A);
+    expect(batch).toBeTruthy();
+    const nextRetryAt = new Date(T0 + 60_000).toISOString();
+    db.prepare("update location_upload_outbox set next_attempt_at=? where account_key=?").run(nextRetryAt, key(A));
+    db.prepare("update location_evidence_journal set expires_at=? where account_key=?")
+      .run(new Date(T0 - 1).toISOString(), key(A));
+    await store.applyLocationRetention();
+    expect(n("location_evidence_journal", key(A))).toBe(0);
+    expect(n("location_upload_outbox", key(A))).toBe(1);
+    mockReplay(200, [shadowReplayNotice]);
+    expect(await runtime.syncLocationIntelligenceOnForeground({ forceReplay: true })).toMatchObject({
+      replayed: true, synced: false, outcome: "backoff", remainingEvidenceCount: 0, remainingBatchCount: 1, nextRetryAt
+    });
   });
 
   it("aborts a dispatched replay when the user turns Location off", async () => {

@@ -1133,7 +1133,7 @@ async function canReuseJoinedReplay(result: LocationSyncResult, capture: Locatio
 }
 
 async function runPermittedLocationSync(owner: MobileAccountOwner, options: PermittedLocationSync): Promise<LocationSyncResult> {
-  const result = await synchroniseLocationEvidenceUnsafe(owner, options);
+  const { warningsRequireFollowUp, ...result } = await synchroniseLocationEvidenceUnsafe(owner, options);
   if (result.reason === "location_paused") return result;
   if (!mobileAccountOwnersEqual(await getActiveLocationAccountIdentity(), owner)) {
     return { ...result, synced: false, reason: "session_changed", outcome: "cancelled" };
@@ -1144,17 +1144,17 @@ async function runPermittedLocationSync(owner: MobileAccountOwner, options: Perm
   const batches = await db.getFirstAsync<{pending:number;nextRetryAt:string|null}>(`select count(*) as pending,min(next_attempt_at) as nextRetryAt
     from location_upload_outbox where account_key=? and state='pending'`, accountKey(owner));
   const remaining = counts?.pending ?? 0;
-  // These notices describe completed output and remain available in diagnostics.
-  const warningsRequireFollowUp = result.warnings?.some(warning =>
-    warning !== EVIDENCE_GAP_NOTICE && warning !== SHADOW_UPLOAD_NOTICE && warning !== SHADOW_REPLAY_NOTICE
-  );
-  const outcome: SyncLaneOutcome = result.outcome ?? (!result.synced ? "server_busy" : counts?.rejected ? "needs_attention" : remaining > 0 ?
+  const remainingBatches = batches?.pending ?? 0;
+  const outcome: SyncLaneOutcome = result.outcome ?? (!result.synced ? "server_busy" : counts?.rejected ? "needs_attention" : remaining > 0 || remainingBatches > 0 ?
     batches?.nextRetryAt && Date.parse(batches.nextRetryAt) > Date.now() ? "backoff" : "partial" : warningsRequireFollowUp ? "partial" : "complete");
-  return { ...result, synced: outcome === "complete", outcome, remainingEvidenceCount: remaining, remainingBatchCount: batches?.pending ?? 0,
-    remainingPendingEvidence: remaining, remainingBatches: batches?.pending ?? 0, rejectedEvidenceCount: counts?.rejected ?? 0, nextRetryAt: batches?.nextRetryAt ?? null };
+  return { ...result, synced: outcome === "complete", outcome, remainingEvidenceCount: remaining, remainingBatchCount: remainingBatches,
+    remainingPendingEvidence: remaining, remainingBatches, rejectedEvidenceCount: counts?.rejected ?? 0, nextRetryAt: batches?.nextRetryAt ?? null };
 }
 
-async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, options:PermittedLocationSync): Promise<LocationSyncResult> {
+async function synchroniseLocationEvidenceUnsafe(
+  owner: MobileAccountOwner,
+  options: PermittedLocationSync
+): Promise<LocationSyncResult & { warningsRequireFollowUp?: boolean }> {
   if (!await locationSyncAllowed(options.capture, options.signal)) return { synced: true, reason: "location_paused", outcome: "complete" };
   let sessionRead: Awaited<ReturnType<typeof readOwnedAuthenticatedSessionSnapshot>>;
   try {
@@ -1179,6 +1179,7 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
   let acknowledgedCount = 0;
   let uploadedBatchCount = 0;
   let rejectedBatchCount = 0;
+  let warningsRequireFollowUp = false;
   const attemptedBatches:string[]=[];const attemptedEvidence:string[]=[];const warnings:string[]=[];
   for (let batchIndex = 0; batchIndex < MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC; batchIndex += 1) {
     if(options.signal?.aborted||Date.now()>=(options.deadlineAt??Infinity)) return {synced:false,outcome:"cancelled",acknowledgedCount,uploadedBatchCount,warnings};
@@ -1200,6 +1201,7 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
     );
     if (attempt.status === "success") {
       warnings.push(...(attempt.warnings??[]));
+      warningsRequireFollowUp ||= attempt.warningsRequireFollowUp;
       acknowledgedCount += attempt.acknowledgedCount;
       uploadedBatchCount += 1;
       lastSuccessfulReplay = undefined;
@@ -1250,7 +1252,7 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
       ...(rejectedBatchCount ? { reason: "invalid_batch" as const } : {}),
       acknowledgedCount,
       uploadedBatchCount,
-      replayed: false,warnings
+      replayed: false, warnings, warningsRequireFollowUp
     };
   }
 
@@ -1264,6 +1266,7 @@ async function synchroniseLocationEvidenceUnsafe(owner:MobileAccountOwner, optio
   return {
     synced: replay.ok && rejectedBatchCount === 0,
     warnings:[...new Set([...warnings,...(replay.ok?replay.warnings??[]:[])])],
+    warningsRequireFollowUp: warningsRequireFollowUp || (replay.ok && replay.warningsRequireFollowUp),
     ...(!replay.ok&&"outcome" in replay?{outcome:replay.outcome}:{}),
     ...(!replay.ok
       ? {
@@ -1328,7 +1331,7 @@ async function uploadLocationEvidenceBatch(
   db: SQLite.SQLiteDatabase,
   batch: OutboxRow, options:PermittedLocationSync
 ): Promise<
-  | { status: "success"; acknowledgedCount: number; warnings?:string[] }
+  | { status: "success"; acknowledgedCount: number; warnings?: string[]; warningsRequireFollowUp: boolean }
   | { status: "rejected" }
   | {
       status: "stopped";
@@ -1470,7 +1473,14 @@ async function uploadLocationEvidenceBatch(
     });
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     attemptOutcome = partition.retryIds.length ? "partial" : "success";
-    return { status: "success", acknowledgedCount: acknowledged.length,warnings:payload.warnings };
+    return {
+      status: "success",
+      acknowledgedCount: acknowledged.length,
+      warnings: payload.warnings,
+      warningsRequireFollowUp: payload.warnings?.some(warning =>
+        !(serverMode.success && serverMode.data === "v2_shadow" && warning === SHADOW_UPLOAD_NOTICE)
+      ) ?? false
+    };
   } catch (error) {
     if (error instanceof LocationTransferPausedError) return { status: "stopped", reason: "location_paused" };
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
@@ -1620,7 +1630,8 @@ async function requestServerLocationReplay(
       finalisedSegmentCount: payload.finalisedSegmentCount,
       semanticSegmentCount: payload.semanticSegmentCount,
       ...(payload.semanticChangeCount === undefined ? {} : { semanticChangeCount: payload.semanticChangeCount }),
-      warnings:payload.warnings
+      warnings: payload.warnings,
+      warningsRequireFollowUp: !completedReplay
     };
   } catch (error) {
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {ok:false as const,reason:"cancelled" as const,outcome:"cancelled" as const,message:"Location pass ended."};
