@@ -2398,6 +2398,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     acknowledged: correctionQueue.acknowledged,
     clockFormat,
     data: authState === "authenticated" ? data : null,
+    pickerStyles: styles,
     resolveEditBlock: (id) => {
       if (!correctionOwner) return null;
       const block = mobileTimeEntryById(shownCalendarData, id) ?? mobileTimeEntryById(latestData.current, id);

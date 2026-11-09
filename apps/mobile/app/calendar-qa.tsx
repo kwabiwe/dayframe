@@ -188,11 +188,11 @@ const QA_SHEET_PLACES = [
 ];
 // Logs as and the near guess for the sheets (made-up names and colours).
 const QA_SHEET_ACTIVITIES = [
-  { id: "qa-general", name: "General", color: "slate", icon: null },
-  { id: "qa-errands", name: "Errands", color: "amber", icon: null },
-  { id: "qa-health", name: "Health", color: "green", icon: "heart-pulse" },
-  { id: "qa-getting-around", name: "Getting around", color: "orange", icon: null },
-  { id: "qa-home", name: "Home", color: "teal", icon: null }
+  { id: "qa-general", name: "General", isPinned: false, color: "slate", icon: null },
+  { id: "qa-errands", name: "Errands", isPinned: false, color: "amber", icon: null },
+  { id: "qa-health", name: "Health", isPinned: false, color: "green", icon: "heart-pulse" },
+  { id: "qa-getting-around", name: "Getting around", isPinned: false, color: "orange", icon: null },
+  { id: "qa-home", name: "Home", isPinned: false, color: "teal", icon: null }
 ];
 const QA_SHEET_GUESS = { name: "Holland & Barrett", street: "12 Example Street", applePlaceId: null };
 // A made-up map for the sheets (public coordinates in central Paris, nobody's real places): readings around the
@@ -262,7 +262,7 @@ export default function CalendarQaRoute() {
     LogBox.ignoreAllLogs(true);
     return () => LogBox.ignoreAllLogs(false);
   }, []);
-  const { theme } = useMobileTheme();
+  const { styles, theme } = useMobileTheme();
   const clockFormat = useClockFormat();
   const [now] = useState(() => dense ? new Date(2026, 9, 23, 16, 20).getTime() : new Date(2026, 9, 22, 17, 5).getTime());
   const model = useMemo(() => buildNativeCalendarBridgeState({
@@ -342,7 +342,7 @@ export default function CalendarQaRoute() {
         {/* Step 12: a correction sheet open over the List, for Simulator screenshots. */}
         {sheet && sheetTarget ? (
           <LocationCorrectionSheet clockFormat={clockFormat} evidence={qaSheetEvidence(sheet.name)} key={sheet.name} onDismissed={() => setSheet(null)}
-            onQueue={async () => undefined} onSavePlace={async () => undefined} places={QA_SHEET_PLACES} presentationId={1}
+            onQueue={async () => undefined} onSavePlace={async () => undefined} pickerStyles={styles} places={QA_SHEET_PLACES} presentationId={1}
             question={sheetQuestion ? { text: sheetQuestion.question, detail: null, yesLabel: sheetQuestion.logLabel, noLabel: sheetQuestion.skipLabel, onAnswer: () => undefined,
               // The near guess (PRD D23), as the sheet's own nearby list would make it for the unknown place.
               guess: sheet?.name === "place" ? QA_SHEET_GUESS : null } : null}

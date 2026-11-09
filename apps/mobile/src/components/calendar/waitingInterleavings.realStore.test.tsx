@@ -130,7 +130,7 @@ const hooks: { current: Hooks | null } = { current: null };
 function Harness({ index }: { index: number }) {
   const data = DATA[index];
   const answersHook = useCalendarCheckAnswers({ data, locallyDecidedIds: NONE, ownerKey: `owner-${index}`, syncStateIds: NONE });
-  const places = useLocationCorrections({ acknowledged: [], clockFormat: "24h", data, pending: [], reduceMotion: false,
+  const places = useLocationCorrections({ pickerStyles: {} as never,  acknowledged: [], clockFormat: "24h", data, pending: [], reduceMotion: false,
     showNotice: () => undefined, theme: {} as never, timeline: TIMELINES[index] });
   // The Dashboard's release: real outcomes (into the Review outbox, or log_place into the correction queue).
   const release = useAnswersAfterCorrections({ data, owner: owners[index], onDropped: answersHook.restoreAnswered });
