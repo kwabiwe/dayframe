@@ -5,6 +5,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } fr
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { isolateModalLayer } from "@/components/ui/modalIsolation";
 import { Button, IconButton } from "@/components/ui/Primitives";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
 import { addCalendarDays } from "@/lib/calendar-grid";
@@ -101,6 +102,7 @@ export function DatePickerPopover({
   const generatedPanelId = useId();
   const panelId = controlledPanelId ?? generatedPanelId;
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const layerRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const clientPortalTarget = useSyncExternalStore(
@@ -150,6 +152,7 @@ export function DatePickerPopover({
   useEffect(() => {
     if (!effectiveOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
+      if (panelRef.current?.closest("[inert]")) return;
       if (
         !rootRef.current?.contains(event.target as Node) &&
         !panelRef.current?.contains(event.target as Node) &&
@@ -157,7 +160,7 @@ export function DatePickerPopover({
       ) updateOpen(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || panelRef.current?.closest("[inert]")) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       updateOpen(false);
@@ -228,14 +231,23 @@ export function DatePickerPopover({
     (anchorRef?.current ?? triggerRef.current)?.focus();
   }
 
-  // The phone sheet takes focus (the grid's tab stop) and keeps Tab inside it while open.
+  // Keep the scrim and sheet interactive while hiding the rest of the page from focus and screen readers.
   useEffect(() => {
-    if (!phone || !effectiveOpen) return undefined;
+    const layer = layerRef.current;
+    if (!phone || !effectiveOpen || !layer) return undefined;
+    const releaseIsolation = isolateModalLayer(layer);
     const frame = window.requestAnimationFrame(() => {
       panelRef.current?.querySelector<HTMLElement>('.dayframe-calendar-grid button[tabindex="0"]')?.focus();
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [effectiveOpen, phone]);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      releaseIsolation();
+      const active = document.activeElement;
+      if (active === document.body || layer.contains(active)) {
+        (anchorRef?.current ?? triggerRef.current)?.focus();
+      }
+    };
+  }, [anchorRef, effectiveOpen, phone]);
 
   function trapTab(event: ReactKeyboardEvent<HTMLElement>) {
     if (!phone || event.key !== "Tab" || !panelRef.current) return;
@@ -266,6 +278,7 @@ export function DatePickerPopover({
     <section
       aria-hidden={!effectiveOpen}
       aria-label={panelLabel}
+      aria-modal={phone && effectiveOpen ? true : undefined}
       className={`ui-floating-surface timeline-date-picker-panel${effectiveOpen ? " is-open" : ""}${portal ? " is-portalled" : ""}${phone ? " is-sheet" : ""}${panelClassName ? ` ${panelClassName}` : ""}`}
       id={panelId}
       inert={!effectiveOpen}
@@ -316,16 +329,16 @@ export function DatePickerPopover({
     </section>
   );
   // Phone width: a scrim behind the sheet (a press on it is a press outside, which closes it).
-  // Its own press handler (a non-portalled scrim is inside the picker, so the outside-press listener
-  // ignores it), and the quick editor's nested-surface marker so a press here never reaches the
-  // editor's own outside-press dismissal (Codex r1 on #423).
+  // The nested-surface marker keeps the quick editor from treating the scrim as its own
+  // outside press (Codex r1 on #423).
   const scrim = phone && effectiveOpen
     ? (
       <div
         aria-hidden="true"
-        className={`date-sheet-scrim${portal ? " time-entry-quick-editor-nested-surface" : ""}`}
+        className="date-sheet-scrim time-entry-quick-editor-nested-surface"
         onMouseDown={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           dismiss();
         }}
         style={scrimZ === null ? undefined : { zIndex: scrimZ }}
@@ -356,7 +369,11 @@ export function DatePickerPopover({
           {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
         </button>
       ) : null}
-      {portal ? (portalTarget ? createPortal(<>{scrim}{panel}</>, portalTarget) : null) : <>{scrim}{panel}</>}
+      {phone
+        ? (clientPortalTarget ? createPortal(
+            <div ref={layerRef} style={{ display: "contents" }}>{scrim}{panel}</div>, clientPortalTarget
+          ) : null)
+        : portal ? (portalTarget ? createPortal(panel, portalTarget) : null) : panel}
     </div>
   );
 }

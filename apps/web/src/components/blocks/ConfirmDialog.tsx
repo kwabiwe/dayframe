@@ -2,44 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-
-// Open confirmations, oldest first, and the page elements this module made inert. Only the newest
-// dialog is interactive; the page (and any older dialog) stays inert until the last one closes
-// (Codex r2 on #469). Elements made inert by someone else are left alone.
-const modalStack: HTMLElement[] = [];
-const isolatedByStack = new Set<HTMLElement>();
-
-function syncModalIsolation() {
-  const top = modalStack[modalStack.length - 1] ?? null;
-  for (const element of [...isolatedByStack]) {
-    if (top && element !== top && element.isConnected) continue;
-    element.removeAttribute("inert");
-    isolatedByStack.delete(element);
-  }
-  if (!top) return;
-  for (const element of document.body.children) {
-    if (!(element instanceof HTMLElement) || element === top || element.hasAttribute("inert")) continue;
-    element.setAttribute("inert", "");
-    isolatedByStack.add(element);
-  }
-}
-
-function openModal(layer: HTMLElement) {
-  modalStack.push(layer);
-  syncModalIsolation();
-}
-
-function closeModal(layer: HTMLElement) {
-  const index = modalStack.lastIndexOf(layer);
-  if (index >= 0) modalStack.splice(index, 1);
-  if (isolatedByStack.has(layer)) {
-    // A closed layer stays inert through its own prop. One still open (React StrictMode replaying
-    // the effect, or an unmount) gets back the interactivity the stack took (Codex r3 on #469).
-    if (layer.getAttribute("aria-hidden") !== "true") layer.removeAttribute("inert");
-    isolatedByStack.delete(layer);
-  }
-  syncModalIsolation();
-}
+import { isolateModalLayer } from "@/components/ui/modalIsolation";
 
 /**
  * The one web confirmation (audit WUI-005/WUI-009, owner 17 Oct 2026; the web twin of the iPhone's
@@ -113,14 +76,14 @@ export function ConfirmDialog({
     // it when it closes.
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const layer = layerRef.current;
-    if (layer) openModal(layer);
+    const releaseIsolation = layer ? isolateModalLayer(layer) : undefined;
     const frame = window.requestAnimationFrame(() => {
       setEntered(true);
       backRef.current?.focus({ preventScroll: true });
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      if (layer) closeModal(layer);
+      releaseIsolation?.();
       const active = document.activeElement;
       const focusLeftWithDialog = !active || active === document.body || Boolean(layer?.contains(active));
       if (focusLeftWithDialog && opener?.isConnected) opener.focus({ preventScroll: true });

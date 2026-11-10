@@ -88,6 +88,39 @@ describe("DatePickerPopover at phone width (date-picker audit D1/D6, 14 Oct 2026
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("isolates the phone sheet from the page and restores focus to its opener", async () => {
+    const { container } = render(<Picker onChange={vi.fn()} />);
+    const opener = screen.getByRole("button", { name: /2026-10-10/ });
+    opener.focus();
+    await act(async () => { fireEvent.click(opener); });
+    const sheet = screen.getByRole("dialog", { name: "Choose Start date" });
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    expect(container.hasAttribute("inert")).toBe(true);
+    expect(sheet.closest("[inert]")).toBeNull();
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    await act(async () => { fireEvent.keyDown(sheet, { key: "Escape" }); });
+    expect(container.hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("returns focus to a blocked opener while the selected period loads", async () => {
+    function LoadingPeriod() {
+      const [loading, setLoading] = useState(false);
+      return (
+        <DatePickerPopover label="Calendar period" onChange={() => setLoading(true)}
+          today="2026-10-14" value="2026-10-10" unavailable={loading ? "Loading date" : undefined} />
+      );
+    }
+    render(<LoadingPeriod />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Calendar period" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    const opener = screen.getByRole("button", { name: "Calendar period, loading date" });
+    expect(opener.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(opener);
+    fireEvent.click(opener);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("marks a portalled scrim as a nested surface of the quick editor", async () => {
     render(<DatePickerPopover label="10 Oct" onChange={vi.fn()} portal today="2026-10-14" value="2026-10-10" />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /10 Oct/ })); });

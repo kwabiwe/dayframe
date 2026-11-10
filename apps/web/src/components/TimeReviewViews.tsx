@@ -700,13 +700,13 @@ export function TimeReviewViews({
                     <span aria-hidden="true" className="df-cal-datebox-sizer" key={sizer}>{sizer}</span>
                   ))}
                   <DatePickerPopover
-                    disabled={isDateLoading}
                     label={rangeLabel}
                     onChange={(date) => void navigate({ date }, { reposition: true })}
                     panelClassName="df-cal-date-panel"
                     portal
                     portalAlign="center"
                     today={todayKey ?? state.date}
+                    unavailable={isDateLoading ? "Loading date" : undefined}
                     value={headerDayKey}
                   />
                 </span>
