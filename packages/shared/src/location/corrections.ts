@@ -68,9 +68,9 @@ export const TimelineCorrectionRequestSchema = z.discriminatedUnion("kind", [
     stoppedAt: instant
   }).refine((value) => Date.parse(value.stoppedAt) > Date.parse(value.startedAt), { message: "The end must be after the start." }),
   // A trip that wasn't one; a place you weren't at, whose trips either side become one (step 12 part 4).
-  z.object({ kind: z.literal("delete"), subject: z.enum(["place", "trip"]), itemId, clientCorrectionId }),
+  z.object({ kind: z.literal("delete"), subject: z.enum(["place", "trip"]), itemId, clientCorrectionId, tripStartedAt: instant.optional() }),
   // "I didn't leave": the trip between two visits to one place, which become one stay (step 12 part 4).
-  z.object({ kind: z.literal("merge"), subject: z.literal("trip"), itemId, clientCorrectionId }),
+  z.object({ kind: z.literal("merge"), subject: z.literal("trip"), itemId, clientCorrectionId, tripStartedAt: instant.optional() }),
   // "Log activity": log the uncovered part of a visit with a description, a category, or both.
   // This resolves the open question and creates blocks through an event receipt.
   z.object({

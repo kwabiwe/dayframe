@@ -120,6 +120,7 @@ export type LocationReviewEvidenceDto = z.infer<typeof LocationReviewEvidenceDto
  */
 export const TimelineItemEvidenceDtoSchema = LocationReviewEvidenceDtoSchema.extend({
   itemId: z.string(),
+  tripActions: z.object({ remove: z.boolean(), join: z.boolean() }).optional(),
   reviewItemId: z.string().uuid().nullable(),
   eventId: z.string().uuid().nullable()
 });

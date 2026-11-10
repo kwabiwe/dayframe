@@ -383,6 +383,15 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await suggest(t1, "j-t1", "commute", 60, 80);
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
 
+    const { getTripCorrectionActions } = await import("./location-timeline-corrections");
+    expect(await getTripCorrectionActions(session, "j-t3", at(base + 150))).toEqual({ remove: true, join: true });
+    expect(await getTripCorrectionActions(session, "j-t4", at(base + 200))).toEqual({ remove: true, join: false });
+    expect(await getTripCorrectionActions(session, "j-t3", at(base + 149))).toEqual({ remove: false, join: false });
+    expect(await getTripCorrectionActions({ ...session, workspaceId: otherWorkspaceId }, "j-t3", at(base + 150)))
+      .toEqual({ remove: false, join: false });
+    await expect(correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t3", tripStartedAt: at(base + 149) }, session))
+      .rejects.toMatchObject({ status: 404 });
+
     // Refused: no trip after the last place; a trip between Home and an unknown place; a place beside a block.
     await expect(correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-last" }, session)).rejects.toMatchObject({ status: 422 });
     await expect(correctLocationTimeline({ kind: "merge", subject: "trip", itemId: "j-t4" }, session)).rejects.toMatchObject({ status: 422 });
@@ -392,6 +401,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       [workspaceId, userId, at(base + 200)])).rows[0].id;
     const block = (await db.query<{ id: string }>(`insert into time_entries (workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
        values ($1, $2, 'location_learning', $3, $4, $5) returning id`, [workspaceId, userId, at(base + 200), at(base + 230), blockEvent])).rows[0].id;
+    expect(await getTripCorrectionActions(session, "j-t4", at(base + 200))).toEqual({ remove: false, join: false });
     await expect(correctLocationTimeline({ kind: "delete", subject: "place", itemId: "j-home-3" }, session)).rejects.toMatchObject({ status: 409 });
     await db.query(`delete from time_entries where id = $1`, [block]);
     expect((await db.query(`select count(*)::int as n from location_timeline_corrections where workspace_id = $1 and span_started_at >= $2`,
@@ -435,6 +445,21 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const timeline = await getLocationTimeline(session, { date: at(base).slice(0, 10), timeZone: "UTC", now: new Date(at(base + 400)) });
     const ids = timeline.items.map((item) => item.id).filter((id) => id.startsWith("j-"));
     expect(ids).toEqual(["j-home-1", "j-t1", "j-home-2", "j-t4", "j-last"]);
+
+    // Sunday night through Monday morning, with the second visit outside the first Calendar week.
+    const boundary = -24 * 60 - base;
+    const sunday = await stay("boundary-sunday", boundary - 40, boundary - 5, homeId);
+    const monday = await stay("boundary-monday", boundary + 5, boundary + 30, homeId);
+    await trip("boundary-trip", boundary - 5, boundary + 5, sunday, monday, "walking");
+    const { getTimelineItemEvidence } = await import("./location-query-service");
+    const options = await getTimelineItemEvidence("boundary-trip", session, {
+      kind: "trip", startedAt: at(base + boundary - 5), includeTripActions: true
+    });
+    expect(options.tripActions).toEqual({ remove: true, join: true });
+    await correctLocationTimeline({
+      kind: "merge", subject: "trip", itemId: "boundary-trip", tripStartedAt: at(base + boundary - 5)
+    }, session);
+    expect((await db.query("select status from stay_segments where id = $1", [monday])).rows[0].status).toBe("superseded");
   });
 
   // Step 12 part 4: Logs as on a place with no question and no block.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DAYFRAME_APP_ICONS,
@@ -56,7 +56,7 @@ export type LocationCorrectionTarget =
   /** `joinsTrips`: a trip comes into the place and one leaves it, so "I wasn't here" can join them (step 12 part 4). */
   | { kind: "place"; place: TimelinePlace; label: string; joinsTrips?: boolean }
   | { kind: "leg"; tripId: string; leg: TripLeg; index: number; count: number }
-  /** a trip's own dialog (its map, legs, "I didn't leave", "This wasn't a trip"). */
+  /** a trip's own dialog (its map, legs and eligible corrections). */
   | { kind: "trip"; trip: TimelineTrip; route: string };
 
 /**
@@ -84,7 +84,7 @@ function useItemEvidence(item: { id: string; kind: "place" | "trip"; startedAt: 
   useEffect(() => {
     if (!item || !key) return;
     const controller = new AbortController();
-    clientFetch(`/api/timeline/items/${encodeURIComponent(item.id)}/evidence?kind=${item.kind}&startedAt=${encodeURIComponent(item.startedAt)}`,
+    clientFetch(`/api/timeline/items/${encodeURIComponent(item.id)}/evidence?kind=${item.kind}&startedAt=${encodeURIComponent(item.startedAt)}${item.kind === "trip" ? "&tripActions=1" : ""}`,
       { cache: "no-store", signal: controller.signal })
       .then(async (response) => response.ok ? await response.json() as TimelineItemEvidenceDto : "unavailable" as const)
       .catch(() => "unavailable" as const)
@@ -285,6 +285,9 @@ export function LocationCorrectionDialog({
   // One id per logical correction (Codex r3 on #609): made when it is first sent and reused on each retry, so a
   // retry after a lost reply gets the saved receipt back instead of a refusal.
   const correctionIds = useRef(new Map<string, string>());
+  const tripActions = evidence && evidence !== "unavailable" ? evidence.tripActions : undefined;
+  const joinHintId = useId();
+  const removeHintId = useId();
   const send = (correction: TimelineCorrectionRequest) => {
     // A new place keeps one id whatever its name becomes: a lost reply may have saved it.
     const signature = correction.kind === "place" && correction.newPlace ? `new-place:${correction.itemId}` : JSON.stringify(correction);
@@ -504,13 +507,14 @@ export function LocationCorrectionDialog({
     setLegOfTrip(index);
   }
 
-  /** A trip's "I didn't leave" (one stay) or "This wasn't a trip" (off your day), confirmed in place first. */
+  /** Join adjacent visits or remove only the trip, after confirmation. */
   async function fixTrip(kind: "merge" | "delete") {
-    if (initialTarget.kind !== "trip") return;
+    if (initialTarget.kind !== "trip" || !(kind === "merge" ? tripActions?.join : tripActions?.remove)) return;
     setBusy(true);
     setError(null);
-    const { failure } = await send(kind === "merge" ? { kind: "merge", subject: "trip", itemId: initialTarget.trip.id }
-      : { kind: "delete", subject: "trip", itemId: initialTarget.trip.id });
+    const { failure } = await send({
+      kind, subject: "trip", itemId: initialTarget.trip.id, tripStartedAt: initialTarget.trip.startedAt
+    });
     if (!alive.current) return;
     if (failure) {
       setBusy(false);
@@ -600,21 +604,35 @@ export function LocationCorrectionDialog({
               </button>
             ))}
           </div>
-          <div aria-label="Fix this trip" className="location-correction-shape" role="group">
-            {confirmingTrip ? (
+          <div aria-label="Fix this trip" className="location-correction-shape location-correction-trip-actions" role="group">
+            {!tripActions ? (
+              <small role="status">{evidence === null ? "Checking trip corrections…" : "Trip corrections are unavailable."}</small>
+            ) : !tripActions.remove ? (
+              <small>This trip can’t be corrected here. If it was logged, edit its block.</small>
+            ) : confirmingTrip && (confirmingTrip === "delete" || tripActions.join) ? (
               <div className="location-correction-confirm">
-                <p>{confirmingTrip === "merge" ? "Make this one stay? The places either side join into one." : "Take this trip off your day?"}</p>
+                <p>{confirmingTrip === "merge"
+                  ? "Remove this trip and make the two visits one continuous stay?"
+                  : "Remove this trip? The visits on either side will stay separate."}</p>
                 <div className="location-correction-confirm-actions">
                   <Button compact disabled={busy} onClick={() => void fixTrip(confirmingTrip)} variant="danger">
-                    {confirmingTrip === "merge" ? "Make it one stay" : "Take it off your day"}
+                    {confirmingTrip === "merge" ? "Join visits" : "Remove trip"}
                   </Button>
                   <Button compact disabled={busy} onClick={() => setConfirmingTrip(null)}>Keep it</Button>
                 </div>
               </div>
             ) : (
               <>
-                <Button compact disabled={busy} onClick={() => setConfirmingTrip("merge")}>I didn&apos;t leave</Button>
-                <Button compact disabled={busy} onClick={() => setConfirmingTrip("delete")}>This wasn&apos;t a trip</Button>
+                {tripActions.join ? (
+                  <div>
+                    <Button aria-describedby={joinHintId} compact disabled={busy} onClick={() => setConfirmingTrip("merge")}>Join these visits</Button>
+                    <small id={joinHintId}>Make one continuous stay.</small>
+                  </div>
+                ) : null}
+                <div>
+                  <Button aria-describedby={removeHintId} compact disabled={busy} onClick={() => setConfirmingTrip("delete")}>Remove this trip</Button>
+                  <small id={removeHintId}>Keep both visits separate.</small>
+                </div>
               </>
             )}
           </div>
