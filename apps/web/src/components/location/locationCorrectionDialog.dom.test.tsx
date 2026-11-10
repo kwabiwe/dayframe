@@ -634,6 +634,21 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(sent()).toEqual([{ kind: "merge", subject: "trip", itemId: "trip-1", tripStartedAt: trip.startedAt }]);
   });
+  it("requires a new confirmation if the refreshed trip has the same id and a different start", async () => {
+    evidenceFetch.mockResolvedValue({ ok: true, json: async () => ({ ...evidence(), tripActions: { remove: true, join: true } }) });
+    const props = { clock: "24h" as const, onClose: vi.fn(), onCorrected: vi.fn(), places };
+    const trip = { kind: "trip" as const, id: "trip-1", status: "finalised" as const, startedAt: at(8, 12),
+      stoppedAt: at(8, 40), fromId: "visit-a", toId: "visit-b", legs: [], blockIds: [] };
+    const view = render(<LocationCorrectionDialog {...props}
+      target={{ kind: "trip", trip: trip as never, route: "Home → Home" }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Join these visits" }));
+    expect(screen.getByRole("button", { name: "Join visits" })).toBeTruthy();
+    view.rerender(<LocationCorrectionDialog {...props}
+      target={{ kind: "trip", trip: { ...trip, startedAt: at(8, 13) } as never, route: "Home → Home" }} />);
+    expect(await screen.findByRole("button", { name: "Join these visits" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Join visits" })).toBeNull();
+    expect(sent()).toEqual([]);
+  });
   it("hands the map one evidence object across re-renders, so it never rebuilds (glitch fix 1)", async () => {
     evidenceFetch.mockResolvedValue({ ok: true, json: async () => evidence() });
     const props = { clock: "24h" as const, onClose: vi.fn(), onCorrected: vi.fn(), places, target: { kind: "place" as const, place: place(), label: "Unknown place" } };

@@ -334,7 +334,13 @@ export function LocationCorrectionDialog({
   // Asked only where Apple's nearby places could show: a place whose evidence has a centre.
   const [mapProvider, setMapProvider] = useMapProvider(target.kind === "place"
     && Boolean(evidence && evidence !== "unavailable" && evidence.map.centre));
-  const [confirmingTrip, setConfirmingTrip] = useState<"merge" | "delete" | null>(null);
+  const [tripConfirmation, setTripConfirmation] = useState<{ action: "merge" | "delete"; key: string } | null>(null);
+  const tripConfirmationKey = initialTarget.kind === "trip"
+    ? JSON.stringify([initialTarget.trip.id, initialTarget.trip.startedAt, initialTarget.trip.stoppedAt])
+    : null;
+  const confirmingTrip = tripConfirmation?.key === tripConfirmationKey ? tripConfirmation.action : null;
+  // A Calendar refresh can replace the trip without remounting this dialog.
+  if (tripConfirmation && !confirmingTrip) setTripConfirmation(null);
   // Saved places nearest the visit first, as far as the map knows (the place dialog lists at most two within 1 km).
   // Only with a visit centre: without one the map can't say what's near, so every place shows.
   const distances = evidence && evidence !== "unavailable" && evidence.map.centre
@@ -509,7 +515,8 @@ export function LocationCorrectionDialog({
 
   /** Join adjacent visits or remove only the trip, after confirmation. */
   async function fixTrip(kind: "merge" | "delete") {
-    if (initialTarget.kind !== "trip" || !(kind === "merge" ? tripActions?.join : tripActions?.remove)) return;
+    if (initialTarget.kind !== "trip" || confirmingTrip !== kind ||
+      !(kind === "merge" ? tripActions?.join : tripActions?.remove)) return;
     setBusy(true);
     setError(null);
     const { failure } = await send({
@@ -618,19 +625,19 @@ export function LocationCorrectionDialog({
                   <Button compact disabled={busy} onClick={() => void fixTrip(confirmingTrip)} variant="danger">
                     {confirmingTrip === "merge" ? "Join visits" : "Remove trip"}
                   </Button>
-                  <Button compact disabled={busy} onClick={() => setConfirmingTrip(null)}>Keep it</Button>
+                  <Button compact disabled={busy} onClick={() => setTripConfirmation(null)}>Keep it</Button>
                 </div>
               </div>
             ) : (
               <>
                 {tripActions.join ? (
                   <div>
-                    <Button aria-describedby={joinHintId} compact disabled={busy} onClick={() => setConfirmingTrip("merge")}>Join these visits</Button>
+                    <Button aria-describedby={joinHintId} compact disabled={busy} onClick={() => setTripConfirmation({ action: "merge", key: tripConfirmationKey! })}>Join these visits</Button>
                     <small id={joinHintId}>Make one continuous stay.</small>
                   </div>
                 ) : null}
                 <div>
-                  <Button aria-describedby={removeHintId} compact disabled={busy} onClick={() => setConfirmingTrip("delete")}>Remove this trip</Button>
+                  <Button aria-describedby={removeHintId} compact disabled={busy} onClick={() => setTripConfirmation({ action: "delete", key: tripConfirmationKey! })}>Remove this trip</Button>
                   <small id={removeHintId}>Keep both visits separate.</small>
                 </div>
               </>
