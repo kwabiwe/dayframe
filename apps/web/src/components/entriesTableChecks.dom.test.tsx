@@ -278,8 +278,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(within(asked).getByRole("button", { name: /^(Not now|Don't log)$/ })).toBeTruthy();
     // The trip's own dialog: its legs and its fixes (the editor it had under the question is gone).
     expect(within(opened).getByRole("group", { name: "Legs" })).toBeTruthy();
-    expect(within(opened).getByRole("button", { name: "I didn't leave" })).toBeTruthy();
-    expect(within(opened).getByRole("button", { name: "This wasn't a trip" })).toBeTruthy();
+    expect(within(opened).getByText("Checking trip corrections…")).toBeTruthy();
+    expect(within(opened).queryByRole("button", { name: "Join these visits" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(evidenceFetch.mock.calls[0][0]).toMatch(/^\/api\/timeline\/items\/seg-trip\/evidence\?kind=trip&startedAt=/);
     // Yes logs it as the deck's Log it does.

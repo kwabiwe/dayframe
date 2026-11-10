@@ -24,7 +24,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!id || id.length > 200 || (kind !== "place" && kind !== "trip") || !startedAt || !Number.isFinite(Date.parse(startedAt))) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400, headers: PRIVATE_LOCATION_HEADERS });
     }
-    const result = await getTimelineItemEvidence(id, session, { kind, startedAt: new Date(startedAt).toISOString() });
+    const result = await getTimelineItemEvidence(id, session, {
+      kind, startedAt: new Date(startedAt).toISOString(), includeTripActions: url.searchParams.get("tripActions") === "1"
+    });
     return NextResponse.json(result, { headers: PRIVATE_LOCATION_HEADERS });
   } catch (error) {
     const authResponse = authErrorResponse(error);

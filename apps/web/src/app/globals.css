@@ -14614,6 +14614,23 @@ button.timeline-location-hit:focus-visible {
   justify-items: start;
 }
 
+.location-correction-trip-actions {
+  gap: 8px;
+  min-height: 36px;
+}
+
+.location-correction-trip-actions > div:not(.location-correction-confirm) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.location-correction-trip-actions small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* "I wasn't here", asked once in place: it fades in where the button was (step 12 part 4). */
 .location-correction-confirm {
   display: grid;

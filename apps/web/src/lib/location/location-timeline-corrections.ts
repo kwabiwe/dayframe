@@ -9,6 +9,7 @@ import {
   type TimelineCorrectionRequest,
   type TripLeg
 } from "@dayframe/shared";
+import { pool } from "../db";
 import { withSyncTransaction } from "../sync-transaction";
 import { reconcileTimerTripClashes } from "./timer-trip-clash-service";
 import type { RequestSession } from "../session";
@@ -112,7 +113,12 @@ type SegmentRow = {
   id: string; startedAt: Date; stoppedAt: Date | null; createdFromEventId: string | null; metadata: Record<string, unknown>;
 };
 
-async function lockSegment(client: pg.PoolClient, session: RequestSession, table: "stay_segments" | "commute_segments", itemId: string, visitStartedAt?: string) {
+type CorrectionReader = Pick<pg.PoolClient, "query">;
+
+async function readSegment(
+  client: CorrectionReader, session: RequestSession, table: "stay_segments" | "commute_segments",
+  itemId: string, expectedStart: string | undefined, lock: boolean
+) {
   // Trusted table name; the item is the timeline's id for it (its client segment id).
   const result = await client.query<SegmentRow>(
     `select id, started_at as "startedAt", stopped_at as "stoppedAt", created_from_event_id as "createdFromEventId", metadata
@@ -120,12 +126,14 @@ async function lockSegment(client: pg.PoolClient, session: RequestSession, table
       where workspace_id = $1 and user_id = $2 and client_segment_id = $3 and status <> 'superseded'
       order by updated_at desc
       limit $4
-      for update`,
-    [session.workspaceId, session.userId, itemId, visitStartedAt ? 2 : 1]);
+      ${lock ? "for update" : ""}`,
+    [session.workspaceId, session.userId, itemId, expectedStart ? 2 : 1]);
   const row = result.rows[0];
   // Some older blocks carry only the segment ID. If two live visits share it, refuse before moving either.
-  if (result.rows.length > 1) throw new TimelineCorrectionError("This visit can't be matched to one place. Refresh Calendar and try again.", 409);
-  if (!row || (visitStartedAt && row.startedAt.getTime() !== Date.parse(visitStartedAt))) throw new TimelineCorrectionError("That place or trip is no longer in your day.", 404);
+  if (result.rows.length > 1) throw new TimelineCorrectionError(table === "stay_segments"
+    ? "This visit can't be matched to one place. Refresh Calendar and try again."
+    : "This trip can't be matched. Refresh Calendar and try again.", 409);
+  if (!row || (expectedStart && row.startedAt.getTime() !== Date.parse(expectedStart))) throw new TimelineCorrectionError("That place or trip is no longer in your day.", 404);
   return row;
 }
 
@@ -143,7 +151,7 @@ const SEGMENT_BLOCKS_SQL = `from time_entries te
           or (ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = $3)
           or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))`;
 
-async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
+async function hasBlock(client: CorrectionReader, session: RequestSession, itemId: string, row: SegmentRow) {
   const result = await client.query(`select 1 ${SEGMENT_BLOCKS_SQL} limit 1`,
     [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId]);
   return (result.rowCount ?? 0) > 0;
@@ -332,14 +340,14 @@ async function lockTripAt(client: pg.PoolClient, session: RequestSession, stayRo
   return result.rows[0] ?? null;
 }
 
-/** A stay row by its row id, locked. */
-async function lockStayRow(client: pg.PoolClient, session: RequestSession, id: string) {
+/** A stay row by its row id. The mutation locks it before applying the correction. */
+async function readStayRow(client: CorrectionReader, session: RequestSession, id: string, lock: boolean) {
   const result = await client.query<StayRow>(
     `select id, client_segment_id as "clientSegmentId", started_at as "startedAt", stopped_at as "stoppedAt",
             created_from_event_id as "createdFromEventId", metadata, place_id as "placeId", learned_place_id as "learnedPlaceId"
        from stay_segments
       where workspace_id = $1 and user_id = $2 and id = $3 and status <> 'superseded'
-      for update`,
+      ${lock ? "for update" : ""}`,
     [session.workspaceId, session.userId, id]);
   return result.rows[0] ?? null;
 }
@@ -359,23 +367,45 @@ async function joinedItems(client: pg.PoolClient, session: RequestSession, reque
     }
     return { kind: "place_delete" as const, before, after };
   }
-  if (request.kind === "merge") {
-    const ends = (await client.query<{ fromStayId: string; toStayId: string }>(
-      `select from_stay_segment_id as "fromStayId", to_stay_segment_id as "toStayId" from commute_segments
-        where id = $1 and workspace_id = $2 and user_id = $3`, [row.id, session.workspaceId, session.userId])).rows[0];
-    const first = ends ? await lockStayRow(client, session, ends.fromStayId) : null;
-    const second = ends ? await lockStayRow(client, session, ends.toStayId) : null;
-    if (!first || !second || first.id === second.id || !sameKnownPlace(first, second)) {
-      throw new TimelineCorrectionError("Only a trip between two visits to one of your places can be one stay.", 422);
-    }
-    for (const stay of [first, second]) {
-      if (await hasBlock(client, session, stay.clientSegmentId, stay)) {
-        throw new TimelineCorrectionError("A visit either side is already in a block. Edit the block instead.", 409);
-      }
-    }
-    return { kind: "trip_merge" as const, first, second };
-  }
+  if (request.kind === "merge") return readTripJoin(client, session, row.id, true);
   return null;
+}
+
+/** Follow the persisted neighbours, including visits outside the loaded Calendar day or week. */
+async function readTripJoin(client: CorrectionReader, session: RequestSession, tripId: string, lock: boolean) {
+  const ends = (await client.query<{ fromStayId: string; toStayId: string }>(
+    `select from_stay_segment_id as "fromStayId", to_stay_segment_id as "toStayId" from commute_segments
+      where id = $1 and workspace_id = $2 and user_id = $3`, [tripId, session.workspaceId, session.userId])).rows[0];
+  const first = ends ? await readStayRow(client, session, ends.fromStayId, lock) : null;
+  const second = ends ? await readStayRow(client, session, ends.toStayId, lock) : null;
+  if (!first || !second || first.id === second.id || !sameKnownPlace(first, second)) {
+    throw new TimelineCorrectionError("Only a trip between two visits to one of your places can be one stay.", 422);
+  }
+  for (const stay of [first, second]) {
+    if (await hasBlock(client, session, stay.clientSegmentId, stay)) {
+      throw new TimelineCorrectionError("A visit either side is already in a block. Edit the block instead.", 409);
+    }
+  }
+  return { kind: "trip_merge" as const, first, second };
+}
+
+/** Present current options without taking mutation locks. A submitted correction rechecks under lock. */
+export async function getTripCorrectionActions(session: RequestSession, itemId: string, startedAt: string) {
+  let trip: SegmentRow;
+  try {
+    trip = await readSegment(pool, session, "commute_segments", itemId, startedAt, false);
+  } catch (error) {
+    if (error instanceof TimelineCorrectionError) return { remove: false, join: false };
+    throw error;
+  }
+  if (await hasBlock(pool, session, itemId, trip)) return { remove: false, join: false };
+  try {
+    await readTripJoin(pool, session, trip.id, false);
+    return { remove: true, join: true };
+  } catch (error) {
+    if (error instanceof TimelineCorrectionError) return { remove: true, join: false };
+    throw error;
+  }
 }
 
 /** Retires the open Review suggestions of these segment rows, and their events, with the person's reason. */
@@ -429,7 +459,9 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
     const visitStartedAt = request.kind === "save_visit_place" || request.kind === "place" ? request.visitStartedAt : undefined;
-    const row = await lockSegment(client, session, table, request.itemId, visitStartedAt);
+    const tripStartedAt = (request.kind === "merge" || request.kind === "delete") && request.subject === "trip"
+      ? request.tripStartedAt : undefined;
+    const row = await readSegment(client, session, table, request.itemId, visitStartedAt ?? tripStartedAt, true);
     // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16). A place's
     // place changes with its block.
     const inBlock = request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row);

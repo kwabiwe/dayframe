@@ -9,6 +9,7 @@ import {
 import { query } from "../db";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql } from "../place-display";
+import { getTripCorrectionActions } from "./location-timeline-corrections";
 
 type ReviewSegmentRow = {
   /** Null for a timeline item with no open Review item (step 12). */
@@ -216,7 +217,7 @@ export async function getTimelineItemEvidence(
    * Which item exactly: a client segment id is unique per device only, so the timeline's kind and start pick
    * the one the person is looking at (Codex r1 on #599).
    */
-  match: { kind: "place" | "trip"; startedAt: string }
+  match: { kind: "place" | "trip"; startedAt: string; includeTripActions?: boolean }
 ): Promise<TimelineItemEvidenceDto> {
   const startedAt = Date.now();
   const timings: LocationEvidenceTimings = {};
@@ -253,8 +254,11 @@ export async function getTimelineItemEvidence(
     timings.reviewLookupMs = Date.now() - lookupStartedAt;
     const segment = found.rows[0];
     if (!segment) throw new LocationEvidenceNotFoundError("That place or trip is no longer in your day.");
-    const dto = await assembleSegmentEvidence(segment, session, timings);
-    const result = TimelineItemEvidenceDtoSchema.parse({ ...dto, itemId });
+    const [dto, tripActions] = await Promise.all([
+      assembleSegmentEvidence(segment, session, timings),
+      match.kind === "trip" && match.includeTripActions ? getTripCorrectionActions(session, itemId, match.startedAt) : undefined
+    ]);
+    const result = TimelineItemEvidenceDtoSchema.parse({ ...dto, itemId, tripActions });
     timings.totalMs = Date.now() - startedAt;
     logLocationEvidenceTiming(timings, result, null);
     return result;
