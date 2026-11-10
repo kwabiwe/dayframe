@@ -23,12 +23,14 @@ const ELEMENTS: Record<DayframeGlyphElement, typeof Path> = {
  */
 export const DayframeIcon = memo(function DayframeIcon({
   color,
+  fill = "none",
   glyph,
   size = 20,
   strokeWidth = 2,
   testID,
 }: {
   color: string;
+  fill?: string;
   glyph: DayframeGlyph;
   size?: number;
   strokeWidth?: number;
@@ -39,7 +41,7 @@ export const DayframeIcon = memo(function DayframeIcon({
     <Svg
       accessibilityElementsHidden
       accessible={false}
-      fill="none"
+      fill={fill}
       height={size}
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
@@ -55,8 +57,8 @@ export const DayframeIcon = memo(function DayframeIcon({
         const attributes: Readonly<Record<string, string>> = glyphAttributes;
         const Element = ELEMENTS[element];
         // A few glyphs carry small filled dots ("currentColor"); draw them as given.
-        const fill = attributes.fill === "currentColor" ? color : attributes.fill;
-        return <Element key={index} {...attributes} fill={fill} />;
+        const elementFill = attributes.fill === "currentColor" ? color : attributes.fill;
+        return <Element key={index} {...attributes} fill={elementFill} />;
       })}
     </Svg>
   );

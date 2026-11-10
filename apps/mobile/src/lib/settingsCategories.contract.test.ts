@@ -15,6 +15,10 @@ const editorSource = readFileSync(
 
 // Blocks parity step 6b-1: Settings › Activities and the activity editor sheet.
 describe("mobile Activities page contract", () => {
+  it("shows pinned activities with a filled pin and exposes the same selected state to VoiceOver", () => {
+    expect(settingsSource).toMatch(/accessibilityState=\{\{ selected: category\.isPinned \}\}[\s\S]*?fill=\{category\.isPinned \? theme\.textPrimary : undefined\}\s+glyph=\{DAYFRAME_APP_ICONS\.pin\}/);
+  });
+
   it("lists activities in the picker's groups with a week total and a 44-point pin, capped at six", () => {
     expect(settingsSource).toContain("activitiesPageGroups(data?.categories ?? []).map((group) => (");
     expect(settingsSource).toContain("formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0)");

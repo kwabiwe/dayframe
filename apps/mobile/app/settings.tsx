@@ -2647,6 +2647,7 @@ export default function SettingsScreen() {
                         >
                           <DayframeIcon
                             color={category.isPinned ? theme.textPrimary : theme.textMuted}
+                            fill={category.isPinned ? theme.textPrimary : undefined}
                             glyph={DAYFRAME_APP_ICONS.pin}
                             size={18}
                           />
