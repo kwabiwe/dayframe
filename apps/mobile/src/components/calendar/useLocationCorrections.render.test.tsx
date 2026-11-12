@@ -148,6 +148,39 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)).toBeNull();
   });
 
+  it.each(["on the same account", "after an account switch"])(
+    "gives a replacement sheet its own map %s and ignores the old response and dismissal", async (replacement) => {
+      const evidenceFor = (stayRadiusMeters: number) => ({
+        segment: { kind: "stay" }, map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters }
+      });
+      let finishOldRead!: (evidence: ReturnType<typeof evidenceFor>) => void;
+      mocks.fetchEvidence.mockImplementationOnce(() => new Promise((resolve) => { finishOldRead = resolve; }))
+        .mockResolvedValueOnce(evidenceFor(80));
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<Probe data={account("a")} />); });
+      act(() => { api!.openPlace(place, "Unknown place"); });
+      const oldSheet = sheetOf(tree)!.props;
+      const [, request] = mocks.fetchEvidence.mock.calls[0] as unknown as [unknown, { signal: AbortSignal }];
+
+      if (replacement === "after an account switch") {
+        await act(async () => { tree.update(<Probe data={account("b")} />); });
+        expect(sheetOf(tree)).toBeNull();
+      }
+      await act(async () => { api!.openPlace(place, "Unknown place"); });
+      expect(mocks.fetchEvidence).toHaveBeenCalledTimes(2);
+      expect(request.signal.aborted).toBe(true);
+      expect(sheetOf(tree)?.props.evidence).toMatchObject({ map: { stayRadiusMeters: 80 } });
+
+      await act(async () => {
+        oldSheet.onDismissed(oldSheet.presentationId);
+        finishOldRead(evidenceFor(40));
+      });
+      expect(sheetOf(tree)?.props.presentationId).not.toBe(oldSheet.presentationId);
+      expect(sheetOf(tree)?.props.evidence).toMatchObject({ map: { stayRadiusMeters: 80 } });
+      await act(async () => { tree.unmount(); });
+    }
+  );
+
   it("reads the map again once a refresh moves the item's times, so the sheet ranks the stay as it is now (Codex r2 on #620)", async () => {
     const evidenceFor = (minutes: number) => ({ segment: { kind: "stay", startedAt: iso(0), stoppedAt: iso(minutes) },
       map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters: 40 } });
