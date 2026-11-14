@@ -15558,9 +15558,9 @@ button.timeline-location-hit:focus-visible {
   margin-top: 12px;
 }
 
-/* ---------- 5: the now line (round 2, owner 30 Oct 2026) ---------- */
-/* The live coral token, one thickness on every day: full across today, faint across the other days. It starts at the
-   time pill and never runs on into the gutter. */
+/* ---------- 5: the now line ---------- */
+/* One thickness on every day, full across today and faint across the other days. It starts beside
+   the time pill and stays out of the gutter. */
 :root .calendar-now-line.is-faint {
   opacity: 0.45;
 }
