@@ -25,7 +25,8 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\\.span), frames: lane.map(\\.frame))");
     expect(rootView).toContain(".accessibilityAction { openLaneItem(item) }");
     expect(coordinator).toContain("let laneFrames = DayframeCalendarLaneLayout.layout(");
-    expect(coordinator).toContain("frames: hitFrames + momentFrames + laneFrames");
+    expect(coordinator).toContain("frames: momentFrames + laneFrames");
+    expect(coordinator).toContain("metrics.hitFrame.contains(point)");
     expect(rootView).toContain("DayframeCalendarLegStripMath.segments(");
     expect(rootView).not.toContain("minimumHeight: 4\n        ) {");
   });
@@ -359,7 +360,9 @@ describe("native Calendar production contract", () => {
     expect(coordinator).toContain("selectionHaptic.selectionChanged()");
     expect(began).toContain("model.beginCreationPreview(");
     expect(began).not.toContain("actions.requestCreateEntry");
-    expect(changed).toContain("updateCreationDrag(");
+    expect(changed).toContain("updateLongPressDrag(");
+    expect(changed).not.toContain("actions.requestBlockEdit");
+    expect(ended).toContain("completeBlockEdit(drag, model: model)");
     expect(ended).toContain("completeCreationInteraction()");
     expect(coordinator.slice(coordinator.indexOf("private func completeCreationInteraction"))).toContain(
       "actions.requestCreateEntry(request)"

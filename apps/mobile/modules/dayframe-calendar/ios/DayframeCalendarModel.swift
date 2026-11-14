@@ -82,6 +82,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let isReview: Bool
   let asking: Bool
   let isUncategorized: Bool
+  let canDragEdit: Bool
   let laneCount: Int
   let laneIndex: Int
   let layoutMode: String
@@ -125,6 +126,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     isReview = record.isReview
     asking = record.asking ?? false
     isUncategorized = record.isUncategorized
+    canDragEdit = record.canDragEdit ?? false
     laneCount = max(1, record.laneCount)
     laneIndex = max(0, record.laneIndex)
     layoutMode = record.layoutMode
@@ -326,11 +328,29 @@ struct DayframeCalendarCreationPreview: Equatable {
   let durationMinutes: Int
 }
 
+struct DayframeCalendarBlockEditPreview: Equatable {
+  let entryId: String
+  let dayKey: String
+  let range: DayframeCalendarBlockEditRange
+  let frame: DayframeCalendarHitFrame
+  let title: String
+}
+
+struct DayframeCalendarBlockEditRequest {
+  let dayKey: String
+  let entryId: String
+  let originalStartMs: Double
+  let originalEndMs: Double
+  let startMinute: Double
+  let endMinute: Double
+}
+
 @MainActor
 final class DayframeCalendarViewModel: ObservableObject {
   @Published private(set) var presentation = DayframeCalendarPresentation.empty
   @Published private(set) var hourHeight = CGFloat(DayframeCalendarConstants.defaultHourHeight)
   @Published private(set) var creationPreview: DayframeCalendarCreationPreview?
+  @Published private(set) var blockEditPreview: DayframeCalendarBlockEditPreview?
   @Published private(set) var zoomRequest: DayframeCalendarZoomRequest?
   /// The Dynamic Type scale of the block labels, set by the hosting view from its traits, so drawing
   /// and hit testing size the one-line minimum alike (location v4 C6).
@@ -367,6 +387,7 @@ final class DayframeCalendarViewModel: ObservableObject {
     withTransaction(Transaction(animation: nil)) {
       presentation = .empty
       creationPreview = nil
+      blockEditPreview = nil
     }
   }
 
@@ -429,6 +450,13 @@ final class DayframeCalendarViewModel: ObservableObject {
     return true
   }
 
+  func setBlockEditPreview(_ next: DayframeCalendarBlockEditPreview?) {
+    guard next != blockEditPreview else { return }
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) { blockEditPreview = next }
+  }
+
   func clearCreationPreview(sessionToken: UInt64? = nil) {
     guard
       creationPreview != nil,
@@ -447,6 +475,7 @@ struct DayframeCalendarActions {
   let changeWeek: (Int) -> Void
   let open: (DayframeCalendarActionTarget) -> Void
   let requestCreateEntry: (DayframeCalendarCreateRequest) -> Void
+  let requestBlockEdit: (DayframeCalendarBlockEditRequest) -> Void
   let requestRefresh: () -> Void
   let selectDay: (String) -> Void
   /// Grid · List in the header (location v4 step 9).

@@ -49,7 +49,7 @@ import {
   type RecentActivitySuggestion,
   type TimerStateFingerprint
 } from "@dayframe/shared";
-import { DayframeCalendarView } from "../../modules/dayframe-calendar";
+import { DayframeCalendarView, type DayframeCalendarBlockEditEvent } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
@@ -470,6 +470,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // the delete Undo toast's place; that Undo toast always wins it.
   const todayNotice = useBlocksNotice();
   const clearTodayNotice = todayNotice.clear;
+  const calendarDragSaves = useRef(new Set<string>());
   // Notices belong to the session that raised them: a sign-out bumps this, so a start that is
   // accepted after the account left never shows its "Switched to …" over sign-in or another account.
   const noticeSessionGeneration = useRef(0);
@@ -3015,6 +3016,65 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  async function saveCalendarDrag(change: DayframeCalendarBlockEditEvent) {
+    const owner = todayNoticeOwner();
+    if (!todayNoticeOwnerStill(owner) || calendarLayout !== "grid" || change.dayKey !== selectedDayKey
+        || gridModel.refreshing || refreshing || calendarDragSaves.current.has(change.entryId)) return;
+
+    const visible = gridModel.entries.find((entry) => entry.entryId === change.entryId);
+    const current = mobileTimeEntryById(latestData.current, change.entryId);
+    if (!visible?.canDragEdit || !current?.stoppedAt || current.pendingCompletedCopy) return;
+
+    const originalStart = Date.parse(current.startedAt);
+    const originalEnd = Date.parse(current.stoppedAt);
+    const dayStart = gridModel.dayStartMs;
+    const dayEnd = gridModel.dayEndMs;
+    const proposedStart = dayStart + Math.round(change.startMinute * 60_000);
+    const proposedEnd = dayStart + Math.round(change.endMinute * 60_000);
+    if (originalStart !== change.originalStartMs || originalEnd !== change.originalEndMs
+        || dayEnd - dayStart !== 86_400_000 || originalStart < dayStart || originalEnd > dayEnd
+        || !(proposedStart >= dayStart && proposedEnd > proposedStart && proposedEnd <= Math.min(Date.now(), dayEnd))) return;
+
+    const patch: TimeEntryUpdatePatch = {};
+    const restore: TimeEntryUpdatePatch = {};
+    if (originalStart !== proposedStart) {
+      patch.startedAt = new Date(proposedStart).toISOString();
+      restore.startedAt = current.startedAt;
+    }
+    if (originalEnd !== proposedEnd) {
+      patch.stoppedAt = new Date(proposedEnd).toISOString();
+      restore.stoppedAt = current.stoppedAt;
+    }
+    if (!patch.startedAt && !patch.stoppedAt) return;
+
+    const { entryId } = change;
+    calendarDragSaves.current.add(entryId);
+    try {
+      if (!await saveCalendarEntryEdit(entryId, patch) || !todayNoticeOwnerStill(owner)) return;
+      const savedVersion = timerMutationVersions.current.get(entryId);
+      const title = current.description?.trim() || current.categoryName || "block";
+      const message = patch.startedAt && patch.stoppedAt ? "Block moved" : "Block resized";
+      todayNotice.show(message, toastSwatchColor(current, theme.mode), {
+        label: `Undo changing the time of ${title}`,
+        run: () => {
+          const latest = mobileTimeEntryById(latestData.current, entryId);
+          if (!todayNoticeOwnerStill(owner) || !latest?.stoppedAt
+              || calendarDragSaves.current.has(entryId)
+              || timerMutationVersions.current.get(entryId) !== savedVersion
+              || Date.parse(latest.startedAt) !== proposedStart
+              || Date.parse(latest.stoppedAt) !== proposedEnd) return;
+          clearTodayNotice();
+          calendarDragSaves.current.add(entryId);
+          void saveCalendarEntryEdit(entryId, restore).then((undone) => {
+            if (undone && todayNoticeOwnerStill(owner)) playHaptic("undoRestore");
+          }).finally(() => { calendarDragSaves.current.delete(entryId); });
+        }
+      });
+    } finally {
+      calendarDragSaves.current.delete(entryId);
+    }
+  }
+
   async function saveTimeEntryOptimistically(
     entryId: string,
     patch: TimeEntryUpdatePatch,
@@ -4252,6 +4312,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   event.nativeEvent.startMinute
                 );
               }}
+              onRequestBlockEdit={(event) => {
+                if (isFocused) void saveCalendarDrag(event.nativeEvent);
+              }}
               onRequestRefresh={() => {
                 routeNativeCalendarRefresh(() => {
                   void load({ visibleRefresh: true });
@@ -4472,6 +4535,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <BlocksToast
             key={`notice-${todayNotice.notice.token}`}
             accessibilityLabel={todayNotice.notice.accessibilityLabel}
+            actionLabel={todayNotice.notice.action ? "Undo" : undefined}
+            actionAccessibilityLabel={todayNotice.notice.action?.label}
+            onAction={todayNotice.notice.action?.run}
             detail={todayNotice.notice.detail}
             message={todayNotice.notice.message}
             reduceMotion={reduceMotion}

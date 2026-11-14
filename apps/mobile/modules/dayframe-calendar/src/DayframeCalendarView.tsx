@@ -12,6 +12,15 @@ export type DayframeCalendarChangeLayoutEvent = { layout: "grid" | "list" };
 export type DayframeCalendarHeaderHeightEvent = { height: number };
 export type DayframeCalendarCreateEntryEvent = { dayKey: string; startMinute: number };
 
+export type DayframeCalendarBlockEditEvent = {
+  dayKey: string;
+  entryId: string;
+  originalStartMs: number;
+  originalEndMs: number;
+  startMinute: number;
+  endMinute: number;
+};
+
 export type DayframeCalendarViewProps = ViewProps & {
   model: NativeCalendarPresentation;
   onChangeLayout?: (event: NativeSyntheticEvent<DayframeCalendarChangeLayoutEvent>) => void;
@@ -23,6 +32,7 @@ export type DayframeCalendarViewProps = ViewProps & {
   onOpenActiveTimer?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;
   onOpenCompletedEntry?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;
   onOpenReviewItem?: (event: NativeSyntheticEvent<DayframeCalendarReviewEvent>) => void;
+  onRequestBlockEdit?: (event: NativeSyntheticEvent<DayframeCalendarBlockEditEvent>) => void;
   onRequestCreateEntry?: (event: NativeSyntheticEvent<DayframeCalendarCreateEntryEvent>) => void;
   onRequestRefresh?: () => void;
   onSelectDay?: (event: NativeSyntheticEvent<DayframeCalendarSelectDayEvent>) => void;

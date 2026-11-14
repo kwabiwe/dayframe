@@ -83,6 +83,7 @@ export type NativeCalendarPresentationEntry = {
    */
   asking?: boolean;
   isUncategorized: boolean;
+  canDragEdit?: boolean;
   laneCount: number;
   laneIndex: number;
   layoutMode: TimeIntervalLayout["mode"];
@@ -571,6 +572,7 @@ function serializeCalendarEntry(
     isReview: reviewNeeded,
     ink,
     isUncategorized,
+    canDragEdit: actionKind === "completed" && !reviewNeeded && !entry.pendingCompletedCopy,
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
     layoutMode: layout?.mode ?? "full",

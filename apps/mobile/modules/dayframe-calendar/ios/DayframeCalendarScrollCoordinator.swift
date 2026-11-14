@@ -72,8 +72,37 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
   }
 
   final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-    private struct LongPressCandidate {
+    private enum LongPressTarget {
+      case creation(DayframeCalendarCreateRequest)
+      case block(BlockEditTarget)
+    }
+
+    private struct BlockEditTarget {
       let dayKey: String
+      let dayStartMs: Double
+      let entryId: String
+      let startMs: Double
+      let endMs: Double
+      let original: DayframeCalendarBlockEditRange
+      let frame: DayframeCalendarHitFrame
+      let title: String
+      let mode: DayframeCalendarBlockEditMode
+
+      func stillMatches(_ presentation: DayframeCalendarPresentation) -> Bool {
+        guard dayKey == presentation.selectedDayKey,
+              dayStartMs == presentation.dayStartMs,
+              !presentation.isList,
+              !presentation.refreshing else { return false }
+        return presentation.entries.contains {
+          $0.entryId == entryId && $0.canDragEdit
+            && $0.startedAtMs == startMs && $0.stoppedAtMs == endMs
+        }
+      }
+    }
+
+    private struct BlockEditDrag {
+      let target: BlockEditTarget
+      let startY: Double
     }
 
     private final class DisplayLinkProxy: NSObject {
@@ -123,7 +152,11 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private var scrollToNowGate: DayframeCalendarScrollToNowGate
     private var scrollToNowLayoutObservation: NSKeyValueObservation?
     private var layout: DayframeCalendarTimelineLayout
-    private var longPressCandidate: LongPressCandidate?
+    private var longPressTarget: LongPressTarget?
+    private var blockEditDrag: BlockEditDrag?
+    private var submittedBlockEdit: BlockEditTarget?
+    private var submittedPreviewExpiry: DispatchWorkItem?
+    private var hasLongPressDrag: Bool { blockEditDrag != nil || creationDragState.session != nil }
     private var creationDragState = DayframeCalendarCreationDragState()
     private var creationPreviewSessionToken: UInt64?
     private var creationGestureLockActive = false
@@ -262,16 +295,22 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       }
       if
         !creationContextIsValid(model: model),
-        creationDragState.session != nil || longPressCandidate != nil
+        hasLongPressDrag || longPressTarget != nil
       {
         cancelLongPressRecognition()
+      }
+      if let drag = blockEditDrag, !drag.target.stillMatches(model.presentation) {
+        cancelLongPressRecognition()
+      }
+      if let submitted = submittedBlockEdit, !submitted.stillMatches(model.presentation) {
+        clearSubmittedBlockEdit()
       }
       if let token = creationPreviewSessionToken,
          model.creationPreview?.sessionToken != token {
         cancelLongPressRecognition()
       }
       if model.presentation.refreshing,
-         creationDragState.session != nil || longPressCandidate != nil {
+         hasLongPressDrag || longPressTarget != nil {
         cancelLongPressRecognition()
       }
       if let request = model.zoomRequest, request.token != handledZoomToken {
@@ -321,7 +360,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         selectedDayKey: presentation.selectedDayKey,
         todayKey: presentation.todayKey,
         viewportHeight: viewportHeight,
-        fingerOnTimeline: scrollView.isTracking || pinchSession != nil || creationDragState.session != nil
+        fingerOnTimeline: scrollView.isTracking || pinchSession != nil || hasLongPressDrag
       ))
       if scrollToNowGate.isWaiting {
         guard scrollToNowLayoutObservation == nil else { return }
@@ -357,7 +396,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
       switch gesture.state {
       case .began:
-        guard creationDragState.session == nil, pinchSession == nil, let model, let scrollView,
+        guard !hasLongPressDrag, pinchSession == nil, let model, let scrollView,
               let midpointY = pairedViewportMidpointY(for: gesture, in: scrollView) else { return }
         // A pinch takes over from a button zoom at the geometry already shown.
         stopButtonZoom()
@@ -410,7 +449,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     @objc private func handleHorizontalPan(_ gesture: UIPanGestureRecognizer) {
-      guard creationDragState.session == nil else { return }
+      guard !hasLongPressDrag else { return }
       guard gesture.state == .ended, let view = gesture.view else { return }
       let translation = gesture.translation(in: view)
       let velocity = gesture.velocity(in: view)
@@ -431,8 +470,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         guard
           let model,
           let scrollView,
-          let candidate = longPressCandidate,
-          candidate.dayKey == model.presentation.selectedDayKey,
+          let target = longPressTarget,
           gesture.numberOfTouches == 1,
           !scrollView.isDragging,
           !scrollView.isDecelerating,
@@ -442,16 +480,27 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           pinchGesture.state != .began,
           pinchGesture.state != .changed,
           horizontalPanGesture.state != .began,
-          horizontalPanGesture.state != .changed,
-          let request = createRequest(for: gesture, model: model, scrollView: scrollView)
+          horizontalPanGesture.state != .changed
         else {
-          longPressCandidate = nil
+          longPressTarget = nil
           cancelCreationInteraction()
           return
         }
 
-        longPressCandidate = nil
+        longPressTarget = nil
         let contentY = Double(gesture.location(in: scrollView).y)
+        if case let .block(target) = target {
+          guard submittedBlockEdit == nil, target.stillMatches(model.presentation) else { return }
+          blockEditDrag = BlockEditDrag(target: target, startY: contentY)
+          stopButtonZoom()
+          setCreationGestureLock(true)
+          updateBlockEditDrag(contentY: contentY, model: model)
+          if model.presentation.hapticsEnabled { selectionHaptic.selectionChanged() }
+          updateEdgeAutoscrollIntent(for: gesture, in: scrollView)
+          return
+        }
+        guard case let .creation(request) = target,
+              request.dayKey == model.presentation.selectedDayKey else { return }
         let transition = DayframeCalendarCreationDragReducer.reduce(
           state: creationDragState,
           event: .began(
@@ -486,14 +535,13 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           let model,
           let scrollView,
           gesture.numberOfTouches == 1,
-          let session = creationDragState.session,
-          session.dayKey == model.presentation.selectedDayKey,
+          hasLongPressDrag,
           creationContextIsValid(model: model)
         else {
           cancelLongPressRecognition()
           return
         }
-        updateCreationDrag(
+        updateLongPressDrag(
           contentY: Double(gesture.location(in: scrollView).y),
           model: model
         )
@@ -503,18 +551,21 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         guard
           let model,
           let scrollView,
-          let session = creationDragState.session,
-          session.dayKey == model.presentation.selectedDayKey,
+          hasLongPressDrag,
           creationContextIsValid(model: model)
         else {
           cancelCreationInteraction()
           return
         }
-        updateCreationDrag(
+        updateLongPressDrag(
           contentY: Double(gesture.location(in: scrollView).y),
           model: model
         )
-        completeCreationInteraction()
+        if let drag = blockEditDrag {
+          completeBlockEdit(drag, model: model)
+        } else {
+          completeCreationInteraction()
+        }
 
       case .cancelled, .failed:
         cancelCreationInteraction()
@@ -525,21 +576,21 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
       if gestureRecognizer === horizontalPanGesture {
-        guard creationDragState.session == nil else { return false }
+        guard !hasLongPressDrag else { return false }
         guard let view = gestureRecognizer.view else { return false }
         let velocity = horizontalPanGesture.velocity(in: view)
         return abs(velocity.x) > abs(velocity.y) * 0.72
       }
 
       if gestureRecognizer === pinchGesture {
-        return creationDragState.session == nil
+        return !hasLongPressDrag
       }
 
       if gestureRecognizer === longPressGesture {
         guard
           let model,
           let scrollView,
-          creationDragState.session == nil,
+          !hasLongPressDrag,
           longPressGesture.numberOfTouches == 1,
           !scrollView.isDragging,
           !scrollView.isDecelerating,
@@ -550,12 +601,12 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           pinchGesture.state != .changed,
           horizontalPanGesture.state != .began,
           horizontalPanGesture.state != .changed,
-          let request = createRequest(for: longPressGesture, model: model, scrollView: scrollView)
+          let target = resolveLongPressTarget(for: longPressGesture, model: model, scrollView: scrollView)
         else {
-          longPressCandidate = nil
+          longPressTarget = nil
           return false
         }
-        longPressCandidate = LongPressCandidate(dayKey: request.dayKey)
+        longPressTarget = target
         selectionHaptic.prepare()
       }
 
@@ -584,16 +635,17 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       return gestureRecognizer === pinchGesture || otherGestureRecognizer === pinchGesture
     }
 
-    private func createRequest(
+    private func resolveLongPressTarget(
       for gesture: UIGestureRecognizer,
       model: DayframeCalendarViewModel,
       scrollView: UIScrollView
-    ) -> DayframeCalendarCreateRequest? {
+    ) -> LongPressTarget? {
       let presentation = model.presentation
       let dayKey = presentation.selectedDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
       let hourHeight = Double(model.hourHeight)
       guard
         !dayKey.isEmpty,
+        !presentation.isList,
         presentation.dayEndMs > presentation.dayStartMs,
         layout.availableWidth.isFinite,
         layout.hourLabelWidth.isFinite
@@ -629,12 +681,13 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           leadingInset: presentation.entryLeadingInset
         )
       )
-      let hitFrames = presentation.entries.compactMap { entry -> DayframeCalendarHitFrame? in
+      let entriesAtPoint = presentation.entries.compactMap { entry
+        -> (entry: DayframeCalendarEntry, frame: DayframeCalendarHitFrame, drawn: DayframeCalendarHitFrame, z: Int)? in
         guard let laidOut = dayLayout[entry.entryId] else {
           return nil
         }
         let block = laidOut.block
-        return DayframeCalendarEntryGeometryMath.metrics(
+        guard let metrics = DayframeCalendarEntryGeometryMath.metrics(
           availableWidth: layout.availableWidth,
           hourLabelWidth: layout.hourLabelWidth,
           semanticTop: block.top,
@@ -645,7 +698,15 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           textDensity: entry.textDensity,
           timelineHeight: 24 * hourHeight,
           leadingInset: presentation.entryLeadingInset
-        )?.hitFrame
+        ), metrics.hitFrame.contains(point) else { return nil }
+        let visibleHeight = DayframeCalendarBlockVisualMath.metrics(
+          semanticHeight: block.height, continuesIntoNextDay: block.continuesIntoNextDay
+        ).visualHeight
+        let drawn = DayframeCalendarHitFrame(
+          minX: metrics.hitFrame.minX, maxX: metrics.hitFrame.maxX,
+          minY: block.top, maxY: block.top + visibleHeight
+        )
+        return (entry, metrics.hitFrame, drawn, laidOut.zIndex)
       }
       // Moments' targets too (dense-day rules), resolved together as the entries layer places them.
       let momentFrames = DayframeCalendarMomentLayout.layout(
@@ -659,18 +720,100 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         hourHeight: hourHeight,
         hourLabelWidth: layout.hourLabelWidth
       ).map(\.frame)
-      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames + momentFrames + laneFrames) else {
+      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: momentFrames + laneFrames) else {
         return nil
       }
+      if let topZ = entriesAtPoint.map(\.z).max(),
+         let hit = entriesAtPoint.last(where: { $0.z == topZ }) {
+        let entry = hit.entry
+        guard submittedBlockEdit == nil,
+              hit.drawn.contains(point),
+              entry.canDragEdit,
+              let endMs = entry.stoppedAtMs,
+              presentation.dayEndMs - presentation.dayStartMs == 86_400_000,
+              entry.startedAtMs >= presentation.dayStartMs,
+              endMs <= min(presentation.dayEndMs, presentation.nowMs),
+              endMs > entry.startedAtMs else { return nil }
+        return .block(BlockEditTarget(
+          dayKey: dayKey, dayStartMs: presentation.dayStartMs, entryId: entry.entryId,
+          startMs: entry.startedAtMs, endMs: endMs,
+          original: DayframeCalendarBlockEditRange(
+            startMinute: (entry.startedAtMs - presentation.dayStartMs) / 60_000,
+            endMinute: (endMs - presentation.dayStartMs) / 60_000
+          ),
+          frame: hit.frame, title: entry.title,
+          mode: DayframeCalendarBlockEditMath.mode(
+            at: point.y, top: hit.drawn.minY, bottom: hit.drawn.maxY
+          )
+        ))
+      }
 
-      return DayframeCalendarCreateRequest(dayKey: dayKey, startMinute: slot.startMinute)
+      return .creation(DayframeCalendarCreateRequest(dayKey: dayKey, startMinute: slot.startMinute))
     }
 
     private func cancelLongPressRecognition() {
-      longPressCandidate = nil
+      longPressTarget = nil
       cancelCreationInteraction()
       longPressGesture.isEnabled = false
       longPressGesture.isEnabled = true
+    }
+
+    private func updateLongPressDrag(contentY: Double, model: DayframeCalendarViewModel) {
+      if blockEditDrag != nil {
+        updateBlockEditDrag(contentY: contentY, model: model)
+      } else {
+        updateCreationDrag(contentY: contentY, model: model)
+      }
+    }
+
+    private func updateBlockEditDrag(contentY: Double, model: DayframeCalendarViewModel) {
+      guard let drag = blockEditDrag else { return }
+      let target = drag.target
+      guard target.stillMatches(model.presentation),
+            let range = DayframeCalendarBlockEditMath.range(
+              original: target.original, mode: target.mode, startY: drag.startY, currentY: contentY,
+              hourHeight: Double(model.hourHeight),
+              latestMinute: (model.presentation.nowMs - target.dayStartMs) / 60_000
+            ) else {
+        cancelLongPressRecognition()
+        return
+      }
+      model.setBlockEditPreview(DayframeCalendarBlockEditPreview(
+        entryId: target.entryId, dayKey: target.dayKey, range: range,
+        frame: target.frame, title: target.title
+      ))
+    }
+
+    private func completeBlockEdit(_ drag: BlockEditDrag, model: DayframeCalendarViewModel) {
+      stopEdgeAutoscroll()
+      blockEditDrag = nil
+      setCreationGestureLock(false)
+      let target = drag.target
+      guard target.stillMatches(model.presentation), let preview = model.blockEditPreview,
+            preview.range != target.original else {
+        model.setBlockEditPreview(nil)
+        return
+      }
+      // Hold this placement across the native-to-React handoff. The published edit replaces it.
+      // A rejected or stale request has no model update, so its preview expires.
+      submittedBlockEdit = target
+      let expiry = DispatchWorkItem { [weak self] in
+        MainActor.assumeIsolated { self?.clearSubmittedBlockEdit() }
+      }
+      submittedPreviewExpiry = expiry
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: expiry)
+      actions.requestBlockEdit(DayframeCalendarBlockEditRequest(
+        dayKey: target.dayKey, entryId: target.entryId,
+        originalStartMs: target.startMs, originalEndMs: target.endMs,
+        startMinute: preview.range.startMinute, endMinute: preview.range.endMinute
+      ))
+    }
+
+    private func clearSubmittedBlockEdit() {
+      submittedPreviewExpiry?.cancel()
+      submittedPreviewExpiry = nil
+      submittedBlockEdit = nil
+      model?.setBlockEditPreview(nil)
     }
 
     private func updateCreationDrag(
@@ -708,7 +851,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         model?.clearCreationPreview(sessionToken: token)
       }
       creationPreviewSessionToken = nil
-      longPressCandidate = nil
+      longPressTarget = nil
       setCreationGestureLock(false)
       if let request = transition.request {
         actions.requestCreateEntry(request)
@@ -717,6 +860,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     private func cancelCreationInteraction() {
       stopEdgeAutoscroll()
+      blockEditDrag = nil
+      clearSubmittedBlockEdit()
       let transition = DayframeCalendarCreationDragReducer.reduce(
         state: creationDragState,
         event: .cancelled
@@ -726,7 +871,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         model?.clearCreationPreview(sessionToken: token)
       }
       creationPreviewSessionToken = nil
-      longPressCandidate = nil
+      longPressTarget = nil
       setCreationGestureLock(false)
     }
 
@@ -773,7 +918,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           viewportHeight: Double(scrollView.bounds.height)
         ),
         velocity != 0,
-        creationDragState.session != nil
+        hasLongPressDrag
       else {
         stopEdgeAutoscroll()
         return
@@ -798,7 +943,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       guard
         let model,
         let scrollView,
-        creationDragState.session != nil,
+        hasLongPressDrag,
         creationContextIsValid(model: model),
         longPressGesture.state == .began || longPressGesture.state == .changed
       else {
@@ -841,7 +986,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         CGPoint(x: scrollView.contentOffset.x, y: CGFloat(nextOffset)),
         animated: false
       )
-      updateCreationDrag(
+      updateLongPressDrag(
         contentY: Double(longPressGesture.location(in: scrollView).y),
         model: model
       )
@@ -854,7 +999,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       model: DayframeCalendarViewModel,
       scrollView: UIScrollView
     ) {
-      guard creationDragState.session == nil, pinchSession == nil else { return }
+      guard !hasLongPressDrag, pinchSession == nil else { return }
       let fromHeight = buttonZoom?.targetHourHeight ?? Double(model.hourHeight)
       let target = DayframeCalendarZoomMath.buttonTarget(hourHeight: fromHeight, direction: direction)
       guard abs(target - Double(model.hourHeight)) > 0.01 else {
@@ -890,7 +1035,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         let scrollView,
         !scrollView.isDragging,
         pinchSession == nil,
-        creationDragState.session == nil
+        !hasLongPressDrag
       else {
         stopButtonZoom()
         return

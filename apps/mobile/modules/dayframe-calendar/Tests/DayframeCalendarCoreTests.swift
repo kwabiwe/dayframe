@@ -2,6 +2,40 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testCompletedBlockEdgesResizeOnlyWhenThereIsRoomToPickTheBody() {
+    XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 101, top: 100, bottom: 128), .resizeStart)
+    XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 114, top: 100, bottom: 128), .move)
+    XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 127, top: 100, bottom: 128), .resizeEnd)
+    XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 101, top: 100, bottom: 125), .move)
+  }
+
+  func testCompletedBlockMovePreservesItsDurationAndSnapsRelativeToTheOriginalEdges() {
+    let original = DayframeCalendarBlockEditRange(startMinute: 547.5, endMinute: 587.5)
+    for height in [48.0, 72.0, 128.0] {
+      let moved = DayframeCalendarBlockEditMath.range(original: original, mode: .move,
+        startY: 543, currentY: 543 + height / 6, hourHeight: height, latestMinute: 1440)
+      XCTAssertEqual(moved, DayframeCalendarBlockEditRange(startMinute: 557.5, endMinute: 597.5))
+    }
+    let untouched = DayframeCalendarBlockEditMath.range(original: original, mode: .move,
+      startY: 543, currentY: 544, hourHeight: 72, latestMinute: 1440)
+    XCTAssertEqual(untouched, original)
+  }
+
+  func testCompletedBlockResizeKeepsTheOtherEdgeAndClampsAtTodayAndMinimumLength() {
+    let original = DayframeCalendarBlockEditRange(startMinute: 540, endMinute: 570)
+    let early = DayframeCalendarBlockEditMath.range(original: original, mode: .resizeStart,
+      startY: 540, currentY: 700, hourHeight: 60, latestMinute: 600)
+    XCTAssertEqual(early, DayframeCalendarBlockEditRange(startMinute: 565, endMinute: 570))
+    let late = DayframeCalendarBlockEditMath.range(original: original, mode: .resizeEnd,
+      startY: 570, currentY: 646, hourHeight: 60, latestMinute: 600)
+    XCTAssertEqual(late, DayframeCalendarBlockEditRange(startMinute: 540, endMinute: 600))
+    let clampedMove = DayframeCalendarBlockEditMath.range(original: original, mode: .move,
+      startY: 540, currentY: 710, hourHeight: 60, latestMinute: 600)
+    XCTAssertEqual(clampedMove, DayframeCalendarBlockEditRange(startMinute: 570, endMinute: 600))
+    XCTAssertNil(DayframeCalendarBlockEditMath.range(original: original, mode: .move,
+      startY: 0, currentY: .infinity, hourHeight: 60, latestMinute: 600))
+  }
+
   func testTapSequenceRejectsBothStaggeredPinchReleasesAndAllowsTheNextTap() {
     for firstToLift in [1, 2] {
       var sequence = DayframeCalendarTapSequence<Int>()
