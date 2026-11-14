@@ -1100,6 +1100,33 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(badge()).toBe(2);
   });
 
+  it.each([false, true])("keeps an acknowledged trip out of Calendar checks after an older snapshot (already resolved: %s)", async (alreadyResolved) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify({
+      ...acknowledge(url, init), ...(alreadyResolved ? { alreadyResolved, equivalent: true } : {})
+    }), { status: 200 }));
+    const trip = { ...reviewItems[1], title: "Getting around" };
+    const show = (items: readonly ReviewItemRow[], owner = "w1:u1") => (
+      <Shell items={items} owner={owner}><EntriesTable {...baseProps()} reviewItems={items} /></Shell>
+    );
+    const view = render(show([trip]));
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(askingRow(trip.title)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+
+    // The committed refresh leaves the question out, then a cached Calendar snapshot arrives.
+    view.rerender(show([]));
+    view.rerender(show([{ ...trip }]));
+    expect(askingRow(trip.title)).toBeNull();
+    expect(badge()).toBe(0);
+    expect(screen.queryByRole("button", { name: /to check, oldest first/ })).toBeNull();
+
+    view.rerender(show([trip], "w2:u1"));
+    expect(askingRow(trip.title)).toBeTruthy();
+    expect(badge()).toBe(1);
+  });
+
   it("drops a previous workspace's late refusal: nothing comes back in the new one (Codex r4 on #609)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const save = holdSaves(new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));

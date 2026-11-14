@@ -34,8 +34,8 @@ export type ReviewDecisionNotice = {
   isExiting: boolean;
 };
 
-/** What the save found: saved, the item already gone (decided elsewhere), or the suggestion changed. */
-export type ReviewDecisionCommitResult = "saved" | "gone" | "changed";
+/** What the save found: applied, equivalently resolved, gone, or the suggestion changed. */
+export type ReviewDecisionCommitResult = "saved" | "already-saved" | "gone" | "changed";
 
 export type ReviewDecisionCommit = (
   decision: ReviewDecision,
@@ -45,6 +45,8 @@ export type ReviewDecisionCommit = (
 export type ReviewDecisionState = {
   /** Items held, saving or saved here and not yet gone from the data. */
   hiddenIds: ReadonlySet<string>;
+  /** Acknowledged answers stay resolved for this owner even if a cached read lists them open again. */
+  savedIds: ReadonlySet<string>;
   /** This visit's decisions that are held, saving or saved (Undo and failures take them out). */
   decided: readonly ReviewDecision[];
   notice: ReviewDecisionNotice | null;
@@ -70,6 +72,7 @@ export class ReviewDecisionController {
   private pending: ReviewDecision | null = null;
   private restored: ReviewDecisionState["restored"] = null;
   private restoreSequence = 0;
+  private savedIds = new Set<string>();
   private sequence = 0;
   /** Saved decisions whose item has left the data: still this visit's, for "All framed". */
   private settled: ReviewDecision[] = [];
@@ -102,13 +105,12 @@ export class ReviewDecisionController {
       decided.push(this.pending);
     }
     decided.sort((a, b) => a.token - b.token);
-    return { hiddenIds, decided, notice: this.notice, error: this.error, restored: this.restored };
+    return { hiddenIds, savedIds: this.savedIds, decided, notice: this.notice, error: this.error, restored: this.restored };
   }
 
-  /** Holds a decision; false when this item already has one held or saving. */
+  /** Holds a decision; false when this item already has one held, saving or saved. */
   decide(request: ReviewDecisionRequest) {
-    
-    if (this.pending?.itemId === request.itemId) return false;
+    if (this.savedIds.has(request.itemId) || this.pending?.itemId === request.itemId) return false;
     for (const { decision, status } of this.active.values()) {
       if (decision.itemId === request.itemId && status === "saving") return false;
     }
@@ -182,12 +184,9 @@ export class ReviewDecisionController {
     if (changed) this.emit();
   }
 
-  /**
-   * A saved decision stays hidden until fresh data no longer lists its item, so a stale snapshot
-   * never flashes the card back.
-   */
+  /** Retires the temporary decision projection on omission. The save still protects the Review IDs. */
   reconcileItemIds(openIds: ReadonlySet<string>) {
-        let changed = false;
+    let changed = false;
     for (const [token, active] of this.active) {
       if (active.status !== "saving" && !openIds.has(active.decision.itemId)) {
         this.active.delete(token);
@@ -211,8 +210,12 @@ export class ReviewDecisionController {
     const saving = this.commit(decision, options)
       .then((result) => {
         if (this.active.get(decision.token)?.status !== "saving") return;
-        if (result === "saved") {
-          this.active.set(decision.token, { decision, status: "saved" });
+        if (result === "saved" || result === "already-saved") {
+          const mutation = decision.mutation;
+          const members = mutation.action === "confirm_outing" || mutation.action === "ignore_outing"
+            ? mutation.memberReviewItemIds : [];
+          this.savedIds = new Set([...this.savedIds, decision.itemId, ...members]);
+          this.active.set(decision.token, { decision, status: result === "saved" ? "saved" : "gone" });
         } else if (result === "gone") {
           // Decided elsewhere while held: not this visit's decision, and nothing to bring back.
           this.active.set(decision.token, { decision, status: "gone" });
@@ -272,5 +275,5 @@ export class ReviewDecisionController {
 }
 
 export function initialReviewDecisionState(): ReviewDecisionState {
-  return { hiddenIds: new Set(), decided: [], notice: null, error: null, restored: null };
+  return { hiddenIds: new Set(), savedIds: new Set(), decided: [], notice: null, error: null, restored: null };
 }

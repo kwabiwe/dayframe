@@ -93,8 +93,7 @@ export function useReviewDecisions(
       // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
       if (
         response.status === 404 ||
-        (response.status === 409 && body.code === "resolution_conflict") ||
-        (response.ok && body.alreadyResolved === true)
+        (response.status === 409 && body.code === "resolution_conflict")
       ) {
         void refresh().catch(() => undefined);
         return "gone";
@@ -111,6 +110,10 @@ export function useReviewDecisions(
       }
       if (!validReviewAcknowledgement(body, envelope, decision.itemId)) {
         throw new Error("Couldn’t confirm that decision was saved.");
+      }
+      if (body.alreadyResolved === true) {
+        void refresh().catch(() => undefined);
+        return "already-saved";
       }
       onAcknowledgedRef.current?.(body);
       void refresh().catch(() => undefined);

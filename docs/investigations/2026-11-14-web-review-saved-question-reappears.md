@@ -1,0 +1,7 @@
+# A saved Review question reappears on web
+
+[Trello #292](https://trello.com/c/Lgem5xBG) reports that a Getting around question disappeared after Yes and returned later. The public description identifies the symptom. The original Trello attachments require a separate authenticated download, so the reported occurrence has not been matched to a server receipt.
+
+Production was serving `d6f00bf0`. The web Calendar uses an account-scoped decision controller. Yes hides the question immediately and holds the mutation for Undo. Acknowledgement keeps the decision projected until a snapshot omits the question. An older open snapshot can then repaint it after the projection retires. A user-visible Calendar List test reproduced that sequence, including the returning badge and check chip. A changing Location suggestion is another possibility for a report about the same journey. Replay only reopens records it superseded itself, so the confirmed history and the question’s stable Review ID distinguish those paths.
+
+The controller retains the IDs from a validated terminal acknowledgement for the current workspace and user, including every member of an outing. A cached Calendar snapshot cannot make those IDs actionable again. Temporary timer projections still retire as before. A refused or changed answer still restores with its existing explanation. Undo uses the same timer and transitions. There are no new requests or schema changes.

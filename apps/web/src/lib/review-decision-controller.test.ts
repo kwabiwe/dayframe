@@ -48,12 +48,24 @@ describe("ReviewDecisionController", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(commits).toEqual([{ itemId: "a", keepalive: false, clientMutationId: "id-1" }]);
     expect(state().notice?.isExiting).toBe(true);
-    // Saved: hidden until fresh data drops it, and still this visit's for "All framed".
+    // Retire the temporary projection when the snapshot drops the item. Keep the saved Review ID.
     controller.reconcileItemIds(new Set(["a"]));
     expect(state().hiddenIds.has("a")).toBe(true);
     controller.reconcileItemIds(new Set());
     expect(state().hiddenIds.has("a")).toBe(false);
+    expect(state().savedIds.has("a")).toBe(true);
+    expect(controller.decide(request("a"))).toBe(false);
     expect(state().decided.map((decision) => decision.itemId)).toEqual(["a"]);
+  });
+
+  it.each(["saved", "already-saved"] as const)("keeps every member resolved after its %s outing projection retires", async (result) => {
+    const { controller, state } = setup([result]);
+    controller.decide({ ...request("stay"), mutation: { action: "confirm_outing", memberReviewItemIds: ["trip"] } });
+    await vi.advanceTimersByTimeAsync(REVIEW_DECISION_UNDO_MS);
+    controller.reconcileItemIds(new Set());
+    expect(state().savedIds).toEqual(new Set(["stay", "trip"]));
+    expect(state().decided.map((decision) => decision.itemId)).toEqual(result === "saved" ? ["stay"] : []);
+    expect(controller.decide(request("trip"))).toBe(false);
   });
 
   it("Undo brings the card back and never sends", async () => {
