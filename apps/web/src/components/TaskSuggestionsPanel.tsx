@@ -131,10 +131,11 @@ export function TaskSuggestionsPanel({
 }
 
 /** One suggestion row shared by the start and Switch pickers. */
-export function TaskSuggestionOption({ disabled, highlighted = false, id, onHighlight, onPick, suggestion }: {
+export function TaskSuggestionOption({ disabled, highlighted = false, id, keepSearchFocus = false, onHighlight, onPick, suggestion }: {
   disabled?: boolean;
   highlighted?: boolean;
   id?: string;
+  keepSearchFocus?: boolean;
   onHighlight?: () => void;
   onPick: () => void;
   suggestion: RecentActivitySuggestion;
@@ -146,8 +147,10 @@ export function TaskSuggestionOption({ disabled, highlighted = false, id, onHigh
       disabled={disabled}
       id={id}
       onClick={onPick}
+      onMouseDown={keepSearchFocus ? (event) => event.preventDefault() : undefined}
       onMouseEnter={onHighlight}
       role="option"
+      tabIndex={keepSearchFocus ? -1 : undefined}
       type="button"
     >
       <i

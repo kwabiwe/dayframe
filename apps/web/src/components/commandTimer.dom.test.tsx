@@ -265,7 +265,10 @@ describe("Switch activity from the running block menu", () => {
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
-    expect(screen.getByRole("option", { name: /Plan next sprint.*Deep work.*Focus/ })).toBeTruthy();
+    const suggestion = screen.getByRole("option", { name: /Plan next sprint.*Deep work.*Focus/ });
+    expect(suggestion.tabIndex).toBe(-1);
+    expect(screen.getByRole("listbox").tabIndex).toBe(-1);
+    expect(fireEvent.mouseDown(suggestion)).toBe(false);
     const search = screen.getByRole("combobox", { name: "Search or enter a description" });
     fireEvent.change(search, { target: { value: "sprint" } });
     await act(async () => { fireEvent.keyDown(search, { key: "Enter" }); });

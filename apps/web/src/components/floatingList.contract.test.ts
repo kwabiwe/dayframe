@@ -62,7 +62,7 @@ describe("one floating list (FloatingList)", () => {
     const suggestions = source("TaskSuggestionsPanel.tsx");
     const tagInput = source("InlineTagInput.tsx");
     const list = source("FloatingList.tsx");
-    expect(suggestions).toContain('className="df-flist-row df-flist-row--suggestion"');
+    expect(suggestions).toContain("`df-flist-row df-flist-row--suggestion");
     // Tag and activity rows are one component each, shared by the typed lists and the buttons' lists.
     expect(list).toContain("`df-flist-row df-flist-row--tag");
     expect(list).toContain("`df-flist-row df-flist-row--activity");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { FloatingListActivityOption, FloatingListSearch, type FloatingListActivity } from "@/components/FloatingList";
 import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { TaskSuggestionOption } from "@/components/TaskSuggestionsPanel";
@@ -27,15 +27,19 @@ export function SwitchActivityDialog({ activities, candidates, currentId, fallba
   const [highlight, setHighlight] = useState(0);
   const picked = useRef(false);
   const description = query.trim();
-  const matchingSuggestions = description
-    ? searchTaskSuggestions(candidates, suggestions, description, suggestionLimit)
-    : suggestions.slice(0, suggestionLimit);
-  const options: SwitchOption[] = matchingSuggestions
-    .filter(({ categoryId }) => !categoryId || activities.some(({ id }) => id === categoryId))
-    .map((suggestion) => ({ suggestion }));
-  options.push(...activitiesForMention(description, activities.filter(({ id }) => id !== currentId))
-    .map((activity) => ({ activity })));
-  if (currentId && "no activity".includes(description.toLocaleLowerCase())) options.push({ activity: null });
+  const options = useMemo<SwitchOption[]>(() => {
+    const matchingSuggestions = description
+      ? searchTaskSuggestions(candidates, suggestions, description, suggestionLimit)
+      : suggestions.slice(0, suggestionLimit);
+    const availableIds = new Set(activities.map(({ id }) => id));
+    const matches: SwitchOption[] = matchingSuggestions
+      .filter(({ categoryId }) => !categoryId || availableIds.has(categoryId))
+      .map((suggestion) => ({ suggestion }));
+    matches.push(...activitiesForMention(description, activities.filter(({ id }) => id !== currentId))
+      .map((activity) => ({ activity })));
+    if (currentId && "no activity".includes(description.toLocaleLowerCase())) matches.push({ activity: null });
+    return matches;
+  }, [activities, candidates, currentId, description, suggestions, suggestionLimit]);
 
   function pick(draft: TimerDraft) {
     if (picked.current) return;
@@ -71,7 +75,7 @@ export function SwitchActivityDialog({ activities, candidates, currentId, fallba
       size="compact"
       title="Switch activity"
     >
-      <div className="df-flist">
+      <div className="df-flist df-switch-picker">
         <FloatingListSearch
           activeDescendant={activeId}
           expanded
@@ -92,7 +96,7 @@ export function SwitchActivityDialog({ activities, candidates, currentId, fallba
           }}
           value={query}
         />
-        <div aria-label="Blocks to switch to" className="df-flist-rows" id={listId} role="listbox">
+        <div aria-label="Blocks to switch to" className="df-flist-rows" id={listId} role="listbox" tabIndex={-1}>
           {options.map((option, optionIndex) => {
             const row = {
               highlighted: optionIndex === index,
@@ -101,11 +105,12 @@ export function SwitchActivityDialog({ activities, candidates, currentId, fallba
               onPick: () => pickOption(option)
             };
             return "suggestion" in option
-              ? <TaskSuggestionOption {...row} key={`suggestion-${option.suggestion.key}`} suggestion={option.suggestion} />
+              ? <TaskSuggestionOption {...row} keepSearchFocus key={`suggestion-${option.suggestion.key}`} suggestion={option.suggestion} />
               : <FloatingListActivityOption {...row} activity={option.activity} key={option.activity?.id ?? "none"} selected={row.highlighted} />;
           })}
+          {!options.length ? <div className="df-flist-empty" role="presentation">No matching suggestions or activities.</div> : null}
         </div>
-        {!options.length ? <p className="df-flist-empty" role="status">No matching suggestions or activities.</p> : null}
+        <span className="sr-only" role="status">{options.length ? "" : "No matching suggestions or activities."}</span>
       </div>
     </ModalDialog>
   );
