@@ -122,30 +122,46 @@ export function TaskSuggestionsPanel({
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
     >
       {suggestions.map((suggestion) => (
-        // One 36 px line: the activity marker, the description with its #tags, and the activity
-        // name right-aligned as muted metadata.
-        <button
-          aria-selected={false}
-          className="df-flist-row df-flist-row--suggestion"
-          disabled={isBusy}
-          key={suggestion.key}
-          onClick={() => onSelect(suggestion)}
-          role="option"
-          type="button"
-        >
-          <i
-            aria-hidden="true"
-            style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }}
-          />
-          <span className="df-flist-label">
-            <b>{suggestion.description}</b>
-            {suggestion.tagNames.length ? <small>{suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}</small> : null}
-          </span>
-          <span className="df-flist-meta">{suggestion.categoryName ?? "No activity"}</span>
-        </button>
+        <TaskSuggestionOption disabled={isBusy} key={suggestion.key} onPick={() => onSelect(suggestion)} suggestion={suggestion} />
       ))}
     </FloatingList>
   );
 
   return portal && typeof document !== "undefined" ? createPortal(panel, document.body) : panel;
+}
+
+/** One suggestion row shared by the start and Switch pickers. */
+export function TaskSuggestionOption({ disabled, highlighted = false, id, keepSearchFocus = false, onHighlight, onPick, suggestion }: {
+  disabled?: boolean;
+  highlighted?: boolean;
+  id?: string;
+  keepSearchFocus?: boolean;
+  onHighlight?: () => void;
+  onPick: () => void;
+  suggestion: RecentActivitySuggestion;
+}) {
+  return (
+    <button
+      aria-selected={highlighted}
+      className={`df-flist-row df-flist-row--suggestion${highlighted ? " is-highlighted" : ""}`}
+      disabled={disabled}
+      id={id}
+      onClick={onPick}
+      onMouseDown={keepSearchFocus ? (event) => event.preventDefault() : undefined}
+      onMouseEnter={onHighlight}
+      role="option"
+      tabIndex={keepSearchFocus ? -1 : undefined}
+      type="button"
+    >
+      <i
+        aria-hidden="true"
+        style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }}
+      />
+      <span className="df-flist-label">
+        <b>{suggestion.description}</b>
+        {suggestion.tagNames.length ? <small>{suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}</small> : null}
+      </span>
+      <span className="df-flist-meta">{suggestion.categoryName ?? "No activity"}</span>
+    </button>
+  );
 }

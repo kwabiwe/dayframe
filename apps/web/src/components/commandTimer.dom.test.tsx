@@ -243,7 +243,7 @@ describe("Switch activity from the running block menu", () => {
 
     expect(screen.getByRole("dialog", { name: "Switch activity" })).not.toBeNull();
     expect(screen.queryByRole("option", { name: "Focus" })).toBeNull();
-    const search = screen.getByRole("combobox", { name: "Search activities" });
+    const search = screen.getByRole("combobox", { name: "Search or enter a description" });
     fireEvent.change(search, { target: { value: "learn" } });
     expect(screen.getByRole("option", { name: "Learning" })).not.toBeNull();
     expect(runtime.startTimer).not.toHaveBeenCalled();
@@ -256,12 +256,53 @@ describe("Switch activity from the running block menu", () => {
     expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
   });
 
+  it("offers the same suggestions as Start and keeps the chosen activity and tags", async () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }), taskSuggestions: [{
+      key: "plan", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", description: "Plan next sprint",
+      lastSeenAt: "2026-08-14T08:00:00Z", score: 4, section: "recent", useCount: 3, totalSeconds: 3600,
+      tagNames: ["Deep work"]
+    }] });
+    render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    const suggestion = screen.getByRole("option", { name: /Plan next sprint.*Deep work.*Focus/ });
+    expect(suggestion.tabIndex).toBe(-1);
+    expect(screen.getByRole("listbox").tabIndex).toBe(-1);
+    expect(fireEvent.mouseDown(suggestion)).toBe(false);
+    const search = screen.getByRole("combobox", { name: "Search or enter a description" });
+    fireEvent.change(search, { target: { value: "sprint" } });
+    await act(async () => { fireEvent.keyDown(search, { key: "Enter" }); });
+    expect(runtime.startTimer).toHaveBeenCalledExactlyOnceWith(
+      { categoryId: "focus", description: "Plan next sprint", tagNames: ["Deep work"] },
+      { dedupeRunning: true, expectedRunningEntryId: "running-entry", guard: expect.any(Function) }
+    );
+  });
+
+  it("switches once to the typed description when no suggestion matches", async () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
+    render(<PersistentTimerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    const search = screen.getByRole("combobox", { name: "Search or enter a description" });
+    const start = screen.getByRole<HTMLButtonElement>("button", { name: "Switch to new block" });
+    expect(start.disabled).toBe(true);
+    fireEvent.change(search, { target: { value: "  New customer handover  " } });
+    expect(screen.getByRole("status").textContent).toBe("No matching suggestions or activities.");
+    expect(runtime.startTimer).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(start); fireEvent.click(start); });
+    expect(runtime.startTimer).toHaveBeenCalledExactlyOnceWith(
+      { categoryId: "", description: "New customer handover", tagNames: [] },
+      { dedupeRunning: true, expectedRunningEntryId: "running-entry", guard: expect.any(Function) }
+    );
+    expect(runtime.createManualEntry).not.toHaveBeenCalled();
+  });
+
   it("moves focus to Add time when the running block stops while the picker is open", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     const { rerender } = render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
-    screen.getByRole("combobox", { name: "Search activities" }).focus();
+    screen.getByRole("combobox", { name: "Search or enter a description" }).focus();
 
     runtime = runtimeFixture();
     rerender(<PersistentTimerBar />);
@@ -287,7 +328,7 @@ describe("Switch activity from the running block menu", () => {
     expect(runtime.startTimer).not.toHaveBeenCalled();
   });
 
-  it("does not switch a replacement block that arrived before the choice", () => {
+  it.each(["activity", "new block"])("does not switch a replacement block before choosing %s", (kind) => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
@@ -297,7 +338,12 @@ describe("Switch activity from the running block menu", () => {
       ...(runtime.shellData as BootstrapData),
       activeEntry: timeEntry({ id: "replacement" })
     });
-    fireEvent.click(screen.getByRole("option", { name: "Learning" }));
+    if (kind === "activity") {
+      fireEvent.click(screen.getByRole("option", { name: "Learning" }));
+    } else {
+      fireEvent.change(screen.getByRole("combobox", { name: "Search or enter a description" }), { target: { value: "New block" } });
+      fireEvent.click(screen.getByRole("button", { name: "Switch to new block" }));
+    }
 
     expect(runtime.startTimer).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
@@ -407,6 +453,7 @@ function runtimeFixture(overrides: {
   categoryId?: string;
   description?: string;
   tagNames?: string[];
+  taskSuggestions?: BootstrapData["taskSuggestions"];
 } = {}) {
   const activeEntry = overrides.activeEntry ?? null;
   const data = {
@@ -420,7 +467,7 @@ function runtimeFixture(overrides: {
     dateRange: { selectedDate: "2026-08-14" },
     entries: activeEntry ? [activeEntry] : [],
     tags: [{ id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 2 }],
-    taskSuggestions: [],
+    taskSuggestions: overrides.taskSuggestions ?? [],
     workspace: { id: "workspace", name: "Personal" }
   } as unknown as BootstrapData;
   return {

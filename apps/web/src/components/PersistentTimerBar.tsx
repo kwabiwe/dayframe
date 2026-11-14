@@ -15,7 +15,7 @@ import { focusQuietly } from "@/components/blocks/TooltipHost";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
-import { FLOATING_LIST_HINTS, type FloatingListActivity } from "@/components/FloatingList";
+import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
@@ -33,7 +33,7 @@ import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
 import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
-import { DISCARD_RESTORE_REFUSALS, discardedBlockRestoreBlocker, quickActionTimerDraft } from "@/lib/timer-runtime";
+import { DISCARD_RESTORE_REFUSALS, discardedBlockRestoreBlocker, quickActionTimerDraft, type TimerDraft } from "@/lib/timer-runtime";
 import { newBlockCommandId, runningSplitBounds } from "@/lib/time-entry-split";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
@@ -421,9 +421,9 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
 
   function startQuickAction(
     action: Pick<QuickAction, "categoryId" | "color" | "label">,
-    switchTarget?: { expectedRunningEntryId: string; guard: (snapshot: BootstrapData) => string | null }
+    switchTarget?: { expectedRunningEntryId: string; guard: (snapshot: BootstrapData) => string | null },
+    draft = quickActionTimerDraft(action.categoryId)
   ) {
-    const draft = quickActionTimerDraft(action.categoryId);
     // The Activities list is not closed here: a press on a quick start is a press outside it (which
     // closes it unless a Create is saving), and the new block's scope closes it the same way, so a
     // saving Create keeps its form and outcome (Codex r4 on #402). Keys 1–6 never run while it is open.
@@ -453,7 +453,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
     });
   }
 
-  function switchActivity(activity: FloatingListActivity | null) {
+  function switchActivity(draft: TimerDraft) {
     setSwitchSource(null);
     if (isTimerBusy || !switchSource) return;
     const { entryId, workspaceId } = switchSource;
@@ -461,7 +461,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
       if (snapshot.workspace.id !== workspaceId || snapshot.activeEntry?.id !== entryId) {
         return SWITCH_BLOCK_CHANGED;
       }
-      if (activity && !snapshot.categories.some(({ id }) => id === activity.id)) {
+      if (draft.categoryId && !snapshot.categories.some(({ id }) => id === draft.categoryId)) {
         return SWITCH_ACTIVITY_UNAVAILABLE;
       }
       return null;
@@ -472,11 +472,12 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
       setCommandNotice(refusal);
       return;
     }
+    const activity = latest?.categories.find(({ id }) => id === draft.categoryId);
     startQuickAction({
       categoryId: activity?.id ?? null,
       color: activity?.color ?? null,
-      label: activity?.name ?? "No activity"
-    }, { expectedRunningEntryId: entryId, guard });
+      label: draft.description || activity?.name || "No activity"
+    }, { expectedRunningEntryId: entryId, guard }, draft);
   }
 
   // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
@@ -1123,10 +1124,13 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
         switchSource.workspaceId === data.workspace.id && switchSource.scope === completionScope ? (
         <SwitchActivityDialog
           activities={data.categories}
+          candidates={taskSuggestionCandidates}
           currentId={active.categoryId}
           fallbackFocus={() => timerActionsTriggerRef.current ?? addTimeButtonRef.current ?? descriptionInputRef.current}
           onClose={() => setSwitchSource(null)}
           onSwitch={switchActivity}
+          suggestionLimit={TASK_SUGGESTION_LIMIT}
+          suggestions={taskSuggestions}
         />
       ) : null}
 

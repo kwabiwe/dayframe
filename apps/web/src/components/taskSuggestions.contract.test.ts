@@ -44,7 +44,7 @@ describe("web task suggestion interaction", () => {
   });
 
   it("starts Quick Actions from a clean category-only draft", () => {
-    expect(timerSource).toContain("const draft = quickActionTimerDraft(action.categoryId)");
+    expect(timerSource).toContain("draft = quickActionTimerDraft(action.categoryId)");
     expect(timerSource).toContain("setTimerDraft(draft)");
     // The Start is asked for before the bar shows its draft, so the runtime keeps the outgoing
     // block's edits (Codex r10 on #361).

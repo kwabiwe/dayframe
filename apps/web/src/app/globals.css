@@ -4890,6 +4890,12 @@ dialog.ui-dialog.df-range-custom {
   overscroll-behavior: contain;
 }
 
+/* Keep the Switch field and footer in place while the search changes the result count. */
+.df-switch-picker .df-flist-rows {
+  block-size: min(calc(6 * var(--df-flist-row)), max(var(--df-flist-row), calc(100dvh - 240px)));
+  flex: 0 0 auto;
+}
+
 .df-flist-close {
   display: none;
 }
@@ -5207,13 +5213,13 @@ dialog.ui-dialog.df-range-custom {
   min-height: var(--task-suggestion-row-height);
 }
 
-.swiss-task-suggestions-list .df-flist-label {
+.df-flist-row--suggestion .df-flist-label {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
-.swiss-task-suggestions-list b {
+.df-flist-row--suggestion b {
   overflow: hidden;
   flex: 0 1 auto;
   font-size: 13px;
@@ -5222,7 +5228,7 @@ dialog.ui-dialog.df-range-custom {
   text-overflow: ellipsis;
 }
 
-.swiss-task-suggestions-list small {
+.df-flist-row--suggestion small {
   overflow: hidden;
   min-width: 0;
   flex: 0 1 auto;
@@ -5233,7 +5239,7 @@ dialog.ui-dialog.df-range-custom {
   text-overflow: ellipsis;
 }
 
-.swiss-task-suggestions-list i {
+.df-flist-row--suggestion i {
   display: inline-block;
   width: 8px;
   height: 8px;

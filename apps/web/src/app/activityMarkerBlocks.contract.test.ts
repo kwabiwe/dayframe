@@ -8,7 +8,7 @@ const css = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
 // Markers rendered today (each is used by a component; see the rendered-use test below).
 const ACTIVITY_MARKERS = [
   ".category-data-marker",
-  ".swiss-task-suggestions-list i",
+  ".df-flist-row--suggestion i",
   ".df-report-row .df-erow-block",
   ".category-picker-color-swatch",
   ".swiss-focus-dot",
