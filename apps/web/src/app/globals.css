@@ -68,9 +68,9 @@
   --calendar-ink: 52%;
   --calendar-ink-strong: 40%;
   --calendar-ink-mix: #000000;
-  /* The live coral (UI review round 2, owner 30 Oct 2026; the danger red before). */
-  --calendar-now: var(--accent);
-  --calendar-now-ink: var(--on-accent);
+  /* Match the iPhone Calendar marker. The deeper red gives white time text AA contrast. */
+  --calendar-now: var(--danger-text);
+  --calendar-now-ink: var(--surface);
   --border: #dde2ea;
   --border-strong: #bcc5d2;
   --control-border: #7d8797;
@@ -179,8 +179,8 @@
     --calendar-ink: 62%;
     --calendar-ink-strong: 40%;
     --calendar-ink-mix: #ffffff;
-    --calendar-now: var(--accent);
-    --calendar-now-ink: var(--on-accent);
+    --calendar-now: var(--danger);
+    --calendar-now-ink: var(--background);
     --border: #2a3345;
     --border-strong: #3b465b;
     --control-border: #64718a;
@@ -286,8 +286,8 @@
   --calendar-ink: 62%;
   --calendar-ink-strong: 40%;
   --calendar-ink-mix: #ffffff;
-  --calendar-now: var(--accent);
-  --calendar-now-ink: var(--on-accent);
+  --calendar-now: var(--danger);
+  --calendar-now-ink: var(--background);
   --border: #2a3345;
   --border-strong: #3b465b;
   --control-border: #64718a;
