@@ -61,7 +61,7 @@ type CheckDecisionsInput = {
  * The "?" decisions (Codex r4 on #609): what is held for Undo, saving, revived or decided by the server, and the
  * "?" that therefore still show. Owned once per workspace/user lifetime at AppShell level (CheckDecisionsProvider),
  * so the List, the sidebar badge and Today's chip read one state that outlives the List: an answer still saving
- * stays away when the List is left and opened again, and a saved one until the data no longer lists it open.
+ * stays away when the List is left and opened again. An acknowledged answer stays out of cached reads.
  */
 function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowledged, owner, refresh, reviewItems }: CheckDecisionsInput) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
@@ -146,10 +146,11 @@ function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowl
   if ([...closedByServer].some(([id, over]) => reopened(id, over))) {
     setClosedByServer(new Map([...closedByServer].filter(([id, over]) => !reopened(id, over))));
   }
-  // Cards the server says are decided leave before outings are grouped, from the data as from revived copies,
-  // so no answer covers them again and an open trip under a decided stay stands on its own (Codex r3 on #568).
+  // Remove decided rows before grouping outings, from both the server snapshot and the restored copies.
+  // A stale saved Stay must not fold an open trip into a question we can no longer show.
   const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id))]
-    .filter((item) => !closedByServer.has(item.id)), [closedByServer, loadedIds, openItems, revived]);
+    .filter((item) => !closedByServer.has(item.id) && !state.savedIds.has(item.id)),
+  [closedByServer, loadedIds, openItems, revived, state.savedIds]);
   // An outing (an unknown stay with its trips there and back) is one "?" on its stay, as on the deck.
   const outings = useMemo(() => reviewOutings(items), [items]);
   const memberIds = useMemo(() => new Set([
@@ -167,9 +168,8 @@ function useCheckDecisionsState({ applyTransition, blocks, categories, onAcknowl
       .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt }));
   }, [blocks, closedByServer, items, memberIds, state.hiddenIds]);
 
-  // What the badge and Today's chip count: the open items as the List shows them — held, saving, saved (until the
-  // data no longer lists them) and server-decided ones away, with the same held outing members as `memberIds` and
-  // its exception for a stay the server says is decided; revived ones back.
+  // What the badge and Today's chip count: the open items as the List shows them, with the same held outing members
+  // as `memberIds` and its exception for a Stay the server says is decided.
   const projectedItems = useMemo(() => {
     const hidden = new Set([...state.hiddenIds, ...closedByServer.keys(),
       ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
