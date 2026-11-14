@@ -218,6 +218,7 @@ export function BlocksToast({
 }
 
 type BlocksNoticeAction = { label: string; run: () => void };
+type BlocksNoticeActionRequest = { label: string; run: (clear: () => void) => void };
 
 export type BlocksNotice = {
   action?: BlocksNoticeAction;
@@ -247,7 +248,7 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
   const show = useCallback((
     copy: string | BlocksToastCopy,
     swatchColor?: string | null,
-    action?: BlocksNoticeAction
+    action?: BlocksNoticeActionRequest
   ) => {
     const next = ++token.current;
     if (timer.current) clearTimeout(timer.current);
@@ -256,7 +257,10 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
       accessibilityLabel: words.accessibilityLabel,
       ...(action ? { action: {
         label: action.label,
-        run: () => { if (token.current === next) action.run(); }
+        run: () => {
+          if (token.current !== next) return;
+          action.run(() => { if (token.current === next) clear(); });
+        }
       } } : {}),
       detail: words.detail ?? null,
       message: words.message,
@@ -270,9 +274,10 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
       timer.current = null;
       setNotice(null);
     }, durationMs);
-  }, [durationMs]);
+  }, [clear, durationMs]);
 
   useEffect(() => () => {
+    token.current += 1;
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   }, []);

@@ -50,6 +50,21 @@ describe("durable dashboard projection", () => {
     });
   });
 
+  it("projects a Calendar drag only over its original completed server version", () => {
+    const expectedUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const original = { ...entry("dragged"), stoppedAt: "2026-08-22T10:30:00.000Z", updatedAt: expectedUpdatedAt };
+    const command: PendingTimeEntryCommand = {
+      ...OWNER, clientCommandId: "calendar-drag", operation: "update", targetEntryId: original.id,
+      expectedUpdatedAt, patch: { stoppedAt: "2026-08-22T10:35:00.000Z" },
+      updatedAt: "2026-08-22T11:01:00.000Z", createdAt: "2026-08-22T11:01:00.000Z", attemptCount: 0
+    };
+    const project = (block: typeof original) =>
+      projectDurableLocalWork(bootstrap({ entries: [block] }), work({ timeEntryCommands: [command] })).entries[0];
+    expect(project(original).stoppedAt).toBe(command.patch?.stoppedAt);
+    const newer = { ...original, stoppedAt: "2026-08-22T10:45:00.000Z", updatedAt: "2026-08-22T11:02:00.000Z" };
+    expect(project(newer)).toEqual(newer);
+  });
+
   it("layers persisted-entry Edit and Delete commands over every server snapshot", () => {
     const edited = entry("persisted-edit");
     const deleted = entry("persisted-delete");

@@ -669,6 +669,14 @@ export async function listTimeEntrySyncIssues(owner?: MobileAccountOwner) {
     .filter((command) => command.failureKind === "permanent");
 }
 
+export function isTimeEntryVersionConflict(command: PendingTimeEntryCommand) {
+  return Boolean(command.expectedUpdatedAt && command.lastStatusCode === 409);
+}
+
+export function canRetryTimeEntrySyncIssue(command: PendingTimeEntryCommand) {
+  return !command.refusedStart && !isTimeEntryVersionConflict(command);
+}
+
 export async function retryTimeEntrySyncIssue(
   clientCommandId: string,
   owner?: MobileAccountOwner
@@ -682,7 +690,7 @@ export async function retryTimeEntrySyncIssue(
       if (
         command.clientCommandId !== clientCommandId ||
         command.failureKind !== "permanent" ||
-        command.refusedStart ||
+        !canRetryTimeEntrySyncIssue(command) ||
         !mobileAccountOwnersEqual(command, resolvedOwner)
       ) {
         return command;

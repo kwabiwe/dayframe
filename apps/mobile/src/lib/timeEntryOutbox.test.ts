@@ -102,7 +102,9 @@ describe("durable time-entry outbox", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ ...patch, expectedUpdatedAt: version });
     expect(await outbox.isTimeEntryCommandRejected(OWNER_A, command.clientCommandId)).toBe(true);
+    expect(await outbox.retryTimeEntrySyncIssue(command.clientCommandId, OWNER_A)).toBe(false);
     expect(await outbox.undoHeldTimeEntryUpdate(OWNER_A, command.clientCommandId, () => true)).toBe(false);
+    expect(await outbox.discardTimeEntrySyncIssue(command.clientCommandId, OWNER_A)).toBe(true);
   });
 
   it("retries a completed copy using the durable command and expected result ID after relaunch", async () => {

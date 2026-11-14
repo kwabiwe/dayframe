@@ -3077,6 +3077,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const entry = mobileTimeEntryById(latestData.current, entryId);
         return todayNoticeOwnerStill(session) && !entry?.pendingCompletedCopy && Boolean(entry?.stoppedAt) &&
           isCurrentTimerMutation(entryId, savedVersion) &&
+          Date.parse(entry?.updatedAt ?? "") === Date.parse(current.updatedAt ?? "") &&
           Date.parse(entry?.startedAt ?? "") === proposedStart && Date.parse(entry?.stoppedAt ?? "") === proposedEnd;
       };
       const title = current.description?.trim() || current.categoryName || "block";
@@ -3084,7 +3085,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const expiry = setTimeout(release, BLOCKS_TOAST_DURATION_MS);
       todayNotice.show(message, toastSwatchColor(current, theme.mode), {
         label: `Undo changing the time of ${title}`,
-        run: () => {
+        run: (clearDragNotice) => {
           if (!undoStillCurrent() || calendarDragSaves.current.has(entryId)) return;
           calendarDragSaves.current.add(entryId);
           void undoHeldTimeEntryUpdate(owner, clientCommandId, undoStillCurrent).then((undone) => {
@@ -3092,7 +3093,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             clearTimeout(expiry);
             lease.end();
             if (!undoStillCurrent()) return;
-            clearTodayNotice();
+            clearDragNotice();
             nextTimerMutationVersion(entryId);
             updateDashboardData((data) => optimisticPatchTimeEntry(data, entryId, restore));
             playHaptic("undoRestore");

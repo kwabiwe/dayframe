@@ -212,10 +212,12 @@ import {
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 import {
+  canRetryTimeEntrySyncIssue,
   clearDeviceTimeEntryOutboxQuarantine,
   clearTimeEntryOutboxQuarantine,
   discardTimeEntrySyncIssue,
   getTimeEntryOutboxDiagnostics,
+  isTimeEntryVersionConflict,
   listTimeEntrySyncIssues,
   retryTimeEntrySyncIssue,
   subscribeTimeEntryOutbox
@@ -1517,14 +1519,17 @@ export default function SettingsScreen() {
     });
   }
 
-  function confirmDiscardTimeEntryIssue(clientCommandId: string, refusedStart = false) {
+  function confirmDiscardTimeEntryIssue(issue: (typeof timeEntrySyncIssues)[number]) {
+    const { clientCommandId, refusedStart } = issue;
     void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard this block change?",
       // A refused Start's block was never saved, so there is no earlier version (Codex r2 on #532).
       message: refusedStart
         ? "The block this was for was never saved. Only this change is removed from this iPhone."
-        : "Your account already shows the earlier version. Only this change is removed from this iPhone.",
+        : isTimeEntryVersionConflict(issue)
+          ? "The newer version stays in your account. Only this change is removed from this iPhone."
+          : "Your account already shows the earlier version. Only this change is removed from this iPhone.",
       confirmLabel: "Discard",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -2758,7 +2763,7 @@ export default function SettingsScreen() {
                 <SettingsBlockGroup
                   foot={needsAttentionFoot({
                     tryAgain: timerStopSyncIssues.some((issue) => !issue.refusedSplit) ||
-                      timeEntrySyncIssues.some((issue) => !issue.refusedStart) ||
+                      timeEntrySyncIssues.some(canRetryTimeEntrySyncIssue) ||
                       reviewSyncIssues.length > 0 ||
                       queueDiagnostics.permanentFailedCount > 0,
                     discard: timerStopSyncIssues.length + timeEntrySyncIssues.length > 0 ||
@@ -2790,7 +2795,9 @@ export default function SettingsScreen() {
                         // Its block's Start was refused, so there is nothing to change and nothing to retry
                         // (Codex r1 on #532): Discard only.
                         ? `From ${formatQueueTime(issue.updatedAt, clockFormat)}. The block this was for was never saved, so there's nothing to change.`
-                        : `From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
+                        : isTimeEntryVersionConflict(issue)
+                          ? "The block changed before this edit could sync. Discard this edit, then open Calendar to change the current block."
+                          : `From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
@@ -2799,8 +2806,8 @@ export default function SettingsScreen() {
                         : issue.copy?.action.kind === "duplicate" ? "Couldn't duplicate a block"
                         : "Couldn't save an edit"}
                     >
-                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel="Try this block change again" label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
-                      <SettingsPillButton accessibilityLabel="Discard this block change" danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
+                      {canRetryTimeEntrySyncIssue(issue) ? <SettingsPillButton accessibilityLabel="Try this block change again" label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} /> : null}
+                      <SettingsPillButton accessibilityLabel="Discard this block change" danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {reviewSyncIssues.map((issue, index) => (
