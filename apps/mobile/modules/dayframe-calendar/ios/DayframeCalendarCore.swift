@@ -258,6 +258,10 @@ struct DayframeCalendarBlockEditRange: Equatable {
 
 /// Changes are relative to the original boundary so touching an off-grid block never jumps it.
 enum DayframeCalendarBlockEditMath {
+  static func exceedsDragSlop(currentY: Double, startY: Double) -> Bool {
+    abs(currentY - startY) > 5
+  }
+
   /// Small blocks keep their full body for moving. Their edges remain editable in the sheet.
   static func mode(at y: Double, top: Double, bottom: Double) -> DayframeCalendarBlockEditMode {
     let edge = 9.0

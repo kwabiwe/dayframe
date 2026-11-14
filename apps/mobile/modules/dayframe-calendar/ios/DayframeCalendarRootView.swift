@@ -302,6 +302,7 @@ private struct DayframeCalendarTimelineCanvas: View {
           DayframeCalendarBlockDragLayer(
             hourHeight: hourHeight,
             clockFormat: presentation.clockFormat,
+            textScale: model.labelTextScale,
             preview: preview,
             reduceTransparency: presentation.reduceTransparency,
             theme: theme
@@ -411,20 +412,29 @@ private struct DayframeCalendarNowMarker: View {
 private struct DayframeCalendarBlockDragLayer: View {
   let hourHeight: CGFloat
   let clockFormat: String
+  let textScale: Double
   let preview: DayframeCalendarBlockEditPreview
   let reduceTransparency: Bool
   let theme: DayframeCalendarTheme
 
   var body: some View {
     let top = CGFloat(preview.range.startMinute / 60) * hourHeight
-    let height = CGFloat((preview.range.endMinute - preview.range.startMinute) / 60) * hourHeight
+    let duration = max(1, preview.range.endMinute - preview.range.startMinute)
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: max(
+        DayframeCalendarDayLayout.labelMinimumHeight(textScale: textScale),
+        duration / 60 * Double(hourHeight)
+      ),
+      continuesIntoNextDay: false
+    )
+    let height = CGFloat(visual.visualHeight)
     let width = CGFloat(preview.frame.maxX - preview.frame.minX)
     let accent = UIColor(dayframeCSS: theme.accent)
     let fill = accent.dayframeBlended(
       over: UIColor(dayframeCSS: theme.surface),
       alpha: reduceTransparency ? 0.34 : 0.22
     )
-    let shape = RoundedRectangle(cornerRadius: min(6, height / 3), style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius), style: .continuous)
 
     ZStack(alignment: .leading) {
       shape.fill(Color(uiColor: fill))

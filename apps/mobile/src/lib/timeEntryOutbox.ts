@@ -91,6 +91,7 @@ export type PendingTimeEntryCommand = MobileAccountOwner & {
   targetEntryId?: string;
   optimisticEntryId?: string;
   patch?: TimeEntryUpdatePatch;
+  expectedUpdatedAt?: string;
   deliverAfter?: string;
   createdAt: string;
   updatedAt: string;
@@ -174,6 +175,9 @@ export async function enqueueTimeEntryUpdate(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   patch: TimeEntryUpdatePatch;
+  expectedUpdatedAt?: string;
+  deliverAfter?: string;
+  holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
@@ -181,6 +185,9 @@ export async function enqueueTimeEntryUpdate(input: {
     target: input.target,
     operation: "update",
     patch: input.patch,
+    expectedUpdatedAt: input.expectedUpdatedAt,
+    deliverAfter: input.deliverAfter,
+    holdLease: input.holdLease,
     requestImmediateDelivery: input.requestImmediateDelivery
   });
 }
@@ -329,6 +336,29 @@ export async function undoHeldTimeEntrySplit(
     const next = all.filter((item) => !mobileAccountOwnersEqual(item, owner) ||
       (item.clientCommandId !== clientCommandId && item.optimisticEntryId !== secondLocalId));
     await writeAllCommands(next);
+    dropHold(clientCommandId);
+    return true;
+  });
+}
+
+/** Cancel a version-fenced edit before dispatch, without issuing a second PATCH. */
+export async function undoHeldTimeEntryUpdate(
+  owner: MobileAccountOwner,
+  clientCommandId: string,
+  isStillCurrent: () => boolean
+) {
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    const command = all.find((item) =>
+      item.clientCommandId === clientCommandId && mobileAccountOwnersEqual(item, owner)
+    );
+    if (command?.operation !== "update" || !command.expectedUpdatedAt ||
+        !heldCommands.has(clientCommandId) || !isHeld(command, new Date()) ||
+        dispatchedCommandIds.has(clientCommandId) ||
+        all.some((item) => item !== command && item.targetEntryId === command.targetEntryId &&
+          mobileAccountOwnersEqual(item, owner) && !item.copyAcknowledged) ||
+        !isStillCurrent()) return false;
+    await writeAllCommands(all.filter((item) => item !== command));
     dropHold(clientCommandId);
     return true;
   });
@@ -853,7 +883,7 @@ async function runTimeEntryCommandDrain(input: {
     if (!input.signal && input.isForeground?.() === false) {
       return currentOutboxResult(input.owner, deliveredCount, true, "foreground_required");
     }
-    if (original.split) {
+    if (original.split || original.expectedUpdatedAt) {
       // Undo and dispatch claim the same durable command under the outbox lock.
       const dispatchable = await withMutation(async () => {
         const latest = (await readAllCommands()).find((command) => command.clientCommandId === original.clientCommandId);
@@ -878,7 +908,10 @@ async function runTimeEntryCommandDrain(input: {
             ...(copy.action.kind === "split" ? { splitAt: copy.action.splitAt } : {})
           }
         : split ? { mode: "split-running", entryId: targetEntryId, splitAt: split.splitAt, source: "mobile_app" }
-        : original.operation === "update" ? original.patch ?? {} : undefined;
+        : original.operation === "update" ? {
+          ...original.patch,
+          ...(original.expectedUpdatedAt ? { expectedUpdatedAt: original.expectedUpdatedAt } : {})
+        } : undefined;
       const response = await mobileFetchWithTimeout(
         DAYFRAME_API_BASE + path,
         {
@@ -1022,6 +1055,7 @@ async function enqueueTimeEntryCommand(input: {
   copy?: PendingCompletedEntryCopy;
   split?: PendingRunningSplit;
   patch?: TimeEntryUpdatePatch;
+  expectedUpdatedAt?: string;
   deliverAfter?: string;
   holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
@@ -1032,6 +1066,13 @@ async function enqueueTimeEntryCommand(input: {
   }
   return withMutation(async () => {
     const all = await readAllCommands();
+    if (input.expectedUpdatedAt && (
+      !validIso(input.expectedUpdatedAt) || !input.target.targetEntryId ||
+      all.some((command) => mobileAccountOwnersEqual(command, input.owner) &&
+        command.targetEntryId === input.target.targetEntryId && !command.copyAcknowledged)
+    )) {
+      throw new PendingCompletedEntryChangeError("Wait for this block's existing change to sync before dragging it.");
+    }
     if (input.copy && all.some((command) =>
       mobileAccountOwnersEqual(command, input.owner) && !command.copyAcknowledged &&
       (command.targetEntryId === input.target.targetEntryId || command.copy?.copyId === input.target.targetEntryId)
@@ -1066,6 +1107,7 @@ async function enqueueTimeEntryCommand(input: {
       workspaceId: input.owner.workspaceId,
       ...input.target,
       ...(input.operation === "update" ? { patch: input.patch ?? {} } : {}),
+      ...(input.expectedUpdatedAt ? { expectedUpdatedAt: input.expectedUpdatedAt } : {}),
       ...(input.copy ? { copy: input.copy } : {}),
       ...(input.split ? { split: input.split } : {}),
       ...(validIso(input.deliverAfter) && !fenced ? { deliverAfter: input.deliverAfter } : {}),
@@ -1600,9 +1642,12 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
   const createdAt = validIso(item.createdAt);
   const updatedAt = validIso(item.updatedAt);
   const copy = operation === "copy" ? parseCompletedEntryCopy(item.copy) : null;
+  const expectedUpdatedAt = validIso(item.expectedUpdatedAt);
   const split = operation === "split" ? parseRunningSplit(item.split) : null;
   if (
     (operation === "copy" && (!copy || !targetEntryId || optimisticEntryId)) ||
+    (item.expectedUpdatedAt !== undefined &&
+      (!expectedUpdatedAt || operation !== "update" || !targetEntryId || optimisticEntryId)) ||
     (operation === "split" && (!split || Boolean(targetEntryId) === Boolean(optimisticEntryId))) ||
     !clientCommandId || !operation || !userId || !workspaceId ||
     (!targetEntryId && !optimisticEntryId) || !createdAt || !updatedAt
@@ -1625,6 +1670,7 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
     ...(operation === "update" && item.patch && typeof item.patch === "object"
       ? { patch: item.patch as TimeEntryUpdatePatch }
       : {}),
+    ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
     createdAt,
     updatedAt,
     attemptCount: typeof item.attemptCount === "number" && Number.isFinite(item.attemptCount)

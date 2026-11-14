@@ -59,6 +59,52 @@ describe("durable time-entry outbox", () => {
     vi.useRealTimers();
   });
 
+  it("undoes only the owned versioned edit before dispatch and sends no compensating patch", async () => {
+    const lease = outbox.createTimeEntryCommandHoldLease();
+    const expectedUpdatedAt = "2026-08-22T11:00:00.000Z";
+    const input = {
+      owner: OWNER_A,
+      target: { targetEntryId: "dragged-block" },
+      patch: { startedAt: "2026-08-22T09:30:00.000Z" },
+      expectedUpdatedAt,
+      holdLease: lease,
+      deliverAfter: "2026-08-22T12:00:05.000Z"
+    };
+    const command = await outbox.enqueueTimeEntryUpdate(input);
+    await expect(outbox.enqueueTimeEntryUpdate(input)).rejects.toBeInstanceOf(outbox.PendingCompletedEntryChangeError);
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    const sync = { owner: OWNER_A, correlations: new Map<string, string>(), force: true };
+    expect((await outbox.synchroniseTimeEntryCommands(sync)).reason).toBe("deferred");
+    expect(await outbox.undoHeldTimeEntryUpdate(OWNER_B, command.clientCommandId, () => true)).toBe(false);
+    expect(await outbox.undoHeldTimeEntryUpdate(OWNER_A, command.clientCommandId, () => false)).toBe(false);
+    expect(await outbox.undoHeldTimeEntryUpdate(OWNER_A, command.clientCommandId, () => true)).toBe(true);
+    await outbox.synchroniseTimeEntryCommands(sync);
+    expect(request).not.toHaveBeenCalled();
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([]);
+  });
+
+  it("keeps the drag's exact server version through a relaunch and refuses to replace a newer edit", async () => {
+    const version = "2026-08-22T11:00:00.000Z";
+    const patch = { stoppedAt: "2026-08-22T10:30:00.000Z" };
+    const command = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A, target: { targetEntryId: "dragged-block" }, patch,
+      expectedUpdatedAt: version, holdLease: outbox.createTimeEntryCommandHoldLease(),
+      deliverAfter: "2026-08-22T12:00:05.000Z"
+    });
+    outbox.__resetTimeEntryOutboxForTests();
+    const request = vi.fn().mockResolvedValue(new Response('{"error":"A newer edit exists"}', { status: 409 }));
+    vi.stubGlobal("fetch", request);
+    const sync = { owner: OWNER_A, correlations: new Map<string, string>(), force: true };
+    expect((await outbox.synchroniseTimeEntryCommands(sync)).reason).toBe("deferred");
+    vi.setSystemTime(new Date("2026-08-22T12:00:06.000Z"));
+    expect((await outbox.synchroniseTimeEntryCommands(sync)).deliveredCount).toBe(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ ...patch, expectedUpdatedAt: version });
+    expect(await outbox.isTimeEntryCommandRejected(OWNER_A, command.clientCommandId)).toBe(true);
+    expect(await outbox.undoHeldTimeEntryUpdate(OWNER_A, command.clientCommandId, () => true)).toBe(false);
+  });
+
   it("retries a completed copy using the durable command and expected result ID after relaunch", async () => {
     const expectedUpdatedAt = "2026-08-22T11:00:00.000Z";
     const command = await outbox.enqueueCompletedEntryCopy({

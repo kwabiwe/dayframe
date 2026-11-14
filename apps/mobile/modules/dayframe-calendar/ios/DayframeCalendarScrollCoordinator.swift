@@ -94,7 +94,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
               !presentation.isList,
               !presentation.refreshing else { return false }
         return presentation.entries.contains {
-          $0.entryId == entryId && $0.canDragEdit
+          $0.entryId == entryId && $0.canDragEdit && !$0.asking
             && $0.startedAtMs == startMs && $0.stoppedAtMs == endMs
         }
       }
@@ -103,6 +103,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private struct BlockEditDrag {
       let target: BlockEditTarget
       let startY: Double
+      let startViewportY: Double
+      var hasMoved = false
     }
 
     private final class DisplayLinkProxy: NSObject {
@@ -491,12 +493,13 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         let contentY = Double(gesture.location(in: scrollView).y)
         if case let .block(target) = target {
           guard submittedBlockEdit == nil, target.stillMatches(model.presentation) else { return }
-          blockEditDrag = BlockEditDrag(target: target, startY: contentY)
+          blockEditDrag = BlockEditDrag(
+            target: target, startY: contentY, startViewportY: contentY - Double(scrollView.bounds.minY)
+          )
           stopButtonZoom()
           setCreationGestureLock(true)
           updateBlockEditDrag(contentY: contentY, model: model)
           if model.presentation.hapticsEnabled { selectionHaptic.selectionChanged() }
-          updateEdgeAutoscrollIntent(for: gesture, in: scrollView)
           return
         }
         guard case let .creation(request) = target,
@@ -541,10 +544,15 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           cancelLongPressRecognition()
           return
         }
-        updateLongPressDrag(
-          contentY: Double(gesture.location(in: scrollView).y),
-          model: model
-        )
+        let contentY = Double(gesture.location(in: scrollView).y)
+        if var drag = blockEditDrag, !drag.hasMoved,
+           DayframeCalendarBlockEditMath.exceedsDragSlop(
+             currentY: contentY - Double(scrollView.bounds.minY), startY: drag.startViewportY
+           ) {
+          drag.hasMoved = true
+          blockEditDrag = drag
+        }
+        updateLongPressDrag(contentY: contentY, model: model)
         updateEdgeAutoscrollIntent(for: gesture, in: scrollView)
 
       case .ended:
@@ -728,7 +736,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         let entry = hit.entry
         guard submittedBlockEdit == nil,
               hit.drawn.contains(point),
-              entry.canDragEdit,
+              entry.canDragEdit, !entry.asking,
               let endMs = entry.stoppedAtMs,
               presentation.dayEndMs - presentation.dayStartMs == 86_400_000,
               entry.startedAtMs >= presentation.dayStartMs,
@@ -771,7 +779,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       let target = drag.target
       guard target.stillMatches(model.presentation),
             let range = DayframeCalendarBlockEditMath.range(
-              original: target.original, mode: target.mode, startY: drag.startY, currentY: contentY,
+              original: target.original, mode: target.mode, startY: drag.startY,
+              currentY: drag.hasMoved ? contentY : drag.startY,
               hourHeight: Double(model.hourHeight),
               latestMinute: (model.presentation.nowMs - target.dayStartMs) / 60_000
             ) else {
@@ -918,7 +927,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           viewportHeight: Double(scrollView.bounds.height)
         ),
         velocity != 0,
-        hasLongPressDrag
+        (blockEditDrag?.hasMoved ?? (creationDragState.session != nil))
       else {
         stopEdgeAutoscroll()
         return

@@ -97,7 +97,7 @@ import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFl
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayChecksChip } from "./today/TodayChecksChip";
 import { TodayBlockRows } from "./today/TodayBlockRows";
-import { BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
+import { BLOCKS_TOAST_DURATION_MS, BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
 import { useTripOptOut } from "../lib/useTripOptOut";
 import {
   alreadyRecordingToastMessage,
@@ -222,6 +222,7 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
+  createTimeEntryCommandHoldLease,
   enqueueCompletedEntryCopy,
   PendingCompletedEntryChangeError,
   enqueueTimeEntryUpdate,
@@ -232,7 +233,8 @@ import {
   type TimeEntryCommandHoldLease,
   subscribeDeliveredTimeEntryDeletes,
   subscribeTimeEntryOutbox,
-  synchroniseTimeEntryCommands
+  synchroniseTimeEntryCommands,
+  undoHeldTimeEntryUpdate
 } from "@/lib/timeEntryOutbox";
 import {
   type TimeEntrySheetOpenReason,
@@ -263,6 +265,7 @@ import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { captureSettingsSeedGeneration, publishTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import {
   buildNativeCalendarBridgeState,
+  calendarBlockDragPatches,
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh,
   type NativeCalendarActionKind,
@@ -3017,59 +3020,92 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function saveCalendarDrag(change: DayframeCalendarBlockEditEvent) {
-    const owner = todayNoticeOwner();
-    if (!todayNoticeOwnerStill(owner) || calendarLayout !== "grid" || change.dayKey !== selectedDayKey
+    const session = todayNoticeOwner();
+    const bootstrap = latestData.current;
+    if (!bootstrap || !todayNoticeOwnerStill(session) || calendarLayout !== "grid" || change.dayKey !== selectedDayKey
         || gridModel.refreshing || refreshing || calendarDragSaves.current.has(change.entryId)) return;
 
     const visible = gridModel.entries.find((entry) => entry.entryId === change.entryId);
-    const current = mobileTimeEntryById(latestData.current, change.entryId);
-    if (!visible?.canDragEdit || !current?.stoppedAt || current.pendingCompletedCopy) return;
+    const current = mobileTimeEntryById(bootstrap, change.entryId);
+    const persistedId = persistedTimerEntryId(change.entryId);
+    if (!visible?.canDragEdit || !current?.stoppedAt || !current.updatedAt ||
+        !persistedId || persistedId !== change.entryId || current.pendingCompletedCopy) return;
 
-    const originalStart = Date.parse(current.startedAt);
-    const originalEnd = Date.parse(current.stoppedAt);
-    const dayStart = gridModel.dayStartMs;
-    const dayEnd = gridModel.dayEndMs;
-    const proposedStart = dayStart + Math.round(change.startMinute * 60_000);
-    const proposedEnd = dayStart + Math.round(change.endMinute * 60_000);
-    if (originalStart !== change.originalStartMs || originalEnd !== change.originalEndMs
-        || dayEnd - dayStart !== 86_400_000 || originalStart < dayStart || originalEnd > dayEnd
-        || !(proposedStart >= dayStart && proposedEnd > proposedStart && proposedEnd <= Math.min(Date.now(), dayEnd))) return;
-
-    const patch: TimeEntryUpdatePatch = {};
-    const restore: TimeEntryUpdatePatch = {};
-    if (originalStart !== proposedStart) {
-      patch.startedAt = new Date(proposedStart).toISOString();
-      restore.startedAt = current.startedAt;
-    }
-    if (originalEnd !== proposedEnd) {
-      patch.stoppedAt = new Date(proposedEnd).toISOString();
-      restore.stoppedAt = current.stoppedAt;
-    }
-    if (!patch.startedAt && !patch.stoppedAt) return;
+    const edit = calendarBlockDragPatches(change, current, gridModel, Date.now());
+    if (!edit) return;
+    const { patch, restore, proposedStart, proposedEnd } = edit;
 
     const { entryId } = change;
+    const owner = timerStopOwner(bootstrap);
+    const lease = createTimeEntryCommandHoldLease();
     calendarDragSaves.current.add(entryId);
     try {
-      if (!await saveCalendarEntryEdit(entryId, patch) || !todayNoticeOwnerStill(owner)) return;
-      const savedVersion = timerMutationVersions.current.get(entryId);
+      const { clientCommandId } = await enqueueTimeEntryUpdate({
+        owner,
+        target: { targetEntryId: entryId },
+        patch,
+        expectedUpdatedAt: current.updatedAt,
+        holdLease: lease,
+        deliverAfter: new Date(Date.now() + BLOCKS_TOAST_DURATION_MS).toISOString()
+      });
+      const release = () => {
+        lease.end();
+        void releaseTimeEntryCommands([clientCommandId], {
+          owner, requestImmediateDelivery: todayNoticeOwnerStill(session) && connectivityCurrent.current.isOnline
+        }).then((released) => {
+          if (released && todayNoticeOwnerStill(session)) deliverQueuedTimeEntry(owner, clientCommandId);
+        }).catch(() => undefined);
+      };
+      if (!todayNoticeOwnerStill(session)) {
+        release();
+        return;
+      }
+      const latest = mobileTimeEntryById(latestData.current, entryId);
+      if (latest?.updatedAt !== current.updatedAt || !latest.stoppedAt ||
+          Date.parse(latest.startedAt) !== change.originalStartMs ||
+          Date.parse(latest.stoppedAt) !== change.originalEndMs) {
+        const removed = await undoHeldTimeEntryUpdate(owner, clientCommandId, () => todayNoticeOwnerStill(session));
+        lease.end();
+        if (removed) showTodayNotice("This block changed. Try dragging it again.", null);
+        return;
+      }
+      const savedVersion = nextTimerMutationVersion(entryId);
+      updateDashboardData((data) => optimisticPatchTimeEntry(data, entryId, patch));
+      queuedTimerStartRecoveryRequested.current = true;
+
+      const undoStillCurrent = () => {
+        const entry = mobileTimeEntryById(latestData.current, entryId);
+        return todayNoticeOwnerStill(session) && !entry?.pendingCompletedCopy && Boolean(entry?.stoppedAt) &&
+          isCurrentTimerMutation(entryId, savedVersion) &&
+          Date.parse(entry?.startedAt ?? "") === proposedStart && Date.parse(entry?.stoppedAt ?? "") === proposedEnd;
+      };
       const title = current.description?.trim() || current.categoryName || "block";
       const message = patch.startedAt && patch.stoppedAt ? "Block moved" : "Block resized";
+      const expiry = setTimeout(release, BLOCKS_TOAST_DURATION_MS);
       todayNotice.show(message, toastSwatchColor(current, theme.mode), {
         label: `Undo changing the time of ${title}`,
         run: () => {
-          const latest = mobileTimeEntryById(latestData.current, entryId);
-          if (!todayNoticeOwnerStill(owner) || !latest?.stoppedAt
-              || calendarDragSaves.current.has(entryId)
-              || timerMutationVersions.current.get(entryId) !== savedVersion
-              || Date.parse(latest.startedAt) !== proposedStart
-              || Date.parse(latest.stoppedAt) !== proposedEnd) return;
-          clearTodayNotice();
+          if (!undoStillCurrent() || calendarDragSaves.current.has(entryId)) return;
           calendarDragSaves.current.add(entryId);
-          void saveCalendarEntryEdit(entryId, restore).then((undone) => {
-            if (undone && todayNoticeOwnerStill(owner)) playHaptic("undoRestore");
+          void undoHeldTimeEntryUpdate(owner, clientCommandId, undoStillCurrent).then((undone) => {
+            if (!undone) return;
+            clearTimeout(expiry);
+            lease.end();
+            if (!undoStillCurrent()) return;
+            clearTodayNotice();
+            nextTimerMutationVersion(entryId);
+            updateDashboardData((data) => optimisticPatchTimeEntry(data, entryId, restore));
+            playHaptic("undoRestore");
+          }).catch(() => {
+            if (todayNoticeOwnerStill(session)) showTodayNotice("Dayframe couldn't undo this change.", null);
           }).finally(() => { calendarDragSaves.current.delete(entryId); });
         }
       });
+    } catch (error) {
+      lease.end();
+      if (!todayNoticeOwnerStill(session)) return;
+      if (error instanceof PendingCompletedEntryChangeError) showTodayNotice(error.message, null);
+      else Alert.alert("Block not saved", "Dayframe could not save this change on your iPhone. Check available storage and try again.");
     } finally {
       calendarDragSaves.current.delete(entryId);
     }

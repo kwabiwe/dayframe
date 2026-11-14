@@ -1,7 +1,7 @@
 import { requireNativeViewManager } from "expo-modules-core";
 import { useMemo, type ComponentType } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
-import type { NativeCalendarPresentation } from "../../../src/lib/nativeCalendarPresentation";
+import type { NativeCalendarBlockEdit, NativeCalendarPresentation } from "../../../src/lib/nativeCalendarPresentation";
 
 export type DayframeCalendarSelectDayEvent = { dayKey: string };
 export type DayframeCalendarChangeDayEvent = { days: number };
@@ -12,14 +12,7 @@ export type DayframeCalendarChangeLayoutEvent = { layout: "grid" | "list" };
 export type DayframeCalendarHeaderHeightEvent = { height: number };
 export type DayframeCalendarCreateEntryEvent = { dayKey: string; startMinute: number };
 
-export type DayframeCalendarBlockEditEvent = {
-  dayKey: string;
-  entryId: string;
-  originalStartMs: number;
-  originalEndMs: number;
-  startMinute: number;
-  endMinute: number;
-};
+export type DayframeCalendarBlockEditEvent = NativeCalendarBlockEdit;
 
 export type DayframeCalendarViewProps = ViewProps & {
   model: NativeCalendarPresentation;

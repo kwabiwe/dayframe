@@ -2,6 +2,14 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testHoldingNearAnAutoscrollEdgeDoesNotStartADrag() {
+    for edge in [16.0, 640.0] {
+      XCTAssertFalse(DayframeCalendarBlockEditMath.exceedsDragSlop(currentY: edge, startY: edge))
+      XCTAssertFalse(DayframeCalendarBlockEditMath.exceedsDragSlop(currentY: edge + 2, startY: edge))
+      XCTAssertTrue(DayframeCalendarBlockEditMath.exceedsDragSlop(currentY: edge + 8, startY: edge))
+    }
+  }
+
   func testCompletedBlockEdgesResizeOnlyWhenThereIsRoomToPickTheBody() {
     XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 101, top: 100, bottom: 128), .resizeStart)
     XCTAssertEqual(DayframeCalendarBlockEditMath.mode(at: 114, top: 100, bottom: 128), .move)
