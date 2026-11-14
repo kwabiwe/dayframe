@@ -1,6 +1,6 @@
 import { DIVIDER_INSET_PAST_BLOCK, InsetDivider } from "../InsetDivider";
-import { useRef } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
@@ -24,6 +24,7 @@ export function TodaySwitchSheet({
   activityIconFor,
   nowMs,
   onClose,
+  onNewBlock,
   onPick,
   recents,
   reduceMotion,
@@ -34,6 +35,7 @@ export function TodaySwitchSheet({
   activityIconFor: (categoryId: string | null | undefined) => string | null;
   nowMs: number;
   onClose: () => void;
+  onNewBlock: (description: string) => void;
   onPick: (entry: MobileTimeEntry) => void;
   /** Taken when the sheet opened; the sheet never reorders while it is up. */
   recents: readonly SwitchRecent[];
@@ -45,7 +47,21 @@ export function TodaySwitchSheet({
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const picked = useRef(false);
+  const [description, setDescription] = useState("");
   const insets = useSafeAreaInsets();
+  const newDescription = description.trim();
+  const newBlockLabel = running ? "Switch to new block" : "Start new block";
+
+  function commit(choice: () => void) {
+    if (picked.current) return;
+    picked.current = true;
+    choice();
+    sheetRef.current?.dismiss();
+  }
+
+  function startNewBlock() {
+    if (newDescription) commit(() => onNewBlock(newDescription));
+  }
 
   return (
     <Modal
@@ -63,6 +79,10 @@ export function TodaySwitchSheet({
           backdropStyle={shared.sheetBackdrop}
           handleStyle={shared.sheetHandle}
           onDismiss={onClose}
+          onDismissStart={() => {
+            picked.current = true;
+            Keyboard.dismiss();
+          }}
           reduceMotion={reduceMotion}
           style={shared.activeEditSheet}
           testID="today-switch-sheet"
@@ -71,7 +91,12 @@ export function TodaySwitchSheet({
           <View style={styles.head}>
             <BlocksSheetHead eyebrow="SWITCH" theme={theme} title="Pick up something recent" />
           </View>
-          <ScrollView contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <ScrollView
+            automaticallyAdjustKeyboardInsets
+            contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) }]}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+          >
             {recents.length === 0 ? (
               <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>
                 Finished blocks with a description show up here.
@@ -87,13 +112,7 @@ export function TodaySwitchSheet({
                   accessibilityLabel={`${running ? "Switch to" : "Start"} ${title}, ${meta.replace(" · ", ", ")}`}
                   accessibilityRole="button"
                   key={entry.id}
-                  onPress={() => {
-                    // One pick per presentation, even if a second tap lands while the sheet leaves.
-                    if (picked.current) return;
-                    picked.current = true;
-                    onPick(entry);
-                    sheetRef.current?.dismiss();
-                  }}
+                  onPress={() => commit(() => onPick(entry))}
                   style={({ pressed }) => [
                     styles.row,
                     pressed ? styles.pressed : null,
@@ -129,6 +148,32 @@ export function TodaySwitchSheet({
               })}
               </View>
             )}
+            <View style={styles.newBlock}>
+              <TextInput
+                {...mobileTextProps("input")}
+                accessibilityLabel="New block description"
+                onChangeText={setDescription}
+                onSubmitEditing={startNewBlock}
+                placeholder="What are you working on?"
+                placeholderTextColor={theme.textSecondary}
+                returnKeyType="go"
+                style={[shared.activeEditDescriptionInput, styles.description, { color: theme.textPrimary }]}
+                testID="today-switch-description"
+                value={description}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !newDescription }}
+                disabled={!newDescription}
+                onPress={startNewBlock}
+                style={[styles.newBlockAction, { backgroundColor: newDescription ? theme.accent : theme.surfaceMuted }]}
+                testID="today-switch-new-block"
+              >
+                <Text {...mobileTextProps("control")} style={[styles.newBlockLabel, { color: newDescription ? theme.onAccent : theme.textSecondary }]}>
+                  {newBlockLabel}
+                </Text>
+              </Pressable>
+            </View>
           </ScrollView>
         </SwipeDismissSheet>
       </View>
@@ -147,4 +192,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, gap: 2, minWidth: 0 },
   rowTitle: { fontSize: 15, fontWeight: "600" },
   rowMeta: { fontSize: 13 },
+  newBlock: { gap: 8, paddingTop: 14 },
+  description: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 14, paddingVertical: 10 },
+  newBlockAction: { alignItems: "center", alignSelf: "flex-end", borderRadius: 999, justifyContent: "center", minHeight: 44, paddingHorizontal: 14, paddingVertical: 8 },
+  newBlockLabel: { fontSize: 15, fontWeight: "600", textAlign: "center" },
 });

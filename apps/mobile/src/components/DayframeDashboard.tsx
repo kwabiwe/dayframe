@@ -4502,6 +4502,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
           nowMs={minuteNow}
           onClose={() => setSwitchSheetRecents(null)}
+          onNewBlock={(description) => startFromToday(null, description)}
           onPick={switchToRecent}
           recents={switchSheetRecents}
           running={Boolean(activeEntryForDisplay)}
