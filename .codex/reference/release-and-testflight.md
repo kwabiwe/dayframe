@@ -39,17 +39,25 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (148)` (2026-11-09)
+- Last repository-recorded verified build: `0.1.0 (149)` (2026-11-15)
 - Group: `Internal Health Debug`
+- App Store Connect build ID: `20c6de28-4853-47d9-858b-0d4a9b86bdba`
+- Archived commit: `7fcc7a04f6aeea1aee3ea9119da73c1883ebcb12`, built in a detached worktree pinned to that SHA.
+- Apple upload delivery UUID `20c6de28-4853-47d9-858b-0d4a9b86bdba`. App Store Connect recorded the upload at 10:06:56 GMT on 15 Nov 2026. The Apple Distribution-signed app and Live Activity extension use the production shared containers and `https://dayframe-web.vercel.app`.
+- The wired iPhone 11 passed exact signed Staging sign-in, Today Switch and Cancel, Calendar date navigation and completed-block editing, and Reports Week and Month. The warm-up measured 6.7705% CPU and +2.2380 MB/min over 363.489 s. The warmed gate measured 6.7796% CPU and +0.4357 MB/min over 334.976 s against the 15.1% CPU and 2 MB/min iPhone 11 limits. The same visible timer advanced 734 s across 734 s between captures. Cleanup verified removal of the disposable fixture and runner, and restoration of the prior signed app and Staging alias.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 149 includes distinct pinned activity states (#720), new and recent iPhone task switching (#724), a clearer neutral Calendar block edge (#725), and completed-block move and resize with Undo (#726). Installed TestFlight 149 checks are pending.
+- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
+
+Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
+
+Build 148 was verified in Internal Health Debug on 9 Nov 2026.
+
 - Delivery/build ID: `a1be64bb-9ab1-4495-9e77-bd76b1791344`
 - Archived commit: `a7556906abeb11b70347437d2f7bb55fcb5888d1`, built in a detached worktree pinned to that SHA.
 - App Store Connect recorded the upload at 16:31:20 GMT on 9 Nov 2026. The Apple Distribution-signed app and Live Activity extension use the production shared containers and `https://dayframe-web.vercel.app`.
 - Exact signed Staging passed on the wired iPhone 11. The 309.415 s warm-up measured 6.7050% of one core and +2.6783 MB/min. The warmed 309.456 s gate measured 7.5485% and +1.9219 MB/min. The same Today timer advanced 638 s across 638 s between captures. The disposable timer, fixture and runner were removed, and the prior app, alias and protected state were verified.
 - App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 148 contains the iPhone activity picker (#712), editor Actions and Last stop (#714), Location permission and replay handling (#696), and running Split with Undo (#608). Installed 148 passed the editor, picker, Last stop, offline Running Split and Today performance checks.
 - On 9 Nov 2026, the wired iPhone 11 verified Actions, the Split minute wheel and Keep as one, historical and empty-day Last stop, running-editor activity search and Cancel, and Calendar activity search, Cancel, selection and Clear. Offline Undo restored the original running Start. A second Split and Stop survived a cold launch and reconnect, leaving two adjacent completed blocks, one canonical Split and one exact Stop. The original Calendar visit stayed unlinked, its Review stayed open, and no corrections were written. The same Today timer advanced 667 s over 666 s. The 309.373 s warmed installed repeat measured 5.1443% of one core and +0.7213 MB/min. Airplane Mode returned Off, the phone signed out, the runner was removed and all 16 scoped production counts were zero. The installed Location permission follow-up remains open.
-- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
-
-Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
 Build 147 came from `0f5ff1a95b6aab92cdadf86e49f5dbcfebd4fe92` and adds finished-block Split and Duplicate (#707). App Store Connect verified build `fbffb528-b302-4d38-9349-713aed715243` in Internal Health Debug after the 09:51:42 GMT upload on 8 Nov 2026. The signed wired iPhone 11 Staging gate measured 6.7855% CPU and +0.9950 MB/min. Installed 147 verified Keep as one, Split and offline Duplicate through cold relaunch and reconnect. The warmed installed window measured 5.0389% CPU and +0.8673 MB/min. The separate installed background Live Activity check verified a web edit, web Stop, three delivered APNs revisions and token retirement. Both runs passed scoped cleanup.
 
