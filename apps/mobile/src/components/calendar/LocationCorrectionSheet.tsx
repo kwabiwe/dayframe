@@ -1027,13 +1027,13 @@ function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotio
 }) {
   const [hasBaseline, setHasBaseline] = useState(!initialFlow);
   const height = useSharedValue(0);
-  const size = useAnimatedStyle(() => ({ height: height.value }));
-  useEffect(() => {
-    if (!open && !reduceMotion) height.value = withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
-  }, [height, open, reduceMotion]);
   const natural = reduceMotion || (!hasBaseline && open);
+  const size = useAnimatedStyle(() => ({ height: natural ? undefined : height.value }));
+  useEffect(() => {
+    if (!open) height.value = reduceMotion ? 0 : withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+  }, [height, open, reduceMotion]);
   return (
-    <Reanimated.View style={[styles.inlineClip, natural ? null : size]} testID={testID}>
+    <Reanimated.View style={[styles.inlineClip, size]} testID={testID}>
       {open ? (
         <Reanimated.View collapsable={false} exiting={reduceMotion ? undefined : localPresenceExiting(false)}
           style={natural ? undefined : styles.inlineMeasure}
