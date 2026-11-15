@@ -413,7 +413,6 @@ export function LocationCorrectionSheet({
   const activityFirst = Boolean(logAs && target.kind === "place" && !target.place.placeId && !target.place.learnedPlaceId);
   const hasLogDraft = Boolean(logCategoryId || (activityFirst && description));
   const [placePickerOpen, setPlacePickerOpen] = useState(activityFirst);
-  const [placePickerInteracted, setPlacePickerInteracted] = useState(false);
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const pendingActivityPick = useRef<string | null>(null);
   const [moreOptions, setMoreOptions] = useState(false);
@@ -806,10 +805,7 @@ export function LocationCorrectionSheet({
             <View>
               <View style={styles.inlineChoice}>
                 <Pressable accessibilityRole="button" accessibilityState={{ expanded: placePickerOpen }}
-                  onPress={() => {
-                    setPlacePickerInteracted(true);
-                    setPlacePickerOpen((open) => !open);
-                  }}
+                  onPress={() => setPlacePickerOpen((open) => !open)}
                   style={styles.inlineDisclosure} testID="location-correction-place-picker">
                   <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={19} />
                   <Text {...mobileTextProps("control")} numberOfLines={1}
@@ -831,7 +827,7 @@ export function LocationCorrectionSheet({
                   </Pressable>
                 ) : null}
               </View>
-              <InlineReveal initialFlow={!placePickerInteracted} onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
+              <InlineReveal initialFlow onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
                 testID="location-correction-inline-picker">
                 <View style={styles.view}>
                   {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
@@ -1029,12 +1025,13 @@ export function LocationCorrectionSheet({
 function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotion, testID }: {
   children: ReactNode; initialFlow: boolean; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
 }) {
+  const [hasBaseline, setHasBaseline] = useState(!initialFlow);
   const height = useSharedValue(0);
   const size = useAnimatedStyle(() => ({ height: height.value }));
   useEffect(() => {
     if (!open && !reduceMotion) height.value = withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
   }, [height, open, reduceMotion]);
-  const natural = initialFlow || reduceMotion;
+  const natural = reduceMotion || (!hasBaseline && open);
   return (
     <Reanimated.View style={[styles.inlineClip, natural ? null : size]} testID={testID}>
       {open ? (
@@ -1043,6 +1040,7 @@ function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotio
           onLayout={({ nativeEvent }) => {
             const measured = nativeEvent.layout.height;
             height.value = natural ? measured : withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+            if (!hasBaseline) setHasBaseline(true);
             onHeightChange?.(measured);
           }}>
           {children}
