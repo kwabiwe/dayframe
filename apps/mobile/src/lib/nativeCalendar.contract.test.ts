@@ -312,7 +312,8 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain(": Color(uiColor: blockColor).opacity(Double(tint))");
     expect(rootView).toContain("shape.fill(fill)");
     expect(rootView).toContain("blockColor.dayframeBlended(over: dark ? .white : .black, alpha: dark ? 0.62 : 0.52)");
-    expect(rootView).toContain("DayframeCalendarColourBar(color: Color(uiColor: blockColor), dashed: entry.isReview)");
+    expect(rootView).toContain("entry.isUncategorized && !entry.isReview ? Color(dayframeCSS: theme.textSecondary) : Color(uiColor: blockColor)");
+    expect(rootView).toContain("DayframeCalendarColourBar(color: leadingColor, dashed: entry.isReview)");
     expect(rootView).not.toContain("strokeBorder(Color(uiColor: blockColor)");
     expect(rootView).not.toContain("entry.textColor");
     expect(rootView).toContain(".foregroundStyle(ink)");

@@ -826,6 +826,7 @@ private struct DayframeCalendarBlockView: View {
       startsBeforeDay: metrics.startsBeforeDay
     )
     let blockColor = UIColor(dayframeCSS: entry.color)
+    let leadingColor = entry.isUncategorized && !entry.isReview ? Color(dayframeCSS: theme.textSecondary) : Color(uiColor: blockColor)
     let dark = theme.mode == "dark"
     // The mock-up's tint: 18 % light / 28 % dark for blocks; a suggestion is a light fill, 5 % / 8 % (owner
     // item K, 28 Oct 2026). Under Reduce Transparency it is opaque (blended over the surface) and a little stronger.
@@ -861,7 +862,7 @@ private struct DayframeCalendarBlockView: View {
       if entry.isReview {
         shape.stroke(Color(dayframeCSS: theme.warning).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
       }
-      DayframeCalendarColourBar(color: Color(uiColor: blockColor), dashed: entry.isReview)
+      DayframeCalendarColourBar(color: leadingColor, dashed: entry.isReview)
         .clipShape(shape)
       // Step 16: a trip block from 44 points tall shows its legs down its leading edge.
       if showsLegs {
