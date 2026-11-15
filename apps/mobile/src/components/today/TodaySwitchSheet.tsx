@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, searchHistoricalSuggestionCandidates, type RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
@@ -57,7 +57,6 @@ export function TodaySwitchSheet({
 }) {
   const [description, setDescription] = useState("");
   const [selection, setSelection] = useState<SwitchChoice | null>(null);
-  const commitRef = useRef<(() => void) | null>(null);
   const { fontScale } = useWindowDimensions();
   const rowHeight = Math.max(ROW_MIN_HEIGHT, Math.ceil(
     20 * Math.min(fontScale, MOBILE_TEXT_CAP.itemTitle) +
@@ -115,7 +114,6 @@ export function TodaySwitchSheet({
       action={action}
       actionTone="accent"
       automaticallyAdjustKeyboardInsets={false}
-      commitRef={commitRef}
       disabled={!query}
       fixedHeader={(
         <View style={styles.header}>
@@ -129,10 +127,9 @@ export function TodaySwitchSheet({
                 setSelection(null);
                 setDescription(text);
               }}
-              onSubmitEditing={() => commitRef.current?.()}
               placeholder="What are you working on?"
               placeholderTextColor={theme.textSecondary}
-              returnKeyType="go"
+              returnKeyType="done"
               style={[shared.activeEditDescriptionInput, styles.description, { color: theme.textPrimary }]}
               testID="today-switch-description"
               value={description}
