@@ -61,7 +61,7 @@ vi.mock(
   "@/lib/datePickerCalendar",
   async () => import("../../lib/datePickerCalendar"),
 );
-vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140 } }));
+vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140, sheet: 220 }, localPresenceExiting: () => undefined }));
 vi.mock("@/components/DateSheet", async () => import("../DateSheet"));
 vi.mock(
   "@/components/sheets/BottomSheetShell",
@@ -102,11 +102,12 @@ vi.mock(
   async () => import("../calendar/DatePickerCalendar"),
 );
 vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
-vi.mock("../icons/DayframeIcon", () => ({ ActivityIcon: "ActivityIcon" }));
+vi.mock("../icons/DayframeIcon", () => ({ ActivityIcon: "ActivityIcon", DayframeIcon: "DayframeIcon" }));
 const haptic = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/haptics", () => ({ playHaptic: haptic }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
+  Easing: { out: () => undefined, cubic: () => undefined },
   FadeIn: { duration: () => ({}) },
   FadeOut: { duration: () => ({}) },
   useSharedValue: (value: number) => ({ value }),
@@ -146,7 +147,8 @@ function mount(element: React.ReactElement) {
       const node = button(label);
       if (!node.props.disabled) node.props.onPress();
     });
-  return { tree, button, press };
+  const finishNativeDismissal = () => act(() => tree.root.findByType("Modal" as never).props.onDismiss());
+  return { tree, button, press, finishNativeDismissal };
 }
 describe("Reports sheet interactions", () => {
   beforeEach(() => {
@@ -298,8 +300,9 @@ describe("Reports sheet interactions", () => {
         mode === "include"
           ? { mode, keys: ["Work"], universe: ["Work", "Rest"] }
           : { mode, universe: ["Work", "Rest"] };
-      const { tree, button, press } = mount(
+      const { tree, button, press, finishNativeDismissal } = mount(
         <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
           {...{ draft, options, theme, onChange, onApply }}
           presentationId={1}
           onDismissed={onDismissed}
@@ -350,21 +353,22 @@ describe("Reports sheet interactions", () => {
         alignSelf: "stretch",
         width: "100%",
       });
-      press("Close Filter activities");
+      finishNativeDismissal();
       expect(onDismissed).toHaveBeenCalledWith(1);
       expect(onApply).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
         "none",
       );
-      expect(JSON.stringify(tree.toJSON())).not.toContain("Clear");
+      expect(Boolean(button("Clear"))).toBe(mode !== "all");
       act(() => tree.unmount());
     },
   );
   it("has no visible Cancel and routes backdrop dismissal through one coordinated release", () => {
     const onApply = vi.fn();
     const onDismissed = vi.fn();
-    const { tree, press } = mount(
+    const { tree, press, finishNativeDismissal } = mount(
       <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
         presentationId={7}
         draft={{ mode: "all", universe: ["Work", "Rest"] }}
         options={options}
@@ -383,8 +387,9 @@ describe("Reports sheet interactions", () => {
         .findAllByType("Text" as never)
         .some((node) => node.props.children === "Activities"),
     ).toBe(false);
-    press("Close Filter activities");
-    press("Close Filter activities");
+    press("Close Filters");
+    finishNativeDismissal();
+    press("Close Filters");
     expect(onApply).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(7);
@@ -394,6 +399,7 @@ describe("Reports sheet interactions", () => {
     mockLayout.safeAreaBottom = 34;
     const { tree } = mount(
       <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
         rootHosted
         presentationId={9}
         draft={{ mode: "all", universe: ["Work", "Rest"] }}
@@ -437,8 +443,9 @@ describe("Reports sheet interactions", () => {
   it("lets an earlier swipe discard win over a later Apply", () => {
     const onApply = vi.fn();
     const onDismissed = vi.fn();
-    const { tree, press } = mount(
+    const { tree, press, finishNativeDismissal } = mount(
       <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
         presentationId={8}
         draft={{ mode: "all", universe: ["Work", "Rest"] }}
         options={options}
@@ -456,14 +463,16 @@ describe("Reports sheet interactions", () => {
     act(() => sheet.props.onDismiss(7));
     expect(onDismissed).not.toHaveBeenCalled();
     act(() => sheet.props.onDismiss(8));
+    finishNativeDismissal();
     expect(onDismissed).toHaveBeenCalledOnce();
     act(() => tree.unmount());
   });
   it("keeps an earlier Apply committed when a stale swipe callback arrives", () => {
     const onApply = vi.fn(() => true);
     const onDismissed = vi.fn();
-    const { tree, press } = mount(
+    const { tree, press, finishNativeDismissal } = mount(
       <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
         presentationId={11}
         draft={{ mode: "all", universe: ["Work", "Rest"] }}
         options={options}
@@ -476,6 +485,7 @@ describe("Reports sheet interactions", () => {
     );
     const sheet = tree.root.findByType("SwipeDismissSheet" as never);
     press("Show all activities");
+    finishNativeDismissal();
     expect(onApply).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(11);
@@ -491,7 +501,7 @@ describe("Reports sheet interactions", () => {
     (endDay) => {
       const onApply = vi.fn(),
         onDismissed = vi.fn();
-      const { tree, button, press } = mount(
+      const { tree, button, press, finishNativeDismissal } = mount(
         <ReportDateSheet
           initial="today"
           nowMs={+new Date(2026, 8, 9, 12)}
@@ -670,6 +680,7 @@ describe("Neutral selection in Reports sheets and the date picker (UIA-010/011/0
   it("checks filter rows neutrally inside section cards", () => {
     const { tree } = mount(
       <ReportFiltersSheet
+        facets={{}} facetOptions={{ tags: [], places: [] }} onChangeFacets={vi.fn()}
         presentationId={1}
         draft={{ mode: "all", universe: ["Work", "Rest"] } as ReportFilterDraft}
         options={options as never}

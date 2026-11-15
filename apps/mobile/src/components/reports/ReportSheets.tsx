@@ -1,6 +1,7 @@
 import { InsetDivider } from "../InsetDivider";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -31,8 +32,14 @@ import {
 } from "@/lib/reportsSelection";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
-import { DAYFRAME_BLOCKS, contrastRatio } from "@dayframe/shared";
-import { ActivityIcon } from "../icons/DayframeIcon";
+import {
+  DAYFRAME_BLOCKS, REPORT_DESCRIPTION_MAX, REPORT_FACET_MAX, REPORT_SOURCE_LABELS,
+  REPORT_SOURCE_VALUES, contrastRatio, type ReportFacetFilters,
+} from "@dayframe/shared";
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { localPresenceExiting, MOBILE_MOTION } from "@/lib/motion";
+import { reportFacetChips, type ReportFacetOption, type ReportFacetOptions } from "../../lib/reportsFacets";
+import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { playHaptic } from "../../lib/haptics";
 import { reportFilterApplyLabel, reportFilterSections } from "../../lib/reportsBlocks";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
@@ -42,6 +49,9 @@ export function ReportFiltersSheet({
   presentationId,
   draft,
   options,
+  facets,
+  facetOptions,
+  onChangeFacets,
   theme,
   reduceMotion,
   onChange,
@@ -52,6 +62,9 @@ export function ReportFiltersSheet({
   presentationId: number;
   draft: ReportFilterDraft;
   options: ReportCategoryOption[];
+  facets: ReportFacetFilters;
+  facetOptions: ReportFacetOptions;
+  onChangeFacets: (facets: ReportFacetFilters) => void;
   theme: MobileTheme;
   reduceMotion: boolean;
   onChange: (draft: ReportFilterDraft) => void;
@@ -59,6 +72,17 @@ export function ReportFiltersSheet({
   onDismissed: (presentationId: number) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [tagSearch, setTagSearch] = useState("");
+  const [moreFilters, setMoreFilters] = useState(Boolean(facets.places?.length || facets.sources?.length || facets.description));
+  const [hasAdvancedHeight, setHasAdvancedHeight] = useState(!moreFilters);
+  const advancedHeight = useSharedValue(0);
+  const naturalAdvancedHeight = reduceMotion || (!hasAdvancedHeight && moreFilters);
+  const revealStyle = useAnimatedStyle(() => ({ height: naturalAdvancedHeight ? undefined : advancedHeight.value }));
+  useEffect(() => {
+    if (!moreFilters) advancedHeight.value = reduceMotion ? 0
+      : withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+  }, [advancedHeight, moreFilters, reduceMotion]);
+  const chips = reportFacetChips(facets, facetOptions);
   const sections = reportFilterSections(options, search);
   const link = (label: "All" | "None") => (
     <Pressable
@@ -81,12 +105,21 @@ export function ReportFiltersSheet({
     <BottomSheetShell
       testID="report-filter-sheet"
       rootHosted={rootHosted}
-      title="Filter activities"
+      title="Filters"
       presentationId={presentationId}
       theme={theme}
       reduceMotion={reduceMotion}
-      action={reportFilterApplyLabel(draft)}
+      action={chips.length ? "Apply filters" : reportFilterApplyLabel(draft)}
       onApply={onApply}
+      onDismissStart={Keyboard.dismiss}
+      secondaryAction={chips.length || draft.mode !== "all" ? {
+        label: "Clear",
+        testID: "report-filter-clear",
+        onPress: () => {
+          onChange({ mode: "all", universe: draft.universe });
+          onChangeFacets({});
+        },
+      } : undefined}
       onDismissed={onDismissed}
       fixedHeader={
         <View style={s.filterHead}>
@@ -100,7 +133,7 @@ export function ReportFiltersSheet({
                 maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
                 style={[s.filterTitle, { color: theme.textPrimary }]}
               >
-                Filter activities
+                Filters
               </Text>
             </View>
             {link("All")}
@@ -123,6 +156,66 @@ export function ReportFiltersSheet({
         </View>
       }
     >
+      <View style={s.facets}>
+        {facetOptions.tags.length ? (
+          <View style={s.filterSection}>
+            <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+              style={[s.eyebrow, { color: theme.textSecondary }]}>TAGS</Text>
+            {facetOptions.tags.length > 12 ? (
+              <TextInput accessibilityLabel="Search tags" placeholder="Search tags"
+                value={tagSearch} onChangeText={setTagSearch} placeholderTextColor={theme.textMuted}
+                maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+                style={[s.search, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]} />
+            ) : null}
+            <FacetChoices
+              kind="tags"
+              options={facetOptions.tags.filter(({ label }) => label.toLowerCase().includes(tagSearch.trim().toLowerCase()))}
+              selected={facets.tags ?? []} theme={theme}
+              onToggle={(id) => onChangeFacets({ ...facets, tags: toggleFacet(facets.tags, id) })}
+            />
+          </View>
+        ) : null}
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: moreFilters }}
+          onPress={() => setMoreFilters((value) => !value)}
+          style={[s.disclosure, { backgroundColor: theme.surfaceInset }]} testID="report-filter-more">
+          <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.optionText, { color: theme.textPrimary }]}>More filters</Text>
+          <View style={{ transform: [{ rotate: moreFilters ? "-90deg" : "90deg" }] }}>
+            <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+          </View>
+        </Pressable>
+        <Reanimated.View style={[s.advancedClip, revealStyle]}>
+        {moreFilters ? (
+          <Reanimated.View
+            collapsable={false}
+            exiting={localPresenceExiting(reduceMotion)}
+            style={[s.facets, naturalAdvancedHeight ? null : s.advancedMeasure]}
+            onLayout={({ nativeEvent }) => {
+              const measured = nativeEvent.layout.height;
+              advancedHeight.value = naturalAdvancedHeight ? measured
+                : withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+              if (!hasAdvancedHeight) setHasAdvancedHeight(true);
+            }}>
+
+            <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+              style={[s.eyebrow, { color: theme.textSecondary }]}>PLACES</Text>
+            <FacetChoices kind="places" options={facetOptions.places} selected={facets.places ?? []}
+              theme={theme} onToggle={(id) => onChangeFacets({ ...facets, places: toggleFacet(facets.places, id) })} />
+            <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+              style={[s.eyebrow, { color: theme.textSecondary }]}>SOURCES</Text>
+            <FacetChoices kind="sources" options={REPORT_SOURCE_VALUES.map((id) => ({ id, label: REPORT_SOURCE_LABELS[id] }))}
+              selected={facets.sources ?? []} theme={theme}
+              onToggle={(id) => onChangeFacets({ ...facets, sources: toggleFacet(facets.sources, id) })} />
+            <TextInput accessibilityLabel="Description contains" testID="report-filter-description"
+              maxLength={REPORT_DESCRIPTION_MAX} maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              onChangeText={(description) => onChangeFacets({ ...facets, description })}
+              placeholder="Description contains" placeholderTextColor={theme.textMuted} value={facets.description ?? ""}
+              style={[s.search, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]} />
+          </Reanimated.View>
+        ) : null}
+        </Reanimated.View>
+      </View>
+      <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+        style={[s.eyebrow, { color: theme.textSecondary }]}>ACTIVITIES</Text>
       {sections.map((section) => (
         <View key={section.key} style={s.filterSection}>
           {section.title ? (
@@ -163,6 +256,38 @@ export function ReportFiltersSheet({
         <Text style={{ color: theme.textSecondary }}>No activity called “{search.trim()}”.</Text>
       ) : null}
     </BottomSheetShell>
+  );
+}
+
+function toggleFacet<Id extends string>(values: readonly Id[] = [], id: Id) {
+  return values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
+}
+
+function FacetChoices<Id extends string>({ kind, options, selected, onToggle, theme }: {
+  kind: string;
+  options: Array<ReportFacetOption & { id: Id }>;
+  selected: readonly Id[];
+  onToggle: (id: Id) => void;
+  theme: MobileTheme;
+}) {
+  return (
+    <View style={s.facetChips}>
+      {options.map(({ id, label }) => {
+        const checked = selected.includes(id);
+        const disabled = !checked && selected.length >= REPORT_FACET_MAX;
+        return (
+          <Pressable key={id} accessibilityRole="checkbox" accessibilityLabel={label}
+            accessibilityState={{ checked, disabled }} disabled={disabled}
+            testID={`report-filter-${kind}-${id}`}
+            onPress={() => { playHaptic("tick"); onToggle(id); }}
+            style={[s.facetChip, { backgroundColor: checked ? theme.textPrimary : theme.surfaceInset, opacity: disabled ? 0.5 : 1 }]}>
+            {checked ? <DayframeIcon color={theme.background} glyph="check" size={14} /> : null}
+            <Text numberOfLines={2} maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={[s.headLinkText, { color: checked ? theme.background : theme.textPrimary }]}>{label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -325,4 +450,13 @@ const s = StyleSheet.create({
   headLinkText: { fontSize: 15, fontWeight: "700" },
   filterSection: { gap: 6, paddingTop: 6 },
   optionCard: { borderRadius: 16, paddingHorizontal: 12 },
+  facets: { gap: 10, paddingBottom: 10 },
+  advancedClip: { overflow: "hidden" },
+  advancedMeasure: { position: "absolute", top: 0, left: 0, right: 0 },
+  facetChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  facetChip: {
+    minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12,
+    borderRadius: DAYFRAME_BLOCKS.radius.pill, maxWidth: "100%",
+  },
+  disclosure: { flexDirection: "row", minHeight: 44, alignItems: "center", borderRadius: 12, paddingHorizontal: 12, gap: 6 },
 });

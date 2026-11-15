@@ -1,3 +1,4 @@
+import { reportEntryFacetPredicates } from "./report-entry-facets";
 import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaces, type GettingAroundSummary, type TripLeg } from "@dayframe/shared";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { query } from "@/lib/db";
@@ -901,35 +902,7 @@ class ReportSqlBuilder {
       where.push(`(${parts.join(" or ")})`);
     }
 
-    if (this.filters.tags.length > 0) {
-      const tagIds = this.param(this.filters.tags);
-      where.push(`exists (
-        select 1
-        from time_entry_tags filter_tet
-        join tags filter_tag
-          on filter_tag.workspace_id = filter_tet.workspace_id and filter_tag.id = filter_tet.tag_id
-        where filter_tet.workspace_id = te.workspace_id
-          and filter_tet.time_entry_id = te.id
-          and filter_tag.id = any(${tagIds}::uuid[])
-      )`);
-    }
-
-    const selectedPlaceIds = this.filters.places.filter(isReportUuid);
-    const includesNoPlace = this.filters.places.includes("no-place");
-    if (selectedPlaceIds.length > 0 || includesNoPlace) {
-      const parts: string[] = [];
-      if (selectedPlaceIds.length > 0) parts.push(`te.place_id = any(${this.param(selectedPlaceIds)}::uuid[])`);
-      if (includesNoPlace) parts.push(`te.place_id is null and te.place_label is null`);
-      where.push(`(${parts.join(" or ")})`);
-    }
-
-    if (this.filters.sources.length > 0) {
-      where.push(`te.source = any(${this.param(this.filters.sources)}::text[])`);
-    }
-
-    if (this.filters.description) {
-      where.push(`position(lower(${this.param(this.filters.description)}) in lower(coalesce(te.description, ''))) > 0`);
-    }
+    where.push(...reportEntryFacetPredicates(this.filters, (value) => this.param(value)));
 
     return `with candidate_entries as (
       select te.id,

@@ -9,11 +9,42 @@ const bucket = z
 
 // 366 local calendar days may span one additional hour across a clock rollback.
 export const REPORT_MAX_RANGE_MS = (366 * 24 + 1) * 3_600_000;
+export const REPORT_SOURCE_LABELS = {
+  manual_app: "Web app",
+  mobile_app: "Mobile app",
+  nfc: "NFC",
+  widget: "Widget",
+  shortcut: "Shortcut",
+  geofence_specific: "Specific place",
+  geofence_broad: "Broad place",
+  calendar: "Calendar",
+  health_sleep: "Health sleep",
+  health_workout: "Health workout",
+  location_learning: "Location learning",
+  location_auto_log: "Logged automatically",
+  home_assistant: "Home Assistant",
+  ha_button: "Home Assistant button",
+  ha_geofence: "Home Assistant geofence",
+} as const;
+export type ReportSource = keyof typeof REPORT_SOURCE_LABELS;
+export const REPORT_SOURCE_VALUES = Object.keys(REPORT_SOURCE_LABELS) as ReportSource[];
+export const REPORT_FACET_MAX = 50;
+export const REPORT_DESCRIPTION_MAX = 160;
+
+const reportFacetFilters = z.object({
+  tags: z.array(z.uuid()).max(REPORT_FACET_MAX).optional(),
+  places: z.array(z.union([z.uuid(), z.literal("no-place")])).max(REPORT_FACET_MAX).optional(),
+  sources: z.array(z.enum(REPORT_SOURCE_VALUES)).max(REPORT_FACET_MAX).optional(),
+  description: z.string().trim().max(REPORT_DESCRIPTION_MAX).optional(),
+}).strict();
+export type ReportFacetFilters = z.infer<typeof reportFacetFilters>;
+
 export const ReportSummaryRequestSchema = z
   .object({
     start: instant,
     end: instant,
     buckets: z.array(bucket).min(1).max(366),
+    filters: reportFacetFilters.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -83,6 +114,9 @@ export const ReportSummarySchema = z.object({
   }).nullable().optional(),
   // Time at places you haven't named, outside every block (never part of activities or goals). Older servers leave it out.
   notLoggedSeconds: seconds.optional(),
+  // A filtered range keeps the identity of its running block even if it contributes no time.
+  // A local edit can bring that same block into the filter before the next server read.
+  runningEntryId: z.string().nullable().optional(),
   // Only the current timer's bounded contribution, never historical entry payloads.
   active: z
     .object({

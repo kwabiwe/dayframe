@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap } from "@/lib/api";
 import type { ReportSummary, ReportSummaryRequest } from "@dayframe/shared";
 import type { ReportRangeChoice } from "@/lib/reportsRanges";
+vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -145,12 +146,12 @@ function result(input: ReportSummaryRequest): ReportSummary {
   };
 }
 // Most owner tests exercise the activity chart, which the "More" ranges (Today here) keep.
-const render = async (initialChoice: ReportRangeChoice = "today") => {
+const render = async (initialChoice: ReportRangeChoice = "today", extra: Partial<MobileBootstrap> = {}) => {
   let tree!: ReturnType<typeof create>;
   await act(async () => {
     tree = create(
       <ReportsTab
-        data={data}
+        data={{ ...data, ...extra }}
         initialChoice={initialChoice}
         isFocused
         nowMs={nowMs}
@@ -293,6 +294,31 @@ describe("Revision 3 Reports owner", () => {
     mocks.fontScale = 1;
     mocks.width = 390;
   });
+  it("applies tag and advanced facets to both ranges, and restores the request when filters clear", async () => {
+    const tag = "11111111-1111-4111-8111-111111111111";
+    const tree = await render("today", { tags: [
+      { id: tag, name: "Release", normalizedName: "release" },
+      { id: "optimistic-tag:local", name: "Local", normalizedName: "local" },
+    ] });
+    const facets = { tags: [tag], sources: ["mobile_app"], description: " audit " };
+    const firstKey = JSON.stringify(rangeCalls().at(-1)?.[0]);
+    const filter = () => tree.root.findByProps({ testID: "reports-filter-button" });
+    const sheet = () => tree.root.findByType("ReportFiltersSheet" as never);
+    await act(async () => filter().props.onPress());
+    expect(sheet().props.facetOptions.tags).toEqual([{ id: tag, label: "#Release" }]);
+    await act(async () => sheet().props.onChangeFacets(facets));
+    expect(JSON.stringify(rangeCalls().at(-1)?.[0])).toBe(firstKey);
+    await act(async () => sheet().props.onApply());
+    expect(rangeCalls().at(-1)?.[0]).toMatchObject({ filters: { ...facets, description: "audit" } });
+    expect(mocks.fetch.mock.calls.at(-1)?.[0]).toMatchObject({ filters: { ...facets, description: "audit" } });
+    await act(async () => sheet().props.onDismissed(sheet().props.presentationId));
+    await act(async () => filter().props.onPress());
+    await act(async () => sheet().props.onChangeFacets({}));
+    await act(async () => sheet().props.onApply());
+    expect(JSON.stringify(rangeCalls().at(-1)?.[0])).toBe(firstKey);
+    act(() => tree.unmount());
+  });
+
   it("renders selected-only slices and preserves all/some/none recovery", async () => {
     const tree = await render();
     expect(JSON.stringify(tree.toJSON())).not.toMatch(
@@ -308,7 +334,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter activities, all activities selected",
+          accessibilityLabel: "Filter reports, no filters applied",
         })
         .props.onPress(),
     );
@@ -333,7 +359,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter activities, 1 activity selected",
+          accessibilityLabel: "Filter reports, 1 filter applied",
         })
         .props.onPress(),
     );
@@ -379,7 +405,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter activities, all activities selected",
+          accessibilityLabel: "Filter reports, no filters applied",
         })
         .props.onPress(),
     );
@@ -518,7 +544,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter activities, all activities selected",
+          accessibilityLabel: "Filter reports, no filters applied",
         })
         .props.onPress(),
     );
@@ -680,7 +706,7 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     expect(filtered.root.findByType("ReportGoalStreak" as never).props.goalLabel).toBe("1h");
     await act(async () =>
       filtered.root
-        .findByProps({ accessibilityLabel: "Filter activities, all activities selected" })
+        .findByProps({ accessibilityLabel: "Filter reports, no filters applied" })
         .props.onPress(),
     );
     const sheet = filtered.root.findByType("ReportFiltersSheet" as never);
@@ -689,6 +715,13 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     );
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
+    expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
+    await act(async () => filtered.root.findByProps({ accessibilityLabel: "Remove filter Work" }).props.onPress());
+    expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(1);
+    await act(async () => filtered.root.findByProps({ testID: "reports-filter-button" }).props.onPress());
+    const facetsSheet = filtered.root.findByType("ReportFiltersSheet" as never);
+    await act(async () => facetsSheet.props.onChangeFacets({ description: "planned" }));
+    await act(async () => facetsSheet.props.onApply());
     expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
     act(() => filtered.unmount());
   });

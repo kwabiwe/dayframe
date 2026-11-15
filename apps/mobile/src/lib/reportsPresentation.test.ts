@@ -135,6 +135,23 @@ describe("Revision 2 Reports projection", () => {
       }).selectedLoggedSeconds,
     ).toBe(3600);
   });
+  it("projects one existing timer into and out of a facet before server delivery", () => {
+    const matchesFacets = (entry: MobileTimeEntry) => entry.tagNames?.includes("Release") ?? false;
+    const candidate = (snap: ReportSummary, tagNames: string[]) => buildReportsPresentation({
+      data: data(entry({ tagNames })), summary: snap, range, nowMs: now, selection: { mode: "all" },
+      themeMode: "dark", matchesFacets,
+    });
+    const excluded = { ...summary(), runningEntryId: "timer" };
+    expect(candidate(excluded, []).selectedLoggedSeconds).toBe(7200);
+    expect(candidate(excluded, ["Release"]).selectedLoggedSeconds).toBe(10800);
+    const included = {
+      ...excluded,
+      active: { id: "timer", categoryId: "a", startedAt: entry().startedAt,
+        buckets: [{ key: range.buckets[0].key, seconds: 3600 }] },
+    };
+    expect(candidate(included, []).selectedLoggedSeconds).toBe(3600);
+    expect(candidate(included, ["Release"]).selectedLoggedSeconds).toBe(7200);
+  });
   it("excludes provisional active entries and clips at range and now", () => {
     expect(
       buildReportsPresentation({

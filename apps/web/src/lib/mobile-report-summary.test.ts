@@ -52,7 +52,7 @@ describe("mobile aggregate SQL", () => {
       try {
         await client.query("begin");
         await client.query(
-          "create temporary table categories (id uuid, workspace_id uuid, name text, color text, counts_toward_goal boolean not null default true); create temporary table time_entries (id uuid, workspace_id uuid, user_id uuid, category_id uuid, started_at timestamptz, stopped_at timestamptz, review_status text)",
+          "create temporary table categories (id uuid, workspace_id uuid, name text, color text, counts_toward_goal boolean not null default true); create temporary table time_entries (id uuid, workspace_id uuid, user_id uuid, category_id uuid, started_at timestamptz, stopped_at timestamptz, review_status text, source text, place_id uuid, place_label text, description text); create temporary table tags (id uuid, workspace_id uuid); create temporary table time_entry_tags (workspace_id uuid, time_entry_id uuid, tag_id uuid)",
         );
         const category = "20000000-0000-4000-8000-000000000001";
         await client.query(
@@ -69,7 +69,7 @@ describe("mobile aggregate SQL", () => {
           workspace = workspaceId,
         ) =>
           client.query(
-            "insert into time_entries values ($1,$2,$3,$4,$5,$6,$7)",
+            "insert into time_entries(id,workspace_id,user_id,category_id,started_at,stopped_at,review_status) values ($1,$2,$3,$4,$5,$6,$7)",
             [
               `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
               workspace,
@@ -144,6 +144,19 @@ describe("mobile aggregate SQL", () => {
         expect(switchedOff.buckets.map((b) => b.seconds)).toEqual([9000, 1800.5]);
         expect(switchedOff.buckets.map((b) => b.goalIntervals)).toEqual([[], []]);
         await client.query("update categories set counts_toward_goal = true");
+
+        const taggedEntry = "30000000-0000-4000-8000-000000000001";
+        const tag = "50000000-0000-4000-8000-000000000001";
+        await client.query("insert into tags values ($1,$2)", [tag, workspaceId]);
+        await client.query("insert into time_entry_tags values ($1,$2,$3)", [workspaceId, taggedEntry, tag]);
+        await client.query("update time_entries set description='Release notes', source='mobile_app' where id=$1", [taggedEntry]);
+        const filtered = buildMobileReportSummaryQuery(session, {
+          ...input,
+          filters: { tags: [tag], places: ["no-place"], sources: ["mobile_app"], description: "LEASE" },
+        }, captured);
+        const filteredRows = (await client.query(filtered.text, filtered.values)).rows;
+        expect(ReportSummarySchema.parse(filteredRows[0].summary)).toMatchObject({ totalSeconds: 3600, active: null, runningEntryId: "30000000-0000-4000-8000-000000000003" });
+        expect(filteredRows[0].entryRefs).toEqual([{ id: taggedEntry, categoryId: category }]);
 
         const oneDayInput = {
           start,

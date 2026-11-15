@@ -65,6 +65,35 @@ describe("Reports donut", () => {
     expect(donut.props.onResponderTerminationRequest()).toBe(false);
   });
 
+  it("clears a repeated slice tap, while a scrub and termination preserve a highlight", () => {
+    const tree = render();
+    const donut = () => tree.root.findByProps({ testID: "reports-donut" });
+    const firstSlice = touch(168, 84);
+    const value = () => donut().props.accessibilityValue.text;
+    const tap = () => {
+      donut().props.onResponderGrant(firstSlice);
+      donut().props.onResponderRelease();
+    };
+    act(tap);
+    expect(value()).toBe("Work, 3 hours, 75%");
+    act(tap);
+    expect(value()).toBe("This week, 4 hours, 2 activities");
+    act(tap);
+    act(() => {
+      donut().props.onResponderGrant(firstSlice);
+      donut().props.onResponderMove(touch(158, 90));
+      donut().props.onResponderRelease();
+    });
+    expect(value()).toBe("Work, 3 hours, 75%");
+    act(() => {
+      donut().props.onResponderGrant(firstSlice);
+      donut().props.onResponderTerminate();
+    });
+    expect(value()).toBe("Work, 3 hours, 75%");
+    act(() => donut().props.onAccessibilityAction({ nativeEvent: { actionName: "clear" } }));
+    expect(value()).toBe("This week, 4 hours, 2 activities");
+  });
+
   it("toggles the highlight from a row and steps through activities with VoiceOver", () => {
     const tree = render();
     const work = tree.root.findByProps({ testID: "reports-activity-work" });

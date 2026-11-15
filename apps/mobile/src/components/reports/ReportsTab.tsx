@@ -29,10 +29,12 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, placeDisplayName, type ReportFacetFilters, type ReportSummary } from "@dayframe/shared";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { mobileFailureKind } from "@/lib/friendlyError";
 import type { MobileBootstrap } from "@/lib/api";
+import { createReportFacetMatcher, reportFacetChips, reportRequestWithFacets } from "../../lib/reportsFacets";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
@@ -51,6 +53,7 @@ import {
   applyReportFilterDraft,
   openReportFilterDraft,
   refreshReportFilterDraft,
+  normalizeReportSelection,
   type ReportCategorySelection,
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
@@ -76,6 +79,7 @@ import { formatLocaleDate } from "../../lib/localeDateFormat";
 type FilterPresentation = {
   id: number;
   draft: ReportFilterDraft;
+  facets: ReportFacetFilters;
 };
 
 type DatePresentation = {
@@ -124,6 +128,7 @@ function ReportsTabView({
   const [selection, setSelection] = useState<ReportCategorySelection>({
     mode: "all",
   });
+  const [facets, setFacets] = useState<ReportFacetFilters>({});
   const [filterPresentation, setFilterPresentation] =
     useState<FilterPresentation | null>(null);
   const [datePresentation, setDatePresentation] =
@@ -185,7 +190,10 @@ function ReportsTabView({
   const day = formatLocalDateKey(new Date(nowMs));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day, timeZoneId]);
-  const requestKey = JSON.stringify(range.request);
+  const request = useMemo(() => reportRequestWithFacets(range.request, facets), [range, facets]);
+  const requestKey = JSON.stringify(request);
+  const matchesFacets = useMemo(() => request.filters
+    ? createReportFacetMatcher(request.filters, data.tags ?? []) : undefined, [request.filters, data.tags]);
   // The same stretch of the previous period, for the hero's change pill (none for custom ranges).
   const previous = useMemo(
     () => previousReportWindow(choice, range, nowMs),
@@ -193,7 +201,8 @@ function ReportsTabView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [choice, range, Math.floor(nowMs / 300_000)],
   );
-  const previousKey = previous ? JSON.stringify(previous.request) : null;
+  const previousRequest = useMemo(() => previous ? reportRequestWithFacets(previous.request, facets) : null, [previous, facets]);
+  const previousKey = previousRequest ? JSON.stringify(previousRequest) : null;
   const summary =
     loaded?.key === requestKey ? loaded.summary : cache.current.get(requestKey);
   // A cached running contribution can still need replacement after an optimistic Stop.
@@ -229,6 +238,7 @@ function ReportsTabView({
         setFailure(null);
         setFocusedDayKey(null);
         setSelection({ mode: "all" });
+        setFacets({});
         setFilterPresentation(null);
         setDatePresentation(null);
       }),
@@ -249,7 +259,7 @@ function ReportsTabView({
       running = true;
       try {
         const result = await fetchReportSummary(
-          range.request,
+          request,
           { userId: data.user.id, workspaceId: data.workspace.id },
           controller.signal,
         );
@@ -292,7 +302,7 @@ function ReportsTabView({
     }
   }, [data, reload]);
   useEffect(() => {
-    if (!isFocused || !foreground || !previous || !previousKey) return;
+    if (!isFocused || !foreground || !previousRequest || !previousKey) return;
     // Show a cached comparison at once, but read it again on every refresh: a comparison window
     // that stops moving (the whole of a shorter last month) must still pick up edits.
     const cached = cache.current.get(previousKey);
@@ -301,7 +311,7 @@ function ReportsTabView({
     const controller = new AbortController();
     // Best effort: a failed comparison read only hides the pill.
     fetchReportSummary(
-      previous.request,
+      previousRequest,
       { userId: data.user.id, workspaceId: data.workspace.id },
       controller.signal,
     )
@@ -340,10 +350,11 @@ function ReportsTabView({
             range,
             nowMs: reportNow,
             selection,
+            matchesFacets,
             themeMode: theme.mode,
           })
         : null,
-    [data, summary, range, reportNow, selection, theme.mode],
+    [data, summary, range, reportNow, selection, matchesFacets, theme.mode],
   );
   const segments = report?.visibleCategorySegments ?? [];
   const filterOptions = useMemo(
@@ -405,6 +416,15 @@ function ReportsTabView({
       theme.textSecondary,
     ],
   );
+  const facetOptions = useMemo(() => ({
+    tags: (data.tags ?? []).filter((tag) => !tag.id.startsWith("optimistic-tag:"))
+      .map((tag) => ({ id: tag.id, label: `#${tag.name}` })),
+    places: [
+      { id: "no-place", label: "No place" },
+      ...(data.places ?? []).map((place) => ({ id: place.id, label: placeDisplayName(place) })),
+    ],
+  }), [data.tags, data.places]);
+  const facetChips = useMemo(() => reportFacetChips(facets, facetOptions), [facetOptions, facets]);
   const universe = filterOptions.map((option) => option.key);
   const columns = reportCompactNumericColumns(
     contentWidth,
@@ -460,6 +480,13 @@ function ReportsTabView({
           presentationId={filterPresentation.id}
           draft={filterPresentation.draft}
           options={filterOptions}
+          facets={filterPresentation.facets}
+          facetOptions={facetOptions}
+          onChangeFacets={(nextFacets) =>
+            setFilterPresentation((current) =>
+              current?.id === filterPresentation.id ? { ...current, facets: nextFacets } : current,
+            )
+          }
           theme={theme}
           reduceMotion={reduceMotion}
           onChange={(nextDraft) =>
@@ -475,12 +502,14 @@ function ReportsTabView({
             announceHero.current = true;
             setFocusedDayKey(null);
             setSelection(applyReportFilterDraft(current.draft));
+            setFacets({ ...current.facets, description: current.facets.description?.trim() });
             return true;
           }}
           onDismissed={releaseFilterPresentation}
         />
       ) : null,
     [
+      facetOptions,
       filterOptions,
       filterPresentation,
       reduceMotion,
@@ -532,12 +561,28 @@ function ReportsTabView({
     },
     [onSheetPortalChange],
   );
-  const filterCount =
-    selection.mode === "none"
-      ? 0
-      : selection.mode === "include"
-        ? selection.keys.length
-        : null;
+  const filterCount = (selection.mode === "include" ? selection.keys.length : selection.mode === "none" ? 1 : 0) + facetChips.length;
+  const filtered = selection.mode !== "all" || facetChips.length > 0;
+  const activityChips = selection.mode === "include" ? selection.keys.map((key) => ({
+    key, label: filterOptions.find((option) => option.key === key)?.name ?? "Unavailable activity",
+  })) : selection.mode === "none" ? [{ key: "none", label: "No activities" }] : [];
+  const appliedChips = [
+    ...activityChips.map(({ key, label }) => ({
+      key: `activity:${key}`, label,
+      remove: () => setSelection((current) => {
+        if (current.mode !== "include" || current.keys.length <= 1) return { mode: "all" };
+        return normalizeReportSelection({ mode: "include", keys: current.keys.filter((id) => id !== key) }, universe);
+      }),
+    })),
+    ...facetChips.map(({ kind, label, value }) => ({
+      key: `${kind}:${value}`, label,
+      remove: () => setFacets((current) => {
+        if (kind === "description") return { ...current, description: undefined };
+        if (kind === "sources") return { ...current, sources: current.sources?.filter((source) => source !== value) };
+        return { ...current, [kind]: current[kind]?.filter((id) => id !== value) };
+      }),
+    })),
+  ];
   const todayKey = formatLocalDateKey(new Date(nowMs));
   // Day stacks for the week columns and month grid: one per day bucket, with the selected activities.
   const days: ReportDayStack[] =
@@ -573,6 +618,7 @@ function ReportsTabView({
                   { start: previous.currentCutoff, end: new Date(reportNow) },
                   reportNow,
                   selection,
+                  matchesFacets,
                 )
               : 0) -
             previousSummary.categories.reduce(
@@ -610,7 +656,7 @@ function ReportsTabView({
   // Goal time per day of the week (UIA-043): covered time in activities that count, never the
   // logged sum — the same fresh report as the totals, or, from an older server, the phone's entries.
   const weekGoalSeconds =
-    choice === "week" && selection.mode === "all" && report
+    choice === "week" && !filtered && report
       ? (() => {
           const fromServer = report.buckets.every((bucket) => typeof bucket.goalSeconds === "number");
           const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow);
@@ -651,6 +697,7 @@ function ReportsTabView({
     const presentation = {
       id,
       draft: openReportFilterDraft(selection, universe),
+      facets,
     };
     activeFilterPresentation.current = presentation;
     setFilterPresentation(presentation);
@@ -697,22 +744,22 @@ function ReportsTabView({
               ref={filterRef}
               accessibilityRole="button"
               accessibilityLabel={
-                filterCount === null
-                  ? "Filter activities, all activities selected"
-                  : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
+                !filtered
+                  ? "Filter reports, no filters applied"
+                  : `Filter reports, ${filterCount} ${filterCount === 1 ? "filter" : "filters"} applied`
               }
               onPress={openFilters}
               style={[
                 s.iconAction,
                 {
                   backgroundColor:
-                    filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
+                    filtered ? theme.accentSoft : theme.surfaceMuted,
                 },
               ]}
               testID="reports-filter-button"
             >
               <CalendarGlyph kind="funnel" color={theme.textPrimary} />
-              {filterCount !== null ? (
+              {filtered ? (
                 <Text
                   maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
                   style={[
@@ -749,6 +796,22 @@ function ReportsTabView({
             </View>
           </View>
         </View>
+        {appliedChips.length ? (
+          <View style={s.appliedChips} testID="reports-applied-filters">
+            {appliedChips.map((chip) => (
+              <Pressable key={chip.key} accessibilityLabel={`Remove filter ${chip.label}`} accessibilityRole="button"
+                onPress={() => {
+                  announceHero.current = true;
+                  chip.remove();
+                }}
+                style={[s.appliedChip, { backgroundColor: theme.surfaceMuted }]}>
+                <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} numberOfLines={1}
+                  style={[s.appliedChipText, { color: theme.textPrimary }]}>{chip.label}</Text>
+                <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.close} size={14} />
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         {report ? (
           <ReportHero
             delta={delta}
@@ -871,6 +934,12 @@ function ReportsTabView({
   );
 }
 const s = StyleSheet.create({
+  appliedChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  appliedChip: {
+    alignItems: "center", flexDirection: "row", minHeight: 44, maxWidth: "100%",
+    paddingHorizontal: 12, gap: 8, borderRadius: DAYFRAME_BLOCKS.radius.pill,
+  },
+  appliedChipText: { flexShrink: 1, fontSize: 14, fontWeight: "600" },
   screen: { gap: 14 },
   titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 10 },
   stackedTitleRow: { flexDirection: "column", flexWrap: "nowrap", alignItems: "stretch" },

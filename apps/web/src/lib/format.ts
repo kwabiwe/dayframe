@@ -1,4 +1,4 @@
-import { formatClockTime, type ClockFormat } from "@dayframe/shared";
+import { REPORT_SOURCE_LABELS, formatClockTime, type ClockFormat } from "@dayframe/shared";
 /**
  * Every web duration ("6h 25m", "35m", "<1m", "0m") is the shared `formatDuration` (audit
  * UIA-207, the same as iPhone's UIA-042), re-exported here and never wrapped (web UI audit WUI-033);
@@ -172,24 +172,7 @@ export function parseDurationInput(value: string) {
   return totalSeconds > 0 ? totalSeconds : null;
 }
 
-const sourceLabels: Record<string, string> = {
-  manual_app: "Web app",
-  mobile_app: "Mobile app",
-  nfc: "NFC",
-  widget: "Widget",
-  shortcut: "Shortcut",
-  geofence_specific: "Specific place",
-  geofence_broad: "Broad place",
-  calendar: "Calendar",
-  health_sleep: "Health sleep",
-  health_workout: "Health workout",
-  location_learning: "Location learning",
-  // Log automatically (owner decision 14 Oct 2026): a visit logged as a block without a Review card.
-  location_auto_log: "Logged automatically",
-  home_assistant: "Home Assistant",
-  ha_button: "Home Assistant button",
-  ha_geofence: "Home Assistant geofence"
-};
+const sourceLabels: Record<string, string> = REPORT_SOURCE_LABELS;
 
 const eventLabels: Record<string, string> = {
   timer_start: "Started timer",

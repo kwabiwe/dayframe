@@ -49,6 +49,10 @@ describe("POST report summary", () => {
     null,
     { ...body, buckets: [] },
     { ...body, workspaceId: "foreign" },
+    { ...body, filters: { sources: ["internal_test"] } },
+    { ...body, filters: { tags: ["not-a-tag-id"] } },
+    { ...body, filters: { description: "a".repeat(161) } },
+    { ...body, filters: { userId: "someone-else" } },
   ])("rejects invalid body %#", async (value) => {
     expect((await POST(request(value))).status).toBe(400);
     expect(mocks.getMobileReportSummary).not.toHaveBeenCalled();
