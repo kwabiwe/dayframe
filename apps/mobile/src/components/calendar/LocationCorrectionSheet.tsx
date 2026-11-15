@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
+import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
@@ -412,7 +412,7 @@ export function LocationCorrectionSheet({
   const description = logDescription.trim() || undefined;
   const activityFirst = Boolean(logAs && target.kind === "place" && !target.place.placeId && !target.place.learnedPlaceId);
   const hasLogDraft = Boolean(logCategoryId || (activityFirst && description));
-  const [placePickerOpen, setPlacePickerOpen] = useState(false);
+  const [placePickerOpen, setPlacePickerOpen] = useState(activityFirst);
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const pendingActivityPick = useRef<string | null>(null);
   const [moreOptions, setMoreOptions] = useState(false);
@@ -801,33 +801,6 @@ export function LocationCorrectionSheet({
       {editBlockActions}
       {activityFirst ? (
         <View style={styles.activityFirst}>
-          <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary }}>What did you do?</Text>
-          <TextInput accessibilityLabel="What did you do?" editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
-            onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
-            placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
-            style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
-            testID="location-correction-log-description" value={logDescription} />
-          {availableActivities.length ? (
-            <View style={styles.activityFirst}>
-              <View style={styles.activityHeading}>
-                <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
-                {selectionOutsidePreview ? (
-                  <Pressable accessibilityLabel={`Clear ${activeCategory.name}`} accessibilityRole="button"
-                    onPress={() => { if (!stale && !frozen()) setLogCategoryId(null); }} hitSlop={COMPACT_PILL_HIT_SLOP}
-                    style={styles.activityValueClear} testID="location-correction-clear-picked-activity">
-                    <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ flexShrink: 1, color: theme.textSecondary }}
-                      testID="location-correction-activity-value">{activeCategory.name}</Text>
-                    <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.close} size={14} />
-                  </Pressable>
-                ) : (
-                  <Text {...mobileTextProps("metadata")} numberOfLines={1}
-                    style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
-                    testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
-                )}
-              </View>
-              <View style={styles.activityPreview}>{activityChips}</View>
-            </View>
-          ) : null}
           {placeSection ? (
             <View>
               <View style={styles.inlineChoice}>
@@ -854,7 +827,7 @@ export function LocationCorrectionSheet({
                   </Pressable>
                 ) : null}
               </View>
-              <InlineReveal onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
+              <InlineReveal initialFlow onHeightChange={setInlinePlaceHeight} open={placePickerOpen} reduceMotion={reduceMotion}
                 testID="location-correction-inline-picker">
                 <View style={styles.view}>
                   {asks ? <Text {...mobileTextProps("body")} numberOfLines={1}
@@ -863,6 +836,33 @@ export function LocationCorrectionSheet({
                   {placeSearch}
                 </View>
               </InlineReveal>
+            </View>
+          ) : null}
+          <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary }}>What did you do?</Text>
+          <TextInput accessibilityLabel="What did you do?" editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
+            onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
+            placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+            style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+            testID="location-correction-log-description" value={logDescription} />
+          {availableActivities.length ? (
+            <View style={styles.activityFirst}>
+              <View style={styles.activityHeading}>
+                <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>Activity</Text>
+                {selectionOutsidePreview ? (
+                  <Pressable accessibilityLabel={`Clear ${activeCategory.name}`} accessibilityRole="button"
+                    onPress={() => { if (!stale && !frozen()) setLogCategoryId(null); }} hitSlop={COMPACT_PILL_HIT_SLOP}
+                    style={styles.activityValueClear} testID="location-correction-clear-picked-activity">
+                    <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ flexShrink: 1, color: theme.textSecondary }}
+                      testID="location-correction-activity-value">{activeCategory.name}</Text>
+                    <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.close} size={14} />
+                  </Pressable>
+                ) : (
+                  <Text {...mobileTextProps("metadata")} numberOfLines={1}
+                    style={[styles.inlineChoiceValue, { color: theme.textSecondary }]}
+                    testID="location-correction-activity-value">{activeCategory?.name ?? "Optional"}</Text>
+                )}
+              </View>
+              <View style={styles.activityPreview}>{activityChips}</View>
             </View>
           ) : null}
         </View>
@@ -913,9 +913,10 @@ export function LocationCorrectionSheet({
         ) : null}
         {hasMore ? (
           <Pressable accessibilityRole="button" accessibilityState={{ expanded: moreOptions }} hitSlop={2}
-            collapsable={false} onPress={toggleMore} ref={moreRow} style={({ pressed }) => [styles.more, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}
+            collapsable={false} onPress={toggleMore} ref={moreRow} style={({ pressed }) => [styles.inlineDisclosure, styles.more, { opacity: pressed ? 0.7 : 1 }]}
             testID="location-correction-more">
-            <Text {...mobileTextProps("control")} style={[styles.moreText, { color: theme.textPrimary }]}>More options</Text>
+            <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.settings} size={19} />
+            <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>More options</Text>
             <View style={{ transform: [{ rotate: moreOptions ? "-90deg" : "90deg" }] }}>
               <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
             </View>
@@ -1021,26 +1022,26 @@ export function LocationCorrectionSheet({
 }
 
 /** Let the body's normal layout follow the measured reveal, including results that arrive after opening. */
-function InlineReveal({ children, onHeightChange, open, reduceMotion, testID }: {
-  children: ReactNode; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
+function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotion, testID }: {
+  children: ReactNode; initialFlow: boolean; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
 }) {
-  const [contentHeight, setContentHeight] = useState(0);
-  useEffect(() => { if (!open) setContentHeight(0); }, [open]);
-  const size = useAnimatedStyle(() => ({
-    height: reduceMotion ? undefined : withTiming(open ? contentHeight : 0, {
-      duration: MOBILE_MOTION.sheet,
-      easing: Easing.out(Easing.cubic)
-    })
-  }));
+  const [hasBaseline, setHasBaseline] = useState(!initialFlow);
+  const height = useSharedValue(0);
+  const natural = reduceMotion || (!hasBaseline && open);
+  const size = useAnimatedStyle(() => ({ height: natural ? undefined : height.value }));
+  useEffect(() => {
+    if (!open) height.value = reduceMotion ? 0 : withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+  }, [height, open, reduceMotion]);
   return (
     <Reanimated.View style={[styles.inlineClip, size]} testID={testID}>
       {open ? (
         <Reanimated.View collapsable={false} exiting={reduceMotion ? undefined : localPresenceExiting(false)}
-          style={reduceMotion ? undefined : styles.inlineMeasure}
+          style={natural ? undefined : styles.inlineMeasure}
           onLayout={({ nativeEvent }) => {
-            const height = nativeEvent.layout.height;
-            setContentHeight(height);
-            onHeightChange?.(height);
+            const measured = nativeEvent.layout.height;
+            height.value = natural ? measured : withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+            if (!hasBaseline) setHasBaseline(true);
+            onHeightChange?.(measured);
           }}>
           {children}
         </Reanimated.View>
@@ -1233,8 +1234,7 @@ const styles = StyleSheet.create({
   // Sentence-case titles, sparingly (owner feedback, 29 Oct 2026).
   label: { fontSize: 15, fontWeight: "650" as never, lineHeight: 20 },
   fieldLabel: { fontSize: 13, fontWeight: "600" },
-  more: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingHorizontal: 14 },
-  moreText: { fontSize: 15, fontWeight: "600" },
+  more: { flex: 0 },
   logFoot: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44 },
   logHint: { flex: 1 },
   // Clear: quiet text, never a filled pill.

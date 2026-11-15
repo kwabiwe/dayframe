@@ -64,6 +64,7 @@ export function CalendarListView({
   blockChecks,
   checkGlyphs,
   checkKinds,
+  checkOutingLabels,
   checkQuestions,
   checks = [],
   checkTitles,
@@ -114,6 +115,7 @@ export function CalendarListView({
   checkKinds?: ReadonlyMap<string, CalendarCheckKind>;
   /** Each "?" row's own icon (a trip's route, Apple Health's heart, a place's pin). */
   checkGlyphs?: ReadonlyMap<string, DayframeGlyph>;
+  checkOutingLabels?: ReadonlyMap<string, string>;
   /** Every "?" that still asks, the last 7 days on any day (owner, 28 Oct 2026, concern 4); the chip shows this count. */
   checkTotal?: number;
   /** "N to check" opens the next one after the one last opened here, oldest first, across days. */
@@ -577,7 +579,7 @@ export function CalendarListView({
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
              >
-              <LocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles}
+              <LocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles} checkOutingLabels={checkOutingLabels}
                 onOpenCheck={onOpenCheck ? (id) => { lastOpenedCheckId.current = id; onOpenCheck(id); } : undefined}
                 onOpenPlace={onOpenPlace ? (place, label) => { lastOpenedCheckId.current = checkIdOf(item.row) ?? lastOpenedCheckId.current; onOpenPlace(place, label); } : undefined}
                 onYes={onAnswerCheck ? (id) => answerCheck(id, true) : undefined}
@@ -801,9 +803,10 @@ function RowMark({ asking, glyph, theme }: { asking: boolean; glyph: DayframeGly
  * Apple Health questions have no sheet: tapping one opens its question under the row. The journey in progress
  * keeps its own row.
  */
-function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, onOpenPlace, onToggleCheck, onYes, openCheckId, row, sheetless, theme, time }: {
+function LocationRow({ checkGlyphs, checkQuestions, checkTitles, checkOutingLabels, onOpenCheck, onOpenPlace, onToggleCheck, onYes, openCheckId, row, sheetless, theme, time }: {
   checkGlyphs?: ReadonlyMap<string, DayframeGlyph>; checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   checkTitles?: ReadonlyMap<string, string>; onOpenCheck?: (reviewItemId: string) => void;
+  checkOutingLabels?: ReadonlyMap<string, string>;
   onOpenPlace?: (place: TimelinePlace, label: string) => void;
   /** Opens (or closes) an Apple Health "?"'s question under its row. */
   onToggleCheck?: (reviewItemId: string) => void;
@@ -862,22 +865,34 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
     const opens = onToggleCheck ? () => onToggleCheck(row.checkId) : undefined;
     const yes = row.trip ? yesFor(row.checkId, "trip") : null;
     return (
-      <View style={styles.row}>
+      <View style={yes ? styles.tripCheckWithAction : styles.row}>
         <Pressable accessibilityHint={opens ? !sheetless ? row.trip ? "Opens the trip" : "Opens it" : expanded ? "Hides the question" : "Shows the question" : undefined}
           accessibilityLabel={[title, fromMs != null ? `${time(fromMs)} to ${toMs != null ? time(toMs) : "now"}` : null,
             row.trip ? modesLabel(row.trip.legs, row.trip.route) : null, "Needs a look"].filter(Boolean).join(". ")}
           accessibilityRole={opens ? "button" : undefined} accessibilityState={!sheetless || !opens ? undefined : { expanded }} disabled={!opens} onPress={opens}
-          style={({ pressed }) => [styles.rowMain, styles.blockRow, { opacity: pressed ? 0.7 : 1 }]} testID={`calendar-list-check-${row.checkId}`}>
+          style={({ pressed }) => [styles.rowMain, styles.blockRow, yes ? styles.tripCheckBody : null, { opacity: pressed ? 0.7 : 1 }]} testID={`calendar-list-check-${row.checkId}`}>
           <RowMark asking glyph={checkGlyphs?.get(row.checkId) ?? (row.trip ? DAYFRAME_APP_ICONS.openTrip : DAYFRAME_APP_ICONS.places)} theme={theme} />
           <View style={styles.text}>
             <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
             {row.trip?.legs.length ? <ModesLine legs={row.trip.legs} route={row.trip.route} theme={theme} />
               : <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>
                 {fromMs != null && toMs != null ? formatDuration(Math.round((toMs - fromMs) / 1000)) : "Apple Health"}</Text>}
-            {yes ? <YesPill checkId={row.checkId} label={yes} /> : null}
           </View>
           {fromMs != null ? <Times fromMs={fromMs} open={toMs == null} toMs={toMs} /> : null}
         </Pressable>
+        {yes ? (
+          <Pressable
+            accessibilityHint="Logs this suggested trip"
+            accessibilityRole="button"
+            hitSlop={COMPACT_PILL_HIT_SLOP}
+            onPress={() => onYes?.(row.checkId)}
+            style={({ pressed }) => [compactPillStyles.pill, styles.tripCheckAction, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}
+            testID={`calendar-list-yes-${row.checkId}`}
+          >
+            <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.done} size={14} />
+            <Text {...mobileTextProps("control")} style={[compactPillStyles.text, { color: theme.textPrimary }]}>Log trip</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -893,7 +908,8 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, onOpenCheck, on
   const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places;
   const partly = row.unloggedSeconds >= 60 && row.unloggedSeconds < length - 59 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
   // Item D: the length lives in the subtitle only.
-  const detail = [formatDuration(length), partly, place.setByYou ? "You set this" : null].filter(Boolean).join(" · ");
+  const outing = checkId ? checkOutingLabels?.get(checkId) : undefined;
+  const detail = [formatDuration(length), partly, outing, place.setByYou ? "You set this" : null].filter(Boolean).join(" · ");
   const yes = yesFor(checkId, "place");
   return (
     <View style={styles.row}>
@@ -960,14 +976,17 @@ function emptyTimeline(dayStartMs: number, dayEndMs: number): LocationTimeline {
 const listActionsHeight = 36;
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 16, paddingBottom: 140 },
-  contentInner: { gap: 12 },
+  content: { flexGrow: 1 },
+  contentInner: { flexGrow: 1, gap: 12, paddingHorizontal: 16, paddingBottom: 140 },
   dayLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   dayTitle: { flexShrink: 1, fontSize: 20, fontWeight: "600" },
   dayMeta: { fontSize: 13 },
   card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
   empty: { padding: 20, fontSize: 15 },
   row: { flexDirection: "row", alignItems: "center" },
+  tripCheckWithAction: { paddingBottom: 9 },
+  tripCheckBody: { flex: 0, paddingBottom: 6 },
+  tripCheckAction: { alignSelf: "flex-end", marginRight: 14 },
   rowMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 56 },
   mark: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   // Calendar v3 rows (owner choice A): Today's block mark, top-aligned beside the text.

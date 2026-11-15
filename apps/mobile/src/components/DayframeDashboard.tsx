@@ -44,6 +44,7 @@ import {
   timerStateChanged,
   timerStatePollDelay,
   formatClockTime,
+  outingTravelWords,
   reviewCardCount,
   type ClockFormat,
   type RecentActivitySuggestion,
@@ -378,10 +379,8 @@ const LIVE_TIME_PATHNAMES = new Set([`/${DAYFRAME_NATIVE_TABS.reports.route}`]);
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
-  /** Things to check today and the 7 days before: the Calendar tab's badge (location v4 step 14). */
-  checkCount: number;
   /**
-   * The Calendar tab's tap (owner bug, 29 Oct 2026): Calendar opens on today, badge or not. The badge is a count only;
+   * The Calendar tab opens on today.
    * "N to check", the reminder and a link to one "?" step to a question's day.
    */
   openCalendarToday: () => void;
@@ -2264,6 +2263,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stoppedAt: item.suggestedStoppedAt
       })),
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      outingLabels: new Map([...outings].map(([id, { anchor, members }]) => {
+        const firstStart = members[0]?.suggestedStartedAt;
+        const anchorStart = anchor.suggestedStartedAt;
+        const firstDate = firstStart ? new Date(firstStart) : null;
+        const anchorDate = anchorStart ? new Date(anchorStart) : null;
+        const crossDay = firstDate && anchorDate && formatDateKey(firstDate) !== formatDateKey(anchorDate);
+        const travel = outingTravelWords(members);
+        return [id, crossDay && firstDate ? `${travel} · from ${formatLocaleDate(firstDate, { weekday: "short", day: "numeric", month: "short" })}` : travel] as const;
+      })),
       // What each "?" is about, for which have a sheet (Codex r2 on #610): Apple Health's; a location suggestion's
       // place or trip by its segment; anything else (a legacy location suggestion from before location v2, which
       // has no segment) "none", asked under its row.
@@ -2283,22 +2291,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarCheckBase, clockFormat, reviewSyncStateIds, openCalendarCheckId, openCheckVenue.venue]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
-  // Owner, 28 Oct 2026 (concern 4): only "?" from today and the 6 days before ask; the badge, the List's
+  // Only "?" from today and the 6 days before ask. The week strip, the List's
   // "N to check" and the reminder count and step through them oldest first, across days. Older ones stop asking:
   // their places stay plain rows you can still correct.
   const askingChecks = useMemo(() => {
     const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
     return checksOldestFirst(calendarChecks.checks.filter((check) => check.startedAt && checkStillAsks(check, fromMs)));
   }, [calendarChecks, todayKey]);
-  // `week` is the 7-day count (the Calendar badge, the List's "N to check" and the reminder). `today` is Today's
-  // own "N to check today" chip, today-only on purpose (owner-approved; kept so after Codex r1 on #610): it counts
-  // today's "?" and opens today's oldest; earlier days are the badge's.
-  const checkCounts = useMemo(() => {
+  // Today's chip counts today's questions and opens the oldest one on that day.
+  const todayCheckCount = useMemo(() => {
     const todayStart = dateFromKey(todayKey).getTime();
     const tomorrowStart = addDaysToDate(dateFromKey(todayKey), 1).getTime();
-    return { week: askingChecks.length, today: askingChecks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length };
+    return askingChecks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length;
   }, [askingChecks, todayKey]);
-  // Owner item 13 (28 Oct 2026): the end-of-day reminder counts the badge's "?", for this account, noted again on
+  // The end-of-day reminder counts the active questions for this account, noted again on
   // each return to the front and each new day so the one-shot reminder is renewed (Codex r1 on #610).
   const nudgeOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
     [authState, data]);
@@ -2336,6 +2342,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       clockFormat,
       data: shownCalendarData,
       reviewItemIds: gridReviewItemIds,
+      reviewChecks: askingChecks,
       askingEntryIds: askingBlockIds,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
@@ -2352,6 +2359,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       shownCalendarData,
       gridReviewItemIds,
       askingBlockIds,
+      askingChecks,
       clockFormat,
       hapticsEnabled,
       minuteNow,
@@ -3342,7 +3350,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (action === "scroll-grid-to-now") setCalendarScrollToNow((count) => count + 1);
     if (action === "scroll-list-to-now") setCalendarListScrollToNow((count) => count + 1);
   }, [calendarLayout, openCalendarToday, selectedDayKey]);
-  // Today's chip: today's oldest "?" only, by design (see checkCounts); the badge is a count only.
+  // Today's chip opens today's oldest question.
   // On today, even when today's first "?" started yesterday (overnight sleep; Codex r1 on #615): "today" stays today.
   const openTodayChecks = useCallback(() => {
     const today = formatDateKey(new Date());
@@ -4234,7 +4242,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 {/* Location v4 step 14: the Review card is now one quiet chip, opening Calendar › List at the first "?". */}
-                <TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks} reduceMotion={reduceMotion} theme={theme} />
+                <TodayChecksChip count={todayCheckCount} onOpen={openTodayChecks} reduceMotion={reduceMotion} theme={theme} />
               </Reanimated.View>
             </Animated.View>
           )}
@@ -4394,6 +4402,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   blockChecks={askingBlockChecks}
                   checkGlyphs={calendarChecks.glyphs}
                   checkKinds={calendarChecks.kinds}
+                  checkOutingLabels={calendarChecks.outingLabels}
                   checkQuestions={calendarChecks.questions}
                   checks={askingChecks}
                   checkTitles={calendarChecks.titles}
@@ -4509,7 +4518,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week, openCalendarToday, openCheckLink }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, openCalendarToday, openCheckLink }}>
       {children}
       {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
           List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
@@ -4747,12 +4756,7 @@ function ScreenFocusReporter({ focused, onChange }: { focused: boolean; onChange
   return null;
 }
 
-/** The Calendar tab's badge: things to check today and the 7 days before (location v4 step 14). */
-export function useDashboardCheckCount() {
-  return useContext(DashboardContext)?.checkCount ?? 0;
-}
-
-/** The Calendar tab's tap opens today, badge or not (owner bug, 29 Oct 2026). */
+/** The Calendar tab opens today. */
 export function useDashboardOpenCalendarToday() {
   return useContext(DashboardContext)?.openCalendarToday;
 }

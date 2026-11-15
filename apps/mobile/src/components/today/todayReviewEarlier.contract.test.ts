@@ -11,7 +11,7 @@ const checkAnswers = source("../calendar/useCalendarCheckAnswers.ts");
 
 describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   it("opens Calendar's List at the first thing to check from Today's chip, in place of the Review nudge (location v4 step 14)", () => {
-    expect(dashboard).toContain("<TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks}");
+    expect(dashboard).toContain("<TodayChecksChip count={todayCheckCount} onOpen={openTodayChecks}");
     expect(dashboard).not.toContain("<TodayReviewNudge");
     expect(dashboard).toContain('router.navigate("/(tabs)/calendar");');
     // A monotonic request id, so every tap reopens the first question (Codex r1 on #582).
@@ -19,8 +19,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).toContain("setCalendarCheckScroll(calendarCheckRequests.current);");
     // Counts use the List's own rule, and leave suggestions decided on this phone at once (Codex r1 on #573).
     expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
-    // Owner, 28 Oct 2026 (concern 4): the badge counts the "?" that still ask, the last 7 days.
-    expect(dashboard).toContain("week: askingChecks.length");
+    // Calendar List and the day strip read the same asking set for the last seven days.
+    expect(dashboard).toContain("checkTotal={askingChecks.length}");
+    expect(dashboard).toContain("reviewChecks: askingChecks,");
     expect(dashboard).toContain("decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,");
     // The evening reminder opens the oldest "?" that still asks, or today's List when none does (never Review).
     expect(dashboard).toContain("openTodayChecksRef.current = () => askingChecks[0] ? openCheckOn(askingChecks[0].id) : openChecksOn(formatDateKey(new Date()));");
