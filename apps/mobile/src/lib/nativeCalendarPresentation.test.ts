@@ -88,6 +88,21 @@ describe("native Calendar presentation boundary", () => {
     expect(state.model.reduceTransparency).toBe(true);
   });
 
+  it("marks the same visible dates as the List and includes the count in each date label", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const { model } = buildNativeCalendarBridgeState({
+      data: bootstrap([]), now, selectedDayKey: "2026-07-10", reduceMotion: false, reduceTransparency: false,
+      refreshing: false, theme: darkTheme(), transitionDirection: 1,
+      reviewChecks: [
+        { id: "overnight", segmentId: null, startedAt: iso(localTime(2026, 7, 9, 23, 30)), stoppedAt: iso(localTime(2026, 7, 10, 1, 30)) },
+        { id: "today", segmentId: null, startedAt: iso(localTime(2026, 7, 10, 8, 0)), stoppedAt: iso(localTime(2026, 7, 10, 9, 0)) },
+      ]
+    });
+    expect(model.weekDays.filter((day) => day.checkCount).map(({ dayKey, checkCount }) => [dayKey, checkCount]))
+      .toEqual([["2026-07-09", 1], ["2026-07-10", 2]]);
+    expect(model.weekDays.find((day) => day.isToday)?.accessibilityLabel).toMatch(/today, 2 items to check$/);
+  });
+
   it("gives a logged Home visit a Places lane target when corrections are supported", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const { model } = build(now, bootstrap([]));

@@ -6,9 +6,11 @@ import {
   CALENDAR_BLOCK_LABEL,
   calendarBlockContinuationEdges,
   formatClockTime,
+  listCheckOverlaps,
   resolveActivityIcon,
   namedPatternBrackets,
   type ClockFormat,
+  type ListCheck,
   type TimeIntervalLayout
 } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
@@ -229,6 +231,7 @@ export type NativeCalendarPresentation = {
     accessibilityLabel: string;
     /** Up to three activity colours, most time first (confirmed time only). */
     bars: string[];
+    checkCount?: number;
     dayKey: string;
     dayNumber: string;
     isSelected: boolean;
@@ -364,6 +367,7 @@ export function buildNativeCalendarBridgeState({
   reduceTransparency,
   refreshing,
   reviewItemIds,
+  reviewChecks = [],
   askingEntryIds,
   selectedDayKey,
   theme,
@@ -378,6 +382,8 @@ export function buildNativeCalendarBridgeState({
    * shows them (owner, 28 Oct 2026; Codex r1 on #610). Absent, every open suggestion draws.
    */
   reviewItemIds?: ReadonlySet<string> | null;
+  /** Pending checks already folded and projected by Calendar List. */
+  reviewChecks?: readonly ListCheck[];
   hapticsEnabled?: boolean;
   now: number;
   reduceMotion: boolean;
@@ -508,16 +514,22 @@ export function buildNativeCalendarBridgeState({
       totalLabel: formatDuration(confirmedAnalysis.loggedSeconds),
       totalSeconds: confirmedAnalysis.loggedSeconds,
       transitionDirection: transitionDirection < 0 ? -1 : 1,
-      weekDays: buildWeekStripDays(selectedDayKey).map(({ date, key }) => ({
-        // Calendar v3: the strip carries the date ("Friday 23 October"), so it is read in full.
-        accessibilityLabel: `${formatFullDate(date)}${key === todayKey ? ", today" : ""}`,
-        bars: weekDayBars(timeEntries, date, now, theme),
-        dayKey: key,
-        dayNumber: String(date.getDate()),
-        isSelected: key === selectedDayKey,
-        isToday: key === todayKey,
-        weekdayLabel: formatWeekday(date)
-      }))
+      weekDays: buildWeekStripDays(selectedDayKey).map(({ date, key }) => {
+        const dayStart = date.getTime();
+        const dayEnd = localDayEnd(date).getTime();
+        const checkCount = reviewChecks.filter((check) => listCheckOverlaps(check, dayStart, dayEnd)).length;
+        const checkLabel = checkCount ? `, ${checkCount} ${checkCount === 1 ? "item" : "items"} to check` : "";
+        return {
+          accessibilityLabel: `${formatFullDate(date)}${key === todayKey ? ", today" : ""}${checkLabel}`,
+          bars: weekDayBars(timeEntries, date, now, theme),
+          ...(checkCount ? { checkCount } : {}),
+          dayKey: key,
+          dayNumber: String(date.getDate()),
+          isSelected: key === selectedDayKey,
+          isToday: key === todayKey,
+          weekdayLabel: formatWeekday(date)
+        };
+      })
     }
   };
 }

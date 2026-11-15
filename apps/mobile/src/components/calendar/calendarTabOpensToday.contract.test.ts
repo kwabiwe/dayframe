@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // Owner bug (29 Oct 2026): the Calendar tab "always wants to jump to the 23rd" — with the badge showing, its tap opened
-// the oldest "?" (6 days back), and the day stayed selected after. The tab now always opens today; the badge is a count.
+// the oldest "?" (6 days back), and the day stayed selected after. The tab now always opens today.
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 const tabsLayout = source("../../../app/(tabs)/_layout.tsx");
 const dashboard = source("../DayframeDashboard.tsx");
@@ -15,16 +15,15 @@ const between = (text: string, start: string, end: string) => {
 };
 
 describe("the Calendar tab opens today (owner bug, 29 Oct 2026)", () => {
-  it("opens today on every tap, badge or not, and never the oldest question", () => {
+  it("opens today on every tap and keeps the oldest question shortcut separate", () => {
     expect(tabsLayout).toContain("listeners={{ tabPress: () => openCalendarToday?.() }}");
     expect(tabsLayout).not.toMatch(/openOldestCheck|useDashboardOpenOldestCheck/);
     expect(dashboard).not.toMatch(/openOldestCheck|useDashboardOpenOldestCheck/);
   });
 
-  it("provides a Calendar badge only for a positive count", () => {
-    const badge = between(tabsLayout, "{checkCount > 0 ? (", ") : null}");
-    expect(badge).toContain('<NativeTabs.Trigger.Badge>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>');
-    expect(tabsLayout.match(/<NativeTabs\.Trigger\.Badge/g)).toHaveLength(1);
+  it("places the check indicator on the week strip", () => {
+    expect(tabsLayout).not.toContain("<NativeTabs.Trigger.Badge");
+    expect(dashboard).toContain("reviewChecks: askingChecks");
   });
 
   it("selects today and carries no earlier \"?\" or scroll request over", () => {
@@ -42,7 +41,7 @@ describe("the Calendar tab opens today (owner bug, 29 Oct 2026)", () => {
     expect(openToday).not.toContain("closeCorrectionSheet");
     // It never picks a question's day, nor a stored one.
     expect(openToday).not.toMatch(/askingChecks|openCheckOn|AsyncStorage/);
-    expect(dashboard).toContain("checkCount: checkCounts.week, openCalendarToday, openCheckLink }}");
+    expect(dashboard).toContain("renderTab: renderDashboardTab, openCalendarToday, openCheckLink }}");
   });
 
   it("keeps the deliberate ways to a question's day: \"N to check\" oldest first, the reminder, a link to one \"?\"", () => {

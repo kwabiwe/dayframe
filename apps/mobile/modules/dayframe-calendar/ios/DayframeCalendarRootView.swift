@@ -120,6 +120,18 @@ struct DayframeCalendarRootView: View {
                 .minimumScaleFactor(0.7)
             }
             .frame(width: 32, height: 32)
+            .overlay(alignment: .topTrailing) {
+              if day.checkCount > 0 {
+                Circle()
+                  .fill(Color(dayframeCSS: theme.warning))
+                  .frame(width: 7, height: 7)
+                  .padding(1)
+                  .background(Circle().fill(Color(dayframeCSS: theme.background)))
+                  .offset(x: 3, y: -2)
+                  .accessibilityHidden(true)
+                  .allowsHitTesting(false)
+              }
+            }
             HStack(spacing: 2) {
               ForEach(Array(day.bars.enumerated()), id: \.offset) { _, color in
                 // X3: a block marker (30% of the 4 pt side, activityMarkerRadius), not a capsule.

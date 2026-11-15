@@ -59,6 +59,7 @@ vi.mock("react-native-reanimated", () => ({
   FadeOut: chain(),
   ReduceMotion: { Never: "never" },
   useAnimatedStyle: (style: () => unknown) => style(),
+  useSharedValue: <T,>(value: T) => ({ value }),
   withTiming: (value: number) => value
 }));
 vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140, sheet: 260 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
@@ -420,7 +421,6 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace,
       { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog });
     sheet.press("location-correction-log-cat-errands");
-    sheet.press("location-correction-place-picker");
     act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
     expect(onSavePlace).not.toHaveBeenCalled();
     sheet.press("location-correction-sheet-action");
@@ -446,7 +446,6 @@ describe("the iPhone correction sheets (location v4 step 12)", () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" }, undefined, onSavePlace as never,
       { activities: [{ id: "cat-errands", isPinned: false, name: "Errands" }], onLog, onLogAfter } as never);
     sheet.press("location-correction-log-cat-errands");
-    sheet.press("location-correction-place-picker");
     act(() => { sheet.tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0].props.onSaveTyped("Exampleton Bakery"); });
     expect(order).toEqual([]);
     sheet.press("location-correction-sheet-action");
@@ -834,8 +833,7 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
 
   it("puts the sections in the same order for an unknown place, a saved place and a trip", () => {
     const unknownSheet = sheetWith({ question: { ...ask, guess: { name: "Pret", street: null, applePlaceId: null } }, logAs: logs, onSavePlace: vi.fn(async () => undefined), target: { kind: "place", place, label: "Unknown place", notHere: true } });
-    expect(unknownSheet.root.findAll((node) => node.props.testID === "location-correction-map")).toHaveLength(0);
-    tap(unknownSheet, "location-correction-place-picker");
+    expect(unknownSheet.root.findAll((node) => node.props.testID === "location-correction-map")).toHaveLength(1);
     const unknown = order(unknownSheet);
     const home = order(sheetWith({ logAs: logs, target: { kind: "place", place: { ...place, placeId: SAVED, name: "Home", role: "home", matchKind: "saved" } as TimelinePlace, label: "Home" } }));
     const tripSheet = order(sheetWith({ question: { ...ask, text: "Getting around?", yesLabel: "Yes" }, target: { kind: "trip", trip, legIndex: null } }));
@@ -947,7 +945,6 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
         picker().find((node) => typeof node.props.onLayout === "function").props.onLayout({ nativeEvent: { layout: { height } } });
       });
       const nativeMap = () => tree.root.findAllByType("LocationEvidenceMap" as never);
-      tap(tree, "location-correction-place-picker");
       measure(240);
       act(() => { vi.advanceTimersByTime(250); });
       measure(350);
@@ -1106,7 +1103,6 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     const onSavePlace = vi.fn(async () => undefined);
     const onLog = vi.fn();
     const tree = sheetWith({ logAs: { activities: logs.activities, onLog }, onSavePlace, question: { ...ask, guess: venue, onAnswer } });
-    tap(tree, "location-correction-place-picker");
     const picker = () => tree.root.findAll((node) => (node.type as unknown) === "SheetNearbySearch")[0];
     act(() => { picker().props.onPick("A typed place", null); });
     expect(action(tree).props).toMatchObject({ accessibilityLabel: "Save place", disabled: false });

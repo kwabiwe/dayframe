@@ -26,6 +26,7 @@ struct DayframeCalendarThemeRecord: Codable {
 struct DayframeCalendarWeekDayRecord: Codable {
   var accessibilityLabel = ""
   var bars: [String] = []
+  var checkCount: Int?
   var dayKey = ""
   var dayNumber = ""
   var isSelected = false

@@ -48,6 +48,7 @@ struct DayframeCalendarTheme: Equatable {
 struct DayframeCalendarWeekDay: Equatable, Identifiable {
   let accessibilityLabel: String
   let bars: [String]
+  let checkCount: Int
   let dayKey: String
   let dayNumber: String
   let isSelected: Bool
@@ -59,6 +60,7 @@ struct DayframeCalendarWeekDay: Equatable, Identifiable {
   init(_ record: DayframeCalendarWeekDayRecord) {
     accessibilityLabel = record.accessibilityLabel
     bars = Array(record.bars.prefix(3))
+    checkCount = record.checkCount ?? 0
     dayKey = record.dayKey
     dayNumber = record.dayNumber
     isSelected = record.isSelected
