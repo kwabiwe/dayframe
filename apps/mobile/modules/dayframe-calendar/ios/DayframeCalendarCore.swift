@@ -928,6 +928,10 @@ struct DayframeCalendarTapSequence<Touch: Hashable> {
     return activeTouches.isEmpty
   }
 
+  mutating func suppressActivation() {
+    allowsActivation = false
+  }
+
   mutating func interrupt() {
     if !activeTouches.isEmpty { allowsActivation = false }
     activeTouches.removeAll()

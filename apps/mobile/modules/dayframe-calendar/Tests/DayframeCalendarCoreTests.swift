@@ -63,6 +63,20 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
   }
 
+  func testCalendarHoldSuppressesOnlyItsOwnTap() {
+    var sequence = DayframeCalendarTapSequence<Int>()
+    sequence.begin([1])
+    sequence.suppressActivation()
+    XCTAssertFalse(sequence.allowsActivation)
+    XCTAssertTrue(sequence.end([1]))
+    sequence.interrupt()
+    XCTAssertFalse(sequence.allowsActivation)
+
+    sequence.begin([2])
+    XCTAssertTrue(sequence.allowsActivation)
+    XCTAssertTrue(sequence.end([2]))
+  }
+
   func testTapSequenceRejectsSimultaneousTouchesAndInterruption() {
     var sequence = DayframeCalendarTapSequence<Int>()
     sequence.begin([1, 2])

@@ -2,11 +2,25 @@ import SwiftUI
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
+/// A SwiftUI button starts tracking at touch-down. Scrolling, pinching and a
+/// competing long press may still claim the gesture before Calendar's hold.
+private final class DayframeCalendarLongPressRecognizer: UILongPressGestureRecognizer {
+  override func canBePrevented(by recognizer: UIGestureRecognizer) -> Bool {
+    recognizer is UIPanGestureRecognizer
+      || recognizer is UIPinchGestureRecognizer
+      || recognizer is UILongPressGestureRecognizer
+  }
+}
+
 /// Observe the full touch sequence without taking part in gesture recognition.
 final class DayframeCalendarTouchObserver: UIGestureRecognizer {
   private var sequence = DayframeCalendarTapSequence<ObjectIdentifier>()
 
   var allowsActivation: Bool { sequence.allowsActivation }
+
+  func suppressActivation() {
+    sequence.suppressActivation()
+  }
 
   override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
   override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
@@ -142,7 +156,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private let touchObserver: DayframeCalendarTouchObserver
     private let pinchGesture = UIPinchGestureRecognizer()
     private let horizontalPanGesture = UIPanGestureRecognizer()
-    private let longPressGesture = UILongPressGestureRecognizer()
+    private let longPressGesture = DayframeCalendarLongPressRecognizer()
     private let refreshControl = UIRefreshControl()
     private let selectionHaptic = UISelectionFeedbackGenerator()
     private var daySwipeTick = DayframeCalendarDaySwipeTickGate()
@@ -493,6 +507,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         let contentY = Double(gesture.location(in: scrollView).y)
         if case let .block(target) = target {
           guard submittedBlockEdit == nil, target.stillMatches(model.presentation) else { return }
+          touchObserver.suppressActivation()
           blockEditDrag = BlockEditDrag(
             target: target, startY: contentY, startViewportY: contentY - Double(scrollView.bounds.minY)
           )
@@ -520,6 +535,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           cancelCreationInteraction()
           return
         }
+        touchObserver.suppressActivation()
         creationDragState = transition.state
         creationPreviewSessionToken = model.beginCreationPreview(
           dayKey: request.dayKey,
