@@ -89,13 +89,12 @@ enum DayframeDurationDialCore {
     return side / 2 - rangeHandleOffset - rangeHandleHalfSize >= min(side * 0.34, minimumLegibleRadius)
   }
 
-  /// The ring's radius: 34 % of the dial's shorter side. A stopped block's range handle orbits
-  /// outside the ring, so where it is shown the ring shrinks just enough to keep that handle inside
-  /// the view (a short dial at large text would otherwise clip it and lose its touches).
-  static func baseRadius(width: Double, height: Double, includesRangeHandle: Bool) -> Double {
+  /// Both editors reserve the same space for the stopped block's outer range handle. At condensed
+  /// sizes the handle is hidden and both rings use the natural radius.
+  static func baseRadius(width: Double, height: Double) -> Double {
     let side = min(width, height)
     let natural = side * 0.34
-    guard includesRangeHandle, rangeHandleFits(width: width, height: height) else { return natural }
+    guard rangeHandleFits(width: width, height: height) else { return natural }
     return min(natural, side / 2 - rangeHandleOffset - rangeHandleHalfSize)
   }
 
@@ -108,7 +107,7 @@ enum DayframeDurationDialCore {
   ) -> Bool {
     guard x.isFinite, y.isFinite, width.isFinite, height.isFinite,
           width > 0, height > 0 else { return false }
-    let baseRadius = baseRadius(width: width, height: height, includesRangeHandle: includesRangeHandle)
+    let baseRadius = baseRadius(width: width, height: height)
     let handleOffset = includesRangeHandle ? rangeHandleOffset : 0.0
     let accessibilityRadius = baseRadius + handleOffset + 22.0
     return hypot(x - width / 2, y - height / 2) <= accessibilityRadius

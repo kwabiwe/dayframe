@@ -34,7 +34,8 @@ describe("fixed timer-sheet layout contract", () => {
     // A turn of the dial, a shortcut or a new presentation closes the shortcuts.
     expect(dial).toMatch(/phase === "began"\) \{\s*setShortcutsOpen\(false\)/);
     expect(dial).toContain("entering={localPresenceEntering(reduceMotion, \"fade\")}");
-    expect(theme).toMatch(/durationDialHintRow:\s*\{[\s\S]*?marginTop: -16/);
+    expect(dial).toContain("style={styles.durationDialHintRow}");
+    expect(theme).not.toContain("durationDialNativeViewStopped");
     expect(theme).not.toContain("durationDialFieldActions");
     expect(theme).not.toContain("durationDialInnerAction");
     expect(dial).not.toContain("durationDialQuickActions");

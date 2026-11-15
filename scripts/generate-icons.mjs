@@ -21,14 +21,14 @@ const tabManifestPath = join(tabIconDir, "manifest.json");
 
 // Lucide glyphs used anywhere in Dayframe: activities, navigation, actions, sources and sync state.
 const GLYPHS = [
-  "arrow-left", "baby", "bell", "bike", "book-open", "brain", "briefcase", "building-2", "bus", "calendar-days", "camera",
-  "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-question-mark", "circle-user-round", "clock", "cloud-alert", "cloud-check", "copy",
+  "arrow-left", "arrow-left-right", "baby", "bell", "bike", "book-open", "brain", "briefcase", "building-2", "bus", "calendar-days", "camera",
+  "car", "chart-column", "chart-pie", "check", "chef-hat", "chevron-right", "circle-dot", "circle-question-mark", "circle-user-round", "clock", "cloud-alert", "cloud-check", "copy",
   "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "folder", "footprints", "funnel", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
   "laptop", "library", "list", "list-checks", "log-out", "mail", "map-pin", "message-circle", "minus", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",
   "plus", "presentation", "refresh-cw", "rotate-ccw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
-  "shapes", "shield", "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "train-front-tunnel", "tram-front", "trash-2", "tv",
+  "shapes", "shield", "shopping-cart", "split", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "train-front-tunnel", "tram-front", "trash-2", "tv",
   "undo-2", "user-round", "users", "utensils", "wallet", "wrench", "x", "zap"
 ];
 
@@ -44,7 +44,7 @@ const CUSTOM_GLYPHS = {
 };
 
 // Native iOS tab bar icons, rendered as template images so UIKit tints them inside Liquid Glass.
-const TAB_ICONS = { today: "sun", calendar: "calendar-days", reports: "chart-column", orb: "play" };
+const TAB_ICONS = { today: "sun", calendar: "calendar-days", reports: "chart-pie", orb: "play" };
 const TAB_POINTS = 26;
 
 // Native Calendar glyphs (SwiftUI module), template images at the registry's 24-point grid, bundled

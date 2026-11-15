@@ -190,23 +190,15 @@ export function TimeEntryDurationDial({
           style={[
             styles.durationDialNativeView,
             layoutDensity === "compact" ? styles.durationDialNativeViewCompact : null,
-            layoutDensity === "condensed" ? styles.durationDialNativeViewCondensed : null,
-            mode === "stopped" && layoutDensity === "regular" ? styles.durationDialNativeViewStopped : null,
-            mode === "stopped" && layoutDensity === "compact" ? styles.durationDialNativeViewStoppedCompact : null
+            layoutDensity === "condensed" ? styles.durationDialNativeViewCondensed : null
           ]}
           testID="time-entry-duration-dial"
         />
       </GestureDetector>
-      {/* Blocks prototype hint under the dial; the row is tucked into the dial's empty bottom band. */}
+      {/* The hint stays below the space reserved for the stopped block's range handle. */}
       <View
         pointerEvents="box-none"
-        style={[
-          styles.durationDialHintRow,
-          layoutDensity === "compact" ? styles.durationDialHintRowCompact : null,
-          layoutDensity === "condensed" ? styles.durationDialHintRowCondensed : null,
-          // A stopped block's range handle orbits outside the ring, through that empty band.
-          mode === "stopped" ? styles.durationDialHintRowStopped : null
-        ]}
+        style={styles.durationDialHintRow}
         testID="time-entry-dial-hint-row"
       >
         {/* The toggle comes first so VoiceOver moves from it into the pills; the row is reversed. */}
@@ -226,7 +218,7 @@ export function TimeEntryDurationDial({
           >
             <DayframeIcon
               color={theme.textSecondary}
-              glyph={showShortcuts ? DAYFRAME_APP_ICONS.close : DAYFRAME_APP_ICONS.more}
+              glyph={showShortcuts ? DAYFRAME_APP_ICONS.close : DAYFRAME_APP_ICONS.time}
               size={18}
             />
           </Pressable>

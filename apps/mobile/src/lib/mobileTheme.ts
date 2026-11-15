@@ -899,42 +899,22 @@ function createStyles(theme: MobileTheme) {
       alignSelf: "center",
       width: "100%",
       maxWidth: 340,
-      height: 258,
+      height: 242,
       backgroundColor: "transparent",
       overflow: "visible"
     },
     durationDialNativeViewCompact: {
-      height: 200
+      height: 194
     },
     durationDialNativeViewCondensed: {
       height: 128
     },
-    // Stopped blocks: the hint row sits below the dial (see durationDialHintRowStopped), so the
-    // dial gives up that overlap instead and the sheet's height stays the same.
-    durationDialNativeViewStopped: {
-      height: 242
-    },
-    durationDialNativeViewStoppedCompact: {
-      height: 194
-    },
-    // The ring's radius is 34 % of the dial's shorter side, so a band under the ticks stays empty:
-    // the hint row overlaps it by that much, keeping the sheet's total height unchanged.
     durationDialHintRow: {
       minHeight: 44,
-      marginTop: -16,
       flexDirection: "row-reverse",
       alignItems: "center",
       zIndex: 3,
       elevation: 3
-    },
-    durationDialHintRowCompact: {
-      marginTop: -6
-    },
-    durationDialHintRowCondensed: {
-      marginTop: 0
-    },
-    durationDialHintRowStopped: {
-      marginTop: 0
     },
     durationDialHint: {
       flex: 1,
@@ -942,7 +922,7 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    // Balances the 44-point "…" on the right so the hint stays centred under the dial.
+    // Balances the 44-point time shortcuts control to keep the hint centred.
     durationDialHintBalanced: {
       paddingLeft: 44
     },

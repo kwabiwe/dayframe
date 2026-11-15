@@ -166,17 +166,17 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("names the running block's menu action Discard running block", () => {
+  it("names the running block's menu action Discard", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
     render(<PersistentTimerBar />);
-    expect(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ }).textContent).toContain("Discard running block");
+    expect(screen.getByRole("menuitem", { hidden: true, name: /Discard/ }).textContent).toContain("Discard");
   });
 
   it("discards the running block at once and offers Undo, which starts it again at its own start (WUI-008)", async () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch", tagNames: ["Deep work"] });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard/ })); });
     expect(runtime.deleteActiveTimer).toHaveBeenCalledTimes(1);
     // The runtime now has nothing running.
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
@@ -198,7 +198,7 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard/ })); });
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
     rerender(<PersistentTimerBar />);
 
@@ -219,7 +219,7 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     const { rerender } = render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard/ })); });
     // Something else started meanwhile: no Undo, so it is never replaced by the discarded block.
     runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: timeEntry({ id: "other", description: "Other" }) } };
     rerender(<PersistentTimerBar />);
@@ -229,19 +229,19 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     (runtime.deleteActiveTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Offline" });
     render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard running block/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: /Discard/ })); });
     expect(screen.queryByText(/Discarded/)).toBeNull();
   });
 });
 
-describe("Switch activity from the running block menu", () => {
+describe("Switch from the running block menu", () => {
   it("searches an unpinned activity and starts a fresh block through Quick Start", async () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }), description: "Plan launch" });
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
 
-    expect(screen.getByRole("dialog", { name: "Switch activity" })).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Switch" })).not.toBeNull();
     expect(screen.queryByRole("option", { name: "Focus" })).toBeNull();
     const search = screen.getByRole("combobox", { name: "Search or enter a description" });
     fireEvent.change(search, { target: { value: "learn" } });
@@ -253,7 +253,7 @@ describe("Switch activity from the running block menu", () => {
       { categoryId: "learn", description: "", tagNames: [] },
       { dedupeRunning: true, expectedRunningEntryId: "running-entry", guard: expect.any(Function) }
     );
-    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Switch" })).toBeNull();
   });
 
   it("offers the same suggestions as Start and keeps the chosen activity and tags", async () => {
@@ -264,7 +264,7 @@ describe("Switch activity from the running block menu", () => {
     }] });
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
     const suggestion = screen.getByRole("option", { name: /Plan next sprint.*Deep work.*Focus/ });
     expect(suggestion.tabIndex).toBe(-1);
     expect(screen.getByRole("listbox").tabIndex).toBe(-1);
@@ -282,7 +282,7 @@ describe("Switch activity from the running block menu", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
     const search = screen.getByRole("combobox", { name: "Search or enter a description" });
     const start = screen.getByRole<HTMLButtonElement>("button", { name: "Switch to new block" });
     expect(start.disabled).toBe(true);
@@ -301,13 +301,13 @@ describe("Switch activity from the running block menu", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     const { rerender } = render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
     screen.getByRole("combobox", { name: "Search or enter a description" }).focus();
 
     runtime = runtimeFixture();
     rerender(<PersistentTimerBar />);
 
-    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Switch" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add time manually" }));
   });
 
@@ -315,8 +315,8 @@ describe("Switch activity from the running block menu", () => {
     runtime = { ...runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) }), timerDraftScope: "old-scope" };
     const { rerender } = render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
-    expect(screen.getByRole("dialog", { name: "Switch activity" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
+    expect(screen.getByRole("dialog", { name: "Switch" })).not.toBeNull();
 
     runtime.shellData = {
       ...(runtime.shellData as BootstrapData),
@@ -324,7 +324,7 @@ describe("Switch activity from the running block menu", () => {
     };
     rerender(<PersistentTimerBar />);
 
-    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Switch" })).toBeNull();
     expect(runtime.startTimer).not.toHaveBeenCalled();
   });
 
@@ -332,7 +332,7 @@ describe("Switch activity from the running block menu", () => {
     runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus" }) });
     render(<PersistentTimerBar />);
     fireEvent.click(screen.getByRole("button", { name: "More block actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Switch activity" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
 
     (runtime.readShellData as ReturnType<typeof vi.fn>).mockReturnValue({
       ...(runtime.shellData as BootstrapData),
@@ -346,8 +346,8 @@ describe("Switch activity from the running block menu", () => {
     }
 
     expect(runtime.startTimer).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: "Switch activity" })).toBeNull();
-    expect(screen.getByText("The running block changed. Open Switch activity again.")).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Switch" })).toBeNull();
+    expect(screen.getByText("The running block changed. Open Switch again.")).not.toBeNull();
   });
 });
 
@@ -359,7 +359,7 @@ describe("Split for the running block (owner 28 Oct 2026)", () => {
     runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
     render(<PersistentTimerBar />);
     const items = screen.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent?.trim());
-    expect(items).toEqual(["Switch activity", "Split", "Discard running block"]);
+    expect(items).toEqual(["Switch", "Split", "Discard"]);
     await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true, name: "Split" })); });
     const dialog = screen.getByRole("dialog", { hidden: true, name: "Split running block" });
     // From its start to now: the line starts in the middle, on a minute, and moves in whole minutes.

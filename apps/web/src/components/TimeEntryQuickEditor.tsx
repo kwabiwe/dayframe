@@ -3,7 +3,7 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ClockFormat, DayframePaletteKey, RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, type ClockFormat, type DayframePaletteKey, type RecentActivitySuggestion, type RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
@@ -886,7 +886,7 @@ export function TimeEntryQuickEditorPanel({
               disabled={controlsDisabled || !controller.canSplit}
               onClick={controller.openSplit}
             >
-              <DayframeIcon glyph="scissors" size={16} />
+              <DayframeIcon glyph={DAYFRAME_APP_ICONS.split} size={16} />
             </button>
           ) : null}
           {entry?.stoppedAt && props.mode === "entry" && props.onDuplicate ? (

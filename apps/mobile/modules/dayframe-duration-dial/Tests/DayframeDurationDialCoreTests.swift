@@ -67,7 +67,7 @@ final class DayframeDurationDialCoreTests: XCTestCase {
     ))
     XCTAssertTrue(DayframeDurationDialCore.ownsTouch(
       x: 170,
-      y: 24,
+      y: 26,
       width: 340,
       height: 286,
       includesRangeHandle: false
@@ -95,23 +95,21 @@ final class DayframeDurationDialCoreTests: XCTestCase {
     ))
   }
 
-  func testStoppedRingShrinksToKeepTheRangeHandleInside() {
+  func testEditorRingReservesSpaceForTheRangeHandle() {
     // A tall dial: the natural 34 % ring already leaves room for the range handle.
-    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 300, includesRangeHandle: true), 300 * 0.34, accuracy: 0.001)
-    // Regular and compact stopped dials: the handle's outer edge stays inside the view and the
+    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 300), 300 * 0.34, accuracy: 0.001)
+    // Regular and compact dials: the handle's outer edge stays inside the view and the
     // ring stays legible.
     for height in [242.0, 194.0] {
       XCTAssertTrue(DayframeDurationDialCore.rangeHandleFits(width: 358, height: height))
-      let radius = DayframeDurationDialCore.baseRadius(width: 358, height: height, includesRangeHandle: true)
+      let radius = DayframeDurationDialCore.baseRadius(width: 358, height: height)
       let outerEdge = radius + DayframeDurationDialCore.rangeHandleOffset + DayframeDurationDialCore.rangeHandleHalfSize
       XCTAssertLessThanOrEqual(outerEdge, height / 2 + 0.001)
       XCTAssertGreaterThanOrEqual(radius, DayframeDurationDialCore.minimumLegibleRadius)
     }
     // Condensed: no room for the handle, so it is not shown and the ring keeps its natural size.
     XCTAssertFalse(DayframeDurationDialCore.rangeHandleFits(width: 358, height: 128))
-    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128, includesRangeHandle: true), 128 * 0.34, accuracy: 0.001)
-    // A running dial keeps the natural ring.
-    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128, includesRangeHandle: false), 128 * 0.34, accuracy: 0.001)
+    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128), 128 * 0.34, accuracy: 0.001)
   }
 
   func testClockDetailFollowsTheChosenFormatWithShorterFallbacks() {

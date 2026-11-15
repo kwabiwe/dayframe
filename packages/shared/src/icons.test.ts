@@ -56,7 +56,7 @@ describe("Dayframe icon set", () => {
 
   it("maps every app role to a glyph, including the native tab bar", () => {
     for (const [role, glyph] of Object.entries(DAYFRAME_APP_ICONS)) expect(DAYFRAME_GLYPHS[glyph], role).toBeDefined();
-    expect([DAYFRAME_APP_ICONS.today, DAYFRAME_APP_ICONS.calendar, DAYFRAME_APP_ICONS.reports]).toEqual(["sun", "calendar-days", "chart-column"]);
+    expect([DAYFRAME_APP_ICONS.today, DAYFRAME_APP_ICONS.calendar, DAYFRAME_APP_ICONS.reports]).toEqual(["sun", "calendar-days", "chart-pie"]);
     // Personal (an activity) and Account (an app role) must not share a person shape.
     expect(DAYFRAME_APP_ICONS.account).toBe("circle-user-round");
   });

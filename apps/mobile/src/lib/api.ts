@@ -29,6 +29,7 @@ import {
   type LocationReviewEvidenceDto,
   type PlaceRole,
   type RecentActivitySuggestion,
+  type RecentActivitySuggestionCandidate,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
@@ -355,6 +356,7 @@ export type MobileBootstrap = {
   reviewItems: MobileReviewItem[];
   categoryUsage?: CategoryUsageRank[];
   taskSuggestions?: RecentActivitySuggestion[];
+  taskSuggestionCandidates?: RecentActivitySuggestionCandidate[];
 };
 
 export type MobileCategoryResponse = {

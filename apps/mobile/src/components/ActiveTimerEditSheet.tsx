@@ -67,7 +67,7 @@ import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityChip, AllActivitiesChip } from "@/components/ActivityChips";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
-import { BlocksSheetHead, blocksSheetHeadStyles } from "@/components/blocks/BlocksSheetHead";
+import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { EntrySplitPanel } from "@/components/EntrySplitPanel";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
@@ -1551,7 +1551,7 @@ export function ActiveTimerEditSheet({
   const canStop = isRunningMode && Boolean(onStop);
   const isFinishedMode = !isRunningMode && !isAddMode;
   const canDelete = Boolean(onDelete);
-  const showDeleteButton = !isFinishedMode && (canDelete || isAddMode);
+  const showDeleteButton = canDelete || isAddMode;
   const cancelLabel = isRunningMode ? "Cancel editing block" : isAddMode ? "Cancel adding time" : "Cancel editing block";
   const saveLabel = isRunningMode ? "Save block" : isAddMode ? "Add block" : "Save block";
   const sheetTitle = isAddMode ? "Add time" : "Edit block";
@@ -1582,7 +1582,7 @@ export function ActiveTimerEditSheet({
     entries: lastStopEntries, deletedIds: lastStopDeletedIds,
     projectedIds: lastStopProjectedIds, bootstrapGeneration: lastStopBootstrapGeneration
   });
-  const hasEntryActions = canSplitRunningEntry || (isFinishedMode && (canCopyCompletedEntry || canStartAgain || canDelete));
+  const hasEntryActions = canSplitRunningEntry || canCopyCompletedEntry;
   const actionsOpen = hasEntryActions && actionsPosition?.id === presentation.id && !split;
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
@@ -2829,7 +2829,7 @@ export function ActiveTimerEditSheet({
                 styles.activeEditSheet,
                 isFinishedMode ? styles.finishedEditSheetShadow : null,
                 keyboardAwareSheetStyle,
-                { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) }
+                { paddingBottom: keyboardLayout.keyboardOpen ? 12 : insets.bottom + 12 }
               ]}
               onLayout={(event) => {
                 measuredSheetHeight.current = event.nativeEvent.layout.height;
@@ -2905,28 +2905,28 @@ export function ActiveTimerEditSheet({
                       if (actionsOpen) closeEntryActions(false);
                       void saveChanges();
                     },
-                    testID: "time-entry-sheet-done"
+                    testID: "time-entry-sheet-done",
+                    tone: isAddMode ? "neutral" : "inverse"
                   } : null}
-                  secondaryAction={hasEntryActions ? (
-                    <View style={sheetStyles.actionAnchor}>
-                      <Pressable
-                        ref={actionsButtonRef}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: busy, expanded: actionsOpen }}
-                        disabled={busy}
-                        onPress={openEntryActions}
-                        style={pressable([blocksSheetHeadStyles.pill, { backgroundColor: actionsOpen ? theme.borderStrong : theme.surfaceMuted }], styles.buttonPressed)}
-                        testID="time-entry-actions-menu"
-                      >
-                        <Text {...mobileTextProps("control")} style={[blocksSheetHeadStyles.pillText, { color: theme.textPrimary }]}>Actions</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
                   eyebrow={headEyebrow}
                   eyebrowTestID="time-entry-sheet-elapsed"
                   textTestID="time-entry-sheet-hero"
                   theme={theme}
                   title={headTitle}
+                  titleAction={hasEntryActions ? (
+                    <Pressable
+                      ref={actionsButtonRef}
+                      accessibilityLabel="Block actions"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: busy, expanded: actionsOpen }}
+                      disabled={busy}
+                      onPress={openEntryActions}
+                      style={pressable([sheetStyles.actionAnchor, { backgroundColor: actionsOpen ? theme.surfaceMuted : "transparent" }], styles.buttonPressed)}
+                      testID="time-entry-actions-menu"
+                    >
+                      <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.more} size={20} />
+                    </Pressable>
+                  ) : null}
                 />
               </Pressable>
               {actionsOpen && actionsPosition ? (
@@ -2954,21 +2954,6 @@ export function ActiveTimerEditSheet({
                       testID="time-entry-duplicate" theme={theme}
                     />
                   ) : null}
-                  {canStartAgain ? <EntryActionRow
-                    rowRef={!canCopyCompletedEntry ? firstActionRef : undefined} disabled={busy}
-                    glyph={DAYFRAME_APP_ICONS.startAgain} hint="Saves your changes and starts this block again"
-                    label="Start again" onPress={() => { closeEntryActions(); startAgainFromSheet(); }}
-                    testID="time-entry-sheet-start-again" theme={theme}
-                  /> : null}
-                  {isFinishedMode && canDelete ? <>
-                    {canCopyCompletedEntry || canStartAgain ? <View style={[sheetStyles.menuDivider, { backgroundColor: theme.border }]} /> : null}
-                    <EntryActionRow
-                      rowRef={!canCopyCompletedEntry && !canStartAgain ? firstActionRef : undefined} danger disabled={busy}
-                      glyph={DAYFRAME_APP_ICONS.delete} label="Delete"
-                      onPress={() => { closeEntryActions(); void deleteEntryFromSheet(); }}
-                      testID="time-entry-sheet-delete" theme={theme}
-                    />
-                  </> : null}
                 </Reanimated.View>
               ) : null}
               {question ? (
@@ -3547,8 +3532,16 @@ export function ActiveTimerEditSheet({
                       {...mobileTextProps("body")}
                       style={styles.errorText}
                     >{completedCopyError}</Text> : null}
-                {showDeleteButton || canStop || (isAddMode && onSave) ? (
-                  <View style={sheetStyles.actions} testID="time-entry-sheet-actions">
+                </View>
+                </View>
+              </EntryFormViewport>
+                {showDeleteButton || canStop || canStartAgain || (isAddMode && onSave) ? (
+                  <View
+                    accessibilityElementsHidden={actionsOpen}
+                    importantForAccessibility={actionsOpen ? "no-hide-descendants" : "auto"}
+                    style={sheetStyles.actions}
+                    testID="time-entry-sheet-actions"
+                  >
                     {showDeleteButton ? (
                       <Pressable
                         accessibilityLabel={isRunningMode ? "Discard block" : isAddMode ? "Discard" : "Delete block"}
@@ -3590,6 +3583,24 @@ export function ActiveTimerEditSheet({
                         <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Stop</Text>
                       </Pressable>
                     ) : null}
+                    {canStartAgain ? (
+                      <Pressable
+                        accessibilityHint="Saves your changes and starts this block again"
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={startAgainFromSheet}
+                        style={({ pressed }) => [
+                          sheetStyles.actionPill,
+                          { backgroundColor: theme.surfaceMuted },
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID="time-entry-sheet-start-again"
+                      >
+                        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={18} />
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Start again</Text>
+                      </Pressable>
+                    ) : null}
                     {isAddMode && onSave ? (
                       // The add sheet's single primary action (UIA-052): saves the new block, the same
                       // commit as Done in the head; it closes once the block is created (no spinner,
@@ -3616,9 +3627,6 @@ export function ActiveTimerEditSheet({
                     ) : null}
                   </View>
                 ) : null}
-                </View>
-                </View>
-              </EntryFormViewport>
               <HistoricalSuggestionsOverlay
                 contentKey={historicalSuggestionResultSignature}
                 disabled={busy}
@@ -3909,8 +3917,7 @@ function EntryFormViewport({ accessibilityHidden, children, onLayout, onPress, o
   );
 }
 
-function EntryActionRow({ danger = false, disabled, glyph, hint, label, onPress, rowRef, testID, theme }: {
-  danger?: boolean;
+function EntryActionRow({ disabled, glyph, hint, label, onPress, rowRef, testID, theme }: {
   disabled: boolean;
   glyph: ComponentProps<typeof DayframeIcon>["glyph"];
   hint?: string;
@@ -3920,7 +3927,7 @@ function EntryActionRow({ danger = false, disabled, glyph, hint, label, onPress,
   testID: string;
   theme: MobileTheme;
 }) {
-  const color = danger ? theme.dangerText : theme.textPrimary;
+  const color = theme.textPrimary;
   return (
     <Pressable
       ref={rowRef} accessibilityHint={hint} accessibilityRole="button" accessibilityState={{ disabled }}
@@ -3964,13 +3971,12 @@ const sheetStyles = StyleSheet.create({
   editorHidden: { display: "none" },
   menuHead: { zIndex: 4 },
   menuBackdrop: { ...StyleSheet.absoluteFill, zIndex: 3 },
-  actionAnchor: { position: "relative" },
+  actionAnchor: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   menu: { position: "absolute", zIndex: 5, padding: 6, borderRadius: 16, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, shadowOpacity: 1, elevation: 6 },
   menuRow: { minHeight: 44, paddingHorizontal: 10, paddingVertical: 7, alignItems: "center", flexDirection: "row", gap: 10, borderRadius: 10 },
   menuText: { flexShrink: 1, fontSize: 15, fontWeight: "600" },
   menuDisabled: { opacity: 0.55 },
-  menuDivider: { marginHorizontal: 8, height: StyleSheet.hairlineWidth },
-  actions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  actions: { flexDirection: "row", gap: 8, marginTop: 4, flexShrink: 0 },
   actionPill: {
     alignItems: "center",
     borderRadius: 999,

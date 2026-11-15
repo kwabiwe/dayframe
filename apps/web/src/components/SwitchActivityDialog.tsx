@@ -73,7 +73,7 @@ export function SwitchActivityDialog({ activities, candidates, currentId, fallba
       initialFocusRef={searchRef}
       onClose={onClose}
       size="compact"
-      title="Switch activity"
+      title="Switch"
     >
       <div className="df-flist df-switch-picker">
         <FloatingListSearch

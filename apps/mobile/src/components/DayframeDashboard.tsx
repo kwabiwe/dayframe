@@ -47,6 +47,7 @@ import {
   reviewCardCount,
   type ClockFormat,
   type RecentActivitySuggestion,
+  type RecentActivitySuggestionCandidate,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DayframeCalendarView, type DayframeCalendarBlockEditEvent } from "../../modules/dayframe-calendar";
@@ -564,6 +565,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The Switch sheet's list, taken when it opens, so it never reshuffles under the finger or while it leaves.
   const [switchSheet, setSwitchSheet] = useState<{
     recents: SwitchRecent[];
+    candidates: RecentActivitySuggestionCandidate[];
     entryId: string;
     owner: ReturnType<typeof todayNoticeOwner>;
   } | null>(null);
@@ -2742,7 +2744,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function openSwitchSheet() {
     const running = runningForStartNow();
     if (!running) return;
-    setSwitchSheet({ recents: switchRecents(loggedSourceEntries, running), entryId: running.id, owner: todayNoticeOwner() });
+    const candidates = data?.taskSuggestionCandidates ??
+      (data?.taskSuggestions ?? []).map((suggestion) => ({ ...suggestion, learningTier: 1 as const }));
+    setSwitchSheet({ recents: switchRecents(loggedSourceEntries, running), candidates, entryId: running.id, owner: todayNoticeOwner() });
   }
 
   function startFromSwitch(categoryId: string | null, description: string, tagNames: string[] = []) {
@@ -2756,14 +2760,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     };
     if (canStart()) startFromToday(categoryId, description, tagNames, canStart);
-  }
-
-  function switchToRecent(entry: TimeEntry) {
-    startFromSwitch(
-      entry.categoryId,
-      entry.description ?? "",
-      entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
-    );
   }
 
   function openManualEntry() {
@@ -4626,10 +4622,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       {switchSheet && reduceMotionPreferenceResolved ? (
         <TodaySwitchSheet
           activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
+          candidates={switchSheet.candidates}
           nowMs={minuteNow}
           onClose={() => setSwitchSheet(null)}
-          onNewBlock={(description) => startFromSwitch(null, description)}
-          onPick={switchToRecent}
+          onCommit={startFromSwitch}
           recents={switchSheet.recents}
           running={Boolean(activeEntryForDisplay)}
           reduceMotion={reduceMotion}

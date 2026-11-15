@@ -6,7 +6,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type DayframePaletteKey, type PreviousEndOffer } from "@dayframe/shared";
 import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -44,7 +44,7 @@ import { runningTabTitle, useRunningTabTitle } from "@/lib/running-tab-title";
 const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
-const SWITCH_BLOCK_CHANGED = "The running block changed. Open Switch activity again.";
+const SWITCH_BLOCK_CHANGED = "The running block changed. Open Switch again.";
 const SWITCH_ACTIVITY_UNAVAILABLE = "That activity is no longer available.";
 
 type TimerNotice = {
@@ -1013,8 +1013,8 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                   role="menuitem"
                   type="button"
                 >
-                  <DayframeIcon glyph="refresh-cw" size={16} />
-                  Switch activity
+                  <DayframeIcon glyph={DAYFRAME_APP_ICONS.switchBlock} size={16} />
+                  Switch
                 </button>
                 {/* Split beside Discard (owner 28 Oct 2026): the running block's split dialog. A block under two
                     minutes has nowhere to split yet. */}
@@ -1029,7 +1029,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                   title={runningSplitBounds(active, Date.now()) ? undefined : "Split needs a block of two minutes or more"}
                   type="button"
                 >
-                  <DayframeIcon glyph="scissors" size={16}/>
+                  <DayframeIcon glyph={DAYFRAME_APP_ICONS.split} size={16}/>
                   Split
                 </button>
                 <button
@@ -1042,7 +1042,7 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
                   type="button"
                 >
                   <DayframeIcon glyph="trash-2" size={16}/>
-                  Discard running block
+                  Discard
                 </button>
               </div>
             </>
