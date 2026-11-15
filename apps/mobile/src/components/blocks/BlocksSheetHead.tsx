@@ -10,8 +10,7 @@ export type BlocksSheetHeadAction = {
   accessibilityHint?: string;
   busy?: boolean;
   disabled?: boolean;
-  /** "neutral" (Done), "primary" (the sheet's single coral commit) or "danger" (Clear). */
-  tone?: "neutral" | "primary" | "danger";
+  tone?: "neutral" | "inverse" | "primary" | "danger";
   testID?: string;
 };
 
@@ -26,7 +25,7 @@ export function BlocksSheetHead({
   eyebrow,
   eyebrowTestID,
   leading,
-  secondaryAction,
+  titleAction,
   testID,
   textTestID,
   theme,
@@ -37,7 +36,7 @@ export function BlocksSheetHead({
   eyebrowTestID?: string;
   /** Only for a pushed route with no sheet to swipe: a circular back control before the text. */
   leading?: ReactNode;
-  secondaryAction?: ReactNode;
+  titleAction?: ReactNode;
   testID?: string;
   textTestID?: string;
   theme: MobileTheme;
@@ -45,20 +44,24 @@ export function BlocksSheetHead({
 }) {
   const tone = action?.tone ?? "neutral";
   const inactive = Boolean(action?.disabled || action?.busy);
-  const fill = tone === "primary" ? theme.accent : theme.surfaceMuted;
-  const ink = tone === "primary" ? theme.onAccent : tone === "danger" ? theme.dangerText : theme.textPrimary;
+  const fill = tone === "primary" ? theme.accent : tone === "inverse" ? theme.textPrimary : theme.surfaceMuted;
+  const ink = tone === "primary" ? theme.onAccent : tone === "inverse" ? theme.surfaceRaised : tone === "danger" ? theme.dangerText : theme.textPrimary;
   return (
     <View style={styles.head} testID={testID}>
       {leading}
       <View style={styles.text} testID={textTestID}>
-        <Text {...mobileTextProps("counter")} numberOfLines={1} style={[styles.eyebrow, { color: theme.textMuted }]} testID={eyebrowTestID}>
-          {eyebrow}
-        </Text>
-        <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>
-          {title}
-        </Text>
+        {eyebrow ? (
+          <Text {...mobileTextProps("counter")} numberOfLines={1} style={[styles.eyebrow, { color: theme.textMuted }]} testID={eyebrowTestID}>
+            {eyebrow}
+          </Text>
+        ) : null}
+        <View style={styles.titleRow}>
+          <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>
+            {title}
+          </Text>
+          {titleAction}
+        </View>
       </View>
-      {secondaryAction}
       {action ? (
         <Pressable
           accessibilityHint={action.accessibilityHint}
@@ -87,8 +90,9 @@ export function BlocksSheetHead({
 export const blocksSheetHeadStyles = StyleSheet.create({
   head: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between", minHeight: 52, paddingTop: 4 },
   text: { flex: 1, gap: 2, minWidth: 0 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 2 },
   eyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
-  title: { fontSize: 17, fontWeight: "700" },
+  title: { flexShrink: 1, fontSize: 17, fontWeight: "700" },
   pill: { alignItems: "center", borderRadius: 999, justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 16 },
   pillText: { fontSize: 14, fontWeight: "600" },
   pressed: { opacity: 0.7 },

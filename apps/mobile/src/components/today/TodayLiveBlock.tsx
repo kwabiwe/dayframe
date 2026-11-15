@@ -107,7 +107,7 @@ export function TodayLiveBlock({
         style={[styles.switchReveal, { backgroundColor: theme.surfaceMuted }, swipe.revealStyle]}
         testID="today-live-switch-reveal"
       >
-        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={20} />
+        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.switchBlock} size={20} />
         <Text {...mobileTextProps("control")} style={[styles.switchText, { color: theme.textPrimary }]}>Switch</Text>
       </Reanimated.View>
     <GestureDetector gesture={swipe.gesture}>

@@ -12,20 +12,19 @@ describe("time-entry sheet head and actions", () => {
     expect(sheet).not.toContain("timeEntryHero");
   });
 
-  it("keeps Discard and Stop while running and uses the header Actions menu for finished blocks", () => {
+  it("pins Delete and Start again in the same footer as Discard and Stop", () => {
     const start = sheet.indexOf(`testID="time-entry-sheet-actions"`);
     const actions = sheet.slice(start, sheet.indexOf("<HistoricalSuggestionsOverlay", start));
     expect(actions.indexOf('testID="time-entry-sheet-delete"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-stop"'));
-    expect(actions).not.toContain('testID="time-entry-sheet-start-again"');
-    const menu = sheet.slice(sheet.indexOf('testID="time-entry-actions-options"'), start);
-    const options = ["time-entry-split", "time-entry-duplicate", "time-entry-sheet-start-again", "time-entry-sheet-delete"];
-    let after = -1;
-    for (const option of options) {
-      const index = menu.indexOf(`testID="${option}"`);
-      expect(index).toBeGreaterThan(after);
-      after = index;
-    }
-    expect(menu).toContain('label="Delete"');
+    expect(actions).toContain('testID="time-entry-sheet-start-again"');
+    expect(start).toBeGreaterThan(sheet.indexOf("</EntryFormViewport>"));
+    expect(sheet).toContain("insets.bottom + 12");
+    const menu = sheet.slice(sheet.indexOf('testID="time-entry-actions-options"'), sheet.indexOf("<EntryFormViewport"));
+    expect(menu).toContain('testID="time-entry-split"');
+    expect(menu).toContain('testID="time-entry-duplicate"');
+    expect(menu).not.toContain('testID="time-entry-sheet-start-again"');
+    expect(menu).not.toContain('testID="time-entry-sheet-delete"');
+    expect(sheet).toContain('accessibilityLabel="Block actions"');
     expect(sheet).toContain("const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);");
   });
 
@@ -92,7 +91,7 @@ describe("time-entry sheet polish (A11a)", () => {
     expect(sheet).toContain('eyebrowTestID="time-entry-sheet-elapsed"');
     expect(sheet).toContain('textTestID="time-entry-sheet-hero"');
     expect(sheet).toContain('testID: "time-entry-sheet-done"');
-    expect(head).toMatch(/title: \{ fontSize: 17, fontWeight: "700" \}/);
+    expect(head).toMatch(/title: \{[^}]*fontSize: 17, fontWeight: "700"/);
     expect(head).toMatch(/pill: \{[^}]*minHeight: 44/);
   });
 

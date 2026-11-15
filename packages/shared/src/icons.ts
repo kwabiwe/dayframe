@@ -89,7 +89,7 @@ export const DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH = "circle-dot" satisfies Dayf
 export const DAYFRAME_APP_ICONS = {
   today: "sun",
   calendar: "calendar-days",
-  reports: "chart-column",
+  reports: "chart-pie",
   review: "list-checks",
   library: "library",
   settings: "settings",
@@ -100,6 +100,7 @@ export const DAYFRAME_APP_ICONS = {
   signOut: "log-out",
   start: "play",
   startAgain: "rotate-ccw",
+  switchBlock: "arrow-left-right",
   // "From 15:20": start the next block at the previous block's end (PRD D16).
   startFromPreviousEnd: "arrow-left",
   stop: "square",
@@ -107,7 +108,7 @@ export const DAYFRAME_APP_ICONS = {
   edit: "pencil",
   delete: "trash-2",
   undo: "undo-2",
-  split: "scissors",
+  split: "split",
   merge: "git-merge",
   search: "search",
   more: "ellipsis",

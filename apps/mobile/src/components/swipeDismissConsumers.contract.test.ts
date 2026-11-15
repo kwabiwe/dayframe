@@ -98,7 +98,7 @@ describe("shared swipe-dismiss ownership integration", () => {
   });
 
   it("keeps Delete reachable in the density-adaptive editor", () => {
-    expect(editSource).toContain("const showDeleteButton = !isFinishedMode && (canDelete || isAddMode)");
+    expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
     expect(editSource).toContain("timeEntrySheetLayoutDensity({");
     expect(editSource).toContain('testID="time-entry-sheet-form"');
     expect(editSource).not.toContain("scrollEnabled={false}");

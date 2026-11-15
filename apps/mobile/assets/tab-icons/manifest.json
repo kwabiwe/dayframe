@@ -20,13 +20,13 @@
     }
   },
   "reports": {
-    "glyph": "chart-column",
+    "glyph": "chart-pie",
     "points": 26,
-    "svgSha256": "a6efba8bab1e05050a1da208255a2bd15b04b76682b94f41e111966951881cbf",
+    "svgSha256": "17fce3ee91ba2fbcf499d7fcc1be7b6025da7580d9960e22296721036afba6ae",
     "images": {
-      "reports.png": "b83f77605496ad2663fdad8d7b5aa09b9fc0f23b1a7bd271e417f2888d3eb867",
-      "reports@2x.png": "65f8cbe7feef85450e64494994298f8740f6735b95d57b2a4a712ef61eb25764",
-      "reports@3x.png": "a5805295c741c96d55f7e58f8608e64525ae058799f264ab708a29e17d1e03c7"
+      "reports.png": "1c09cac4b3df9ba77b087560122d87d620e704b8b0b537b53456c9d1027247ca",
+      "reports@2x.png": "d795a6447ccdd3dfd06eb91d9239ef02b5ce9327f510261f9324aa290727140c",
+      "reports@3x.png": "877aee487ac53f0f26492145d167a367283d347d595162932d76458486dd1315"
     }
   },
   "orb": {
