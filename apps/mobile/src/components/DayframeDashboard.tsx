@@ -558,7 +558,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const landingSequence = useRef(0);
   const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
   // The Switch sheet's list, taken when it opens, so it never reshuffles under the finger or while it leaves.
-  const [switchSheetRecents, setSwitchSheetRecents] = useState<SwitchRecent[] | null>(null);
+  const [switchSheet, setSwitchSheet] = useState<{
+    recents: SwitchRecent[];
+    entryId: string;
+    owner: ReturnType<typeof todayNoticeOwner>;
+  } | null>(null);
   const todayScrollY = useSharedValue(0);
   const todayScrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -668,7 +672,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditEntry(null);
     setCalendarEditPresentation(null);
     setPendingDeletion(null);
-    setSwitchSheetRecents(null);
+    setSwitchSheet(null);
     // Today's motion requests belong to the session that made them.
     stopFlightLedger.clear();
     setStopFlight(null);
@@ -2475,7 +2479,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
 
-  async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
+  async function startTask(categoryId?: string | null, description = "", tagNames: string[] = [], canStart?: () => boolean) {
     const isBlankStart = !categoryId && !description.trim();
     if (isBlankStart && blankTimerStartGate.current.current()) return false;
     if (runningForStartNow() && isBlankStart) {
@@ -2518,7 +2522,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       description,
       startedAt: null,
       tagNames
-    });
+    }, { canStart });
   }
 
   function startBlankTask() {
@@ -2533,7 +2537,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Today's Start/Stop: haptic and landing only after the local action is accepted (motion.md).
   // A start that replaces a running block says so ("Switched to …", no Undo: there is no un-switch
   // contract); a start of exactly what is recording does nothing but say "Already recording".
-  function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
+  function startFromToday(categoryId: string | null, description = "", tagNames: string[] = [], canStart?: () => boolean) {
     const running = runningForStartNow();
     if (running && startMatchesRunning(running, { categoryId, description, tagNames })) {
       showTodayNotice(alreadyRecordingToastMessage(running), toastSwatchColor(running, theme.mode));
@@ -2542,7 +2546,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const switching = Boolean(running) && Boolean(categoryId || description.trim());
     const category = categoryId ? latestData.current?.categories.find((item) => item.id === categoryId) ?? null : null;
     const noticeOwner = todayNoticeOwner();
-    void startTask(categoryId, description, tagNames).then((accepted) => {
+    void startTask(categoryId, description, tagNames, canStart).then((accepted) => {
       if (!accepted) return;
       playHaptic("start");
       setLiveLanding(nextLandingRequest());
@@ -2731,8 +2735,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (landed) setRowPop(nextLandingRequest([entryId]));
   }, []);
 
+  function openSwitchSheet() {
+    const running = runningForStartNow();
+    if (!running) return;
+    setSwitchSheet({ recents: switchRecents(loggedSourceEntries, running), entryId: running.id, owner: todayNoticeOwner() });
+  }
+
+  function startFromSwitch(categoryId: string | null, description: string, tagNames: string[] = []) {
+    if (!switchSheet) return;
+    const { entryId, owner } = switchSheet;
+    const canStart = () => {
+      if (!todayNoticeOwnerStill(owner)) return false;
+      const running = runningForStartNow();
+      if (!running || isSameRunningEntry(running.id, entryId, persistedTimerEntryId)) return true;
+      showTodayNotice("The running block changed. Open Switch again.", null);
+      return false;
+    };
+    if (canStart()) startFromToday(categoryId, description, tagNames, canStart);
+  }
+
   function switchToRecent(entry: TimeEntry) {
-    startFromToday(
+    startFromSwitch(
       entry.categoryId,
       entry.description ?? "",
       entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
@@ -2844,12 +2867,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     description?: string | null;
     startedAt?: string | null;
     tagNames?: string[];
-  }, options: { blankStartToken?: number } = {}) {
+  }, options: { blankStartToken?: number; canStart?: () => boolean } = {}) {
     const generation = noticeSessionGeneration.current;
     const undoInFlight = runningSplit.undoInFlight();
     if (undoInFlight) await undoInFlight;
     if (generation !== noticeSessionGeneration.current) return false;
-    if (!latestData.current) return false;
+    if (!latestData.current || options.canStart?.() === false) return false;
     commitPendingActiveDeletionBeforeTimerStart();
     const trimmedDescription = input.description?.trim() ?? "";
     const startedAt = input.startedAt ?? new Date().toISOString();
@@ -4096,7 +4119,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
-                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, activeEntryForDisplay))}
+                onSwitch={openSwitchSheet}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -4497,13 +4520,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         theme={theme}
       />
       <StopFlightOverlay flight={stopFlight} onFinished={finishStopFlight} theme={theme} />
-      {switchSheetRecents && reduceMotionPreferenceResolved ? (
+      {switchSheet && reduceMotionPreferenceResolved ? (
         <TodaySwitchSheet
           activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
           nowMs={minuteNow}
-          onClose={() => setSwitchSheetRecents(null)}
+          onClose={() => setSwitchSheet(null)}
+          onNewBlock={(description) => startFromSwitch(null, description)}
           onPick={switchToRecent}
-          recents={switchSheetRecents}
+          recents={switchSheet.recents}
           running={Boolean(activeEntryForDisplay)}
           reduceMotion={reduceMotion}
           styles={styles}

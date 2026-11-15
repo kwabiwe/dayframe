@@ -8,11 +8,13 @@ vi.mock("react", async () => {
 });
 const mocks = vi.hoisted(() => ({ dismiss: vi.fn() }));
 vi.mock("react-native", () => ({
+  Keyboard: { dismiss: vi.fn() },
   Modal: "Modal",
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 0.5 },
   Text: "Text",
+  TextInput: "TextInput",
   View: "View",
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 59 }) }));
@@ -40,7 +42,7 @@ const recent = (id: string, title: string) => ({
 });
 
 function render(recents: ReturnType<typeof recent>[]) {
-  const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onPick: vi.fn(), recents, reduceMotion: false, running: true, styles: {} as never, theme };
+  const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onNewBlock: vi.fn(), onPick: vi.fn(), recents, reduceMotion: false, running: true, styles: {} as never, theme };
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<TodaySwitchSheet {...props} />);
@@ -53,7 +55,7 @@ describe("TodaySwitchSheet", () => {
     mocks.dismiss.mockClear();
     const { props, tree } = render([recent("a", "Deep work"), recent("b", "Inbox zero")]);
     const texts = tree.root.findAllByType("Text" as never).map((node) => node.children.join(""));
-    expect(texts).toEqual(["SWITCH", "Pick up something recent", "Deep work", "Work · yesterday", "Inbox zero", "Work · yesterday"]);
+    expect(texts).toEqual(["SWITCH", "Pick up something recent", "Deep work", "Work · yesterday", "Inbox zero", "Work · yesterday", "Switch to new block"]);
     const row = tree.root.findByProps({ testID: "today-switch-b" });
     expect(row.props.accessibilityLabel).toBe("Switch to Inbox zero, Work, yesterday");
     act(() => row.props.onPress());
@@ -65,7 +67,7 @@ describe("TodaySwitchSheet", () => {
   });
 
   it("says Start, not Switch, once the running block has stopped elsewhere", () => {
-    const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onPick: vi.fn(), recents: [recent("a", "Deep work")], reduceMotion: false, running: false, styles: {} as never, theme };
+    const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onNewBlock: vi.fn(), onPick: vi.fn(), recents: [recent("a", "Deep work")], reduceMotion: false, running: false, styles: {} as never, theme };
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(<TodaySwitchSheet {...props} />);
@@ -82,6 +84,22 @@ describe("TodaySwitchSheet", () => {
     expect(card.findAllByProps({ testID: "today-switch-a" }).length).toBeGreaterThan(0);
     expect(card.findAllByProps({ testID: "today-switch-b" }).length).toBeGreaterThan(0);
     expect(JSON.stringify(tree.toJSON())).toContain("glyph:play");
+    act(() => tree.unmount());
+  });
+
+  it("starts a new described block once, with no matching recent", () => {
+    mocks.dismiss.mockClear();
+    const { props, tree } = render([]);
+    const description = tree.root.findByProps({ testID: "today-switch-description" });
+    const action = tree.root.findByProps({ testID: "today-switch-new-block" });
+    expect(action.props.disabled).toBe(true);
+    act(() => description.props.onChangeText("  Customer handover  "));
+    expect(action.props.disabled).toBe(false);
+    act(() => action.props.onPress());
+    act(() => description.props.onSubmitEditing());
+    expect(props.onNewBlock).toHaveBeenCalledExactlyOnceWith("Customer handover");
+    expect(props.onPick).not.toHaveBeenCalled();
+    expect(mocks.dismiss).toHaveBeenCalledOnce();
     act(() => tree.unmount());
   });
 

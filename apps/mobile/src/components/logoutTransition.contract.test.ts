@@ -31,7 +31,7 @@ describe("mobile logout transition contract", () => {
       dashboard.indexOf("const syncQueuedEvents = useCallback(")
     );
     expect(transition).toContain("setPendingDeletion(null);");
-    expect(transition).toContain("setSwitchSheetRecents(null);");
+    expect(transition).toContain("setSwitchSheet(null);");
   });
 
   it("keeps Settings complete during cleanup and gates repeated logout actions", () => {
