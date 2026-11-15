@@ -18,16 +18,14 @@ vi.mock("react-native", () => ({
 vi.mock("../sheets/BottomSheetShell", async () => {
   const React = await import("react");
   return {
-    BottomSheetShell: ({ action, children, commitRef, disabled, fixedHeader, onApply }: {
+    BottomSheetShell: ({ action, children, disabled, fixedHeader, onApply }: {
       action: string;
       children: ReactNode;
-      commitRef: { current: (() => void) | null };
       disabled: boolean;
       fixedHeader: ReactNode;
       onApply: () => void;
     }) => {
-      commitRef.current = disabled ? null : onApply;
-      return React.createElement("SwitchHarness", { action, disabled }, fixedHeader, children);
+      return React.createElement("SwitchHarness", { action, disabled, onPress: disabled ? undefined : onApply }, fixedHeader, children);
     },
   };
 });
@@ -71,12 +69,13 @@ describe("TodaySwitchSheet", () => {
     expect(reserved).toBeGreaterThan(3 * 56);
     expect(card.findAllByProps({ testID: "today-switch-a" })).toHaveLength(1);
     expect(shell().props.disabled).toBe(true);
+    expect(input().props.onSubmitEditing).toBeUndefined();
     act(() => tree.root.findByProps({ testID: "today-switch-b" }).props.onPress());
     expect(onCommit).not.toHaveBeenCalled();
     expect(input().props.value).toBe("Inbox zero");
     expect(tree.root.findByProps({ testID: "today-switch-results" }).props.style.minHeight).toBe(reserved);
     expect(shell().props.action).toBe("Switch to this block");
-    act(() => input().props.onSubmitEditing());
+    act(() => shell().props.onPress());
     expect(onCommit).toHaveBeenCalledExactlyOnceWith("work", "Inbox zero", ["Planning"]);
     act(() => tree.unmount());
   });
@@ -91,11 +90,11 @@ describe("TodaySwitchSheet", () => {
     expect(tree.root.findAllByProps({ testID: "today-switch-a" })).toHaveLength(0);
     act(() => tree.root.findByProps({ testID: "today-switch-old" }).props.onPress());
     expect(input().props.value).toBe("Fix joining");
-    act(() => input().props.onSubmitEditing());
+    act(() => shell().props.onPress());
     expect(onCommit).toHaveBeenLastCalledWith("coding", "Fix joining", ["Release"]);
     act(() => input().props.onChangeText("Fix the next issue "));
     expect(shell().props.action).toBe("Switch to new block");
-    act(() => input().props.onSubmitEditing());
+    act(() => shell().props.onPress());
     expect(onCommit).toHaveBeenLastCalledWith(null, "Fix the next issue", undefined);
     act(() => tree.unmount());
   });
@@ -109,10 +108,10 @@ describe("TodaySwitchSheet", () => {
   });
 
   it("matches a visible recent when the historical pool is absent", () => {
-    const { tree, onCommit, input } = render([recent("a", "Short handover")]);
+    const { tree, onCommit, input, shell } = render([recent("a", "Short handover")]);
     act(() => input().props.onChangeText("short"));
     act(() => tree.root.findByProps({ testID: "today-switch-a" }).props.onPress());
-    act(() => input().props.onSubmitEditing());
+    act(() => shell().props.onPress());
     expect(onCommit).toHaveBeenCalledWith("work", "Short handover", ["Planning"]);
     act(() => tree.unmount());
   });
