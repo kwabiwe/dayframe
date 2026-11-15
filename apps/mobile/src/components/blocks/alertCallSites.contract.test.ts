@@ -57,6 +57,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Time not added"',
     '"Block not started"',
     '"Block not started"',
+    '"Block not saved"', // Calendar drag could not be saved on this iPhone
     "errorTitle",
     '"Change not saved"',
     '"Block not stopped"',

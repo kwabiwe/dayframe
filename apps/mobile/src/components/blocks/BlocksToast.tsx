@@ -217,7 +217,11 @@ export function BlocksToast({
   );
 }
 
+type BlocksNoticeAction = { label: string; run: () => void };
+type BlocksNoticeActionRequest = { label: string; run: (clear: () => void) => void };
+
 export type BlocksNotice = {
+  action?: BlocksNoticeAction;
   accessibilityLabel?: string;
   detail?: string | null;
   message: string;
@@ -226,8 +230,7 @@ export type BlocksNotice = {
 };
 
 /**
- * A notice without an action ("Switched to …", "Already recording", "Quick start is full"): one at
- * a time, 5 s, each with a new token. A second notice replaces the first and clears its timer, so
+ * One notice at a time, each with a new token and an optional Undo. A second notice replaces the first and clears its timer, so
  * a stale timeout never hides a newer notice. VoiceOver hears each one as it appears.
  */
 export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
@@ -242,12 +245,23 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
     setNotice(null);
   }, []);
 
-  const show = useCallback((copy: string | BlocksToastCopy, swatchColor?: string | null) => {
+  const show = useCallback((
+    copy: string | BlocksToastCopy,
+    swatchColor?: string | null,
+    action?: BlocksNoticeActionRequest
+  ) => {
     const next = ++token.current;
     if (timer.current) clearTimeout(timer.current);
     const words = typeof copy === "string" ? { message: copy } : copy;
     setNotice({
       accessibilityLabel: words.accessibilityLabel,
+      ...(action ? { action: {
+        label: action.label,
+        run: () => {
+          if (token.current !== next) return;
+          action.run(() => { if (token.current === next) clear(); });
+        }
+      } } : {}),
       detail: words.detail ?? null,
       message: words.message,
       swatchColor: swatchColor ?? null,
@@ -256,12 +270,14 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
     AccessibilityInfo.announceForAccessibility(toastAccessibilityText(words));
     timer.current = setTimeout(() => {
       if (token.current !== next) return;
+      token.current += 1;
       timer.current = null;
       setNotice(null);
     }, durationMs);
-  }, [durationMs]);
+  }, [clear, durationMs]);
 
   useEffect(() => () => {
+    token.current += 1;
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   }, []);

@@ -247,6 +247,66 @@ public struct DayframeCalendarCreateRequest: Equatable {
   }
 }
 
+enum DayframeCalendarBlockEditMode: Equatable {
+  case move, resizeStart, resizeEnd
+}
+
+struct DayframeCalendarBlockEditRange: Equatable {
+  let startMinute: Double
+  let endMinute: Double
+}
+
+/// Changes are relative to the original boundary so touching an off-grid block never jumps it.
+enum DayframeCalendarBlockEditMath {
+  static func exceedsDragSlop(currentY: Double, startY: Double) -> Bool {
+    abs(currentY - startY) > 5
+  }
+
+  /// Small blocks keep their full body for moving. Their edges remain editable in the sheet.
+  static func mode(at y: Double, top: Double, bottom: Double) -> DayframeCalendarBlockEditMode {
+    let edge = 9.0
+    guard bottom - top >= edge * 3 else { return .move }
+    if y - top <= edge { return .resizeStart }
+    if bottom - y <= edge { return .resizeEnd }
+    return .move
+  }
+
+  static func range(
+    original: DayframeCalendarBlockEditRange,
+    mode: DayframeCalendarBlockEditMode,
+    startY: Double,
+    currentY: Double,
+    hourHeight: Double,
+    latestMinute: Double
+  ) -> DayframeCalendarBlockEditRange? {
+    let dayEnd = min(latestMinute, DayframeCalendarConstants.minutesPerDay)
+    guard
+      latestMinute.isFinite,
+      original.startMinute.isFinite,
+      original.endMinute.isFinite,
+      original.startMinute >= 0,
+      original.endMinute <= dayEnd,
+      original.endMinute > original.startMinute,
+      let delta = DayframeCalendarCreationDragMath.rawMinute(contentY: currentY - startY, hourHeight: hourHeight)
+    else { return nil }
+
+    let snap = 5.0
+    let snapped = (delta / snap).rounded() * snap
+    let start = original.startMinute
+    let end = original.endMinute
+    let minLength = min(snap, end - start)
+    switch mode {
+    case .move:
+      let offset = min(dayEnd - end, max(-start, snapped))
+      return DayframeCalendarBlockEditRange(startMinute: start + offset, endMinute: end + offset)
+    case .resizeStart:
+      return DayframeCalendarBlockEditRange(startMinute: min(end - minLength, max(0, start + snapped)), endMinute: end)
+    case .resizeEnd:
+      return DayframeCalendarBlockEditRange(startMinute: start, endMinute: max(start + minLength, min(dayEnd, end + snapped)))
+    }
+  }
+}
+
 public struct DayframeCalendarEntryGeometryMetrics: Equatable {
   public let hitFrame: DayframeCalendarHitFrame
   public let horizontal: DayframeCalendarHorizontalMetrics
@@ -866,6 +926,10 @@ struct DayframeCalendarTapSequence<Touch: Hashable> {
     activeTouches.subtract(touches)
     if cancelled { allowsActivation = false }
     return activeTouches.isEmpty
+  }
+
+  mutating func suppressActivation() {
+    allowsActivation = false
   }
 
   mutating func interrupt() {

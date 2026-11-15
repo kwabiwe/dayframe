@@ -25,7 +25,8 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("DayframeCalendarPlacesLaneMath.hitIndex(point: point, spans: lane.map(\\.span), frames: lane.map(\\.frame))");
     expect(rootView).toContain(".accessibilityAction { openLaneItem(item) }");
     expect(coordinator).toContain("let laneFrames = DayframeCalendarLaneLayout.layout(");
-    expect(coordinator).toContain("frames: hitFrames + momentFrames + laneFrames");
+    expect(coordinator).toContain("frames: momentFrames + laneFrames");
+    expect(coordinator).toContain("metrics.hitFrame.contains(point)");
     expect(rootView).toContain("DayframeCalendarLegStripMath.segments(");
     expect(rootView).not.toContain("minimumHeight: 4\n        ) {");
   });
@@ -348,7 +349,16 @@ describe("native Calendar production contract", () => {
     const changed = handler.slice(handler.indexOf("case .changed:"), handler.indexOf("case .ended:"));
     const ended = handler.slice(handler.indexOf("case .ended:"), handler.indexOf("case .cancelled"));
 
-    expect(coordinator.match(/private let longPressGesture = UILongPressGestureRecognizer\(\)/g)).toHaveLength(1);
+    expect(coordinator.match(/private let longPressGesture = DayframeCalendarLongPressRecognizer\(\)/g)).toHaveLength(1);
+    const recognizer = coordinator.slice(
+      coordinator.indexOf("class DayframeCalendarLongPressRecognizer: UILongPressGestureRecognizer"),
+      coordinator.indexOf("final class DayframeCalendarTouchObserver")
+    );
+    expect(recognizer).toContain("override func canBePrevented(by recognizer: UIGestureRecognizer) -> Bool");
+    expect(recognizer).toContain("recognizer is UIPanGestureRecognizer");
+    expect(recognizer).toContain("recognizer is UIPinchGestureRecognizer");
+    expect(recognizer).toContain("recognizer is UILongPressGestureRecognizer");
+    expect(began.match(/touchObserver\.suppressActivation\(\)/g)).toHaveLength(2);
     expect(coordinator).toContain("minimumPressDuration = DayframeCalendarConstants.longPressMinimumDuration");
     expect(coordinator).toContain("allowableMovement = DayframeCalendarConstants.longPressAllowableMovement");
     expect(coordinator).toContain("numberOfTouchesRequired = 1");
@@ -360,7 +370,9 @@ describe("native Calendar production contract", () => {
     expect(coordinator).toContain("selectionHaptic.selectionChanged()");
     expect(began).toContain("model.beginCreationPreview(");
     expect(began).not.toContain("actions.requestCreateEntry");
-    expect(changed).toContain("updateCreationDrag(");
+    expect(changed).toContain("updateLongPressDrag(");
+    expect(changed).not.toContain("actions.requestBlockEdit");
+    expect(ended).toContain("completeBlockEdit(drag, model: model)");
     expect(ended).toContain("completeCreationInteraction()");
     expect(coordinator.slice(coordinator.indexOf("private func completeCreationInteraction"))).toContain(
       "actions.requestCreateEntry(request)"

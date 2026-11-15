@@ -6,11 +6,44 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_LANE_MAX_LANES,
   buildNativeCalendarBridgeState,
+  calendarBlockDragPatches,
   reviewTargetEnvelope,
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh
 } from "./nativeCalendarPresentation";
 import { minuteClock, newestShownTimestamp } from "./frameClock";
+
+describe("completed Calendar block drag patches", () => {
+  const start = Date.parse("2026-07-10T00:00:00.000Z");
+  const day = { dayStartMs: start, dayEndMs: start + 86_400_000 };
+  const current = {
+    id: "dragged",
+    startedAt: "2026-07-10T09:02:30.000Z",
+    stoppedAt: "2026-07-10T10:02:30.000Z"
+  };
+  const change = {
+    dayKey: "2026-07-10", entryId: current.id, originalStartMs: Date.parse(current.startedAt),
+    originalEndMs: Date.parse(current.stoppedAt), startMinute: 547.5, endMinute: 607.5
+  };
+
+  it("moves both endpoints without changing duration and only resizes the chosen endpoint", () => {
+    const move = calendarBlockDragPatches(change, current, day, day.dayEndMs);
+    expect(move?.patch).toEqual({ startedAt: "2026-07-10T09:07:30.000Z", stoppedAt: "2026-07-10T10:07:30.000Z" });
+    const resizeEnd = calendarBlockDragPatches({ ...change, startMinute: 542.5 }, current, day, day.dayEndMs);
+    expect(resizeEnd?.patch).toEqual({ stoppedAt: "2026-07-10T10:07:30.000Z" });
+    expect(resizeEnd?.restore).toEqual({ stoppedAt: current.stoppedAt });
+    const resizeStart = calendarBlockDragPatches({ ...change, endMinute: 602.5 }, current, day, day.dayEndMs);
+    expect(resizeStart?.patch).toEqual({ startedAt: "2026-07-10T09:07:30.000Z" });
+  });
+
+  it("rejects stale blocks, future times, mixed moves and resizes, or irregular days", () => {
+    expect(calendarBlockDragPatches({ ...change, originalEndMs: 0 }, current, day, day.dayEndMs)).toBeNull();
+    expect(calendarBlockDragPatches(change, { ...current, stoppedAt: null }, day, day.dayEndMs)).toBeNull();
+    expect(calendarBlockDragPatches(change, current, day, change.originalEndMs)).toBeNull();
+    expect(calendarBlockDragPatches({ ...change, endMinute: 617.5 }, current, day, day.dayEndMs)).toBeNull();
+    expect(calendarBlockDragPatches(change, current, { ...day, dayEndMs: start + 82_800_000 }, day.dayEndMs)).toBeNull();
+  });
+});
 
 describe("native Calendar presentation boundary", () => {
   it("serializes fixed 24-hour boundaries, week state, totals, and resolved theme roles", () => {
@@ -263,6 +296,7 @@ describe("native Calendar presentation boundary", () => {
       const other = state.model.entries.find((item) => item.entryId === "other")!;
       expect(asking.asking).toBe(true);
       expect(asking.accessibilityLabel.endsWith(", Needs a look")).toBe(true);
+      expect(asking.canDragEdit).toBe(false);
       expect(asking.actionKind).toBe("completed");
       expect(other.asking).toBeUndefined();
       expect(other.accessibilityLabel).not.toContain("Needs a look");

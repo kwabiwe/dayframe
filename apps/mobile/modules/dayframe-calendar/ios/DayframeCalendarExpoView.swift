@@ -8,6 +8,7 @@ final class DayframeCalendarExpoView: ExpoView {
   let onOpenCompletedEntry = EventDispatcher()
   let onOpenReviewItem = EventDispatcher()
   let onRequestCreateEntry = EventDispatcher()
+  let onRequestBlockEdit = EventDispatcher()
   let onRequestRefresh = EventDispatcher()
   let onSelectDay = EventDispatcher()
   let onChangeLayout = EventDispatcher()
@@ -29,6 +30,16 @@ final class DayframeCalendarExpoView: ExpoView {
         self?.onRequestCreateEntry([
           "dayKey": request.dayKey,
           "startMinute": request.startMinute
+        ])
+      },
+      requestBlockEdit: { [weak self] request in
+        self?.onRequestBlockEdit([
+          "dayKey": request.dayKey,
+          "entryId": request.entryId,
+          "originalStartMs": request.originalStartMs,
+          "originalEndMs": request.originalEndMs,
+          "startMinute": request.startMinute,
+          "endMinute": request.endMinute
         ])
       },
       requestRefresh: { [weak self] in self?.onRequestRefresh([:]) },

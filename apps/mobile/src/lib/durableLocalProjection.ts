@@ -114,6 +114,11 @@ export function projectDurableLocalWork(
       });
       continue;
     }
+    if (operation.command.expectedUpdatedAt) {
+      const current = mobileTimeEntryById(projected, target);
+      if (!current?.stoppedAt ||
+          Date.parse(current.updatedAt ?? "") !== Date.parse(operation.command.expectedUpdatedAt)) continue;
+    }
     projected = operation.kind === "delete"
       ? optimisticDeleteTimeEntry(projected, target) as MobileBootstrap
       : optimisticPatchTimeEntry(

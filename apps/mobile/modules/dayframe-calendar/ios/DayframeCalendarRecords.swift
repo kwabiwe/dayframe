@@ -59,6 +59,7 @@ struct DayframeCalendarEntryRecord: Codable {
   /// Absent from an older bundle (no dot).
   var asking: Bool?
   var isUncategorized = false
+  var canDragEdit: Bool?
   var laneCount = 1
   var laneIndex = 0
   var layoutMode = "full"

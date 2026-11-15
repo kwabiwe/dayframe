@@ -251,6 +251,8 @@ private struct DayframeCalendarTimelineCanvas: View {
           hourLabelWidth: hourLabelWidth,
           hourLabelGlyphHeight: hourLabelGlyphHeight,
           labelTextScale: model.labelTextScale,
+          editingEntryId: model.blockEditPreview?.dayKey == presentation.selectedDayKey
+            ? model.blockEditPreview?.entryId : nil,
           presentation: presentation
         )
         .id(presentation.selectedDayKey)
@@ -287,6 +289,20 @@ private struct DayframeCalendarTimelineCanvas: View {
             hourHeight: hourHeight,
             hourLabelWidth: hourLabelWidth,
             leadingInset: CGFloat(presentation.entryLeadingInset),
+            preview: preview,
+            reduceTransparency: presentation.reduceTransparency,
+            theme: theme
+          )
+          .zIndex(10_000)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+
+        if let preview = model.blockEditPreview, preview.dayKey == presentation.selectedDayKey {
+          DayframeCalendarBlockDragLayer(
+            hourHeight: hourHeight,
+            clockFormat: presentation.clockFormat,
+            textScale: model.labelTextScale,
             preview: preview,
             reduceTransparency: presentation.reduceTransparency,
             theme: theme
@@ -390,6 +406,63 @@ private struct DayframeCalendarNowMarker: View {
         .frame(width: pillTrailing, alignment: .trailing)
     }
     .frame(width: width, height: 18, alignment: .leading)
+  }
+}
+
+private struct DayframeCalendarBlockDragLayer: View {
+  let hourHeight: CGFloat
+  let clockFormat: String
+  let textScale: Double
+  let preview: DayframeCalendarBlockEditPreview
+  let reduceTransparency: Bool
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    let top = CGFloat(preview.range.startMinute / 60) * hourHeight
+    let duration = max(1, preview.range.endMinute - preview.range.startMinute)
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: max(
+        DayframeCalendarDayLayout.labelMinimumHeight(textScale: textScale),
+        duration / 60 * Double(hourHeight)
+      ),
+      continuesIntoNextDay: false
+    )
+    let height = CGFloat(visual.visualHeight)
+    let width = CGFloat(preview.frame.maxX - preview.frame.minX)
+    let accent = UIColor(dayframeCSS: theme.accent)
+    let fill = accent.dayframeBlended(
+      over: UIColor(dayframeCSS: theme.surface),
+      alpha: reduceTransparency ? 0.34 : 0.22
+    )
+    let shape = RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius), style: .continuous)
+
+    ZStack(alignment: .leading) {
+      shape.fill(Color(uiColor: fill))
+      shape.strokeBorder(Color(uiColor: accent), lineWidth: 2)
+      if height >= 20, width >= 64 {
+        VStack(alignment: .leading, spacing: 1) {
+          if height >= 42 {
+            Text(preview.title)
+              .font(.footnote.weight(.bold))
+              .lineLimit(1)
+          }
+          Text("\(clock(preview.range.startMinute))–\(clock(preview.range.endMinute))")
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+        }
+        .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+        .padding(.horizontal, 8)
+      }
+    }
+    .frame(width: width, height: height)
+    .position(x: CGFloat(preview.frame.minX) + width / 2, y: top + height / 2)
+  }
+
+  private func clock(_ minute: Double) -> String {
+    let normalized = Int(minute.rounded(.down)) % 1_440
+    return DayframeClockText.time(hour: normalized / 60, minute: normalized % 60, clockFormat: clockFormat)
   }
 }
 
@@ -517,6 +590,7 @@ private struct DayframeCalendarEntriesLayer: View {
   let hourLabelWidth: CGFloat
   let hourLabelGlyphHeight: CGFloat
   let labelTextScale: Double
+  let editingEntryId: String?
   let presentation: DayframeCalendarPresentation
 
   /// Every lane item opens its own sheet (owner item A): React finds it by its "?" or by the item itself.
@@ -689,6 +763,7 @@ private struct DayframeCalendarEntriesLayer: View {
               : .opacity.animation(.easeOut(duration: 0.21))
           )
           .zIndex(Double(laidOut.zIndex))
+          .opacity(entry.entryId == editingEntryId ? 0 : 1)
           .accessibilityLabel(entry.accessibilityLabel)
           .accessibilityHint(entry.isReview || entry.asking ? "Opens its question" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])

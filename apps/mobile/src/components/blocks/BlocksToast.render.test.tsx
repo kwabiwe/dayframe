@@ -263,6 +263,27 @@ describe("useBlocksNotice", () => {
     ]);
   });
 
+  it("gives Undo a clear callback that only clears its own notice", () => {
+    vi.useFakeTimers();
+    let notice!: Notice;
+    const undo = vi.fn<(clear: () => void) => void>();
+    act(() => { tree = create(<Harness onNotice={(value) => { notice = value; }} />); });
+    act(() => notice.show("First move", null, { label: "Undo", run: undo }));
+    const firstAction = notice.notice!.action!;
+    act(() => firstAction.run());
+    const clearFirst = undo.mock.calls[0][0];
+
+    act(() => notice.show("Second move", null, { label: "Undo", run: undo }));
+    act(() => clearFirst());
+    act(() => firstAction.run());
+    expect(notice.notice?.message).toBe("Second move");
+    expect(undo).toHaveBeenCalledTimes(1);
+
+    act(() => notice.notice!.action!.run());
+    act(() => undo.mock.calls[1][0]());
+    expect(notice.notice).toBeNull();
+  });
+
   it("clears at once and ignores the cleared notice's timer", () => {
     vi.useFakeTimers();
     let notice!: Notice;

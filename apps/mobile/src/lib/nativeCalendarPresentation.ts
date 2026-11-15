@@ -23,6 +23,50 @@ import {
 } from "./review";
 import { displayTimerDescription } from "./timerPresentation";
 
+export type NativeCalendarBlockEdit = {
+  dayKey: string;
+  entryId: string;
+  originalStartMs: number;
+  originalEndMs: number;
+  startMinute: number;
+  endMinute: number;
+};
+
+/** Validate a native drag against the current completed block and the displayed day. */
+export function calendarBlockDragPatches(
+  change: NativeCalendarBlockEdit,
+  current: Pick<MobileTimeEntry, "id" | "startedAt" | "stoppedAt" | "pendingCompletedCopy">,
+  day: { dayStartMs: number; dayEndMs: number },
+  nowMs: number
+) {
+  if (current.id !== change.entryId || !current.stoppedAt || current.pendingCompletedCopy) return null;
+  const { dayStartMs, dayEndMs } = day;
+  const originalStart = Date.parse(current.startedAt);
+  const originalEnd = Date.parse(current.stoppedAt);
+  const proposedStart = dayStartMs + Math.round(change.startMinute * 60_000);
+  const proposedEnd = dayStartMs + Math.round(change.endMinute * 60_000);
+  if (originalStart !== change.originalStartMs || originalEnd !== change.originalEndMs
+      || dayEndMs - dayStartMs !== 86_400_000
+      || !(originalStart >= dayStartMs && originalEnd > originalStart && originalEnd <= dayEndMs)
+      || !(proposedStart >= dayStartMs && proposedEnd > proposedStart && proposedEnd <= Math.min(nowMs, dayEndMs))
+      || (proposedStart === originalStart && proposedEnd === originalEnd)) return null;
+
+  const startChanged = proposedStart !== originalStart;
+  const endChanged = proposedEnd !== originalEnd;
+  if (startChanged && endChanged && proposedEnd - proposedStart !== originalEnd - originalStart) return null;
+  return {
+    proposedStart, proposedEnd,
+    patch: {
+      ...(startChanged ? { startedAt: new Date(proposedStart).toISOString() } : {}),
+      ...(endChanged ? { stoppedAt: new Date(proposedEnd).toISOString() } : {})
+    },
+    restore: {
+      ...(startChanged ? { startedAt: current.startedAt } : {}),
+      ...(endChanged ? { stoppedAt: current.stoppedAt } : {})
+    }
+  };
+}
+
 export type NativeCalendarActionKind = "active" | "completed" | "review";
 
 export type NativeCalendarEntry = MobileTimeEntry & {
@@ -83,6 +127,7 @@ export type NativeCalendarPresentationEntry = {
    */
   asking?: boolean;
   isUncategorized: boolean;
+  canDragEdit?: boolean;
   laneCount: number;
   laneIndex: number;
   layoutMode: TimeIntervalLayout["mode"];
@@ -479,7 +524,7 @@ export function buildNativeCalendarBridgeState({
 
 /** A block with a "?" on it: the dot, and VoiceOver hears that it needs a look. */
 function withAsking(entry: NativeCalendarPresentationEntry, asking: boolean): NativeCalendarPresentationEntry {
-  return asking ? { ...entry, asking: true, accessibilityLabel: `${entry.accessibilityLabel}, Needs a look` } : entry;
+  return asking ? { ...entry, asking: true, canDragEdit: false, accessibilityLabel: `${entry.accessibilityLabel}, Needs a look` } : entry;
 }
 
 export function routeNativeCalendarOpenEvent(
@@ -571,6 +616,8 @@ function serializeCalendarEntry(
     isReview: reviewNeeded,
     ink,
     isUncategorized,
+    canDragEdit: actionKind === "completed" && !reviewNeeded && !entry.pendingCompletedCopy
+      && Boolean(entry.updatedAt) && !continuation.continuesIntoNextDay && !continuation.startsBeforeDay,
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
     layoutMode: layout?.mode ?? "full",

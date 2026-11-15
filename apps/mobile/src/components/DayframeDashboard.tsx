@@ -49,7 +49,7 @@ import {
   type RecentActivitySuggestion,
   type TimerStateFingerprint
 } from "@dayframe/shared";
-import { DayframeCalendarView } from "../../modules/dayframe-calendar";
+import { DayframeCalendarView, type DayframeCalendarBlockEditEvent } from "../../modules/dayframe-calendar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CalendarListView } from "./calendar/CalendarListView";
 import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
@@ -97,7 +97,7 @@ import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFl
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayChecksChip } from "./today/TodayChecksChip";
 import { TodayBlockRows } from "./today/TodayBlockRows";
-import { BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
+import { BLOCKS_TOAST_DURATION_MS, BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
 import { useTripOptOut } from "../lib/useTripOptOut";
 import {
   alreadyRecordingToastMessage,
@@ -222,6 +222,7 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
+  createTimeEntryCommandHoldLease,
   enqueueCompletedEntryCopy,
   PendingCompletedEntryChangeError,
   enqueueTimeEntryUpdate,
@@ -232,7 +233,8 @@ import {
   type TimeEntryCommandHoldLease,
   subscribeDeliveredTimeEntryDeletes,
   subscribeTimeEntryOutbox,
-  synchroniseTimeEntryCommands
+  synchroniseTimeEntryCommands,
+  undoHeldTimeEntryUpdate
 } from "@/lib/timeEntryOutbox";
 import {
   type TimeEntrySheetOpenReason,
@@ -263,6 +265,7 @@ import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { captureSettingsSeedGeneration, publishTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import {
   buildNativeCalendarBridgeState,
+  calendarBlockDragPatches,
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh,
   type NativeCalendarActionKind,
@@ -470,6 +473,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // the delete Undo toast's place; that Undo toast always wins it.
   const todayNotice = useBlocksNotice();
   const clearTodayNotice = todayNotice.clear;
+  const calendarDragSaves = useRef(new Set<string>());
   // Notices belong to the session that raised them: a sign-out bumps this, so a start that is
   // accepted after the account left never shows its "Switched to …" over sign-in or another account.
   const noticeSessionGeneration = useRef(0);
@@ -3038,6 +3042,99 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  async function saveCalendarDrag(change: DayframeCalendarBlockEditEvent) {
+    const session = todayNoticeOwner();
+    const bootstrap = latestData.current;
+    if (!bootstrap || !todayNoticeOwnerStill(session) || calendarLayout !== "grid" || change.dayKey !== selectedDayKey
+        || gridModel.refreshing || refreshing || calendarDragSaves.current.has(change.entryId)) return;
+
+    const visible = gridModel.entries.find((entry) => entry.entryId === change.entryId);
+    const current = mobileTimeEntryById(bootstrap, change.entryId);
+    const persistedId = persistedTimerEntryId(change.entryId);
+    if (!visible?.canDragEdit || !current?.stoppedAt || !current.updatedAt ||
+        !persistedId || persistedId !== change.entryId || current.pendingCompletedCopy) return;
+
+    const edit = calendarBlockDragPatches(change, current, gridModel, Date.now());
+    if (!edit) return;
+    const { patch, restore, proposedStart, proposedEnd } = edit;
+
+    const { entryId } = change;
+    const owner = timerStopOwner(bootstrap);
+    const lease = createTimeEntryCommandHoldLease();
+    calendarDragSaves.current.add(entryId);
+    try {
+      const { clientCommandId } = await enqueueTimeEntryUpdate({
+        owner,
+        target: { targetEntryId: entryId },
+        patch,
+        expectedUpdatedAt: current.updatedAt,
+        holdLease: lease,
+        deliverAfter: new Date(Date.now() + BLOCKS_TOAST_DURATION_MS).toISOString()
+      });
+      const release = () => {
+        lease.end();
+        void releaseTimeEntryCommands([clientCommandId], {
+          owner, requestImmediateDelivery: todayNoticeOwnerStill(session) && connectivityCurrent.current.isOnline
+        }).then((released) => {
+          if (released && todayNoticeOwnerStill(session)) deliverQueuedTimeEntry(owner, clientCommandId);
+        }).catch(() => undefined);
+      };
+      if (!todayNoticeOwnerStill(session)) {
+        release();
+        return;
+      }
+      const latest = mobileTimeEntryById(latestData.current, entryId);
+      if (latest?.updatedAt !== current.updatedAt || !latest.stoppedAt ||
+          Date.parse(latest.startedAt) !== change.originalStartMs ||
+          Date.parse(latest.stoppedAt) !== change.originalEndMs) {
+        const removed = await undoHeldTimeEntryUpdate(owner, clientCommandId, () => todayNoticeOwnerStill(session));
+        lease.end();
+        if (removed) showTodayNotice("This block changed. Try dragging it again.", null);
+        return;
+      }
+      const savedVersion = nextTimerMutationVersion(entryId);
+      updateDashboardData((data) => optimisticPatchTimeEntry(data, entryId, patch));
+      queuedTimerStartRecoveryRequested.current = true;
+
+      const undoStillCurrent = () => {
+        const entry = mobileTimeEntryById(latestData.current, entryId);
+        return todayNoticeOwnerStill(session) && !entry?.pendingCompletedCopy && Boolean(entry?.stoppedAt) &&
+          isCurrentTimerMutation(entryId, savedVersion) &&
+          Date.parse(entry?.updatedAt ?? "") === Date.parse(current.updatedAt ?? "") &&
+          Date.parse(entry?.startedAt ?? "") === proposedStart && Date.parse(entry?.stoppedAt ?? "") === proposedEnd;
+      };
+      const title = current.description?.trim() || current.categoryName || "block";
+      const message = patch.startedAt && patch.stoppedAt ? "Block moved" : "Block resized";
+      const expiry = setTimeout(release, BLOCKS_TOAST_DURATION_MS);
+      todayNotice.show(message, toastSwatchColor(current, theme.mode), {
+        label: `Undo changing the time of ${title}`,
+        run: (clearDragNotice) => {
+          if (!undoStillCurrent() || calendarDragSaves.current.has(entryId)) return;
+          calendarDragSaves.current.add(entryId);
+          void undoHeldTimeEntryUpdate(owner, clientCommandId, undoStillCurrent).then((undone) => {
+            if (!undone) return;
+            clearTimeout(expiry);
+            lease.end();
+            if (!undoStillCurrent()) return;
+            clearDragNotice();
+            nextTimerMutationVersion(entryId);
+            updateDashboardData((data) => optimisticPatchTimeEntry(data, entryId, restore));
+            playHaptic("undoRestore");
+          }).catch(() => {
+            if (todayNoticeOwnerStill(session)) showTodayNotice("Dayframe couldn't undo this change.", null);
+          }).finally(() => { calendarDragSaves.current.delete(entryId); });
+        }
+      });
+    } catch (error) {
+      lease.end();
+      if (!todayNoticeOwnerStill(session)) return;
+      if (error instanceof PendingCompletedEntryChangeError) showTodayNotice(error.message, null);
+      else Alert.alert("Block not saved", "Dayframe could not save this change on your iPhone. Check available storage and try again.");
+    } finally {
+      calendarDragSaves.current.delete(entryId);
+    }
+  }
+
   async function saveTimeEntryOptimistically(
     entryId: string,
     patch: TimeEntryUpdatePatch,
@@ -4275,6 +4372,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   event.nativeEvent.startMinute
                 );
               }}
+              onRequestBlockEdit={(event) => {
+                if (isFocused) void saveCalendarDrag(event.nativeEvent);
+              }}
               onRequestRefresh={() => {
                 routeNativeCalendarRefresh(() => {
                   void load({ visibleRefresh: true });
@@ -4495,6 +4595,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <BlocksToast
             key={`notice-${todayNotice.notice.token}`}
             accessibilityLabel={todayNotice.notice.accessibilityLabel}
+            actionLabel={todayNotice.notice.action ? "Undo" : undefined}
+            actionAccessibilityLabel={todayNotice.notice.action?.label}
+            onAction={todayNotice.notice.action?.run}
             detail={todayNotice.notice.detail}
             message={todayNotice.notice.message}
             reduceMotion={reduceMotion}

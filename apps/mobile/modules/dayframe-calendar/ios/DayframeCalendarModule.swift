@@ -12,6 +12,7 @@ public final class DayframeCalendarModule: Module {
         "onOpenCompletedEntry",
         "onOpenReviewItem",
         "onRequestCreateEntry",
+        "onRequestBlockEdit",
         "onRequestRefresh",
         "onSelectDay",
         "onChangeLayout",
