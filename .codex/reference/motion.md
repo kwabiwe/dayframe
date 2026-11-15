@@ -516,10 +516,10 @@ Removed in location v4 step 15: the web Review page and its card deck are gone; 
 
 ## Reports donut and filter (Blocks parity step 10b)
 
-- Trigger: a finger on the ring, a row tap, VoiceOver increment/decrement, All / None / a row in the filter sheet.
-- Owner: `ReportDonutCard` owns the highlighted activity; the highlight changes stroke width and opacity at once (no animation), the centre text and the row background change in the same render. The ring takes the touch with the responder system and refuses to hand it over until release; while a finger is on it the Reports scroll view turns `scrollEnabled` off (refusing the JS responder alone does not stop the native iOS pan), and release, termination or unmount turn it back on, so scrubbing never scrolls the page. The filter sheet keeps `SwipeDismissSheet` as its only transition owner.
-- Interruption: a range or filter change that removes the highlighted activity clears the highlight; releasing the finger keeps the last highlight (tap its row, or step past the last activity, to return to the total).
-- Accessibility: nothing moves, so Reduce Motion needs no other path; the ring is adjustable for VoiceOver; rows are 44-point buttons with their full name, percentage and duration; the `tick` haptic follows the Dayframe haptics setting.
+- Trigger: a tap or scrub on the ring, a row tap, VoiceOver adjustments, or an Apply or remove action for a filter.
+- Owner: `ReportDonutCard` owns the highlighted activity; the highlight changes stroke width and opacity at once (no animation), the centre text and the row background change in the same render. The ring takes the touch with the responder system and refuses to hand it over until release; while a finger is on it the Reports scroll view turns `scrollEnabled` off (refusing the JS responder alone does not stop the native iOS pan), and release, termination or unmount turn it back on, so scrubbing never scrolls the page. The filter sheet uses `SwipeDismissSheet` for its entrance and dismissal. Its More filters section uses a single local layout transition and the footer stays fixed. Editing a draft leaves the report stable. Apply and chip removal ask for only the matching bounded aggregate and show the range loading frame if that exact aggregate is uncached.
+- Interruption: a range or filter change that removes the highlighted activity clears the highlight; a second tap of the same slice or row clears the highlight. A drag release retains the last slice and termination unlocks scrolling. VoiceOver offers Clear highlight, and stepping past the last activity returns to the total.
+- Accessibility: Reduce Motion settles More filters directly; the ring is adjustable for VoiceOver; rows are 44-point buttons with their full name, percentage and duration; the `tick` haptic follows the Dayframe haptics setting.
 
 ## Calendar (Blocks parity step 9)
 

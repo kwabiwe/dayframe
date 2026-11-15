@@ -1,3 +1,4 @@
+import { REPORT_DESCRIPTION_MAX, REPORT_FACET_MAX, REPORT_SOURCE_VALUES } from "@dayframe/shared";
 import { zonedDateKey, zonedStartOfDay } from "@/lib/viewer-time-zone";
 
 export const REPORT_RANGE_PRESETS = [
@@ -63,23 +64,7 @@ export const REPORT_PAGE_SIZE = 25;
 export const REPORT_MAX_RANGE_DAYS = 366;
 export const REPORT_DAILY_CHART_THRESHOLD = 62;
 
-export const REPORT_SOURCE_VALUES = [
-  "manual_app",
-  "mobile_app",
-  "nfc",
-  "widget",
-  "shortcut",
-  "geofence_specific",
-  "geofence_broad",
-  "calendar",
-  "health_sleep",
-  "health_workout",
-  "location_learning",
-  "location_auto_log",
-  "home_assistant",
-  "ha_button",
-  "ha_geofence"
-] as const;
+export { REPORT_SOURCE_VALUES };
 
 type SearchInput = Record<string, string | string[] | null | undefined>;
 
@@ -108,7 +93,7 @@ export function parseReportQueryInput(
     tags: parseIdList(input.tags),
     places: parseIdList(input.places, ["no-place"]),
     sources: parseList(input.sources).filter((value) => sourceValues.has(value)),
-    description: scalar(input.description)?.trim().slice(0, 160) ?? "",
+    description: scalar(input.description)?.trim().slice(0, REPORT_DESCRIPTION_MAX) ?? "",
     sort: scalar(input.sort) === "duration" ? "duration" : "newest",
     page: parsePage(input.page)
   };
@@ -356,7 +341,7 @@ function parseIdList(value: string | string[] | null | undefined, specialValues:
 
 function parseList(value: string | string[] | null | undefined) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
-  return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()).filter(Boolean))].slice(0, 50);
+  return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()).filter(Boolean))].slice(0, REPORT_FACET_MAX);
 }
 
 function scalar(value: string | string[] | null | undefined) {

@@ -75,11 +75,12 @@ export function reportTrackedSeconds(
   window: ReportWindow,
   nowMs: number,
   selection: ReportCategorySelection,
+  matchesFacets?: (entry: MobileTimeEntry) => boolean,
 ) {
   if (+window.end <= +window.start) return 0;
   return reportEntryUnion(data).reduce(
     (sum, entry) =>
-      eligible(entry) && reportSelectionIncludes(selection, reportCategoryKey(entry))
+      eligible(entry) && (!matchesFacets || matchesFacets(entry)) && reportSelectionIncludes(selection, reportCategoryKey(entry))
         ? sum + entryOverlapMs(entry, window, nowMs) / 1000
         : sum,
     0,
@@ -97,9 +98,10 @@ export function reportGoalSeconds(
   data: MobileBootstrap,
   windows: readonly ReportWindow[],
   nowMs: number,
+  matchesFacets?: (entry: MobileTimeEntry) => boolean,
 ) {
   const counting = goalCountingEntries(
-    reportEntryUnion(data).filter(eligible),
+    reportEntryUnion(data).filter((entry) => eligible(entry) && (!matchesFacets || matchesFacets(entry))),
     withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
   );
   return windows.map((window) =>
@@ -138,8 +140,9 @@ export function buildReportsPresentation(input: {
   nowMs: number;
   selection: ReportCategorySelection;
   themeMode: MobileTheme["mode"];
+  matchesFacets?: (entry: MobileTimeEntry) => boolean;
 }) {
-  const { data, summary, range, selection, themeMode, nowMs } = input;
+  const { data, summary, range, selection, themeMode, nowMs, matchesFacets } = input;
   const categories = new Map(summary.categories.map((c) => [c.key, { ...c }]));
   const buckets = summary.buckets.map((b) => ({
     ...b,
@@ -197,7 +200,7 @@ export function buildReportsPresentation(input: {
   )
     replacements.set(data.activeEntry.id, data.activeEntry);
   for (const entry of replacements.values()) {
-    if (!eligible(entry)) continue;
+    if (!eligible(entry) || (matchesFacets && !matchesFacets(entry))) continue;
     const key = reportCategoryKey(entry);
     categories.set(key, {
       key,

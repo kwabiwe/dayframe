@@ -393,6 +393,7 @@ export function BottomSheetShell({
             <View style={s.footerRow}>
               <Pressable
                 testID={secondaryAction.testID}
+                accessibilityLabel={secondaryAction.label}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(secondaryAction.disabled) || inactive }}
                 disabled={Boolean(secondaryAction.disabled) || inactive}

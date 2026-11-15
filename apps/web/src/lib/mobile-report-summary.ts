@@ -1,5 +1,6 @@
 import type { ReportSummary, ReportSummaryRequest } from "@dayframe/shared";
 import { query } from "./db";
+import { reportEntryFacetPredicates } from "./report-entry-facets";
 import { getGettingAround, getNotLoggedSeconds } from "./report-service";
 import type { RequestSession } from "./session";
 
@@ -8,15 +9,15 @@ export function buildMobileReportSummaryQuery(
   input: ReportSummaryRequest,
   capturedNow: string,
 ) {
+  const values: unknown[] = [
+    session.workspaceId, session.userId, capturedNow, input.start, input.end, JSON.stringify(input.buckets),
+  ];
+  const facets = reportEntryFacetPredicates(input.filters ?? {}, (value) => {
+    values.push(value);
+    return `$${values.length}`;
+  });
   return {
-    values: [
-      session.workspaceId,
-      session.userId,
-      capturedNow,
-      input.start,
-      input.end,
-      JSON.stringify(input.buckets),
-    ],
+    values,
     text: `with bounds as (
       select b.value->>'key' as key, (b.value->>'start')::timestamptz as start_at,
         (b.value->>'end')::timestamptz as end_at, b.ordinal
@@ -33,6 +34,7 @@ export function buildMobileReportSummaryQuery(
         and te.review_status in ('confirmed', 'accepted')
         and te.started_at < $5::text::timestamptz
         and coalesce(te.stopped_at, $3::text::timestamptz) > $4::text::timestamptz
+        ${facets.map((predicate) => `and ${predicate}`).join("\n        ")}
     ), pieces as (
       select e.*, b.key, b.ordinal,
         greatest(0, extract(epoch from (least(e.end_at, b.end_at) - greatest(e.started_at, b.start_at))))::double precision as seconds
@@ -96,7 +98,9 @@ export function buildMobileReportSummaryQuery(
         'buckets', coalesce((select jsonb_agg(jsonb_build_object('key', p.key, 'seconds', p.seconds) order by p.ordinal)
           from pieces p where p.id = e.id), '[]'::jsonb))
         from eligible e where e.stopped_at is null order by e.started_at desc, e.id limit 1)
-    ) as summary`,
+    ) as summary,
+    coalesce((select jsonb_agg(jsonb_build_object('id', id, 'categoryId', category_id))
+      from eligible where category_id is not null), '[]'::jsonb) as "entryRefs"`,
   };
 }
 
@@ -107,17 +111,11 @@ export async function getMobileReportSummary(
   const capturedNow = new Date().toISOString();
   const sql = buildMobileReportSummaryQuery(session, input, capturedNow);
   const range = { start: input.start, end: input.end };
-  const [result, entries, notLoggedSeconds] = await Promise.all([
-    query<{ summary: ReportSummary }>(sql.text, sql.values),
-    // The range's logged blocks, as the summary counts them, for Getting around (location v4 step 18).
-    query<{ id: string; categoryId: string | null }>(
-      `select id, category_id as "categoryId" from time_entries
-        where workspace_id = $1 and user_id = $2 and review_status in ('confirmed', 'accepted') and category_id is not null
-          and started_at < $4::timestamptz and coalesce(stopped_at, $5::timestamptz) > $3::timestamptz`,
-      [session.workspaceId, session.userId, input.start, input.end, capturedNow]),
-    getNotLoggedSeconds(session, range, capturedNow)
+  const [result, notLoggedSeconds] = await Promise.all([
+    query<{ summary: ReportSummary; entryRefs: { id: string; categoryId: string }[] }>(sql.text, sql.values),
+    getNotLoggedSeconds(session, range, capturedNow),
   ]);
   const gettingAround = await getGettingAround(session,
-    entries.rows.map((row) => ({ id: row.id, categoryId: row.categoryId ?? undefined })), range, capturedNow);
+    result.rows[0].entryRefs, range, capturedNow);
   return { ...result.rows[0].summary, gettingAround, notLoggedSeconds };
 }

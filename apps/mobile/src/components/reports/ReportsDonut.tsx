@@ -23,6 +23,7 @@ const SIZE = 168;
 const STROKE = 24;
 const HOT_STROKE = 30;
 const GAP = 2.2;
+const TAP_SLOP = 6;
 // Leaves room for the thicker highlighted arc inside the drawing.
 const RADIUS = (SIZE - HOT_STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -102,9 +103,12 @@ export const ReportDonutCard = memo(function ReportDonutCard({
   useEffect(() => () => {
     if (scrubbing.current) onScrubbingChange?.(false);
   }, []);
-  const scrub = (event: GestureResponderEvent) => {
-    const { locationX, locationY } = event.nativeEvent;
-    choose(donutSegmentAt(segments, donutTurn(locationX, locationY)));
+  const gesture = useRef<{ x: number; y: number; startKey: string | null; wasSelected: boolean; dragged: boolean } | null>(null);
+  const keyAt = ({ locationX, locationY }: GestureResponderEvent["nativeEvent"]) =>
+    donutSegmentAt(segments, donutTurn(locationX, locationY));
+  const releaseScrub = () => {
+    gesture.current = null;
+    setScrubbing(false);
   };
   const hotSegment = segments.find((segment) => segment.key === hot) ?? null;
   const total = segments.reduce((sum, segment) => sum + segment.seconds, 0);
@@ -130,7 +134,10 @@ export const ReportDonutCard = memo(function ReportDonutCard({
       <View style={styles.donutRow}>
         <View
           accessible
-          accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+          accessibilityActions={[
+            { name: "increment" }, { name: "decrement" },
+            ...(hotSegment ? [{ name: "clear", label: "Clear highlight" }] : []),
+          ]}
           accessibilityHint="Swipe up or down to read each activity."
           accessibilityLabel="Activity breakdown"
           accessibilityRole="adjustable"
@@ -139,16 +146,33 @@ export const ReportDonutCard = memo(function ReportDonutCard({
               ? `${hotSegment.name}, ${spokenDuration(hotSegment.seconds)}, ${reportPercent(hotSegment.seconds, total)}`
               : `${periodLabel}, ${spokenDuration(totalSeconds)}, ${segments.length} ${segments.length === 1 ? "activity" : "activities"}`,
           }}
-          onAccessibilityAction={(event) => step(event.nativeEvent.actionName === "increment" ? 1 : -1)}
+          onAccessibilityAction={({ nativeEvent: { actionName } }) => {
+            if (actionName === "clear") choose(null);
+            if (actionName === "increment") step(1);
+            if (actionName === "decrement") step(-1);
+          }}
           onMoveShouldSetResponder={() => segments.length > 0}
           onResponderGrant={(event) => {
             onInteraction?.();
             setScrubbing(true);
-            scrub(event);
+            const { locationX: x, locationY: y } = event.nativeEvent;
+            const startKey = keyAt(event.nativeEvent);
+            gesture.current = { x, y, startKey, wasSelected: startKey !== null && startKey === hotRef.current, dragged: false };
+            choose(startKey);
           }}
-          onResponderMove={scrub}
-          onResponderRelease={() => setScrubbing(false)}
-          onResponderTerminate={() => setScrubbing(false)}
+          onResponderMove={(event) => {
+            const current = gesture.current;
+            if (!current) return;
+            const { locationX, locationY } = event.nativeEvent;
+            current.dragged ||= Math.hypot(locationX - current.x, locationY - current.y) >= TAP_SLOP;
+            if (current.dragged) choose(keyAt(event.nativeEvent));
+          }}
+          onResponderRelease={() => {
+            const current = gesture.current;
+            if (current?.wasSelected && !current.dragged && current.startKey === hotRef.current) choose(null);
+            releaseScrub();
+          }}
+          onResponderTerminate={releaseScrub}
           onResponderTerminationRequest={() => false}
           onStartShouldSetResponder={() => segments.length > 0}
           style={styles.donut}

@@ -201,6 +201,7 @@ export type MobileTimeEntry = {
   categoryName: string | null;
   categoryColor?: string | null;
   placeName: string | null;
+  placeId?: string | null;
   placeKind?: "saved" | "one_time" | null;
   /** For a block a Move logged by itself (PRD D19), its Move's event, for "Don't log trips like this". */
   automaticMoveEventId?: string | null;
