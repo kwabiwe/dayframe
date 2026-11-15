@@ -349,7 +349,16 @@ describe("native Calendar production contract", () => {
     const changed = handler.slice(handler.indexOf("case .changed:"), handler.indexOf("case .ended:"));
     const ended = handler.slice(handler.indexOf("case .ended:"), handler.indexOf("case .cancelled"));
 
-    expect(coordinator.match(/private let longPressGesture = UILongPressGestureRecognizer\(\)/g)).toHaveLength(1);
+    expect(coordinator.match(/private let longPressGesture = DayframeCalendarLongPressRecognizer\(\)/g)).toHaveLength(1);
+    const recognizer = coordinator.slice(
+      coordinator.indexOf("class DayframeCalendarLongPressRecognizer: UILongPressGestureRecognizer"),
+      coordinator.indexOf("final class DayframeCalendarTouchObserver")
+    );
+    expect(recognizer).toContain("override func canBePrevented(by recognizer: UIGestureRecognizer) -> Bool");
+    expect(recognizer).toContain("recognizer is UIPanGestureRecognizer");
+    expect(recognizer).toContain("recognizer is UIPinchGestureRecognizer");
+    expect(recognizer).toContain("recognizer is UILongPressGestureRecognizer");
+    expect(began.match(/touchObserver\.suppressActivation\(\)/g)).toHaveLength(2);
     expect(coordinator).toContain("minimumPressDuration = DayframeCalendarConstants.longPressMinimumDuration");
     expect(coordinator).toContain("allowableMovement = DayframeCalendarConstants.longPressAllowableMovement");
     expect(coordinator).toContain("numberOfTouchesRequired = 1");
