@@ -78,13 +78,11 @@ export function reportTrackedSeconds(
   matchesFacets?: (entry: MobileTimeEntry) => boolean,
 ) {
   if (+window.end <= +window.start) return 0;
-  return reportEntryUnion(data).reduce(
-    (sum, entry) =>
-      eligible(entry) && (!matchesFacets || matchesFacets(entry)) && reportSelectionIncludes(selection, reportCategoryKey(entry))
-        ? sum + entryOverlapMs(entry, window, nowMs) / 1000
-        : sum,
-    0,
-  );
+  return reportEntryUnion(data).reduce((sum, entry) => {
+    if (!eligible(entry) || !reportSelectionIncludes(selection, reportCategoryKey(entry))) return sum;
+    const overlap = entryOverlapMs(entry, window, nowMs);
+    return overlap > 0 && (!matchesFacets || matchesFacets(entry)) ? sum + overlap / 1000 : sum;
+  }, 0);
 }
 
 /**
@@ -98,10 +96,9 @@ export function reportGoalSeconds(
   data: MobileBootstrap,
   windows: readonly ReportWindow[],
   nowMs: number,
-  matchesFacets?: (entry: MobileTimeEntry) => boolean,
 ) {
   const counting = goalCountingEntries(
-    reportEntryUnion(data).filter((entry) => eligible(entry) && (!matchesFacets || matchesFacets(entry))),
+    reportEntryUnion(data).filter(eligible),
     withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
   );
   return windows.map((window) =>
@@ -150,6 +147,7 @@ export function buildReportsPresentation(input: {
   }));
   const entries = reportEntryUnion(data);
   const active = summary.active;
+  const runningEntryId = active?.id ?? summary.runningEntryId;
   // Goal time per bucket (UIA-043). Preferred: the server's merged covered intervals without the
   // running entry, unioned with the phone's own projected timer (overlaps count once). From a server
   // with only goalSeconds, its running-timer share is swapped for the projection instead.
@@ -183,8 +181,8 @@ export function buildReportsPresentation(input: {
     }
   }
   const replacements = new Map<string, MobileTimeEntry>();
-  if (active) {
-    const replacement = entries.find((entry) => entry.id === active.id);
+  if (runningEntryId) {
+    const replacement = entries.find((entry) => entry.id === runningEntryId);
     if (
       replacement &&
       (replacement.stoppedAt !== null ||
@@ -194,7 +192,7 @@ export function buildReportsPresentation(input: {
   }
   if (
     data.activeEntry &&
-    (data.activeEntry.id === active?.id ||
+    (data.activeEntry.id === runningEntryId ||
       data.activeEntry.id.startsWith("optimistic-active-timer:") ||
       Date.parse(data.activeEntry.startedAt) >= Date.parse(summary.capturedNow))
   )

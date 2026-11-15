@@ -146,12 +146,12 @@ function result(input: ReportSummaryRequest): ReportSummary {
   };
 }
 // Most owner tests exercise the activity chart, which the "More" ranges (Today here) keep.
-const render = async (initialChoice: ReportRangeChoice = "today") => {
+const render = async (initialChoice: ReportRangeChoice = "today", extra: Partial<MobileBootstrap> = {}) => {
   let tree!: ReturnType<typeof create>;
   await act(async () => {
     tree = create(
       <ReportsTab
-        data={data}
+        data={{ ...data, ...extra }}
         initialChoice={initialChoice}
         isFocused
         nowMs={nowMs}
@@ -295,13 +295,17 @@ describe("Revision 3 Reports owner", () => {
     mocks.width = 390;
   });
   it("applies tag and advanced facets to both ranges, and restores the request when filters clear", async () => {
-    const tree = await render();
     const tag = "11111111-1111-4111-8111-111111111111";
+    const tree = await render("today", { tags: [
+      { id: tag, name: "Release", normalizedName: "release" },
+      { id: "optimistic-tag:local", name: "Local", normalizedName: "local" },
+    ] });
     const facets = { tags: [tag], sources: ["mobile_app"], description: " audit " };
     const firstKey = JSON.stringify(rangeCalls().at(-1)?.[0]);
     const filter = () => tree.root.findByProps({ testID: "reports-filter-button" });
     const sheet = () => tree.root.findByType("ReportFiltersSheet" as never);
     await act(async () => filter().props.onPress());
+    expect(sheet().props.facetOptions.tags).toEqual([{ id: tag, label: "#Release" }]);
     await act(async () => sheet().props.onChangeFacets(facets));
     expect(JSON.stringify(rangeCalls().at(-1)?.[0])).toBe(firstKey);
     await act(async () => sheet().props.onApply());
@@ -711,6 +715,13 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     );
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
+    expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
+    await act(async () => filtered.root.findByProps({ accessibilityLabel: "Remove filter Work" }).props.onPress());
+    expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(1);
+    await act(async () => filtered.root.findByProps({ testID: "reports-filter-button" }).props.onPress());
+    const facetsSheet = filtered.root.findByType("ReportFiltersSheet" as never);
+    await act(async () => facetsSheet.props.onChangeFacets({ description: "planned" }));
+    await act(async () => facetsSheet.props.onApply());
     expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
     act(() => filtered.unmount());
   });

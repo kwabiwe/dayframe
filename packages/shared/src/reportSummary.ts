@@ -114,6 +114,9 @@ export const ReportSummarySchema = z.object({
   }).nullable().optional(),
   // Time at places you haven't named, outside every block (never part of activities or goals). Older servers leave it out.
   notLoggedSeconds: seconds.optional(),
+  // A filtered range keeps the identity of its running block even if it contributes no time.
+  // A local edit can bring that same block into the filter before the next server read.
+  runningEntryId: z.string().nullable().optional(),
   // Only the current timer's bounded contribution, never historical entry payloads.
   active: z
     .object({

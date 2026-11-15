@@ -155,7 +155,7 @@ describe("mobile aggregate SQL", () => {
           filters: { tags: [tag], places: ["no-place"], sources: ["mobile_app"], description: "LEASE" },
         }, captured);
         const filteredRows = (await client.query(filtered.text, filtered.values)).rows;
-        expect(ReportSummarySchema.parse(filteredRows[0].summary)).toMatchObject({ totalSeconds: 3600, active: null });
+        expect(ReportSummarySchema.parse(filteredRows[0].summary)).toMatchObject({ totalSeconds: 3600, active: null, runningEntryId: "30000000-0000-4000-8000-000000000003" });
         expect(filteredRows[0].entryRefs).toEqual([{ id: taggedEntry, categoryId: category }]);
 
         const oneDayInput = {

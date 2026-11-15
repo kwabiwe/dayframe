@@ -16,6 +16,13 @@ export function buildMobileReportSummaryQuery(
     values.push(value);
     return `$${values.length}`;
   });
+  // The phone can project an edit that brings an existing running block into a facet.
+  const runningIdentity = facets.length ? `,
+      'runningEntryId', (select te.id from time_entries te
+        where te.workspace_id = $1::uuid and te.user_id = $2::uuid
+          and te.review_status in ('confirmed', 'accepted') and te.stopped_at is null
+          and te.started_at < $5::text::timestamptz and $3::text::timestamptz > $4::text::timestamptz
+        order by te.started_at desc, te.id limit 1)` : "";
   return {
     values,
     text: `with bounds as (
@@ -97,7 +104,7 @@ export function buildMobileReportSummaryQuery(
       'active', (select jsonb_build_object('id', e.id, 'categoryId', e.category_id, 'startedAt', e.started_at,
         'buckets', coalesce((select jsonb_agg(jsonb_build_object('key', p.key, 'seconds', p.seconds) order by p.ordinal)
           from pieces p where p.id = e.id), '[]'::jsonb))
-        from eligible e where e.stopped_at is null order by e.started_at desc, e.id limit 1)
+        from eligible e where e.stopped_at is null order by e.started_at desc, e.id limit 1)${runningIdentity}
     ) as summary,
     coalesce((select jsonb_agg(jsonb_build_object('id', id, 'categoryId', category_id))
       from eligible where category_id is not null), '[]'::jsonb) as "entryRefs"`,

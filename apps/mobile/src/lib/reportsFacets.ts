@@ -28,29 +28,33 @@ export function reportRequestWithFacets(request: ReportSummaryRequest, facets: R
   };
 }
 
-export function reportEntryMatchesFacets(
-  entry: MobileTimeEntry,
+export function createReportFacetMatcher(
   { tags, places, sources, description }: ReportFacetFilters,
   tagCatalog: readonly MobileTag[],
 ) {
-  if (sources?.length && !sources.includes(entry.source as ReportSource)) return false;
-  if (places?.length) {
-    const place = entry.placeId ?? (entry.placeName == null ? "no-place" : null);
-    if (place === null || !places.includes(place)) return false;
-  }
-  if (description && !(entry.description ?? "").toLowerCase().includes(description.toLowerCase())) return false;
-  if (!tags?.length) return true;
-  if (!entry.tagNames) return entry.tags?.some((tag) => tags.includes(tag.id)) ?? false;
-  const selectedNames = new Set([...tagCatalog, ...(entry.tags ?? [])]
-    .filter((tag) => tags.includes(tag.id)).map((tag) => tag.normalizedName));
-  // The optimistic timer and editor can own tag names before the server can resolve their IDs.
-  return entry.tagNames.some((name) => {
-    try {
-      return selectedNames.has(normalizeTagName(name).normalizedName);
-    } catch {
-      return false;
+  const selectedTags = new Set(tags);
+  const selectedNames = new Set(tagCatalog.filter((tag) => selectedTags.has(tag.id)).map((tag) => tag.normalizedName));
+  const descriptionNeedle = description?.trim().toLowerCase();
+  return (entry: MobileTimeEntry) => {
+    if (sources?.length && !sources.includes(entry.source as ReportSource)) return false;
+    if (places?.length) {
+      const place = entry.placeId ?? (entry.placeName == null ? "no-place" : null);
+      if (place === null || !places.includes(place)) return false;
     }
-  });
+    if (descriptionNeedle && !(entry.description ?? "").toLowerCase().includes(descriptionNeedle)) return false;
+    if (selectedTags.size === 0) return true;
+    if (!entry.tagNames) return entry.tags?.some((tag) => selectedTags.has(tag.id)) ?? false;
+    // The optimistic timer and editor can own tag names before the server can resolve their IDs.
+    return entry.tagNames.some((name) => {
+      try {
+        const { normalizedName } = normalizeTagName(name);
+        return selectedNames.has(normalizedName) || (entry.tags?.some((tag) =>
+          selectedTags.has(tag.id) && tag.normalizedName === normalizedName) ?? false);
+      } catch {
+        return false;
+      }
+    });
+  };
 }
 
 export function reportFacetChips(facets: ReportFacetFilters, options: ReportFacetOptions) {

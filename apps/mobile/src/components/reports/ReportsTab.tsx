@@ -32,8 +32,8 @@ import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypog
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, placeDisplayName, type ReportFacetFilters, type ReportSummary } from "@dayframe/shared";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { mobileFailureKind } from "@/lib/friendlyError";
-import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
-import { reportEntryMatchesFacets, reportFacetChips, reportRequestWithFacets } from "../../lib/reportsFacets";
+import type { MobileBootstrap } from "@/lib/api";
+import { createReportFacetMatcher, reportFacetChips, reportRequestWithFacets } from "../../lib/reportsFacets";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -53,7 +53,7 @@ import {
   applyReportFilterDraft,
   openReportFilterDraft,
   refreshReportFilterDraft,
-  toggleReportCategory,
+  normalizeReportSelection,
   type ReportCategorySelection,
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
@@ -192,8 +192,8 @@ function ReportsTabView({
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day, timeZoneId]);
   const request = useMemo(() => reportRequestWithFacets(range.request, facets), [range, facets]);
   const requestKey = JSON.stringify(request);
-  const matchesFacets = useCallback((entry: MobileTimeEntry) =>
-    reportEntryMatchesFacets(entry, facets, data.tags ?? []), [facets, data.tags]);
+  const matchesFacets = useMemo(() => request.filters
+    ? createReportFacetMatcher(request.filters, data.tags ?? []) : undefined, [request.filters, data.tags]);
   // The same stretch of the previous period, for the hero's change pill (none for custom ranges).
   const previous = useMemo(
     () => previousReportWindow(choice, range, nowMs),
@@ -417,7 +417,8 @@ function ReportsTabView({
     ],
   );
   const facetOptions = useMemo(() => ({
-    tags: (data.tags ?? []).map((tag) => ({ id: tag.id, label: `#${tag.name}` })),
+    tags: (data.tags ?? []).filter((tag) => !tag.id.startsWith("optimistic-tag:"))
+      .map((tag) => ({ id: tag.id, label: `#${tag.name}` })),
     places: [
       { id: "no-place", label: "No place" },
       ...(data.places ?? []).map((place) => ({ id: place.id, label: placeDisplayName(place) })),
@@ -568,8 +569,10 @@ function ReportsTabView({
   const appliedChips = [
     ...activityChips.map(({ key, label }) => ({
       key: `activity:${key}`, label,
-      remove: () => setSelection((current) => current.mode === "none"
-        ? { mode: "all" } : toggleReportCategory(current, key, universe)),
+      remove: () => setSelection((current) => {
+        if (current.mode !== "include" || current.keys.length <= 1) return { mode: "all" };
+        return normalizeReportSelection({ mode: "include", keys: current.keys.filter((id) => id !== key) }, universe);
+      }),
     })),
     ...facetChips.map(({ kind, label, value }) => ({
       key: `${kind}:${value}`, label,
@@ -653,10 +656,10 @@ function ReportsTabView({
   // Goal time per day of the week (UIA-043): covered time in activities that count, never the
   // logged sum — the same fresh report as the totals, or, from an older server, the phone's entries.
   const weekGoalSeconds =
-    choice === "week" && selection.mode === "all" && report
+    choice === "week" && !filtered && report
       ? (() => {
           const fromServer = report.buckets.every((bucket) => typeof bucket.goalSeconds === "number");
-          const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow, matchesFacets);
+          const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow);
           return days.map((_, index) => (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0);
         })()
       : null;

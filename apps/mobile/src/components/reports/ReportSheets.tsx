@@ -1,5 +1,5 @@
 import { InsetDivider } from "../InsetDivider";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Keyboard,
   Pressable,
@@ -36,8 +36,8 @@ import {
   DAYFRAME_BLOCKS, REPORT_DESCRIPTION_MAX, REPORT_FACET_MAX, REPORT_SOURCE_LABELS,
   REPORT_SOURCE_VALUES, contrastRatio, type ReportFacetFilters,
 } from "@dayframe/shared";
-import Reanimated from "react-native-reanimated";
-import { localLayoutTransition } from "@/lib/motion";
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { localPresenceExiting, MOBILE_MOTION } from "@/lib/motion";
 import { reportFacetChips, type ReportFacetOption, type ReportFacetOptions } from "../../lib/reportsFacets";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { playHaptic } from "../../lib/haptics";
@@ -74,6 +74,14 @@ export function ReportFiltersSheet({
   const [search, setSearch] = useState("");
   const [tagSearch, setTagSearch] = useState("");
   const [moreFilters, setMoreFilters] = useState(Boolean(facets.places?.length || facets.sources?.length || facets.description));
+  const [hasAdvancedHeight, setHasAdvancedHeight] = useState(!moreFilters);
+  const advancedHeight = useSharedValue(0);
+  const naturalAdvancedHeight = reduceMotion || (!hasAdvancedHeight && moreFilters);
+  const revealStyle = useAnimatedStyle(() => ({ height: naturalAdvancedHeight ? undefined : advancedHeight.value }));
+  useEffect(() => {
+    if (!moreFilters) advancedHeight.value = reduceMotion ? 0
+      : withTiming(0, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+  }, [advancedHeight, moreFilters, reduceMotion]);
   const chips = reportFacetChips(facets, facetOptions);
   const sections = reportFilterSections(options, search);
   const link = (label: "All" | "None") => (
@@ -148,7 +156,7 @@ export function ReportFiltersSheet({
         </View>
       }
     >
-      <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={s.facets}>
+      <View style={s.facets}>
         {facetOptions.tags.length ? (
           <View style={s.filterSection}>
             <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
@@ -175,8 +183,19 @@ export function ReportFiltersSheet({
             <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
           </View>
         </Pressable>
+        <Reanimated.View style={[s.advancedClip, revealStyle]}>
         {moreFilters ? (
-          <View style={s.facets}>
+          <Reanimated.View
+            collapsable={false}
+            exiting={localPresenceExiting(reduceMotion)}
+            style={[s.facets, naturalAdvancedHeight ? null : s.advancedMeasure]}
+            onLayout={({ nativeEvent }) => {
+              const measured = nativeEvent.layout.height;
+              advancedHeight.value = naturalAdvancedHeight ? measured
+                : withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+              if (!hasAdvancedHeight) setHasAdvancedHeight(true);
+            }}>
+
             <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
               style={[s.eyebrow, { color: theme.textSecondary }]}>PLACES</Text>
             <FacetChoices kind="places" options={facetOptions.places} selected={facets.places ?? []}
@@ -191,9 +210,10 @@ export function ReportFiltersSheet({
               onChangeText={(description) => onChangeFacets({ ...facets, description })}
               placeholder="Description contains" placeholderTextColor={theme.textMuted} value={facets.description ?? ""}
               style={[s.search, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]} />
-          </View>
+          </Reanimated.View>
         ) : null}
-      </Reanimated.View>
+        </Reanimated.View>
+      </View>
       <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
         style={[s.eyebrow, { color: theme.textSecondary }]}>ACTIVITIES</Text>
       {sections.map((section) => (
@@ -431,6 +451,8 @@ const s = StyleSheet.create({
   filterSection: { gap: 6, paddingTop: 6 },
   optionCard: { borderRadius: 16, paddingHorizontal: 12 },
   facets: { gap: 10, paddingBottom: 10 },
+  advancedClip: { overflow: "hidden" },
+  advancedMeasure: { position: "absolute", top: 0, left: 0, right: 0 },
   facetChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   facetChip: {
     minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12,

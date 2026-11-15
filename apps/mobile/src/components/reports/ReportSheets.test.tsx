@@ -61,7 +61,7 @@ vi.mock(
   "@/lib/datePickerCalendar",
   async () => import("../../lib/datePickerCalendar"),
 );
-vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140 }, localLayoutTransition: () => undefined }));
+vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140, sheet: 220 }, localPresenceExiting: () => undefined }));
 vi.mock("@/components/DateSheet", async () => import("../DateSheet"));
 vi.mock(
   "@/components/sheets/BottomSheetShell",
@@ -107,6 +107,7 @@ const haptic = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/haptics", () => ({ playHaptic: haptic }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
+  Easing: { out: () => undefined, cubic: () => undefined },
   FadeIn: { duration: () => ({}) },
   FadeOut: { duration: () => ({}) },
   useSharedValue: (value: number) => ({ value }),
