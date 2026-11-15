@@ -7,10 +7,12 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.mock("react-native", () => ({
+  Keyboard: { dismiss: vi.fn() },
   Pressable: "Pressable",
   StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 0.5 },
   Text: "Text",
   TextInput: "TextInput",
+  useWindowDimensions: () => ({ fontScale: 1.6 }),
   View: "View",
 }));
 vi.mock("../sheets/BottomSheetShell", async () => {
@@ -31,7 +33,10 @@ vi.mock("../sheets/BottomSheetShell", async () => {
 });
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
 vi.mock("./ActivityBlockMark", () => ({ ActivityBlockMark: () => null }));
-vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
+vi.mock("../../lib/mobileTypography", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../lib/mobileTypography")>(),
+  mobileTextProps: () => ({}),
+}));
 
 import { TodaySwitchSheet } from "./TodaySwitchSheet";
 
@@ -62,11 +67,14 @@ describe("TodaySwitchSheet", () => {
   it("holds a recent choice and its tags until the shared commit", () => {
     const { tree, shell, onCommit, input } = render([recent("a", "Deep work"), recent("b", "Inbox zero")]);
     const card = tree.root.findByProps({ testID: "today-switch-card" });
+    const reserved = tree.root.findByProps({ testID: "today-switch-results" }).props.style.minHeight;
+    expect(reserved).toBeGreaterThan(3 * 56);
     expect(card.findAllByProps({ testID: "today-switch-a" })).toHaveLength(1);
     expect(shell().props.disabled).toBe(true);
     act(() => tree.root.findByProps({ testID: "today-switch-b" }).props.onPress());
     expect(onCommit).not.toHaveBeenCalled();
     expect(input().props.value).toBe("Inbox zero");
+    expect(tree.root.findByProps({ testID: "today-switch-results" }).props.style.minHeight).toBe(reserved);
     expect(shell().props.action).toBe("Switch to this block");
     act(() => input().props.onSubmitEditing());
     expect(onCommit).toHaveBeenCalledExactlyOnceWith("work", "Inbox zero", ["Planning"]);
@@ -97,6 +105,15 @@ describe("TodaySwitchSheet", () => {
     expect(shell().props.action).toBe("Start new block");
     act(() => tree.root.findByProps({ testID: "today-switch-a" }).props.onPress());
     expect(shell().props.action).toBe("Start this block");
+    act(() => tree.unmount());
+  });
+
+  it("matches a visible recent when the historical pool is absent", () => {
+    const { tree, onCommit, input } = render([recent("a", "Short handover")]);
+    act(() => input().props.onChangeText("short"));
+    act(() => tree.root.findByProps({ testID: "today-switch-a" }).props.onPress());
+    act(() => input().props.onSubmitEditing());
+    expect(onCommit).toHaveBeenCalledWith("work", "Short handover", ["Planning"]);
     act(() => tree.unmount());
   });
 });
