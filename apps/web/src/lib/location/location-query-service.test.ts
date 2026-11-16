@@ -99,6 +99,40 @@ describe("Location Review evidence query", () => {
     expect(dto.segment.approximateArrival).toBe(expected);
   });
 
+  it("suggests the same description from earlier direct logs in this owner's matching location pattern", async () => {
+    const review = { ...reviewRow(), reviewItemStatus: "open", learnedPlaceId: null };
+    const original = { latitude: review.centreLatitude, longitude: review.centreLongitude, description: "Visit a friend" };
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      if (sql.includes("location_place_logged")) return Promise.resolve({ rows: [
+        original, { ...original, description: "visit  a friend" },
+        { latitude: 0, longitude: 0, description: "A different visit" }
+      ] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await expect(getLocationReviewEvidence(review.reviewItemId, session)).resolves.toMatchObject({
+      previousVisitDescription: "Visit a friend"
+    });
+    const priorVisitCall = query.mock.calls.find(([sql]) => String(sql).includes("location_place_logged"));
+    expect(priorVisitCall?.[1].slice(0, 3)).toEqual([session.workspaceId, session.userId, review.startedAt]);
+    expect(priorVisitCall?.[0]).toContain("ae.workspace_id = te.workspace_id and ae.user_id = te.user_id");
+  });
+
+  it("does not suggest a name when earlier logs at the same place disagree", async () => {
+    const review = { ...reviewRow(), reviewItemStatus: "open", learnedPlaceId: null };
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      if (sql.includes("location_place_logged")) return Promise.resolve({ rows: ["First description", "Second description"].map((description) => ({
+        latitude: review.centreLatitude, longitude: review.centreLongitude, description
+      })) });
+      return Promise.resolve({ rows: [] });
+    });
+
+    const evidence = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(evidence.previousVisitDescription).toBeUndefined();
+  });
+
   it("presents trip stops from commute metadata and ignores malformed entries", async () => {
     const review = {
       ...reviewRow(),

@@ -606,6 +606,11 @@ export function LocationCorrectionSheet({
   // The question's one line, in the title area: a guess only changes its words, so nothing moves when one arrives.
   const asks = question && !leg ? guess ? `Visited ${guess.name}?` : question.text : null;
   const placeIsNamed = target.kind === "place" && Boolean(target.place.placeId || target.place.learnedPlaceId);
+  const priorDescription = activityFirst && !stale && !attempted && choice.kind === "keep" && target.kind === "place"
+    && evidence && evidence !== "unavailable" && evidence.itemId === target.place.id
+    && Date.parse(evidence.segment.startedAt) === Date.parse(target.place.startedAt)
+    && Date.parse(evidence.segment.stoppedAt ?? "") === Date.parse(target.place.stoppedAt ?? "")
+    ? evidence.previousVisitDescription : undefined;
   const currentPlaceId = target.kind === "place" ? target.place.placeId : null;
   // How far each saved place is from the visit, as far as the map knows.
   const distances = evidence && evidence !== "unavailable" && evidence.map.centre
@@ -839,11 +844,26 @@ export function LocationCorrectionSheet({
             </View>
           ) : null}
           <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary }}>What did you do?</Text>
-          <TextInput accessibilityLabel="What did you do?" editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
-            onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
-            placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
-            style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
-            testID="location-correction-log-description" value={logDescription} />
+          <View>
+            <TextInput accessibilityLabel="What did you do?" editable={!saving} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
+              onChangeText={(text) => { if (!frozen()) setLogDescription(text); }}
+              placeholder="Add a description" placeholderTextColor={theme.textSecondary} returnKeyType="done"
+              style={[styles.nameInput, { flex: 0, backgroundColor: theme.surfaceMuted, color: theme.textPrimary }]}
+              testID="location-correction-log-description" value={logDescription} />
+            <InlineReveal initialFlow={false} open={Boolean(priorDescription)} reduceMotion={reduceMotion}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Previously logged as “${priorDescription}”`}
+                accessibilityState={{ disabled: saving || Boolean(description) }}
+                disabled={saving || Boolean(description)}
+                onPress={() => { if (!frozen() && !description && priorDescription) setLogDescription(priorDescription); }}
+                style={({ pressed }) => [styles.previousVisit,
+                  { opacity: pressed || description ? 0.65 : 1, backgroundColor: theme.surfaceMuted }]}
+                testID="location-correction-previous-description">
+                <Text {...mobileTextProps("control")} numberOfLines={2} style={{ color: theme.textPrimary }}>
+                  Previously logged as “{priorDescription}”
+                </Text>
+              </Pressable>
+            </InlineReveal>
+          </View>
           {availableActivities.length ? (
             <View style={styles.activityFirst}>
               <View style={styles.activityHeading}>
@@ -1210,6 +1230,7 @@ function TimesSection({ clockFormat, onChange, onReveal, problem, reduceMotion, 
 
 const styles = StyleSheet.create({
   activityFirst: { gap: 8 },
+  previousVisit: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", borderRadius: 16, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8 },
   activityHeading: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 },
   activityPreview: { paddingVertical: 6 },
   activityValueClear: { flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "42%", minHeight: 32 },

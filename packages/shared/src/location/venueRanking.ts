@@ -46,7 +46,7 @@ export type VenueKind =
   | "shopping_centre" | "park" | "campus" | "hospital" | "stadium" | "school" | "station"
   | "bus_stop" | "supermarket" | "large_store" | "gym" | "activity" | "entertainment"
   | "dining" | "nightlife" | "hotel" | "religious" | "library" | "beauty" | "service"
-  | "small_shop" | "petrol" | "motoring" | "parking" | "other";
+  | "small_shop" | "petrol" | "rest_area" | "motoring" | "parking" | "other";
 
 type VenueKindSpec = {
   /** How far the venue reaches from its point: a stay this close counts as inside. */
@@ -82,6 +82,7 @@ export const VENUE_KINDS: Readonly<Record<VenueKind, VenueKindSpec>> = {
   service: { footprintMeters: 15, prior: 0.4, medianMinutes: 10 },
   small_shop: { footprintMeters: 15, prior: 0.5, medianMinutes: 10 },
   petrol: { footprintMeters: 25, prior: 0.2, medianMinutes: 6 },
+  rest_area: { footprintMeters: 200, prior: 1, medianMinutes: 25, container: true },
   motoring: { footprintMeters: 25, prior: 0.3, medianMinutes: 40 },
   bus_stop: { footprintMeters: 10, prior: 0.1, medianMinutes: 5 },
   // A car park known only by its name (Apple's Parking category is dropped before ranking).
@@ -94,7 +95,7 @@ export const VENUE_KINDS: Readonly<Record<VenueKind, VenueKindSpec>> = {
 export const VENUE_EXCLUDED_CATEGORIES: ReadonlySet<string> = new Set(["Parking", "ATM", "EVCharger", "Restroom"]);
 
 const CATEGORY_KINDS: Readonly<Record<string, VenueKind>> = {
-  Park: "park", NationalPark: "park", Beach: "park", Campground: "park", Marina: "park",
+  Park: "park", NationalPark: "park", Beach: "park", Campground: "park", Marina: "park", RestArea: "rest_area",
   University: "campus", ConventionCenter: "campus", Airport: "campus",
   Hospital: "hospital", Stadium: "stadium", School: "school",
   FoodMarket: "supermarket", Store: "small_shop",

@@ -215,6 +215,16 @@ describe("rankVenues: Codex r1 on #517", () => {
     expect(ranking.venues.reduce((sum, venue) => sum + venue.share, 0)).toBeCloseTo(1, 10);
   });
 
+  it("suggests a motorway services site for a short stay at its edge", () => {
+    const services = place("Example Motorway Services", "RestArea", 193, 0);
+    const charger = place("EV charging", "EVCharger", 135, 0);
+    const hotel = place("Motorway Hotel", "Hotel", 178, 0);
+    const result = rankVenues([charger, hotel, services], stay(30, 1, { accuracyMeters: 76, spreadMeters: 120 }));
+    expect(result.suggestion?.candidate.id).toBe(services.id);
+    expect(result.suggestion?.kind).toBe("rest_area");
+    expect(result.venues[0].children.map((child) => child.title)).toContain(hotel.title);
+  });
+
   it("reports which venue is the area the stay lies in", () => {
     const centre = place("Northgate Shopping Centre", null, 380, 150);
     const ranking = rankVenues([centre, place("Unit Shop", "Store", 20, 0)], stay(60, 14, { areasOfInterest: ["Northgate Shopping Centre"] }));

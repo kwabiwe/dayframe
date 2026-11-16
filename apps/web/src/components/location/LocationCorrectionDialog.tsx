@@ -681,6 +681,8 @@ export function LocationCorrectionDialog({
 
   const { place } = target;
   const open = place.stoppedAt == null;
+  const priorDescription = !open && picked === "unknown" && !place.placeId && !place.learnedPlaceId
+    && evidence && evidence !== "unavailable" ? evidence.previousVisitDescription : undefined;
   const logActivities = activities.slice(0, 8);
   const previewActivity = activities.find((activity) => activity.id === previewActivityId);
   if (previewActivity && !logActivities.some((activity) => activity.id === previewActivity.id)) {
@@ -830,6 +832,12 @@ export function LocationCorrectionDialog({
                       <input className="ui-control" disabled={busy} maxLength={REVIEW_DESCRIPTION_MAX_LENGTH}
                         onChange={(event) => setLogDescription(event.target.value)} type="text" value={logDescription} />
                     </label>
+                    {priorDescription ? (
+                      <button className="location-correction-option" disabled={busy || Boolean(logDescription.trim())}
+                        onClick={() => setLogDescription(priorDescription)} type="button">
+                        <span style={{ overflowWrap: "anywhere" }}>Previously logged as “{priorDescription}”</span>
+                      </button>
+                    ) : null}
                     <p className="location-correction-hint">Fills only the time your own blocks don’t cover.</p>
                   </>
                 ) : null}

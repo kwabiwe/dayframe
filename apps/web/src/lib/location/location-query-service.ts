@@ -1,5 +1,7 @@
 import {
   LOCATION_ENGINE_V2_CONFIG,
+  REVIEW_DESCRIPTION_MAX_LENGTH,
+  stayPatternKey,
   LocationReviewEvidenceDtoSchema,
   TimelineItemEvidenceDtoSchema,
   type TimelineItemEvidenceDto,
@@ -14,12 +16,14 @@ import { getTripCorrectionActions } from "./location-timeline-corrections";
 type ReviewSegmentRow = {
   /** Null for a timeline item with no open Review item (step 12). */
   reviewItemId: string | null;
+  reviewItemStatus: string | null;
   venuePlaceId?: string | null;
   suggestedVenuePlaceId?: string | null;
   eventId: string | null;
   title: string;
   notes: string | null;
   placeId: string | null;
+  learnedPlaceId: string | null;
   placeName: string | null;
   addressSummary: string | null;
   deviceId: string | null;
@@ -91,6 +95,7 @@ type LocationEvidenceTimings = {
   rejectedEvidenceMs?: number;
   nearbyPlacesMs?: number;
   venueHistoryMs?: number;
+  previousVisitDescriptionMs?: number;
   assemblyMs?: number;
   totalMs?: number;
 };
@@ -130,6 +135,7 @@ export async function getLocationReviewEvidence(
  * (step 12): place, times, bounds, centre, the trip's ends, stops and mode.
  */
 const SEGMENT_COLUMNS = `coalesce(st.place_id, cs.from_place_id) as "placeId",
+            st.learned_place_id as "learnedPlaceId",
             ${placeDisplayNameSql("pl")} as "placeName",
             null::text as "addressSummary",
             coalesce(st.device_id, cs.device_id) as "deviceId",
@@ -177,7 +183,7 @@ async function buildLocationReviewEvidence(
 ): Promise<LocationReviewEvidenceDto> {
   const reviewLookupStartedAt = Date.now();
   const reviewResult = await query<ReviewSegmentRow>(
-    `select ri.id as "reviewItemId",
+    `select ri.id as "reviewItemId", ri.status as "reviewItemStatus",
             ri.event_id as "eventId",
             ri.title,
             ri.notes,
@@ -224,7 +230,7 @@ export async function getTimelineItemEvidence(
   try {
     const lookupStartedAt = Date.now();
     const found = await query<ReviewSegmentRow>(
-      `select open_ri.id as "reviewItemId",
+      `select open_ri.id as "reviewItemId", open_ri.status as "reviewItemStatus",
               coalesce(st.created_from_event_id, cs.created_from_event_id) as "eventId",
               case when st.id is not null
                 then coalesce(case when st.place_id is not null then ${placeDisplayNameSql("pl")} end, learned.name, 'Unknown place')
@@ -241,7 +247,7 @@ export async function getTimelineItemEvidence(
        ${SEGMENT_JOINS}
        left join learned_places learned on learned.id = st.learned_place_id and learned.workspace_id = $1
        left join lateral (
-         select ri.id from review_items ri
+         select ri.id, ri.status from review_items ri
           where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = coalesce(st.id, cs.id) and ri.status = 'open'
           order by ri.created_at desc
           limit 1
@@ -273,7 +279,7 @@ export async function getTimelineItemEvidence(
 async function assembleSegmentEvidence(review: ReviewSegmentRow, session: RequestSession, timings: LocationEvidenceTimings) {
   const kind = review.stayId ? "stay" as const : "commute" as const;
   const centre = point(review.centreLongitude, review.centreLatitude);
-  const [evidenceResult, rejectedResult, nearbyPlaces, venueHistory] = await Promise.all([
+  const [evidenceResult, rejectedResult, nearbyPlaces, venueHistory, previousVisitDescription] = await Promise.all([
     timedPhase(timings, "acceptedEvidenceMs", () => query<EvidenceMapRow>(
       `select le.id,
             le.client_evidence_id as "clientEvidenceId",
@@ -326,7 +332,12 @@ async function assembleSegmentEvidence(review: ReviewSegmentRow, session: Reques
     kind === "stay" && centre && review.stayId
       ? timedPhase(timings, "venueHistoryMs", () => venueHistoryNear(
           session, review.stayId!, centre.coordinates[1], centre.coordinates[0]))
-      : Promise.resolve([] as string[])
+      : Promise.resolve([] as string[]),
+    review.stayId && centre && review.stoppedAt && review.status !== "superseded"
+      && review.reviewItemStatus === "open" && !review.placeId && !review.learnedPlaceId && !review.venuePlaceId
+      ? timedPhase(timings, "previousVisitDescriptionMs", () => previousVisitDescriptionNear(
+          session, review.startedAt, centre.coordinates[1], centre.coordinates[0]))
+      : Promise.resolve(undefined)
   ]);
   const retained = downsampleEvidence(evidenceResult.rows, 160);
   const assemblyStartedAt = Date.now();
@@ -441,6 +452,7 @@ async function assembleSegmentEvidence(review: ReviewSegmentRow, session: Reques
         historyPlaceIds: venueHistory
       }
     } : {}),
+    ...(previousVisitDescription ? { previousVisitDescription } : {}),
     evidenceExpiresAt: expiresAt,
     evidenceExpired,
     rawEvidenceAvailable: expiryRows.length > 0,
@@ -486,6 +498,68 @@ async function venueHistoryNear(session: RequestSession, stayId: string, latitud
   return result.rows.map((row) => row.placeId);
 }
 
+const PREVIOUS_VISIT_RADIUS_METERS = 75;
+
+/**
+ * An explicitly logged description belongs to its completed block. Look up active blocks via their
+ * scoped events so older visits work too, and edits or deletions take effect on the next read.
+ * The stay and time-entry indexes bound the spatial search and the work per stay respectively.
+ */
+async function previousVisitDescriptionNear(
+  session: RequestSession,
+  startedAt: Date | string,
+  latitude: number,
+  longitude: number
+) {
+  const earlier = await query<{ latitude: number; longitude: number; description: string }>(
+    `with recent_stays as materialized (
+       select st.client_segment_id, st.centre, st.started_at, st.stopped_at
+         from stay_segments st
+        where st.workspace_id = $1 and st.user_id = $2 and st.started_at < $3::timestamptz
+          and st.stopped_at <= $3::timestamptz and st.status = 'finalised'
+          and st.continuity_status = 'manual' and st.superseded_by_segment_id is null
+          and st.place_id is null and st.learned_place_id is null and st.client_segment_id is not null
+          and ST_DWithin(st.centre, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6)
+        order by st.started_at desc, st.id
+        limit 12
+     )
+     select ST_Y(st.centre::geometry) as latitude, ST_X(st.centre::geometry) as longitude, logged.description
+       from recent_stays st
+       cross join lateral (
+         select distinct on (lower(regexp_replace(btrim(te.description), '[[:space:]]+', ' ', 'g')))
+                btrim(te.description) as description
+           from time_entries te
+           join activity_events ae on ae.id = te.created_from_event_id
+             and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+          where te.workspace_id = $1 and te.user_id = $2 and te.review_status = 'confirmed'
+            and te.started_at >= st.started_at and te.started_at < st.stopped_at
+            and te.stopped_at <= st.stopped_at
+            and ae.event_type = 'location_place_logged' and ae.raw_payload ->> 'clientSegmentId' = st.client_segment_id
+            and char_length(btrim(te.description)) between 1 and $7
+          order by lower(regexp_replace(btrim(te.description), '[[:space:]]+', ' ', 'g')), te.started_at desc, te.id
+          limit 2
+       ) logged
+      order by st.started_at desc, logged.description`,
+    [session.workspaceId, session.userId, startedAt, longitude, latitude,
+      PREVIOUS_VISIT_RADIUS_METERS, REVIEW_DESCRIPTION_MAX_LENGTH]
+  );
+  const key = stayPatternKey({ centreLatitude: latitude, centreLongitude: longitude });
+  let description: string | undefined;
+  let folded: string | undefined;
+  for (const row of earlier.rows) {
+    if (stayPatternKey({ centreLatitude: row.latitude, centreLongitude: row.longitude }) !== key) continue;
+    const candidate = row.description.trim();
+    const normalized = candidate.replace(/\s+/g, " ").toLowerCase();
+    if (!normalized || candidate.length > REVIEW_DESCRIPTION_MAX_LENGTH) continue;
+    if (folded && normalized !== folded) return undefined;
+    if (!description) {
+      description = candidate;
+      folded = normalized;
+    }
+  }
+  return description;
+}
+
 async function timedPhase<K extends keyof LocationEvidenceTimings, T>(
   timings: LocationEvidenceTimings,
   key: K,
@@ -514,6 +588,7 @@ function logLocationEvidenceTiming(
     nearbyPlacesMs: timings.nearbyPlacesMs ?? null,
     // Its duration only: never the Place IDs it read (Codex r1 on #519).
     venueHistoryMs: timings.venueHistoryMs ?? null,
+    previousVisitDescriptionMs: timings.previousVisitDescriptionMs ?? null,
     assemblyMs: timings.assemblyMs ?? null,
     totalMs: timings.totalMs ?? null,
     acceptedEvidenceCount: evidence?.segment.evidenceCount ?? null,
