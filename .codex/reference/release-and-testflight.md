@@ -39,17 +39,28 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (151)` (2026-11-16)
+- Last repository-recorded verified build: `0.1.0 (153)` (2026-11-16)
 - Group: `Internal Health Debug`
+- App Store Connect build ID: `8e21edca-8ea5-4a72-8fcb-8c5d7b83b251`
+- Archived commit: `24b3ff37ea2f72f7a0362aac528a1f32160ab95f` (#737), built in a detached worktree pinned to that SHA.
+- Apple upload delivery UUID `8e21edca-8ea5-4a72-8fcb-8c5d7b83b251`. App Store Connect recorded the upload at 21:55:18 UTC on 16 Nov 2026. The distribution-signed app and Live Activity extension use production shared containers and `https://dayframe-web.vercel.app`.
+- The exact signed Staging build passed sign-in, Calendar List logging for a trip and named and unknown places, Undo, Reports Month and Week, and a running Today timer on the wired iPhone 11. The server confirmed one saved block for each Calendar test. Cleanup restored the previous Staging app and alias and removed the disposable fixture and runner.
+- The warm-up measured 6.7725% CPU and +2.9394 MB/min over 316.132 s. The warmed gate measured 6.8133% CPU and +1.1212 MB/min over 317.616 s against the iPhone 11 limits of 15.1% CPU and 2 MB/min. The same visible timer advanced 650 s across 650 s of capture time.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Installed TestFlight 153 checks are pending.
+- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
+
+Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
+
+Build 152 from `9f51bebe` was verified in Internal Health Debug on 16 Nov 2026. Delivery `3da7e8eb-dffc-4907-8f0c-5314911886fe`. It includes local Sync help diagnostics (#736). The warmed iPhone 11 Staging gate measured 6.8095% CPU and −0.1881 MB/min. The installed app exposed Export diagnostics. Verification of the installed JSON export is pending.
+
+Build 151 was verified in Internal Health Debug on 16 Nov 2026.
+
 - App Store Connect build ID: `09a9429e-1981-4b3d-aaa6-a22ed904e11d`
 - Archived commit: `3850b6c1173c5414b4676029aca9a8bfde10387a`, built in a detached worktree pinned to that SHA.
 - Apple upload delivery UUID `09a9429e-1981-4b3d-aaa6-a22ed904e11d`. App Store Connect recorded the upload at 15:12:46 GMT on 16 Nov 2026. The distribution-signed app and Live Activity extension use the production shared containers and `https://dayframe-web.vercel.app`.
 - On the wired iPhone 11, exact signed Staging passed sign-in, Today Switch and Cancel, Calendar day navigation, Reports Week and Month, the keyboard visibility of Description and Apply, and the time shortcuts in Running block, Add past time and Edit block. Both rounding actions saved the expected end time on the standard and 128-point dial. The compact dial's end knob remained draggable. Cleanup removed the disposable fixture and runner and restored the prior Staging app and alias.
 - The warm-up measured 6.6930% CPU and +2.2275 MB/min over 347.978 s. The warmed gate measured 6.7800% CPU and +0.9540 MB/min over 334.364 s against the 15.1% CPU and 2 MB/min iPhone 11 limits. The same Today timer advanced 718 s across 718 s between captures.
 - App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 151 includes repeat-visit descriptions and wider sparse nearby search (#732), inline place options, stable trip logging and simplified mobile Reports filters (#733), and matching text-only time shortcuts in the block editors (#734). Installed TestFlight 151 checks are pending.
-- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
-
-Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
 Build 150 was verified in Internal Health Debug on 16 Nov 2026.
 
