@@ -39,6 +39,7 @@ import {
   withGoalExclusions,
   paletteColorFor,
   previousEndOffer,
+  REVIEW_PRESENTATION_MAX_IDS,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   completedEntriesChanged,
   timerStateChanged,
@@ -76,7 +77,7 @@ import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentation
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
 import type { CalendarTripLog } from "../lib/calendarTripLog";
-import { getReviewItemSyncStates, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
+import { getReviewItemSyncStates, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarTripHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -2079,13 +2080,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     syncStateIds: reviewSyncStateIds,
     waitingHidden
   });
-  const loggedTripRows = useMemo(() => {
-    const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
-    if (locallyDecided?.owner === scopedOwnerKey) {
-      for (const log of locallyDecided?.tripLogs ?? []) held.set(log.check.id, log);
+  // A Review lookup hands off its proven trip before it tells readers the outbox row is gone.
+  // Keep it for the Calendar until the block can take over or a newer day read has removed the trip.
+  const [tripHandover, setTripHandover] = useState<{
+    owner: string;
+    logs: readonly (CalendarTripLog & { observedAt: number })[];
+  } | null>(null);
+  useEffect(() => {
+    if (!scopedOwnerKey) {
+      setTripHandover(null);
+      return;
     }
-    return [...held.values()];
-  }, [checkAnswers.tripLogs, locallyDecided, scopedOwnerKey]);
+    return subscribeCalendarTripHandover((owner, logs) => {
+      if (`${owner.backendId}:${owner.workspaceId}:${owner.userId}` !== scopedOwnerKey) return;
+      const observedAt = Date.now();
+      setTripHandover((previous) => {
+        const retained = new Map(previous?.owner === scopedOwnerKey ? previous.logs.map((log) => [log.check.id, log]) : []);
+        for (const log of logs) {
+          retained.delete(log.check.id);
+          retained.set(log.check.id, { ...log, observedAt });
+        }
+        return { owner: scopedOwnerKey, logs: [...retained.values()].slice(-REVIEW_PRESENTATION_MAX_IDS) };
+      });
+    });
+  }, [scopedOwnerKey]);
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
   // "A block ran into your trip" (location v4 design §7): an End it held for Undo, saving, or waiting on this iPhone
@@ -2428,6 +2446,37 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  const tripSegmentByEntryId = useMemo(() => new Map(nativeCalendarBridge.actionEntries.flatMap((entry) =>
+    entry.tripSegmentId && !entry.reviewItemId ? [[entry.id, entry.tripSegmentId] as const] : [])),
+  [nativeCalendarBridge.actionEntries]);
+  useEffect(() => {
+    if (!tripHandover || tripHandover.owner !== scopedOwnerKey) return;
+    const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
+    const canonicalSegments = new Set(tripSegmentByEntryId.values());
+    const shownIds = new Set(nativeCalendarModel.entries.filter((entry) => !entry.isReview).map((entry) => entry.entryId));
+    const timelineTrips = new Map((serverCalendarTimeline?.items ?? []).flatMap((item) => item.kind === "trip" ? [[item.id, item] as const] : []));
+    const live = tripHandover.logs.filter((log) => {
+      const trip = timelineTrips.get(log.check.segmentId);
+      if (!checkStillAsks(log.check, fromMs) || canonicalSegments.has(log.check.segmentId)
+        || trip?.blockIds.some((id) => shownIds.has(id))) return false;
+      const shownDay = listCheckOverlaps(log.check, nativeCalendarModel.dayStartMs, nativeCalendarModel.dayEndMs);
+      return !shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt
+        || Boolean(trip?.blockIds.length);
+    });
+    if (live.length !== tripHandover.logs.length) {
+      setTripHandover((current) => current === tripHandover ? { ...tripHandover, logs: live } : current);
+    }
+  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwnerKey, serverCalendarTimeline, todayKey, tripHandover, tripSegmentByEntryId]);
+  const loggedTripRows = useMemo(() => {
+    const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
+    if (locallyDecided?.owner === scopedOwnerKey) {
+      for (const log of locallyDecided?.tripLogs ?? []) held.set(log.check.id, log);
+    }
+    if (tripHandover?.owner === scopedOwnerKey) {
+      for (const log of tripHandover?.logs ?? []) held.set(log.check.id, log);
+    }
+    return [...held.values()];
+  }, [checkAnswers.tripLogs, locallyDecided, scopedOwnerKey, tripHandover]);
   // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
   const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
   const gridModel = useMemo(() => calendarLayout === "grid"
@@ -4435,6 +4484,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
                   loggedTripRows={loggedTripRows}
+                  tripSegmentByEntryId={tripSegmentByEntryId}
                   nowMs={minuteNow}
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
                   // Without a backend identity the outbox's record is not read here, so an answer could never

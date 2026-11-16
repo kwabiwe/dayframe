@@ -1519,64 +1519,53 @@ final class DayframeSheetQATests: XCTestCase {
     let sheet = element(SheetQAIdentifiers.sheet)
     let start = element(SheetQAIdentifiers.startTime)
     let dial = element(SheetQAIdentifiers.durationDial)
-    let shortcuts = element(SheetQAIdentifiers.dialShortcuts)
     let setLastStop = element(SheetQAIdentifiers.setLastStopTime)
     let delete = element(SheetQAIdentifiers.delete)
     for (candidate, description) in [
       (sheet, "running timer sheet"),
       (start, "running Start field"),
       (dial, "running duration dial"),
-      (shortcuts, "time shortcuts toggle"),
-      (delete, "running Delete entry action")
+      (setLastStop, "last-stop shortcut"),
+      (delete, "running Discard action")
     ] {
       try waitForElement(candidate, description: description)
     }
-    // Step 4e: the shortcuts sit behind "…" on the hint row under the dial.
-    try require(!setLastStop.exists, "Running sheet showed the last-stop shortcut before Time shortcuts opened.", state: state)
-    try require(shortcuts.frame.minY >= dial.frame.midY, "Time shortcuts toggle was not under the dial.", state: state)
-    shortcuts.tap()
-    try waitForElement(setLastStop, description: "last-stop shortcut")
     try require(setLastStop.label.hasPrefix("Set start to the last stop time"), "Running last-stop shortcut lost its label.", state: state)
-    try require(setLastStop.frame.minY >= dial.frame.midY, "Running last-stop shortcut was not under the dial.", state: state)
-    try require(!element(SheetQAIdentifiers.roundStopTime).exists, "Running sheet exposed Round stop time.", state: state)
+    try require(setLastStop.frame.minY >= start.frame.maxY - 1 && setLastStop.frame.maxY <= dial.frame.minY + 1,
+      "Last stop was not between Start and the dial.", state: state)
+    try require(!element(SheetQAIdentifiers.roundStopTime).exists, "Running sheet exposed Round end.", state: state)
     try require(!element(SheetQAIdentifiers.roundDuration).exists, "Running sheet exposed Round duration.", state: state)
-    shortcuts.tap()
-    try waitForElementToDisappear(setLastStop, description: "last-stop shortcut")
-    try require(delete.frame.minY >= dial.frame.maxY - 1, "Running Delete entry was not below the dial.", state: state)
-    try require(sheet.frame.contains(delete.frame), "Running Delete entry was outside the single-screen sheet.", state: state)
+    try require(delete.frame.minY >= dial.frame.maxY - 1, "Running Discard was not below the dial.", state: state)
+    try require(sheet.frame.contains(delete.frame), "Running Discard was outside the single-screen sheet.", state: state)
   }
 
   private func assertStoppedTimerLayout(state: SheetQAJSON, expectsDelete: Bool) throws {
     let sheet = element(SheetQAIdentifiers.sheet)
     let end = element(SheetQAIdentifiers.endTime)
     let dial = element(SheetQAIdentifiers.durationDial)
-    let shortcuts = element(SheetQAIdentifiers.dialShortcuts)
-    let roundStop = element(SheetQAIdentifiers.roundStopTime)
+    let roundEnd = element(SheetQAIdentifiers.roundStopTime)
     let roundDuration = element(SheetQAIdentifiers.roundDuration)
     for (candidate, description) in [
       (sheet, "stopped timer sheet"),
       (end, "stopped End field"),
       (dial, "stopped duration dial"),
-      (shortcuts, "time shortcuts toggle")
+      (roundEnd, "Round end shortcut"),
+      (roundDuration, "Round duration shortcut")
     ] {
       try waitForElement(candidate, description: description)
     }
-    try require(!roundStop.exists && !roundDuration.exists, "Stopped sheet showed rounding before Time shortcuts opened.", state: state)
-    shortcuts.tap()
-    try waitForElement(roundStop, description: "Round stop time shortcut")
-    try waitForElement(roundDuration, description: "Round duration shortcut")
-    try require(roundStop.label == "Round stop time" && roundDuration.label == "Round duration", "Rounding shortcuts lost their labels.", state: state)
-    try require(roundStop.frame.minY >= dial.frame.midY && roundDuration.frame.minY >= dial.frame.midY, "Rounding shortcuts were not under the dial.", state: state)
-    try require(sheet.frame.contains(roundStop.frame) && sheet.frame.contains(roundDuration.frame), "Stopped timer controls escaped the single-screen sheet.", state: state)
-    shortcuts.tap()
-    try waitForElementToDisappear(roundStop, description: "Round stop time shortcut")
+    try require(roundEnd.label == "Round end" && roundDuration.label == "Round duration", "Rounding shortcuts lost their labels.", state: state)
+    try require(roundEnd.frame.minY >= end.frame.maxY - 1 && roundEnd.frame.maxY <= dial.frame.minY + 1,
+      "Round end was not between End and the dial.", state: state)
+    try require(dial.frame.contains(roundDuration.frame), "Round duration was outside the dial.", state: state)
+    try require(sheet.frame.contains(roundEnd.frame) && sheet.frame.contains(roundDuration.frame), "Stopped timer controls escaped the single-screen sheet.", state: state)
     let delete = element(SheetQAIdentifiers.delete)
     if expectsDelete {
-      try waitForElement(delete, description: "stopped-sheet Delete entry action")
-      try require(delete.frame.minY >= dial.frame.maxY - 1, "Stopped-sheet Delete entry was not below the dial.", state: state)
-      try require(sheet.frame.contains(delete.frame), "Stopped-sheet Delete entry was outside the single-screen sheet.", state: state)
+      try waitForElement(delete, description: "stopped-sheet Delete action")
+      try require(delete.frame.minY >= dial.frame.maxY - 1, "Stopped-sheet Delete was not below the dial.", state: state)
+      try require(sheet.frame.contains(delete.frame), "Stopped-sheet Delete was outside the single-screen sheet.", state: state)
     } else {
-      try require(!delete.exists, "Add Past Time unexpectedly exposed Delete entry.", state: state)
+      try require(!delete.exists, "Add Past Time unexpectedly exposed Delete.", state: state)
     }
   }
 

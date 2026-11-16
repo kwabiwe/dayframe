@@ -82,6 +82,7 @@ export function CalendarListView({
   entries,
   loggedLabel,
   loggedTripRows,
+  tripSegmentByEntryId,
   nowMs,
   onAnswerCheck,
   onOpenCheck,
@@ -156,6 +157,7 @@ export function CalendarListView({
   /** The day's logged time ("7h 3m"). */
   loggedLabel: string;
   loggedTripRows?: readonly CalendarTripLog[];
+  tripSegmentByEntryId?: ReadonlyMap<string, string>;
   nowMs: number;
   /**
    * The caller's own opener for a "?" (step 15: there is no Review screen): a place's when there is no
@@ -209,9 +211,9 @@ export function CalendarListView({
       startedAt: new Date(entry.startedAtMs).toISOString(),
       stoppedAt: entry.stoppedAtMs == null ? null : new Date(entry.stoppedAtMs).toISOString()
     }));
-    // The check and the first real block made from its trip share a row key. The timeline and
-    // durable receipt each know the exact block ids, even when the other response is late.
-    const tripByEntry = new Map<string, string>();
+    // Each source can arrive first. Correlate by segment or exact receipt, even while the
+    // timeline is stale or an equivalent confirmation has no entry ID of its own.
+    const tripByEntry = new Map(tripSegmentByEntryId);
     for (const item of timeline?.items ?? []) {
       if (item.kind === "trip") for (const id of item.blockIds) tripByEntry.set(id, item.id);
     }
@@ -227,7 +229,8 @@ export function CalendarListView({
     });
     const localLogs = new Map(loggedTripRows?.map((log) => [log.check.id, log]));
     const checksToShow = [
-      ...rowChecks.filter((check) => !localLogs.has(check.id)),
+      ...rowChecks.filter((check) => !localLogs.has(check.id)
+        && !(check.segmentId && representedTrips.has(check.segmentId))),
       ...[...localLogs.values()].filter((log) => !representedTrips.has(log.check.segmentId)).map((log) => log.check)
     ];
     // Without the day's places (not read yet, or the read failed), its checks still show on rows of their own.
@@ -241,7 +244,7 @@ export function CalendarListView({
       return { kind: "location", key, atMs: row.atMs, row, loggedTrip };
     });
     return [...blockRows, ...locationRows].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
-  }, [blocks, rowChecks, dayEndMs, dayStartMs, loggedTripRows, nowMs, showAllPlaces, timeline]);
+  }, [blocks, rowChecks, dayEndMs, dayStartMs, loggedTripRows, nowMs, showAllPlaces, timeline, tripSegmentByEntryId]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
   // What each "?" is about comes from the caller (`checkKinds`, from the suggestion itself; Codex r2 on #610): Apple
@@ -892,7 +895,7 @@ function LocationRow({ checkGlyphs, checkQuestions, checkTitles, checkOutingLabe
     const yes = row.trip && !loggedTrip ? yesFor(row.checkId, "trip") : null;
     return (
       <View style={yes ? styles.tripCheckWithAction : styles.row}>
-        <Pressable accessibilityHint={opens ? !sheetless ? row.trip ? "Opens the trip" : "Opens it" : expanded ? "Hides the question" : "Shows the question" : undefined}
+        <Pressable accessible accessibilityHint={opens ? !sheetless ? row.trip ? "Opens the trip" : "Opens it" : expanded ? "Hides the question" : "Shows the question" : undefined}
           accessibilityLabel={[title, fromMs != null ? `${time(fromMs)} to ${toMs != null ? time(toMs) : "now"}` : null,
             row.trip ? modesLabel(row.trip.legs, row.trip.route) : null, loggedTrip ? "Logged" : "Needs a look"].filter(Boolean).join(". ")}
           accessibilityRole={opens ? "button" : undefined} accessibilityState={!sheetless || !opens ? undefined : { expanded }} disabled={!opens} onPress={opens}

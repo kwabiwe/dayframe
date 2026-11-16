@@ -1356,6 +1356,7 @@ export async function cacheReviewPresentation(input: {
   const now = new Date().toISOString();
   let wrote = false;
   let evicted = 0;
+  let tripHandover: CalendarTripLog[] = [];
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (
@@ -1439,12 +1440,15 @@ export async function cacheReviewPresentation(input: {
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
     if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt, scopeKey, input.owner.backendId);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
-    await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
+    tripHandover = await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
   if (wrote) {
     reviewCacheEvictedCount += evicted;
+    if (tripHandover.length) {
+      for (const listener of calendarTripHandoverListeners) listener(input.owner, tripHandover);
+    }
     emitChange();
   }
   return wrote;
@@ -1924,13 +1928,15 @@ async function materialiseAcknowledgedReviewHandover(
   response: ReviewPresentationSnapshot,
   backendId: string
 ) {
+  const tripHandover: CalendarTripLog[] = [];
   const rows = await transaction.getAllAsync<{
     client_mutation_id: string;
     review_item_id: string;
+    original_snapshot_json: string;
     request_json: string;
     acknowledgement_json: string | null;
   }>(
-    `select client_mutation_id, review_item_id, request_json, acknowledgement_json
+    `select client_mutation_id, review_item_id, original_snapshot_json, request_json, acknowledgement_json
      from review_mutation_outbox
      where account_key = ? and state = 'acknowledged' and action_kind <> 'save_place'`,
     accountKeyValue
@@ -1988,6 +1994,13 @@ async function materialiseAcknowledgedReviewHandover(
         accountKeyValue, effect.review_item_id, backendId, response.capturedAt
       );
       if (reopened) continue;
+      if (envelope.mutation.action === "confirm" && effect.review_item_id === row.review_item_id
+        && terminalById.get(effect.review_item_id) === "accepted") {
+        const present = resultEntryIds.filter((id) => lookupEntries.get(id) === "present");
+        const original = parseReviewSnapshot(row.original_snapshot_json);
+        const log = present.length ? calendarTripLog(original ?? undefined, present) : null;
+        if (log) tripHandover.push(log);
+      }
       await transaction.runAsync(
         `delete from review_item_cache where account_key = ? and review_item_id = ?`,
         accountKeyValue,
@@ -2001,6 +2014,7 @@ async function materialiseAcknowledgedReviewHandover(
       row.client_mutation_id
     );
   }
+  return tripHandover;
 }
 
 function terminalStatusesFromPresentation(response: ReviewPresentationSnapshot) {
@@ -3077,6 +3091,14 @@ export async function readPendingTimerTripClashEnds(owner: { workspaceId: string
       tripStartedAt: question.tripStartedAt, acknowledged: row.state === "acknowledged",
       stoppedRunningTimer: acknowledgement?.stoppedRunningTimer === true }];
   });
+}
+
+const calendarTripHandoverListeners = new Set<(owner: ReviewPresentationOwner, logs: readonly CalendarTripLog[]) => void>();
+
+/** A committed Review lookup can retire an outbox item before the Calendar has read its resulting block. */
+export function subscribeCalendarTripHandover(listener: (owner: ReviewPresentationOwner, logs: readonly CalendarTripLog[]) => void) {
+  calendarTripHandoverListeners.add(listener);
+  return () => { calendarTripHandoverListeners.delete(listener); };
 }
 
 /** Project accepted trip rows while the outbox is still waiting for canonical data. */

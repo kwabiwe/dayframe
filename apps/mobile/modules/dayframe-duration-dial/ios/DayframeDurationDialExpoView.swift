@@ -140,6 +140,19 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     gestureRecognizer !== pan || !(touch.view?.isDescendant(of: roundDurationButton) ?? false)
   }
 
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    let hit = super.hitTest(point, with: event)
+    guard hit != nil, let record, !roundDurationButton.isHidden, roundDurationButton.isEnabled,
+          roundDurationButton.frame.contains(point) else { return hit }
+    // The adjustable controls' invisible padding must not swallow the label's tap.
+    // Give a drag starting on the actual knob to the dial.
+    if let handle = nearestHandle(to: point, record: record),
+       distance(point, handlePoint(handle, record: record)) <= DayframeDurationDialStyle.knobRadius {
+      return hit
+    }
+    return roundDurationButton
+  }
+
   override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
     guard super.point(inside: point, with: event), let record else { return false }
     return DayframeDurationDialCore.ownsTouch(

@@ -147,7 +147,7 @@ describe("CalendarListView (location v4 step 9)", () => {
     const stale = { ...timeline, items: timeline.items.map((item) => item.kind === "trip" ? { ...item, blockIds: [] } : item) };
     const review = {
       checks: [check], checkTitles: new Map([[check.id, pending.title]]),
-      checkQuestions: new Map([[check.id, { question: "Log this trip?", detail: null, yesLabel: "Yes", logLabel: "Log trip", noLabel: "Don't log" }]]),
+      checkQuestions: new Map([[check.id, { question: "Log this trip?", detail: null, yesLabel: "Yes", logLabel: "Log trip", skipLabel: "Don't log" }]]),
       onAnswerCheck: vi.fn()
     };
     const show = (extra: Partial<ListProps>) => <CalendarListView {...defaults} {...review} timeline={stale} entries={[work]} {...extra} />;
@@ -164,6 +164,12 @@ describe("CalendarListView (location v4 step 9)", () => {
     act(() => { tree.update(show({ checks: [], loggedTripRows: [{ ...pending, entryIds: ["commute"] }], entries: [actual, work] })); });
     expect(tree.root.findAllByProps({ testID: "calendar-list-logged-trip-seg-trip" })).toHaveLength(0);
     expect(labels(tree).some((label) => label.includes("Getting around"))).toBe(true);
+
+    // Bootstrap can arrive first, even when an equivalent confirmation has no entry ID.
+    act(() => { tree.update(show({ entries: [actual, work], loggedTripRows: [pending],
+      tripSegmentByEntryId: new Map([["commute", "seg-trip"]]) })); });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-logged-trip-seg-trip" })).toHaveLength(0);
+    expect(labels(tree).filter((label) => label.includes("Getting around"))).toHaveLength(1);
   });
 
   it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {

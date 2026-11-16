@@ -206,6 +206,8 @@ export type MobileTimeEntry = {
   placeKind?: "saved" | "one_time" | null;
   /** For a block a Move logged by itself (PRD D19), its Move's event, for "Don't log trips like this". */
   automaticMoveEventId?: string | null;
+  /** Stable Calendar identity; older servers supply it through the trip timeline or the receipt. */
+  tripSegmentId?: string | null;
   /** A member of a named A → B → A (location v3 PR 14): Today shows adjacent members as one row. */
   locationGroup?: { key: string; name: string; parts?: number } | null;
   source: string;

@@ -158,6 +158,8 @@ export type TimeEntryRow = {
   ownerAuthoredInReview?: boolean;
   /** For a Move's automatic block (PRD D19), its Move's event, for "Don't log trips like this". */
   automaticMoveEventId?: string | null;
+  /** Stable Calendar row identity for blocks derived from a detected trip. */
+  tripSegmentId?: string | null;
   /** A member of a named A → B → A (location v3 PR 14): adjacent members show as one row. */
   locationGroup?: LocationGroup;
   description: string | null;
@@ -1134,6 +1136,11 @@ export function buildTimeEntriesQuery(
             ${confirmedInReviewSql},
             ${ownerAuthoredInReviewSql},
             ${automaticMoveEventIdSql},
+            case when te.source in ('location_learning', 'location_auto_log') then (
+              select move_event.raw_payload ->> 'clientSegmentId' from activity_events move_event
+              where move_event.id = te.created_from_event_id and move_event.workspace_id = te.workspace_id
+                and move_event.user_id = te.user_id and move_event.event_type = 'commute_detected'
+            ) end as "tripSegmentId",
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
