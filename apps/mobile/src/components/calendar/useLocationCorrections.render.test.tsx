@@ -358,6 +358,13 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(cancel).not.toHaveBeenCalled();
   });
 
+  const placeLog = { startedAt: place.startedAt, stoppedAt: place.stoppedAt, title: "Unknown place" };
+  const queuedPlaceLog = {
+    request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands",
+      clientCorrectionId: expect.any(String), visitOnly: true },
+    preview: { name: null, placeLog }
+  };
+
   it("holds Logs as for Undo, sends it after the hold, and reads the day again once the server has it (step 12 part 4c)", async () => {
     vi.useFakeTimers();
     try {
@@ -377,7 +384,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { logAs.onLog("cat-errands"); });
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
+        [queuedPlaceLog]);
       // Only the server's acknowledgement reads the day again; leaving the queue (a refusal) does not (Codex r1 on #606).
       await act(async () => { tree.update(<Probe data={account("a")} onLogged={onLogged} pending={[]} />); });
       expect(onLogged).not.toHaveBeenCalled();
@@ -424,7 +431,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       let handle!: { start: () => void; cancel: () => Promise<void> };
       await act(async () => { handle = await logAs.onLogAfter("cat-errands", ["cid-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: ["cid-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true, placeLog } }));
       const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       act(() => { handle.start(); });
       expect(api!.heldLog?.title).toBe("Unknown place as Errands");
@@ -461,7 +468,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { logAs.onLog("cat-errands"); });
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["earlier-1"] });
       expect(register.waitForItemCorrections).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: [], action: { kind: "log", categoryId: "cat-errands", visitOnly: true, placeLog } }));
       const recordId = (register.waitForItemCorrections.mock.calls.at(-1)![1] as { id: string }).id;
       expect(api!.heldLog?.afterCorrections).toBe(recordId);
       await act(async () => { vi.advanceTimersByTime(4_800); });
@@ -474,7 +481,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toBeNull();
       await act(async () => { vi.advanceTimersByTime(4_800); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
+        [queuedPlaceLog]);
     } finally {
       mocks.queued = [];
       vi.useRealTimers();
@@ -491,7 +498,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       const logAs = sheetOf(tree)!.props.logAs as { onLogAfter: (id: string, ids: readonly string[], generation: number) => Promise<unknown> };
       await act(async () => { await logAs.onLogAfter("cat-errands", ["new-1"], currentMobileAccountEpoch()); });
       expect(register.waitForItemCorrections).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true } }));
+        expect.objectContaining({ itemId: "seg-a", newIds: ["new-1"], action: { kind: "log", categoryId: "cat-errands", visitOnly: true, placeLog } }));
       expect(await register.waitForItemCorrections.mock.results.at(-1)!.value).toMatchObject({ waitsFor: ["new-1", "earlier-1"] });
     } finally {
       mocks.queued = [];
@@ -560,7 +567,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
       await act(async () => { plain.onLog("cat-errands"); });
       await act(async () => { tree.unmount(); });
       expect(mocks.enqueue).toHaveBeenCalledWith({ userId: "a", workspaceId: "w" },
-        [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
+        [queuedPlaceLog]);
       expect(mocks.synchronise).not.toHaveBeenCalled();
     } finally {
       waiting.settleOutcome = "committed";
@@ -737,7 +744,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     const sends = mocks.synchronise.mock.calls.length;
     await act(async () => { logAs.onLog("cat-errands"); });
     expect(mocks.enqueue).toHaveBeenLastCalledWith({ userId: "a", workspaceId: "w" },
-      [{ request: { kind: "log_place", subject: "place", itemId: "seg-a", categoryId: "cat-errands", visitOnly: true } }]);
+      [queuedPlaceLog]);
     expect(mocks.synchronise.mock.calls.length).toBe(sends);
     expect(api!.heldLog).toBeNull();
     mocks.appState = "active";

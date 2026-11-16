@@ -2604,6 +2604,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const snapshot = (place && calendarPlaceLogSnapshot(place, title)) || captured;
       if (snapshot) add(calendarPlaceLog(id, snapshot, entryIds));
     };
+    for (const ack of correctionQueue.acknowledged) {
+      if (ack.request.kind !== "log_place") continue;
+      // Older servers don't split outing receipts. Its visit can still be matched after
+      // a fresh timeline links the place itself; the flat receipt contains unrelated trips.
+      if (ack.loggedPlaceEntryIds?.length === 0) continue;
+      const entries = ack.loggedPlaceEntryIds ?? places.get(ack.request.itemId)?.blockIds;
+      addPlace(ack.request.itemId, entries, ack.request.description, ack.preview?.placeLog);
+    }
     const openItems = new Map((shownCalendarData?.reviewItems ?? []).map((item) => [item.id, item]));
     for (const record of answersAfterCorrections.waitingLogs) {
       if (record.log && !record.venue) addPlace(record.log.itemId, [], record.log.description, record.log.placeLog);
@@ -2621,14 +2629,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (pending.request.kind === "log_place" && pending.failureKind !== "permanent") {
         addPlace(pending.request.itemId, [], pending.request.description, pending.preview?.placeLog);
       }
-    }
-    for (const ack of correctionQueue.acknowledged) {
-      if (ack.request.kind !== "log_place") continue;
-      // Older servers don't split outing receipts. Its visit can still be matched after
-      // a fresh timeline links the place itself; the flat receipt contains unrelated trips.
-      if (ack.loggedPlaceEntryIds?.length === 0) continue;
-      const entries = ack.loggedPlaceEntryIds ?? places.get(ack.request.itemId)?.blockIds;
-      addPlace(ack.request.itemId, entries, ack.request.description, ack.preview?.placeLog);
     }
     return [...byKey.values()];
   }, [answersAfterCorrections.waitingLogs, calendarTimeline, confirmedReviewLogs, correctionQueue.acknowledged,

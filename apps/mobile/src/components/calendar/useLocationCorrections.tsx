@@ -403,7 +403,7 @@ export function useLocationCorrections({
   const acknowledgedIds = acknowledged.map((item) => item.clientCorrectionId).join("|");
   const seenLogs = useRef(new Set<string>());
   useEffect(() => {
-    const delivered = acknowledged.filter((item) => !seenLogs.current.has(item.clientCorrectionId)
+    const delivered = acknowledged.filter((item) => !item.restoredPlaceLog && !seenLogs.current.has(item.clientCorrectionId)
       && (sentLogs.current.has(item.clientCorrectionId) || item.request?.kind === "log_place" || item.preview?.refreshBlocks));
     if (!delivered.length) return;
     for (const item of delivered) {

@@ -18,9 +18,13 @@ export function calendarReviewRowKey(log: CalendarReviewLog): string {
   return log.check.segmentId ? `${log.kind ?? "trip"}-${log.check.segmentId}` : `check-${log.check.id}`;
 }
 
-export function reviewActionLogsBlock(action: ReviewMutation["action"]) {
-  return action === "accept" || action === "confirm" || action === "confirm_outing"
-    || action === "record_poi_once" || action === "edit_and_confirm" || action === "save_place_and_confirm";
+export const CALENDAR_BLOCK_LOG_ACTIONS: readonly ReviewMutation["action"][] = [
+  "accept", "confirm", "confirm_outing", "record_poi_once", "edit_and_confirm", "save_place_and_confirm"
+];
+
+export function calendarReviewLogTitle(mutation: ReviewMutation) {
+  return mutation.action === "record_poi_once" ? mutation.name
+    : mutation.action === "confirm_outing" ? mutation.venue?.name : undefined;
 }
 
 /** A positive answer through its Undo hold and outbox, from the same proposal that was confirmed. */

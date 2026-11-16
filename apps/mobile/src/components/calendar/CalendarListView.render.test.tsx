@@ -218,9 +218,14 @@ describe("CalendarListView (location v4 step 9)", () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(show({ entries: [block("other", "Other workout", 13, 14)] })); });
     expect(labels(tree).filter((label) => label.startsWith("Workout.") && label.endsWith("Logged"))).toHaveLength(1);
-    act(() => tree.update(show({ entries: [block("workout-block", "Workout", 13, 14)],
-      loggedReviewRows: [{ ...log, entryIds: ["workout-block"] }] })));
+    const row = () => tree.root.findByProps({ testID: "calendar-list-row-check-workout" });
+    const before = row();
+    const entry = block("workout-block", "Workout", 13, 14);
+    act(() => tree.update(show({ entries: [entry], loggedReviewRows: [{ ...log, entryIds: ["workout-block"] }] })));
     expect(labels(tree).filter((label) => label.includes("Workout"))).toHaveLength(1);
+    expect(row()).toBe(before);
+    act(() => tree.update(show({ entries: [entry], loggedReviewRows: [] })));
+    expect(row()).toBe(before);
   });
 
   it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {

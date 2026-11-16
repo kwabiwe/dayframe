@@ -1,4 +1,4 @@
-import { calendarReviewLog, reviewActionLogsBlock, type CalendarReviewLog, type CalendarReviewHandover } from "./calendarReviewLog";
+import { CALENDAR_BLOCK_LOG_ACTIONS, calendarReviewLog, calendarReviewLogTitle, type CalendarReviewLog, type CalendarReviewHandover } from "./calendarReviewLog";
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
@@ -2023,13 +2023,14 @@ async function materialiseAcknowledgedReviewHandover(
         accountKeyValue, effect.review_item_id, backendId, response.capturedAt
       );
       if (reopened) continue;
-      if (reviewActionLogsBlock(envelope.mutation.action) && effect.review_item_id === row.review_item_id
+      if (CALENDAR_BLOCK_LOG_ACTIONS.includes(envelope.mutation.action) && effect.review_item_id === row.review_item_id
         && terminalById.get(effect.review_item_id) === "accepted") {
         const ownLinks = linksByReviewId.get(effect.review_item_id)?.entryIds;
-        const ownIds = envelope.mutation.action === "confirm_outing" ? ownLinks ?? [] : resultEntryIds;
+        const ownIds = envelope.mutation.action === "confirm_outing"
+          ? acknowledgementAnchorEntryIds(acknowledgement) ?? ownLinks ?? [] : resultEntryIds;
         const present = ownIds.filter((id) => lookupEntries.get(id) === "present");
         const original = parseReviewSnapshot(row.original_snapshot_json);
-        const log = present.length ? calendarReviewLog(original ?? undefined, present) : null;
+        const log = present.length ? calendarReviewLog(original ?? undefined, present, calendarReviewLogTitle(envelope.mutation)) : null;
         if (log) reviewHandover.push(log);
       }
       await transaction.runAsync(
@@ -2089,6 +2090,12 @@ function acknowledgementEntryIds(value: Record<string, unknown>) {
     ...(Array.isArray(value.entryIds) ? value.entryIds.filter((id): id is string => typeof id === "string") : [])
   ].filter((id): id is string => Boolean(id));
   return [...new Set(ids)];
+}
+
+function acknowledgementAnchorEntryIds(value: Record<string, unknown>) {
+  if (!Array.isArray(value.anchorEntryIds)) return undefined;
+  const ids = new Set(acknowledgementEntryIds(value));
+  return value.anchorEntryIds.filter((id): id is string => typeof id === "string" && ids.has(id));
 }
 
 function acknowledgementRequiresLinkedResult(
@@ -3170,21 +3177,20 @@ export async function readPendingCalendarReviewLogs(owner: { workspaceId: string
   const rows = await db.getAllAsync<{ original_snapshot_json: string; request_json: string; acknowledgement_json: string | null }>(
     `select original_snapshot_json, request_json, acknowledgement_json
        from review_mutation_outbox
-      where account_key = ? and action_kind in ('accept', 'confirm', 'confirm_outing', 'record_poi_once', 'edit_and_confirm', 'save_place_and_confirm')
+      where account_key = ? and action_kind in (${CALENDAR_BLOCK_LOG_ACTIONS.map(() => "?").join(", ")})
         and (state <> 'needs_attention' or ${unknownOutcomeSql()})
       order by created_at desc, client_mutation_id desc
       limit ?`,
-    accountKey(owner), REVIEW_PRESENTATION_MAX_IDS
+    accountKey(owner), ...CALENDAR_BLOCK_LOG_ACTIONS, REVIEW_PRESENTATION_MAX_IDS
   );
   return rows.flatMap((row) => {
     const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
     const item = parseReviewSnapshot(row.original_snapshot_json);
     const mutation = parseReviewMutationEnvelope(row.request_json)?.mutation;
     if (!item || !mutation) return [];
-    const entryIds = acknowledgement && mutation.action !== "confirm_outing" ? acknowledgementEntryIds(acknowledgement) : [];
-    const title = mutation.action === "record_poi_once" ? mutation.name
-      : mutation.action === "confirm_outing" ? mutation.venue?.name : undefined;
-    const log = calendarReviewLog(item, entryIds, title);
+    const entryIds = !acknowledgement ? [] : mutation.action === "confirm_outing"
+      ? acknowledgementAnchorEntryIds(acknowledgement) ?? [] : acknowledgementEntryIds(acknowledgement);
+    const log = calendarReviewLog(item, entryIds, calendarReviewLogTitle(mutation));
     return log ? [log] : [];
   });
 }

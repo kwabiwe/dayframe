@@ -450,8 +450,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
       // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
       if (found && found.eventKind === "log_place" && request.kind === "log_place") {
-        const placeEntryIds = await loggedEntries(client, session, found.eventId);
-        return { ok: true as const, logged: { entryIds: placeEntryIds, placeEntryIds,
+        const entries = await loggedEntries(client, session, found.eventId);
+        return { ok: true as const, logged: { ...entries,
           resolvedReviewItemIds: await resolvedFromEvent(client, session, found.eventId) } };
       }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
@@ -746,7 +746,8 @@ async function loggedEntries(client: pg.PoolClient, session: RequestSession, eve
       where te.workspace_id = $1 and te.user_id = $2 and ae.client_event_id = any($3::text[])
       order by te.started_at, te.id`,
     [session.workspaceId, session.userId, tripIds.map((id) => `location-segment:${id}`.slice(0, 160))])).rows.map((row) => row.id) : [];
-  return [...await entriesFromEvent(client, session, eventId), ...tripEntries];
+  const placeEntryIds = await entriesFromEvent(client, session, eventId);
+  return { entryIds: [...placeEntryIds, ...tripEntries], placeEntryIds };
 }
 
 async function entriesFromEvent(client: pg.PoolClient, session: RequestSession, eventId: string) {

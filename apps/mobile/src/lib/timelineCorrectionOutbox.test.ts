@@ -280,6 +280,15 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
     expect(acknowledged[0]).toMatchObject({ clientCorrectionId: "6f000000-0000-4000-8000-000000000001", request: { kind: "log_place" },
       loggedPlaceEntryIds: ["entry-stay"], preview: { name: null, placeLog },
       resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"] });
+    // Cold launch after the follow-up day read failed. The receipt still describes the visit, not its trips.
+    outbox.__resetTimelineCorrectionOutboxForTests();
+    vi.setSystemTime(new Date("2026-10-27T12:15:00.000Z"));
+    expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toMatchObject([{
+      resolvedReviewItemIds: ["review-trip-in", "review-trip-out", "review-stay"],
+      loggedPlaceEntryIds: ["entry-stay"], preview: { name: null, placeLog }, restoredPlaceLog: true
+    }]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_B)).toEqual([]);
     // A Logs as on a place that was no outing's stay: its own "?" only, unchanged.
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: CATEGORY }, { createId });
     vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-cafe"], resolvedReviewItemIds: ["review-cafe"] } })));

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { runOnJS } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -206,7 +206,9 @@ export function CalendarListView({
   const rowChecks = useMemo(() => checks.filter((check) => !blockCheckIds.has(check.id) && checkKinds?.get(check.id) !== "block"),
     [blockCheckIds, checkKinds, checks]);
   const trips = useMemo(() => tripsByBlockId(timeline), [timeline]);
-  const items = useMemo<ListItem[]>(() => {
+  // Remember a resolved row's key for this day, including after its receipt is retired.
+  const entryKeys = useRef<{ dayStartMs: number; keys: ReadonlyMap<string, string> } | null>(null);
+  const projection = useMemo(() => {
     const intervals = blocks.map((entry) => ({
       startedAt: new Date(entry.startedAtMs).toISOString(),
       stoppedAt: entry.stoppedAtMs == null ? null : new Date(entry.stoppedAtMs).toISOString()
@@ -215,26 +217,33 @@ export function CalendarListView({
     // place name would hide the wrong row when independent blocks overlap a visit.
     const logs = loggedReviewRows ?? [];
     const shownEntryIds = new Set(blocks.map((entry) => entry.entryId));
+    const loggedIds = new Set(logs.map((log) => log.check.id));
+    const otherPlaces = new Set(rowChecks.flatMap((check) =>
+      check.segmentId && !loggedIds.has(check.id) ? [check.segmentId] : []));
+    const priorKeys = entryKeys.current?.dayStartMs === dayStartMs ? entryKeys.current.keys : undefined;
     const keyByEntry = new Map<string, string>([...(tripSegmentByEntryId ?? [])].map(([id, tripId]) => [id, `trip-${tripId}`]));
     for (const item of timeline?.items ?? []) {
       if (item.kind === "trip") for (const id of item.blockIds) keyByEntry.set(id, `trip-${item.id}`);
     }
     for (const log of logs) {
-      // Ordinary blocks already have a stable entry key when they arrive. Trips have an
-      // existing segment key even after the receipt leaves, so keep the in-place trip handoff.
-      if ((log.kind ?? "trip") !== "trip") continue;
+      // An independent question still owns its place row. Its neighbour can appear as a normal block.
+      if (log.kind === "place" && log.check.segmentId && otherPlaces.has(log.check.segmentId)) continue;
       for (const id of log.entryIds) if (!keyByEntry.has(id)) keyByEntry.set(id, calendarReviewRowKey(log));
     }
     const represented = new Set<string>();
+    const keys = new Map<string, string>();
+    const retainedKeys = new Set(priorKeys?.values());
     const blockRows = blocks.map((entry): ListItem => {
       const linked = keyByEntry.get(entry.entryId);
-      const key = linked && !represented.has(linked) ? linked : `block-${entry.entryId}`;
+      const key = priorKeys?.get(entry.entryId)
+        ?? (linked && !represented.has(linked) && !retainedKeys.has(linked) ? linked : `block-${entry.entryId}`);
       if (linked) represented.add(linked);
+      represented.add(key);
+      keys.set(entry.entryId, key);
       return { kind: "block", key, atMs: entry.startedAtMs, entry };
     });
     const visibleLogs = logs.filter((log) => !represented.has(calendarReviewRowKey(log))
       && !log.entryIds.some((id) => shownEntryIds.has(id)));
-    const loggedIds = new Set(logs.map((log) => log.check.id));
     const logById = new Map(visibleLogs.map((log) => [log.check.id, log]));
     const checksToShow = [
       ...rowChecks.filter((check) => !loggedIds.has(check.id)
@@ -254,8 +263,12 @@ export function CalendarListView({
       represented.add(key);
       return { kind: "location", key, atMs: row.atMs, row, loggedReview: log };
     });
-    return [...blockRows, ...locationRows].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
+    return { items: [...blockRows, ...locationRows].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key)), keys };
   }, [blocks, rowChecks, dayEndMs, dayStartMs, loggedReviewRows, nowMs, showAllPlaces, timeline, tripSegmentByEntryId]);
+  const { items } = projection;
+  useLayoutEffect(() => {
+    entryKeys.current = { dayStartMs, keys: projection.keys };
+  }, [dayStartMs, projection.keys]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row. A place's or a
   // trip's opens its sheet (`open`); only Apple Health's (no sheet) opens its question under its row (`inline`).
   // What each "?" is about comes from the caller (`checkKinds`, from the suggestion itself; Codex r2 on #610): Apple
@@ -596,7 +609,7 @@ export function CalendarListView({
             const trip = trips.get(item.entry.entryId);
             const open = openLegs.has(item.entry.entryId);
             return (
-              <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
+              <Animated.View key={item.key} testID={`calendar-list-row-${item.key}`} layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
                 ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}>
                 <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => {
                   // A block with its own "?": "N to check" moves on from it.
@@ -616,7 +629,7 @@ export function CalendarListView({
           }
           return (
             <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} key={item.key}
-              layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
+              testID={`calendar-list-row-${item.key}`} layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
              >
               <LocationRow checkGlyphs={checkGlyphs} checkQuestions={checkQuestions} checkTitles={checkTitles} checkOutingLabels={checkOutingLabels}
