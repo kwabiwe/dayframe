@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MotionTravelModeSchema } from "./schemas";
+import { MotionTravelModeSchema, REVIEW_DESCRIPTION_MAX_LENGTH } from "./schemas";
 
 const GeoJsonPointSchema = z.object({
   type: z.literal("Point"),
@@ -106,6 +106,8 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     suggestedPlaceId: z.string().nullable(),
     historyPlaceIds: z.array(z.string()).max(20)
   }).optional(),
+  /** One editable description from prior explicitly logged, matching visits. Absent from older servers. */
+  previousVisitDescription: z.string().min(1).max(REVIEW_DESCRIPTION_MAX_LENGTH).optional(),
   evidenceExpiresAt: z.string().nullable(),
   evidenceExpired: z.boolean(),
   rawEvidenceAvailable: z.boolean(),

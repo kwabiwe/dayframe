@@ -141,6 +141,64 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertEqual(result.map(\.name), ["Cinema"])
   }
 
+  func testSparseNearbyRetriesOnceAndKeepsOnlyDestinationsWithinOriginalRadius() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(requestId: "sparse", latitude: 10.5, longitude: 20.4, radiusMeters: 400)
+    }
+    await Task.yield()
+    XCTAssertEqual(searcher.radiusMeters, 400)
+    searcher.completeNearby(.success([
+      nearby("Services Parking", distance: 90, relevance: 0, category: .parking),
+      nearby("Charging point", distance: 80, relevance: 1, category: .evCharger)
+    ]))
+    XCTAssertEqual(searcher.radiusMeters, 800)
+    searcher.completeNearby(.success([
+      nearby("Example Motorway Services", distance: 193, relevance: 0, category: MKPointOfInterestCategory(rawValue: "MKPOICategoryRestArea")),
+      nearby("Faraway café", distance: 630, relevance: 1, category: .cafe)
+    ]))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Example Motorway Services"])
+    XCTAssertEqual(searcher.contextQueries, [])
+  }
+
+  func testSparseNearbyPreservesTheSharedSiteLookup() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(requestId: "sparse", latitude: 10.5, longitude: 20.4, radiusMeters: 400)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Examplegate Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Examplegate Charge Point", distance: 90, relevance: 1, category: .evCharger)
+    ]))
+    XCTAssertEqual(searcher.contextQueries, ["examplegate"])
+    searcher.completeContext(.success([
+      nearby("Examplegate Shopping Centre", distance: 160, relevance: 0, category: .store)
+    ]))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Examplegate Shopping Centre"])
+    XCTAssertEqual(searcher.radiusMeters, 400)
+  }
+
+  func testCancellationRejectsLateWiderNearbyResults() async {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(requestId: "sparse", latitude: 10.5, longitude: 20.4, radiusMeters: 400)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([]))
+    XCTAssertEqual(searcher.radiusMeters, 800)
+    coordinator.cancel()
+    searcher.completeNearby(.success([nearby("Late café", distance: 100, relevance: 0)]))
+    await XCTAssertThrowsErrorAsync(try await task.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
+    }
+  }
+
   func testNearbyCancellationRejectsPendingRequest() async {
     let searcher = FakeNearbySearcher()
     let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
