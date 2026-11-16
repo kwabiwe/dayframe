@@ -3395,18 +3395,16 @@ export function ActiveTimerEditSheet({
                           hitSlop={{ top: 6, bottom: 6 }}
                           onPress={applyLastStop}
                           style={({ pressed }) => [
-                            sheetStyles.lastStopPill,
-                            { backgroundColor: theme.surfaceMuted },
+                            sheetStyles.timeShortcut,
                             pressed && !lastStopDisabled ? styles.buttonPressed : null
                           ]}
                           testID="time-entry-set-last-stop-time"
                         >
-                          {lastStopMs !== null ? <DayframeIcon
-                            color={lastStopMatchesPreviousEnd && previousEndApplied ? theme.textPrimary : theme.textSecondary}
-                            glyph={lastStopMatchesPreviousEnd && previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}
-                            size={14}
-                          /> : null}
-                          <Text {...mobileTextProps("metadata")} style={[sheetStyles.lastStopText, { color: lastStopDisabled ? theme.textSecondary : theme.textPrimary }]}>
+                          <Text {...mobileTextProps("metadata")} style={[
+                            sheetStyles.timeShortcutText,
+                            { color: lastStopDisabled ? theme.textSecondary : theme.textPrimary },
+                            lastStopMatchesPreviousEnd && previousEndApplied ? sheetStyles.timeShortcutApplied : null
+                          ]}>
                             {lastStopLabel}
                           </Text>
                         </Pressable>
@@ -3465,6 +3463,7 @@ export function ActiveTimerEditSheet({
                         </View>
                         <View style={[sheetStyles.lastStopSlot, timeCardsStacked && sheetStyles.lastStopSlotLarge]}>
                           <Pressable accessibilityHint="Rounds the end time. Done saves it."
+                            accessibilityLabel="Round end time"
                             accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
                             hitSlop={{ top: 6, bottom: 6 }} onPress={() => {
                               if (busy) return;
@@ -3475,13 +3474,13 @@ export function ActiveTimerEditSheet({
                               }));
                             }}
                             style={({ pressed }) => [
-                              sheetStyles.lastStopPill, sheetStyles.roundEndPill,
-                              { backgroundColor: theme.surfaceMuted }, pressed && !busy ? styles.buttonPressed : null
+                              sheetStyles.timeShortcut, sheetStyles.roundEndShortcut,
+                              pressed && !busy ? styles.buttonPressed : null
                             ]}
                             testID="time-entry-round-stop-time">
-                            <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.time} size={14} />
-                            <Text {...mobileTextProps("metadata")} style={[sheetStyles.lastStopText, { color: busy ? theme.textSecondary : theme.textPrimary }]}>
-                              Round end
+                            <Text {...mobileTextProps("metadata")} style={[sheetStyles.timeShortcutText,
+                              { color: busy ? theme.textSecondary : theme.textPrimary, textAlign: "right" }]}>
+                              Round end time
                             </Text>
                           </Pressable>
                         </View>
@@ -3983,12 +3982,13 @@ const sheetStyles = StyleSheet.create({
   timeColumn: { flex: 1, gap: 6, minWidth: 0 },
   lastStopSlot: { minHeight: 44, justifyContent: "center" },
   lastStopSlotLarge: { minHeight: 52 },
-  lastStopPill: {
-    alignItems: "center", alignSelf: "flex-start", borderRadius: 999, flexDirection: "row", gap: 5,
-    maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 11
+  timeShortcut: {
+    alignSelf: "flex-start", justifyContent: "center",
+    maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 14
   },
-  roundEndPill: { alignSelf: "flex-end" },
-  lastStopText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  roundEndShortcut: { alignSelf: "flex-end" },
+  timeShortcutText: { fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600", textTransform: "uppercase" },
+  timeShortcutApplied: { textDecorationLine: "underline" },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },
   // The card's time as plain text (owner, 16 Oct 2026: no number pad), centred on the old field's line.

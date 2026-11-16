@@ -23,8 +23,15 @@ describe("fixed timer-sheet layout contract", () => {
   it("groups the time shortcuts with what they adjust", () => {
     expect(sheet.indexOf('testID="time-entry-start-time"')).toBeLessThan(sheet.indexOf('testID="time-entry-set-last-stop-time"'));
     expect(sheet.indexOf('testID="time-entry-end-time"')).toBeLessThan(sheet.indexOf('testID="time-entry-round-stop-time"'));
-    expect(sheet).toContain("sheetStyles.lastStopPill, sheetStyles.roundEndPill");
-    expect(nativeDial).toContain('roundDurationButton.setTitle("Round duration", for: .normal)');
+    const endShortcut = sheet.indexOf('testID="time-entry-round-stop-time"');
+    const roundEnd = sheet.slice(sheet.lastIndexOf("<Pressable", endShortcut), sheet.indexOf("</Pressable>", endShortcut));
+    expect(roundEnd).toContain("sheetStyles.timeShortcut, sheetStyles.roundEndShortcut");
+    expect(roundEnd).toContain("color: busy ? theme.textSecondary : theme.textPrimary");
+    expect(roundEnd).toContain('accessibilityLabel="Round end time"');
+    expect(roundEnd).not.toMatch(/backgroundColor|DayframeIcon/);
+    expect(sheet).toMatch(/timeShortcutText: \{[^}]*textTransform: "uppercase"/);
+    expect(nativeDial).toContain('roundDurationTitle = "ROUND DURATION"');
+    expect(nativeDial).toContain("roundDurationButton.setTitle(Self.roundDurationTitle, for: .normal)");
     expect(dial).toContain("roundTimeEntryDialDuration({ startMs, endMs }, mode, endMs)");
     expect(dial).toContain("nativeEvent.revision !== revision");
     expect(dial).not.toContain("Spin the ring");

@@ -1555,7 +1555,7 @@ final class DayframeSheetQATests: XCTestCase {
     ] {
       try waitForElement(candidate, description: description)
     }
-    try require(roundEnd.label == "Round end" && roundDuration.label == "Round duration", "Rounding shortcuts lost their labels.", state: state)
+    try require(roundEnd.label == "Round end time" && roundDuration.label == "Round duration", "Rounding shortcuts lost their labels.", state: state)
     try require(roundEnd.frame.minY >= end.frame.maxY - 1 && roundEnd.frame.maxY <= dial.frame.minY + 1,
       "Round end was not between End and the dial.", state: state)
     try require(dial.frame.contains(roundDuration.frame), "Round duration was outside the dial.", state: state)

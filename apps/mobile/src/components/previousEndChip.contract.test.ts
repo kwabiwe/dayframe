@@ -58,14 +58,17 @@ describe("entry sheet start-at-the-previous-end chip", () => {
 
   it("uses one compact Last stop control with the existing previous-end toggle when they match", () => {
     const id = 'testID="time-entry-set-last-stop-time"';
-    const chip = sheet.slice(sheet.indexOf(id) - 1800, sheet.indexOf(id) + 900);
+    const shortcut = sheet.indexOf(id);
+    const chip = sheet.slice(sheet.lastIndexOf("<Pressable", shortcut), sheet.indexOf("</Pressable>", shortcut));
     expect(chip).toContain("`${lastStopLabel}, after ${presentedPreviousEnd.previousName}`");
     expect(chip).toContain("accessibilityState={{ disabled: lastStopDisabled, selected: lastStopMatchesPreviousEnd && previousEndApplied }}");
     expect(chip).toContain("hitSlop={{ top: 6, bottom: 6 }}");
-    expect(chip).toContain("{ backgroundColor: theme.surfaceMuted }");
-    expect(chip).toContain("DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd");
+    expect(chip).not.toMatch(/backgroundColor|DayframeIcon/);
+    expect(chip).toContain("lastStopMatchesPreviousEnd && previousEndApplied ? sheetStyles.timeShortcutApplied");
+    expect(chip).toContain("color: lastStopDisabled ? theme.textSecondary : theme.textPrimary");
     expect(sheet).toContain('"No previous entry on this day"');
-    expect(sheet).toMatch(/lastStopPill: \{[^}]*borderRadius: 999[^}]*minHeight: 32, minWidth: 44/);
+    expect(sheet).toMatch(/timeShortcut: \{[^}]*minHeight: 32, minWidth: 44/);
+    expect(sheet).toContain('timeShortcutApplied: { textDecorationLine: "underline" }');
   });
 
   it("sits in the START card's column, directly under the card", () => {
