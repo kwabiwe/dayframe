@@ -455,7 +455,8 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
           name: "bootstrap",
           run: async () => {
             if(context?.dueOnly&&!changed)return "continue";
-            const publication = beginRecoveredDashboardBootstrapPublication();
+            const requestedAt = Date.now();
+            const publication = beginRecoveredDashboardBootstrapPublication(requestedAt);
             try {
               const serverBootstrap = await fetchBootstrap();
               if (
@@ -464,7 +465,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
               ) {
                 throw new AuthRequiredError();
               }
-              await cacheDashboardBootstrap(serverBootstrap);
+              await cacheDashboardBootstrap(serverBootstrap, requestedAt);
               const projected = projectDurableLocalWork(
                 serverBootstrap,
                 await readDurableLocalWork(owner)

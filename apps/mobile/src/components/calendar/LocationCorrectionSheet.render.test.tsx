@@ -1036,30 +1036,15 @@ describe("the correction sheet's question, Done and saved places (owner, 28 Oct 
     expect(tree.root.findAllByProps({ testID: "location-correction-activity-value" })).toHaveLength(0);
   });
 
-  it("closes More options at once with Reduce Motion, and after the scroll back otherwise", () => {
-    vi.useFakeTimers();
-    vi.stubGlobal("requestAnimationFrame", vi.fn());
-    try {
-      const still = sheetWith({});
-      tap(still, "location-correction-more");
-      tap(still, "location-correction-more");
-      expect(still.root.findAll((node) => node.props.testID === "location-correction-more-options")).toHaveLength(0);
-      const moving = sheetWith({ reduceMotion: false });
-      tap(moving, "location-correction-more");
-      tap(moving, "location-correction-more");
-      expect(moving.root.findAll((node) => node.props.testID === "location-correction-more-options").length).toBeGreaterThan(0);
-      act(() => { vi.advanceTimersByTime(240); });
-      expect(moving.root.findAll((node) => node.props.testID === "location-correction-more-options")).toHaveLength(0);
-      // A tap during the scroll back keeps it open.
-      tap(moving, "location-correction-more");
-      tap(moving, "location-correction-more");
-      tap(moving, "location-correction-more");
-      act(() => { vi.advanceTimersByTime(240); });
-      expect(moving.root.findAll((node) => node.props.testID === "location-correction-more-options").length).toBeGreaterThan(0);
-    } finally {
-      vi.unstubAllGlobals();
-      vi.useRealTimers();
-    }
+  it.each([true, false])("toggles More options in place through rapid taps (Reduce Motion %s)", (reduceMotion) => {
+    const tree = sheetWith({ reduceMotion });
+    const options = () => tree.root.findAll((node) => node.props.testID === "location-correction-more-options");
+    tap(tree, "location-correction-more");
+    expect(options().length).toBeGreaterThan(0);
+    tap(tree, "location-correction-more");
+    expect(options()).toHaveLength(0);
+    tap(tree, "location-correction-more");
+    expect(options().length).toBeGreaterThan(0);
   });
 
   it("keeps a guessed venue when Yes follows a time change or a Logs as pick (Codex r1 on #620)", async () => {

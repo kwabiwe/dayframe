@@ -1,3 +1,4 @@
+import { calendarTripLog } from "../../lib/calendarTripLog";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { outingKeyOf, timerTripClashQuestion } from "@dayframe/shared";
@@ -641,6 +642,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    */
   const answeredYesIds = useMemo(() => new Set([...hiddenIds].filter((id) => answeredLogged.current.get(id) === true)), [hiddenIds]);
 
+  const tripLogs = useMemo(() => [...answeredYesIds].flatMap((id) => {
+    const log = calendarTripLog(known.current.get(id));
+    return log ? [log] : [];
+  }), [answeredYesIds]);
+
   /** An edited sheet's answer, registered for `registeredFor` (`recordOwner`), started through the one completion path. */
   const startAfterCorrections = useCallback((itemId: string, logged: boolean, recordId: string, registeredFor: string | null,
     recordOwner: MobileAccountOwner, generation: number) =>
@@ -687,5 +693,5 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * can't is refused at once, never accepted and dropped later.
    */
   const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
-  return { answer, answeredYesIds, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
+  return { answer, answeredYesIds, tripLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
 }

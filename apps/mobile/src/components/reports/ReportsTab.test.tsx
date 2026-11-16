@@ -300,7 +300,7 @@ describe("Revision 3 Reports owner", () => {
       { id: tag, name: "Release", normalizedName: "release" },
       { id: "optimistic-tag:local", name: "Local", normalizedName: "local" },
     ] });
-    const facets = { tags: [tag], sources: ["mobile_app"], description: " audit " };
+    const facets = { tags: [tag], places: ["no-place"], description: " audit " };
     const firstKey = JSON.stringify(rangeCalls().at(-1)?.[0]);
     const filter = () => tree.root.findByProps({ testID: "reports-filter-button" });
     const sheet = () => tree.root.findByType("ReportFiltersSheet" as never);

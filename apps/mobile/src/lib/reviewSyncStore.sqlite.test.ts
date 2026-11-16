@@ -473,6 +473,44 @@ describe("Review real SQLite transactions", () => {
     });
     expect(count("review_mutation_outbox")).toBe(1);
   });
+  it("hands Calendar the exact trip before the Review lookup lets go of its outbox row", async () => {
+    const data = bootstrap();
+    const existing = data.reviewItems.find((item) => item.eventType === "commute_detected")!;
+    const segmentId = syntheticId(97);
+    const item = { ...existing, rawPayload: { ...existing.rawPayload, clientSegmentId: segmentId } };
+    const owner = { userId: data.user.id, workspaceId: data.workspace.id, backendId: "staging-fixture" };
+    const entryId = syntheticId(96);
+    const observed = vi.fn();
+    const unsubscribe = store.subscribeCalendarTripHandover(observed);
+    try {
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(95), mutation: { action: "confirm" } });
+      mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
+        ok: true, action: "confirm", status: "accepted", alreadyResolved: true, equivalent: true
+      }) });
+      await store.synchroniseReviewMutations();
+      expect(await store.readPendingCalendarTripLogs(owner)).toEqual([expect.objectContaining({
+        check: expect.objectContaining({ id: item.id, segmentId }), entryIds: []
+      })]);
+      await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [item.id], entryId) });
+      expect(await store.readPendingCalendarTripLogs(owner)).toEqual([]);
+      const receipt = expect.objectContaining({ check: expect.objectContaining({ id: item.id, segmentId }), entryIds: [entryId] });
+      expect(observed).toHaveBeenCalledExactlyOnceWith(owner, [receipt]);
+      await reopen();
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
+      expect(await store.readCalendarTripHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
+      const cachedData = { ...data, serverBuild: { ...data.serverBuild!, backendId: owner.backendId } };
+      const recentRead = Date.now();
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 10);
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] }, recentRead);
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([]);
+      expect(await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 1)).toBe(false);
+      await reopen();
+      expect((await store.loadCachedDashboardBootstrap())?.bootstrap.entries[0]?.id).toBe(entryId);
+    } finally {
+      unsubscribe();
+    }
+  });
   it("settles a conflict quietly and brings back only the canonically open source", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
     mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict", canonicalReviewStatuses: { [input.item.id]: "accepted", [input.mutation.adjacentReviewItemId]: "open" } }) });
@@ -687,7 +725,7 @@ describe("Review real SQLite transactions", () => {
       stoppedAt: "2026-08-28T17:30:00.000Z",
       startedAt: "2026-08-28T17:00:00.000Z"
     };
-    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] }, Date.now());
     await store.cacheReviewPresentation({ owner, response: result });
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
@@ -753,7 +791,7 @@ describe("Review real SQLite transactions", () => {
       startedAt: "2026-08-28T17:00:00.000Z",
       stoppedAt: "2026-08-28T17:30:00.000Z"
     };
-    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] }, Date.now());
     await store.cacheReviewPresentation({ owner, response: linked });
 
     expect(count("review_mutation_outbox")).toBe(0);

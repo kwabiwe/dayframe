@@ -20,25 +20,15 @@ describe("fixed timer-sheet layout contract", () => {
     expect(suggestions).toContain("styles.taskSuggestionRowDivider");
   });
 
-  it("keeps the time shortcuts behind one toggle on the hint row under the dial (step 4e)", () => {
-    expect(dial).toContain("One turn is an hour.");
-    expect(dial).toContain('testID="time-entry-dial-shortcuts"');
-    expect(dial).toContain('accessibilityState={{ disabled, expanded: showShortcuts }}');
-    expect(dial).not.toContain('testID: "time-entry-set-last-stop-time"');
-    expect(sheet).toContain('testID="time-entry-set-last-stop-time"');
-    expect(dial).toContain('testID: "time-entry-round-stop-time"');
-    expect(dial).toContain('testID: "time-entry-round-duration"');
-    // Rounding stays in the stopped dial menu, while Last stop is beneath Start.
-    expect(dial).toContain('if (mode === "stopped") {');
-    expect(dial).not.toContain("Last stop");
-    // A turn of the dial, a shortcut or a new presentation closes the shortcuts.
-    expect(dial).toMatch(/phase === "began"\) \{\s*setShortcutsOpen\(false\)/);
-    expect(dial).toContain("entering={localPresenceEntering(reduceMotion, \"fade\")}");
-    expect(dial).toContain("style={styles.durationDialHintRow}");
-    expect(theme).not.toContain("durationDialNativeViewStopped");
-    expect(theme).not.toContain("durationDialFieldActions");
-    expect(theme).not.toContain("durationDialInnerAction");
-    expect(dial).not.toContain("durationDialQuickActions");
+  it("groups the time shortcuts with what they adjust", () => {
+    expect(sheet.indexOf('testID="time-entry-start-time"')).toBeLessThan(sheet.indexOf('testID="time-entry-set-last-stop-time"'));
+    expect(sheet.indexOf('testID="time-entry-end-time"')).toBeLessThan(sheet.indexOf('testID="time-entry-round-stop-time"'));
+    expect(sheet).toContain("sheetStyles.lastStopPill, sheetStyles.roundEndPill");
+    expect(nativeDial).toContain('roundDurationButton.setTitle("Round duration", for: .normal)');
+    expect(dial).toContain("roundTimeEntryDialDuration({ startMs, endMs }, mode, endMs)");
+    expect(dial).toContain("nativeEvent.revision !== revision");
+    expect(dial).not.toContain("Spin the ring");
+    expect(theme).not.toContain("durationDialHintRow");
   });
 
   it("shows Start and End as the prototype's filled time cards above the dial", () => {
@@ -58,13 +48,12 @@ describe("fixed timer-sheet layout contract", () => {
     expect(sheet.match(/adjustsFontSizeToFit\s+minimumFontScale=\{0\.7\}/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("keeps the stopped dial's range handle inside the view and the shortcut state per presentation", () => {
+  it("keeps the stopped dial's range handle inside the view and guards its centre action", () => {
     expect(nativeDial).toContain("DayframeDurationDialCore.baseRadius(");
     expect(nativeDial).toContain("DayframeDurationDialCore.rangeHandleFits(");
-    expect(nativeDial).not.toContain("* 0.34");
-    expect(dial).toContain("shortcutsState.presentationId === presentationId");
-    expect(dial).toContain("if (shortcutsOpen && shortcuts.length === 0)");
-    expect(theme).toMatch(/durationDialHintRow:\s*\{[\s\S]*?flexDirection: "row-reverse"/);
+    expect(nativeDial).toContain("roundDurationButton.isEnabled = enabled");
+    expect(nativeDial).toContain("activeInteractionId == nil");
+    expect(nativeDial).toContain("isDescendant(of: roundDurationButton)");
   });
 
   it("uses responsive fixed geometry and leaves the timer form non-scrolling", () => {

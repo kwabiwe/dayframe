@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Reanimated, { Easing, FadeIn, FadeOut, ReduceMotion, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
@@ -89,7 +89,6 @@ export const SHEET_MAP_HEIGHT = 160;
 /** The map waits for the sheet's spring: MapKit starting mid-spring is what stutters. */
 export const SHEET_MAP_DELAY_MS = 320;
 /** More options closes once the scroll back has run. */
-const SHEET_SCROLL_BACK_MS = 240;
 const SHEET_ACTIVITY_PREVIEW_COUNT = 3;
 
 /** `notHere` / `didntLeave`: whether the List lets "I wasn't here" or "I didn't leave" join its neighbours (step 12 part 4). */
@@ -416,10 +415,9 @@ export function LocationCorrectionSheet({
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const pendingActivityPick = useRef<string | null>(null);
   const [moreOptions, setMoreOptions] = useState(false);
-  const moreRow = useRef<View | null>(null);
-  // Opened and not yet scrolled to: its first layout does it.
-  const revealMore = useRef(false);
-  const closingMore = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moreContent = useRef<View | null>(null);
+  // Reveal just the first options after the inline height settles, or the selected wheel.
+  const moreReveal = useRef<View | "first" | null>(null);
   function chooseInlinePlace(name: string, applePlaceId: string | null = null) {
     if (frozen() || stale) return;
     if (!onSavePlace) {
@@ -429,7 +427,6 @@ export function LocationCorrectionSheet({
     setChoice({ kind: "keep" });
     setAttempted({ name, applePlaceId });
   }
-  useEffect(() => () => { if (closingMore.current) clearTimeout(closingMore.current); }, []);
   // The map waits for the sheet's spring; with Reduce Motion there is none.
   const [mapReady, setMapReady] = useState(false);
   const [inlinePlaceHeight, setInlinePlaceHeight] = useState(0);
@@ -448,26 +445,17 @@ export function LocationCorrectionSheet({
     const timer = setTimeout(() => setMapReady(true), SHEET_MAP_DELAY_MS);
     return () => clearTimeout(timer);
   }, [activityFirst, inlinePlaceHeight, mapReady, placePickerOpen, reduceMotion]);
-  /** Opens with the row scrolled to the sheet's top; closes by scrolling back first, so nothing snaps. */
   function toggleMore() {
-    const closing = moreOptions && !closingMore.current;
-    if (closingMore.current) clearTimeout(closingMore.current);
-    closingMore.current = null;
-    if (!closing) {
-      revealMore.current = !moreOptions;
-      setMoreOptions(true);
-      if (moreOptions) scroller.current?.reveal(moreRow.current, "top");
-      return;
-    }
-    scroller.current?.top();
-    if (reduceMotion) {
-      setMoreOptions(false);
-      return;
-    }
-    closingMore.current = setTimeout(() => {
-      closingMore.current = null;
-      setMoreOptions(false);
-    }, SHEET_SCROLL_BACK_MS);
+    if (frozen()) return;
+    if (moreOptions) scroller.current?.reveal(null, "whole");
+    moreReveal.current = moreOptions ? null : "first";
+    setMoreOptions(!moreOptions);
+  }
+  function revealMoreOptions() {
+    const requested = moreReveal.current;
+    moreReveal.current = null;
+    if (requested === "first") scroller.current?.reveal(moreContent.current, "whole", 76);
+    else if (requested) scroller.current?.reveal(requested, "whole");
   }
   /**
    * "Save this place": `chosenName` is a tap (an Apple place, or "Save “X” as a place"), otherwise the name typed under
@@ -933,7 +921,7 @@ export function LocationCorrectionSheet({
         ) : null}
         {hasMore ? (
           <Pressable accessibilityRole="button" accessibilityState={{ expanded: moreOptions }} hitSlop={2}
-            collapsable={false} onPress={toggleMore} ref={moreRow} style={({ pressed }) => [styles.inlineDisclosure, styles.more, { opacity: pressed ? 0.7 : 1 }]}
+            onPress={toggleMore} style={({ pressed }) => [styles.inlineDisclosure, styles.more, { opacity: pressed ? 0.7 : 1 }]}
             testID="location-correction-more">
             <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.settings} size={19} />
             <Text {...mobileTextProps("control")} style={[styles.inlineChoiceTitle, { color: theme.textPrimary }]}>More options</Text>
@@ -942,14 +930,10 @@ export function LocationCorrectionSheet({
             </View>
           </Pressable>
         ) : null}
-        {hasMore && moreOptions ? (
-          <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}
-            onLayout={() => {
-              if (!revealMore.current) return;
-              revealMore.current = false;
-              scroller.current?.reveal(moreRow.current, "top");
-            }}
-            style={styles.view} testID="location-correction-more-options">
+        {hasMore ? (
+          <InlineReveal initialFlow={false} open={moreOptions} reduceMotion={reduceMotion} onSettled={revealMoreOptions}
+            testID={moreOptions ? "location-correction-more-options" : undefined}>
+          <View collapsable={false} ref={moreContent} style={styles.view}>
             {target.kind === "place" && logAs && !activityFirst && !stale ? (
               // Compact activity chips; none picked logs nothing, so Clear is only a quiet way back once one is picked.
               <Section label="Logs as" testID="location-correction-logs-as" theme={theme}>
@@ -978,7 +962,10 @@ export function LocationCorrectionSheet({
               </Section>
             ) : null}
             {correctable(item) && item.stoppedAt ? (
-              <TimesSection clockFormat={clockFormat} onChange={setTimes} onReveal={(view) => scroller.current?.reveal(view, "whole")} problem={problem} reduceMotion={reduceMotion} theme={theme} times={times} />
+              <TimesSection clockFormat={clockFormat} onChange={setTimes} onReveal={(view) => {
+                moreReveal.current = view;
+                scroller.current?.reveal(view, "whole");
+              }} problem={problem} reduceMotion={reduceMotion} theme={theme} times={times} />
             ) : null}
             {target.kind === "place" ? (
               <View style={styles.corrections} testID="location-correction-corrections">
@@ -1025,7 +1012,8 @@ export function LocationCorrectionSheet({
               )}
               </View>
             ) : null}
-          </Reanimated.View>
+          </View>
+          </InlineReveal>
         ) : null}
         {stale ? (
           <Text {...mobileTextProps("metadata")} style={[styles.hint, { color: theme.textSecondary }]} testID="location-correction-stale">
@@ -1042,8 +1030,9 @@ export function LocationCorrectionSheet({
 }
 
 /** Let the body's normal layout follow the measured reveal, including results that arrive after opening. */
-function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotion, testID }: {
-  children: ReactNode; initialFlow: boolean; onHeightChange?: (height: number) => void; open: boolean; reduceMotion: boolean; testID?: string;
+function InlineReveal({ children, initialFlow, onHeightChange, onSettled, open, reduceMotion, testID }: {
+  children: ReactNode; initialFlow: boolean; onHeightChange?: (height: number) => void; onSettled?: () => void;
+  open: boolean; reduceMotion: boolean; testID?: string;
 }) {
   const [hasBaseline, setHasBaseline] = useState(!initialFlow);
   const height = useSharedValue(0);
@@ -1059,7 +1048,14 @@ function InlineReveal({ children, initialFlow, onHeightChange, open, reduceMotio
           style={natural ? undefined : styles.inlineMeasure}
           onLayout={({ nativeEvent }) => {
             const measured = nativeEvent.layout.height;
-            height.value = natural ? measured : withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) });
+            if (natural) {
+              height.value = measured;
+              onSettled?.();
+            } else {
+              height.value = withTiming(measured, { duration: MOBILE_MOTION.sheet, easing: Easing.out(Easing.cubic) }, (finished) => {
+                if (finished && onSettled) runOnJS(onSettled)();
+              });
+            }
             if (!hasBaseline) setHasBaseline(true);
             onHeightChange?.(measured);
           }}>

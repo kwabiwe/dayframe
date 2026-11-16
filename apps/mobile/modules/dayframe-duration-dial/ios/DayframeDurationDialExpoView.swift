@@ -26,6 +26,7 @@ private struct DayframeDurationDialRecord: Decodable {
   let presentationId: Int
   let reduceMotion: Bool
   let revision: Int
+  let roundDurationEnabled: Bool?
   let startMs: Double
   let theme: DayframeDurationDialTheme
 }
@@ -45,6 +46,7 @@ private final class DayframeAdjustableButton: UIButton {
 
 final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate {
   let onInteraction = EventDispatcher()
+  let onRoundDuration = EventDispatcher()
 
   private var record: DayframeDurationDialRecord?
   private let pan = UIPanGestureRecognizer()
@@ -62,6 +64,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   private let startButton = DayframeAdjustableButton(type: .custom)
   private let endButton = DayframeAdjustableButton(type: .custom)
   private let rangeButton = DayframeAdjustableButton(type: .custom)
+  private let roundDurationButton = UIButton(type: .system)
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -80,6 +83,16 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     pan.maximumNumberOfTouches = 1
     pan.cancelsTouchesInView = false
     addGestureRecognizer(pan)
+
+    roundDurationButton.setTitle("Round duration", for: .normal)
+    roundDurationButton.accessibilityIdentifier = "time-entry-round-duration"
+    roundDurationButton.accessibilityHint = "Rounds the block length. Done saves it."
+    roundDurationButton.titleLabel?.numberOfLines = 2
+    roundDurationButton.titleLabel?.textAlignment = .center
+    roundDurationButton.titleLabel?.lineBreakMode = .byWordWrapping
+    roundDurationButton.isHidden = true
+    roundDurationButton.addTarget(self, action: #selector(roundDuration), for: .touchUpInside)
+    addSubview(roundDurationButton)
 
     for (button, handle) in [
       (startButton, DayframeDurationDialHandle.start),
@@ -115,6 +128,29 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   override func layoutSubviews() {
     super.layoutSubviews()
     updateAccessibilityHandles()
+    updateRoundDurationButton()
+  }
+
+  @objc private func roundDuration() {
+    guard let record, record.mode == "stopped", record.roundDurationEnabled == true, activeInteractionId == nil else { return }
+    onRoundDuration(["presentationId": record.presentationId, "revision": record.revision])
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    gestureRecognizer !== pan || !(touch.view?.isDescendant(of: roundDurationButton) ?? false)
+  }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    let hit = super.hitTest(point, with: event)
+    guard hit != nil, let record, !roundDurationButton.isHidden, roundDurationButton.isEnabled,
+          roundDurationButton.frame.contains(point) else { return hit }
+    // The adjustable controls' invisible padding must not swallow the label's tap.
+    // Give a drag starting on the actual knob to the dial.
+    if let handle = nearestHandle(to: point, record: record),
+       distance(point, handlePoint(handle, record: record)) <= DayframeDurationDialStyle.knobRadius {
+      return hit
+    }
+    return roundDurationButton
   }
 
   override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
@@ -431,16 +467,9 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     context.restoreGState()
   }
 
-  private func drawCentre(
-    context: CGContext,
-    centre: CGPoint,
-    record: DayframeDurationDialRecord
-  ) {
+  private func durationText(_ record: DayframeDurationDialRecord) -> (text: NSAttributedString, displaySize: CGFloat) {
     let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
-    // Blocks prototype: the duration in the display face ("42m", "1h 05m"), then "since 21:22"
-    // while running or "21:19–21:26" for a stopped block ("1 full turn + 5 min" past an hour).
     let text = DayframeDurationDialCore.formatShortDuration(milliseconds: effectiveEnd - record.startMs)
-    // 38 points as in the prototype, smaller on compact dials so it stays inside the ring.
     let radius = dialRadius()
     var displaySize = min(38, radius * 0.4)
     func displayFont(_ size: CGFloat) -> UIFont {
@@ -451,10 +480,59 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
           text.size(withAttributes: [.font: displayFont(displaySize)]).width > maxTextWidth {
       displaySize -= 1
     }
-    let attributes: [NSAttributedString.Key: Any] = [
+    let result = NSAttributedString(string: text, attributes: [
       .font: displayFont(displaySize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
-    ]
+    ])
+    return (result, displaySize)
+  }
+
+  private var roundDurationFont: UIFont {
+    UIFontMetrics(forTextStyle: .footnote).scaledFont(
+      for: .systemFont(ofSize: 12.5, weight: .semibold), maximumPointSize: 14, compatibleWith: traitCollection
+    )
+  }
+
+  private func roundDurationLayout(centre: CGPoint, numberHeight: CGFloat, font: UIFont) -> (numberTop: CGFloat, button: CGRect) {
+    let width = max(44, min(156, 2 * (dialRadius() - DayframeDurationDialStyle.ringWidth)))
+    let titleWidth = ("Round duration" as NSString).size(withAttributes: [.font: font]).width
+    let titleHeight = font.lineHeight * (titleWidth > width ? 2 : 1)
+    let gap: CGFloat = 2
+    let numberTop = centre.y - (numberHeight + gap + titleHeight) / 2
+    let buttonHeight = max(44, titleHeight)
+    let buttonY = numberTop + numberHeight + gap + (titleHeight - buttonHeight) / 2
+    return (numberTop, CGRect(x: centre.x - width / 2, y: buttonY, width: width, height: buttonHeight))
+  }
+
+  private func updateRoundDurationButton() {
+    guard let record, record.mode == "stopped", let enabled = record.roundDurationEnabled else {
+      roundDurationButton.isHidden = true
+      return
+    }
+    let font = roundDurationFont
+    roundDurationButton.titleLabel?.font = font
+    roundDurationButton.setTitleColor(UIColor(dayframeHex: record.theme.textPrimary), for: .normal)
+    roundDurationButton.setTitleColor(UIColor(dayframeHex: record.theme.textSecondary), for: .disabled)
+    roundDurationButton.isHidden = false
+    roundDurationButton.isEnabled = enabled
+    let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+    roundDurationButton.frame = roundDurationLayout(centre: centre, numberHeight: durationText(record).text.size().height, font: font).button
+  }
+
+  private func drawCentre(
+    context: CGContext,
+    centre: CGPoint,
+    record: DayframeDurationDialRecord
+  ) {
+    let (text, displaySize) = durationText(record)
+    let size = text.size()
+    if record.mode == "stopped", record.roundDurationEnabled != nil {
+      let layout = roundDurationLayout(centre: centre, numberHeight: size.height, font: roundDurationFont)
+      text.draw(at: CGPoint(x: centre.x - size.width / 2, y: layout.numberTop))
+      return
+    }
+    let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
+    let radius = dialRadius()
     let clockDetails = DayframeDurationDialCore.clockDetailCandidates(
       startMs: record.startMs,
       endMs: record.endMs,
@@ -464,15 +542,13 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     let clockDetail = clockDetails.last ?? ""
     let candidates = ([DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs)] + clockDetails.map { Optional($0) })
       .compactMap { $0 }
-    let size = text.size(withAttributes: attributes)
-    let lift: CGFloat = displaySize >= 30 ? 14 : 8
     let innerRadius = Double(radius - DayframeDurationDialStyle.ringWidth / 2)
     // The subtitle must fit inside the ring where it is drawn: the lap text first, smaller if it
     // must (down to 9 points), else the clock texts from longest to shortest.
     func detailFont(_ size: CGFloat) -> UIFont { UIFont.systemFont(ofSize: size, weight: .semibold) }
     func layout(_ detail: String, _ fontSize: CGFloat) -> (top: CGFloat, detailSize: CGSize, fits: Bool) {
       let detailSize = detail.size(withAttributes: [.font: detailFont(fontSize)])
-      let top = centre.y - (size.height + 2 + detailSize.height) / 2 - lift
+      let top = centre.y - (size.height + 2 + detailSize.height) / 2
       let bandTop = Double(top + size.height + 2 - centre.y)
       let bandBottom = bandTop + Double(detailSize.height)
       let room = DayframeDurationDialCore.chordWidth(
@@ -498,7 +574,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       .font: detailFont(chosen.fontSize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textSecondary)
     ]
-    text.draw(at: CGPoint(x: centre.x - size.width / 2, y: placed.top), withAttributes: attributes)
+    text.draw(at: CGPoint(x: centre.x - size.width / 2, y: placed.top))
     chosen.text.draw(
       at: CGPoint(x: centre.x - placed.detailSize.width / 2, y: placed.top + size.height + 2),
       withAttributes: detailAttributes

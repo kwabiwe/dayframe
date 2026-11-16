@@ -33,12 +33,11 @@ import {
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
 import {
-  DAYFRAME_BLOCKS, REPORT_DESCRIPTION_MAX, REPORT_FACET_MAX, REPORT_SOURCE_LABELS,
-  REPORT_SOURCE_VALUES, contrastRatio, type ReportFacetFilters,
+  DAYFRAME_BLOCKS, REPORT_DESCRIPTION_MAX, REPORT_FACET_MAX, contrastRatio,
 } from "@dayframe/shared";
 import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { localPresenceExiting, MOBILE_MOTION } from "@/lib/motion";
-import { reportFacetChips, type ReportFacetOption, type ReportFacetOptions } from "../../lib/reportsFacets";
+import { reportFacetChips, type MobileReportFacets, type ReportFacetOption, type ReportFacetOptions } from "../../lib/reportsFacets";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { playHaptic } from "../../lib/haptics";
 import { reportFilterApplyLabel, reportFilterSections } from "../../lib/reportsBlocks";
@@ -62,9 +61,9 @@ export function ReportFiltersSheet({
   presentationId: number;
   draft: ReportFilterDraft;
   options: ReportCategoryOption[];
-  facets: ReportFacetFilters;
+  facets: MobileReportFacets;
   facetOptions: ReportFacetOptions;
-  onChangeFacets: (facets: ReportFacetFilters) => void;
+  onChangeFacets: (facets: MobileReportFacets) => void;
   theme: MobileTheme;
   reduceMotion: boolean;
   onChange: (draft: ReportFilterDraft) => void;
@@ -73,7 +72,7 @@ export function ReportFiltersSheet({
 }) {
   const [search, setSearch] = useState("");
   const [tagSearch, setTagSearch] = useState("");
-  const [moreFilters, setMoreFilters] = useState(Boolean(facets.places?.length || facets.sources?.length || facets.description));
+  const [moreFilters, setMoreFilters] = useState(Boolean(facets.places?.length || facets.description));
   const [hasAdvancedHeight, setHasAdvancedHeight] = useState(!moreFilters);
   const advancedHeight = useSharedValue(0);
   const naturalAdvancedHeight = reduceMotion || (!hasAdvancedHeight && moreFilters);
@@ -200,11 +199,6 @@ export function ReportFiltersSheet({
               style={[s.eyebrow, { color: theme.textSecondary }]}>PLACES</Text>
             <FacetChoices kind="places" options={facetOptions.places} selected={facets.places ?? []}
               theme={theme} onToggle={(id) => onChangeFacets({ ...facets, places: toggleFacet(facets.places, id) })} />
-            <Text accessibilityRole="header" maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
-              style={[s.eyebrow, { color: theme.textSecondary }]}>SOURCES</Text>
-            <FacetChoices kind="sources" options={REPORT_SOURCE_VALUES.map((id) => ({ id, label: REPORT_SOURCE_LABELS[id] }))}
-              selected={facets.sources ?? []} theme={theme}
-              onToggle={(id) => onChangeFacets({ ...facets, sources: toggleFacet(facets.sources, id) })} />
             <TextInput accessibilityLabel="Description contains" testID="report-filter-description"
               maxLength={REPORT_DESCRIPTION_MAX} maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
               onChangeText={(description) => onChangeFacets({ ...facets, description })}

@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import Reanimated from "react-native-reanimated";
-import { DAYFRAME_APP_ICONS, formatClockTime } from "@dayframe/shared";
+import { useMemo, useRef, type MutableRefObject } from "react";
+import { View } from "react-native";
 import { useClockFormat } from "@/lib/clockFormat";
 import {
   Gesture,
@@ -12,14 +10,10 @@ import {
   DayframeDurationDialView,
   type DayframeDurationDialInteraction
 } from "../../modules/dayframe-duration-dial";
-import { DayframeIcon } from "./icons/DayframeIcon";
-import { localPresenceEntering, localPresenceExiting } from "@/lib/motion";
-import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
-import { mobileTextProps } from "@/lib/mobileTypography";
+import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import {
   adjustTimeEntryDial,
   roundTimeEntryDialDuration,
-  roundTimeEntryDialStop,
   type TimeEntryDialInterval
 } from "@/lib/timeEntryDurationDial";
 import type { TimeEntrySheetLayoutDensity } from "@/lib/timeEntrySheetDraft";
@@ -69,16 +63,6 @@ export function TimeEntryDurationDial({
   theme
 }: TimeEntryDurationDialProps) {
   const snapshotsRef = useRef(new Map<string, TimeEntryDialInterval>());
-  // The rounding shortcuts live behind "…" on the hint row (Blocks parity step 4e); a new
-  // presentation, a turn of the dial or a shortcut closes them again.
-  // Keyed by presentation, so a retargeted sheet never shows the previous one's open pills.
-  const [shortcutsState, setShortcutsState] = useState<{ open: boolean; presentationId: typeof presentationId }>({
-    open: false,
-    presentationId
-  });
-  const shortcutsOpen = shortcutsState.open && shortcutsState.presentationId === presentationId;
-  const setShortcutsOpen = (open: boolean) => setShortcutsState({ open, presentationId });
-  const shortcutsScrollRef = useRef<ScrollView>(null);
   const nativeDialGesture = useMemo(
     () => Gesture.Native()
       .disallowInterruption(true)
@@ -97,6 +81,7 @@ export function TimeEntryDurationDial({
     presentationId,
     reduceMotion,
     revision,
+    roundDurationEnabled: mode === "stopped" ? !disabled : undefined,
     startMs,
     theme: {
       accent: theme.accent,
@@ -113,6 +98,7 @@ export function TimeEntryDurationDial({
   }), [
     activityColor,
     clockFormat,
+    disabled,
     endMs,
     mode,
     nowMs,
@@ -126,7 +112,6 @@ export function TimeEntryDurationDial({
   function handleInteraction(interaction: DayframeDurationDialInteraction) {
     if (disabled || interaction.presentationId !== presentationId) return;
     if (interaction.phase === "began") {
-      setShortcutsOpen(false);
       snapshotsRef.current.set(interaction.interactionId, {
         startMs,
         endMs: effectiveEndMs
@@ -153,28 +138,6 @@ export function TimeEntryDurationDial({
     }
   }
 
-  const shortcuts: { accessibilityLabel: string; apply: () => TimeEntryDialInterval; label: string; testID: string }[] = [];
-  if (mode === "stopped") {
-    shortcuts.push({
-      accessibilityLabel: "Round stop time",
-      apply: () => roundTimeEntryDialStop({ startMs, endMs }),
-      label: "Round end",
-      testID: "time-entry-round-stop-time"
-    });
-    shortcuts.push({
-      accessibilityLabel: "Round duration",
-      apply: () => roundTimeEntryDialDuration({ startMs, endMs: effectiveEndMs }, mode, effectiveEndMs),
-      label: "Round length",
-      testID: "time-entry-round-duration"
-    });
-  }
-  const showShortcuts = shortcutsOpen && shortcuts.length > 0;
-  // When the last shortcut stops applying the pills close for good, rather than reopening by
-  // themselves if one applies again later.
-  useEffect(() => {
-    if (shortcutsOpen && shortcuts.length === 0) setShortcutsState({ open: false, presentationId });
-  }, [presentationId, shortcuts.length, shortcutsOpen]);
-
   return (
     <View
       pointerEvents="box-none"
@@ -186,6 +149,11 @@ export function TimeEntryDurationDial({
           accessibilityLabel="Duration dial"
           model={model}
           onInteraction={(event) => handleInteraction(event.nativeEvent)}
+          onRoundDuration={({ nativeEvent }) => {
+            if (disabled || mode !== "stopped" || nativeEvent.presentationId !== presentationId || nativeEvent.revision !== revision) return;
+            onInteractionStart();
+            onChange(roundTimeEntryDialDuration({ startMs, endMs }, mode, endMs));
+          }}
           pointerEvents={disabled ? "none" : "auto"}
           style={[
             styles.durationDialNativeView,
@@ -195,114 +163,6 @@ export function TimeEntryDurationDial({
           testID="time-entry-duration-dial"
         />
       </GestureDetector>
-      {/* The hint stays below the space reserved for the stopped block's range handle. */}
-      <View
-        pointerEvents="box-none"
-        style={styles.durationDialHintRow}
-        testID="time-entry-dial-hint-row"
-      >
-        {/* The toggle comes first so VoiceOver moves from it into the pills; the row is reversed. */}
-        {shortcuts.length ? (
-          <Pressable
-            accessibilityLabel={showShortcuts ? "Hide time shortcuts" : "Time shortcuts"}
-            accessibilityRole="button"
-            accessibilityState={{ disabled, expanded: showShortcuts }}
-            disabled={disabled}
-            onPress={() => {
-              onInteractionStart();
-              setShortcutsOpen(!showShortcuts);
-            }}
-            onTouchStart={(event) => event.stopPropagation()}
-            style={pressable([styles.durationDialShortcutToggle, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
-            testID="time-entry-dial-shortcuts"
-          >
-            <DayframeIcon
-              color={theme.textSecondary}
-              glyph={showShortcuts ? DAYFRAME_APP_ICONS.close : DAYFRAME_APP_ICONS.time}
-              size={18}
-            />
-          </Pressable>
-        ) : null}
-        {showShortcuts ? (
-          <Reanimated.View
-            entering={localPresenceEntering(reduceMotion, "fade")}
-            exiting={localPresenceExiting(reduceMotion)}
-            key="shortcuts"
-            style={styles.durationDialShortcuts}
-          >
-            <ScrollView
-              contentContainerStyle={styles.durationDialShortcutsContent}
-              horizontal
-              keyboardShouldPersistTaps="handled"
-              // Three pills can run past a narrow row: flash the indicator so the rest is findable.
-              onContentSizeChange={() => shortcutsScrollRef.current?.flashScrollIndicators()}
-              ref={shortcutsScrollRef}
-              showsHorizontalScrollIndicator
-            >
-              {shortcuts.map((shortcut) => (
-                <DialShortcut
-                  accessibilityLabel={shortcut.accessibilityLabel}
-                  disabled={disabled}
-                  key={shortcut.testID}
-                  label={shortcut.label}
-                  onPress={() => {
-                    onInteractionStart();
-                    onChange(shortcut.apply());
-                    setShortcutsOpen(false);
-                  }}
-                  styles={styles}
-                  testID={shortcut.testID}
-                />
-              ))}
-            </ScrollView>
-          </Reanimated.View>
-        ) : (
-          <Reanimated.View
-            entering={localPresenceEntering(reduceMotion, "fade")}
-            exiting={localPresenceExiting(reduceMotion)}
-            key="hint"
-            pointerEvents="none"
-            style={[styles.durationDialHint, shortcuts.length ? styles.durationDialHintBalanced : null]}
-          >
-            <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.durationDialHintText}>
-              {`Spin the ring to move the ${mode === "running" ? "start" : "end"}.\nOne turn is an hour.`}
-            </Text>
-          </Reanimated.View>
-        )}
-      </View>
     </View>
-  );
-}
-
-function DialShortcut({
-  accessibilityLabel,
-  disabled,
-  label,
-  onPress,
-  styles,
-  testID
-}: {
-  accessibilityLabel: string;
-  disabled: boolean;
-  label: string;
-  onPress: () => void;
-  styles: MobileStyles;
-  testID: string;
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      disabled={disabled}
-      hitSlop={4}
-      onPress={onPress}
-      onTouchStart={(event) => event.stopPropagation()}
-      style={pressable([styles.durationDialShortcut, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
-      testID={testID}
-    >
-      <Text {...mobileTextProps("control")} numberOfLines={1} style={styles.durationDialShortcutText}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }

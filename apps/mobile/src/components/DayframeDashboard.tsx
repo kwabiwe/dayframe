@@ -39,6 +39,7 @@ import {
   withGoalExclusions,
   paletteColorFor,
   previousEndOffer,
+  REVIEW_PRESENTATION_MAX_IDS,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   completedEntriesChanged,
   timerStateChanged,
@@ -75,7 +76,8 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { getReviewItemSyncStates, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
+import type { CalendarTripHandover, CalendarTripLog } from "../lib/calendarTripLog";
+import { forgetCalendarTripHandovers, getReviewItemSyncStates, readCalendarTripHandovers, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarTripHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -161,6 +163,7 @@ import {
 } from "@/lib/connectivityRecovery";
 import {
   captureDashboardRefreshGuard,
+  createDashboardReadOrder,
   reconcileDashboardRefreshCandidate,
   type DashboardRefreshGuard
 } from "@/lib/dashboardRefresh";
@@ -533,6 +536,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
+  const dashboardReadOrder = useRef(createDashboardReadOrder());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<boolean>>(async () => false);
   // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
   // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
@@ -653,6 +657,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
     recoveredBootstrapGuards.current.clear();
+    dashboardReadOrder.current.reset();
     refreshQueued.current = false;
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
@@ -737,14 +742,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       queueDashboardRefreshAfterConflict();
       return;
     }
-    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard);
+    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard, event.requestedAt);
   }), []);
 
   async function applyRecoveredDashboardBootstrap(
     bootstrap: MobileBootstrap,
     serverBootstrap: MobileBootstrap,
-    guard: DashboardRefreshGuard
+    guard: DashboardRefreshGuard,
+    requestedAt: number
   ) {
+    const generation = noticeSessionGeneration.current;
     const current = latestData.current;
     if (
       authStateCurrent.current !== "authenticated" ||
@@ -766,11 +773,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const next = reconciled.candidate;
     const latest = latestData.current;
     if (
+      generation !== noticeSessionGeneration.current ||
       authStateCurrent.current !== "authenticated" ||
       (latest && !sameTimerStopOwner(timerStopOwner(latest), timerStopOwner(next)))
     ) {
       return;
     }
+    if (!dashboardReadOrder.current.accept(requestedAt)) return;
     refreshQueued.current = false;
     lastStopServerBootstrap.current = serverBootstrap;
     loadedBootstrap.current = next;
@@ -1074,6 +1083,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
     refreshInFlight.current = true;
+    const generation = noticeSessionGeneration.current;
     const settingsSeedGeneration = captureSettingsSeedGeneration();
     const refreshGuard = captureDashboardRefreshGuard({
       currentRevision: dashboardMutationRevision.current,
@@ -1084,7 +1094,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
-      const readStartedAt = Date.now();
+      let readStartedAt = Date.now();
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1098,6 +1108,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         }
         const hasRemainingShortcutEvents = syncResult.remaining.some((event) => event.source === "shortcut");
         if (pendingNativeShortcutLocalIds.current.size === 0 && !hasRemainingShortcutEvents) {
+          readStartedAt = Date.now();
           serverBootstrap = await fetchBootstrap({ date });
           liveActivityReconciliationDeferred.current = false;
         }
@@ -1105,7 +1116,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
-      void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
+      void cacheDashboardBootstrap(serverBootstrap, readStartedAt).catch(() => undefined);
       publishTodayBootstrapForSettings(serverBootstrap, settingsSeedGeneration);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);
@@ -1119,17 +1130,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         currentRevision: () => dashboardMutationRevision.current,
         guard: refreshGuard,
         reconcile: reconcileDashboardDeletionState,
-        timerMutationsInFlight: () => timerMutationCount.current,
-        // Only once the guard accepted it, just before it is published: a discarded read settles nothing.
-        onApplied: () => {
-          const applied = serverBootstrap;
-          for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);
-        }
+        timerMutationsInFlight: () => timerMutationCount.current
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
         return false;
       }
+      if (generation !== noticeSessionGeneration.current || !dashboardReadOrder.current.accept(readStartedAt)) return false;
       bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
         timerStateRef.current = {
@@ -1140,6 +1147,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       lastStopServerBootstrap.current = serverBootstrap;
       loadedBootstrap.current = bootstrap;
+      // A discarded or stale read cannot settle local projections.
+      for (const listener of appliedServerDataListeners.current) listener(readStartedAt, serverBootstrap);
       publishDashboardData(bootstrap);
       // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
       setBootstrapCompletions((count) => count + 1);
@@ -2007,16 +2016,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // account only: the List's "?", the Calendar badge and Today's chip leave them at once.
   // With them, the suggestions with a waiting or rejected change of their own, which never fold into an
   // outing (the deck's eligibility, Codex r2 on #582).
-  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string> } | null>(null);
+  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string>; tripLogs: readonly CalendarTripLog[] } | null>(null);
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
     let sequence = 0;
     const read = () => {
       const mine = ++sequence;
-      Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])
-        .then(([ids, states]) => {
-          if (current && mine === sequence) setLocallyDecided({ owner: scopedOwnerKey, ids: new Set(ids), syncStateIds: new Set(states.keys()) });
+      Promise.all([
+        readSuppressedReviewItemIds(scopedOwner),
+        getReviewItemSyncStates(),
+        readPendingCalendarTripLogs(scopedOwner).catch(() => null)
+      ]).then(([ids, states, tripLogs]) => {
+          if (current && mine === sequence) setLocallyDecided((previous) => ({
+            owner: scopedOwnerKey, ids, syncStateIds: new Set(states.keys()),
+            tripLogs: tripLogs ?? (previous?.owner === scopedOwnerKey ? previous.tripLogs : [])
+          }));
         })
         .catch(() => undefined);
     };
@@ -2072,6 +2087,41 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     syncStateIds: reviewSyncStateIds,
     waitingHidden
   });
+  // A Review lookup hands off its proven trip before it tells readers the outbox row is gone.
+  // Keep it for the Calendar until the block can take over or a newer day read has removed the trip.
+  const [tripHandover, setTripHandover] = useState<{
+    owner: string;
+    logs: readonly CalendarTripHandover[];
+  } | null>(null);
+  useEffect(() => {
+    if (!scopedOwner || !scopedOwnerKey) {
+      setTripHandover(null);
+      return;
+    }
+    let current = true;
+    function receive(logs: readonly CalendarTripHandover[]) {
+      if (!current || !scopedOwnerKey || !logs.length) return;
+      setTripHandover((previous) => {
+        const retained = new Map(previous?.owner === scopedOwnerKey ? previous.logs.map((log) => [log.check.id, log]) : []);
+        for (const log of logs) {
+          if ((retained.get(log.check.id)?.observedAt ?? 0) >= log.observedAt) continue;
+          retained.delete(log.check.id);
+          retained.set(log.check.id, log);
+        }
+        return { owner: scopedOwnerKey, logs: [...retained.values()].slice(-REVIEW_PRESENTATION_MAX_IDS) };
+      });
+    }
+    const unsubscribe = subscribeCalendarTripHandover((owner, logs) => {
+      if (`${owner.backendId}:${owner.workspaceId}:${owner.userId}` === scopedOwnerKey) receive(logs);
+    });
+    void readCalendarTripHandovers(scopedOwner).then(receive).catch(() => undefined);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedOwnerKey]);
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
   // "A block ran into your trip" (location v4 design §7): an End it held for Undo, saving, or waiting on this iPhone
@@ -2414,6 +2464,40 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
+  const tripSegmentByEntryId = useMemo(() => new Map(nativeCalendarBridge.actionEntries.flatMap((entry) =>
+    entry.tripSegmentId && !entry.reviewItemId ? [[entry.id, entry.tripSegmentId] as const] : [])),
+  [nativeCalendarBridge.actionEntries]);
+  useEffect(() => {
+    if (!scopedOwner || !tripHandover?.logs.length || tripHandover.owner !== scopedOwnerKey) return;
+    const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
+    const canonicalSegments = new Set(tripSegmentByEntryId.values());
+    const shownIds = new Set(nativeCalendarModel.entries.filter((entry) => !entry.isReview).map((entry) => entry.entryId));
+    const timelineTrips = new Map((serverCalendarTimeline?.items ?? []).flatMap((item) => item.kind === "trip" ? [[item.id, item] as const] : []));
+    const removed: CalendarTripHandover[] = [];
+    const live = tripHandover.logs.filter((log) => {
+      const trip = timelineTrips.get(log.check.segmentId);
+      if (!checkStillAsks(log.check, fromMs) || canonicalSegments.has(log.check.segmentId)
+        || trip?.blockIds.some((id) => shownIds.has(id))) return false;
+      const shownDay = listCheckOverlaps(log.check, nativeCalendarModel.dayStartMs, nativeCalendarModel.dayEndMs);
+      if (!shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt || trip?.blockIds.length) return true;
+      removed.push(log);
+      return false;
+    });
+    if (removed.length) void forgetCalendarTripHandovers(scopedOwner, removed).catch(() => undefined);
+    if (live.length !== tripHandover.logs.length) {
+      setTripHandover((current) => current === tripHandover ? { ...tripHandover, logs: live } : current);
+    }
+  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwner, scopedOwnerKey, serverCalendarTimeline, todayKey, tripHandover, tripSegmentByEntryId]);
+  const loggedTripRows = useMemo(() => {
+    const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
+    if (locallyDecided?.owner === scopedOwnerKey) {
+      for (const log of locallyDecided?.tripLogs ?? []) held.set(log.check.id, log);
+    }
+    if (tripHandover?.owner === scopedOwnerKey) {
+      for (const log of tripHandover?.logs ?? []) held.set(log.check.id, log);
+    }
+    return [...held.values()];
+  }, [checkAnswers.tripLogs, locallyDecided, scopedOwnerKey, tripHandover]);
   // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
   const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
   const gridModel = useMemo(() => calendarLayout === "grid"
@@ -4420,6 +4504,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   dayStartMs={nativeCalendarModel.dayStartMs}
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
+                  loggedTripRows={loggedTripRows}
+                  tripSegmentByEntryId={tripSegmentByEntryId}
                   nowMs={minuteNow}
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
                   // Without a backend identity the outbox's record is not read here, so an answer could never

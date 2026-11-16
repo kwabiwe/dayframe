@@ -22,6 +22,8 @@ export type DayframeDurationDialModel = {
   presentationId: number;
   reduceMotion: boolean;
   revision: number;
+  /** Omitted in running mode and by older bundles. */
+  roundDurationEnabled?: boolean;
   startMs: number;
   theme: {
     accent: string;
@@ -41,6 +43,7 @@ export type DayframeDurationDialModel = {
 
 export type DayframeDurationDialViewProps = ViewProps & {
   model: DayframeDurationDialModel;
+  onRoundDuration?: (event: NativeSyntheticEvent<{ presentationId: number; revision: number }>) => void;
   onInteraction?: (
     event: NativeSyntheticEvent<DayframeDurationDialInteraction>
   ) => void;

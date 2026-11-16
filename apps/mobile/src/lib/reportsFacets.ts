@@ -1,11 +1,11 @@
 import {
   normalizeTagName,
-  REPORT_SOURCE_LABELS,
   type ReportFacetFilters,
-  type ReportSource,
   type ReportSummaryRequest,
 } from "@dayframe/shared";
 import type { MobileTag, MobileTimeEntry } from "./api";
+
+export type MobileReportFacets = Omit<ReportFacetFilters, "sources">;
 
 export type ReportFacetOption = { id: string; label: string };
 export type ReportFacetOptions = {
@@ -13,30 +13,28 @@ export type ReportFacetOptions = {
   places: ReportFacetOption[];
 };
 
-export function reportRequestWithFacets(request: ReportSummaryRequest, facets: ReportFacetFilters): ReportSummaryRequest {
-  const { tags, places, sources, description } = facets;
+export function reportRequestWithFacets(request: ReportSummaryRequest, facets: MobileReportFacets): ReportSummaryRequest {
+  const { tags, places, description } = facets;
   const trimmed = description?.trim();
-  if (!tags?.length && !places?.length && !sources?.length && !trimmed) return request;
+  if (!tags?.length && !places?.length && !trimmed) return request;
   return {
     ...request,
     filters: {
       ...(tags?.length ? { tags: [...tags].sort() } : {}),
       ...(places?.length ? { places: [...places].sort() } : {}),
-      ...(sources?.length ? { sources: [...sources].sort() } : {}),
       ...(trimmed ? { description: trimmed } : {}),
     },
   };
 }
 
 export function createReportFacetMatcher(
-  { tags, places, sources, description }: ReportFacetFilters,
+  { tags, places, description }: MobileReportFacets,
   tagCatalog: readonly MobileTag[],
 ) {
   const selectedTags = new Set(tags);
   const selectedNames = new Set(tagCatalog.filter((tag) => selectedTags.has(tag.id)).map((tag) => tag.normalizedName));
   const descriptionNeedle = description?.trim().toLowerCase();
   return (entry: MobileTimeEntry) => {
-    if (sources?.length && !sources.includes(entry.source as ReportSource)) return false;
     if (places?.length) {
       const place = entry.placeId ?? (entry.placeName == null ? "no-place" : null);
       if (place === null || !places.includes(place)) return false;
@@ -57,14 +55,12 @@ export function createReportFacetMatcher(
   };
 }
 
-export function reportFacetChips(facets: ReportFacetFilters, options: ReportFacetOptions) {
-  const chips = (["tags", "places", "sources"] as const).flatMap((kind) =>
+export function reportFacetChips(facets: MobileReportFacets, options: ReportFacetOptions) {
+  const chips = (["tags", "places"] as const).flatMap((kind) =>
     (facets[kind] ?? []).map((value) => ({
       kind,
       value,
-      label: kind === "sources"
-        ? REPORT_SOURCE_LABELS[value as ReportSource]
-        : options[kind].find((option) => option.id === value)?.label ?? (kind === "tags" ? "Unavailable tag" : "Unavailable place"),
+      label: options[kind].find((option) => option.id === value)?.label ?? (kind === "tags" ? "Unavailable tag" : "Unavailable place"),
     })),
   );
   const description = facets.description?.trim();
