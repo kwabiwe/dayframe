@@ -1593,7 +1593,7 @@ async function syncQueueItems(
   diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>
 ): Promise<SyncQueueResult> {
   const acceptedStatuses = new Map<string, number>();
-  const failureReasons = new Map<string, SyncDiagnosticReason>();
+  const failureReasons = new Map<string, SyncDiagnosticReason | null>();
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
@@ -1823,7 +1823,7 @@ async function syncQueueItems(
         const reason = error instanceof MobileRequestTimeoutError ? "timeout" :
           error instanceof InvalidMobileAcknowledgementError ? "invalid_acknowledgement" :
           failureKind === "network" ? "transport" : undefined;
-        if (reason) failureReasons.set(item.localId, reason);
+        failureReasons.set(item.localId, reason ?? null);
       }
       const failedItem = keepParked(item, markQueueFailure(item, message, attemptedAt, failureKind));
       firstError ??= queueFailureReport(failedItem, message, failedItem.failureKind ?? failureKind);
@@ -3226,7 +3226,7 @@ function reconcileActivityQueueDrain(input: {
   remaining: readonly QueuedEvent[];
   synced: readonly string[];
   acceptedStatuses: ReadonlyMap<string, number>;
-  failureReasons: ReadonlyMap<string, SyncDiagnosticReason>;
+  failureReasons: ReadonlyMap<string, SyncDiagnosticReason | null>;
   diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>;
 }) {
   return withQueueMutation(async () => {
@@ -3279,11 +3279,14 @@ function reconcileActivityQueueDrain(input: {
       }
       if (!failed) continue;
       const retryAt = failed.nextRetryAt ? Date.parse(failed.nextRetryAt) : undefined;
+      // A parked event retains its previous HTTP status for the issue row. It does not describe
+      // a new failure thrown before this attempt's response was read.
+      const statusCode = input.failureReasons.has(item.localId) ? undefined : failed.lastStatusCode;
       recordSyncDiagnostic(input.diagnosticScope, {
         lane, event: isPermanentlyFailedEvent(failed) && !isParkedNonTimerEvent(failed) ? "rejected"
           : retryAt === undefined ? "retry_pending" : "retry_scheduled",
-        attempt: failed.failureCount, status: failed.lastStatusCode, retryAt,
-        reason: input.failureReasons.get(item.localId) ?? (failed.lastStatusCode === undefined ? undefined : "server")
+        attempt: failed.failureCount, status: statusCode, retryAt,
+        reason: input.failureReasons.get(item.localId) ?? (statusCode === undefined ? undefined : "server")
       }, item.localId);
     }
     return next.filter((item) => queuedEventMatchesOwner(item, input.owner));

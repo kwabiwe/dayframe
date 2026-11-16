@@ -175,6 +175,30 @@ describe("local sync diagnostic history", () => {
     expect(fixture.write).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a pending 401 when recovery follows same-account sign-in during a slow write", async () => {
+    const expiredScope = history.captureSyncDiagnosticScope();
+    let release!: () => void;
+    fixture.write.mockImplementationOnce(async (key, value) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      fixture.storage.set(key, value);
+    });
+    history.recordSyncDiagnostic(expiredScope, { lane: "timer_stop", event: "attempted" }, "stop");
+    await vi.waitFor(() => expect(fixture.write).toHaveBeenCalledOnce());
+    history.recordSyncDiagnostic(expiredScope, { lane: "timer_stop", event: "authentication_required", status: 401 }, "stop");
+    fixture.generation += 2;
+    history.recordSyncDiagnostic(history.captureSyncDiagnosticScope(), { lane: "recovery", event: "attempted" });
+    release();
+
+    const share = shareFixture();
+    await share.export();
+    const rows = share.json().records;
+    expect(rows).toEqual([
+      expect.objectContaining({ lane: "timer_stop", event: "attempted" }),
+      expect.objectContaining({ lane: "timer_stop", event: "authentication_required", status: 401, work: rows[0].work }),
+      expect.objectContaining({ lane: "recovery", event: "attempted" })
+    ]);
+  });
+
   it("does not share after leaving Sync help while preparing and surfaces read failure", async () => {
     const share = shareFixture();
     const scope = history.captureSyncDiagnosticScope();

@@ -123,7 +123,8 @@ export function recordSyncDiagnostic(scope: Scope | undefined, fields: Fields, w
     status: fields.status, retryAt: fields.retryAt, pending: fields.pending
   }, at);
   if (!row) return;
-  if (!pending || !isSyncDiagnosticScopeCurrent(pending.scope)) pending = { scope, records: [] };
+  // A fresh login to the same partition must not replace an admitted 401 still waiting to write.
+  if (!pending || !mobileAccountOwnersEqual(pending.scope.owner, scope.owner)) pending = { scope, records: [] };
   if (pending.records.length >= MAX_SYNC_DIAGNOSTIC_RECORDS) pending.records.shift();
   // Retain an internal work ID only until hashing; do not use server or entry IDs.
   pending.records.push({ ...row, workId: typeof workId === "string" && workId.length <= 256 ? workId : undefined });

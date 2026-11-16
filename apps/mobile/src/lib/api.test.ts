@@ -2588,10 +2588,10 @@ describe("mobile API client", () => {
   });
 
   it.each([
-    ["an offline failure", () => Promise.reject(new TypeError("Network request failed"))],
-    ["an invalid acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
-    ["a timeout", () => new Promise<Response>(() => undefined)]
-  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, failure) => {
+    ["an offline failure", "transport", () => Promise.reject(new TypeError("Network request failed"))],
+    ["an invalid acknowledgement", "invalid_acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
+    ["a timeout", "timeout", () => new Promise<Response>(() => undefined)]
+  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, reason, failure) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
     storeBoundSession("session-token");
@@ -2611,9 +2611,18 @@ describe("mobile API client", () => {
     const fetchMock = vi.fn(failure);
     vi.stubGlobal("fetch", fetchMock);
 
-    const pass = syncQueue({ eventScope: "non_timer" });
-    await vi.advanceTimersByTimeAsync(16_000);
-    await pass;
+    enableDiagnosticDigest.enabled = true;
+    try {
+      const pass = syncQueue({ eventScope: "non_timer" });
+      await vi.advanceTimersByTimeAsync(16_000);
+      await pass;
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(TIMER_STOP_OWNER), share, () => true);
+      const rows = JSON.parse(share.mock.calls[0][0].message).records;
+      expect(rows.at(-1)).toMatchObject({ lane: "legacy_location", event: "retry_pending", reason });
+      expect(rows.at(-1)).not.toHaveProperty("status");
+    } finally { enableDiagnosticDigest.enabled = false; }
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [parked] = await readQueue();
     expect(parked).toMatchObject({ failureKind: "permanent", lastStatusCode: 500, serverFailureCount: 9 });
