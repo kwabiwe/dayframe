@@ -69,9 +69,10 @@ describe("entry sheet start-at-the-previous-end chip", () => {
   });
 
   it("sits in the START card's column, directly under the card", () => {
-    const column = sheet.slice(sheet.indexOf("sheetStyles.startColumn"), sheet.indexOf("{hasStoppedTime ? ("));
+    const start = sheet.indexOf("sheetStyles.timeColumn");
+    const column = sheet.slice(start, sheet.indexOf("{hasStoppedTime ? (", start));
     expect(column).toContain('testID="time-entry-start-card"');
     expect(column.indexOf('testID="time-entry-start-date"')).toBeLessThan(column.indexOf('testID="time-entry-set-last-stop-time"'));
-    expect(sheet).toContain("startColumn: { flex: 1, gap: 6, minWidth: 0 },");
+    expect(sheet).toContain("timeColumn: { flex: 1, gap: 6, minWidth: 0 },");
   });
 });

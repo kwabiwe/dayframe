@@ -1086,7 +1086,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
-      const readStartedAt = Date.now();
+      let readStartedAt = Date.now();
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1100,6 +1100,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         }
         const hasRemainingShortcutEvents = syncResult.remaining.some((event) => event.source === "shortcut");
         if (pendingNativeShortcutLocalIds.current.size === 0 && !hasRemainingShortcutEvents) {
+          readStartedAt = Date.now();
           serverBootstrap = await fetchBootstrap({ date });
           liveActivityReconciliationDeferred.current = false;
         }
@@ -1107,7 +1108,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
-      void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
+      void cacheDashboardBootstrap(serverBootstrap, readStartedAt).catch(() => undefined);
       publishTodayBootstrapForSettings(serverBootstrap, settingsSeedGeneration);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);

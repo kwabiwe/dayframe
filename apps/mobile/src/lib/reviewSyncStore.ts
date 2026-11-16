@@ -1306,7 +1306,7 @@ export async function loadCachedDashboardBootstrap(): Promise<{
   }
 }
 
-export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
+export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, requestedAt: number) {
   const db = await database();
   const account = await activeAccount(db);
   if (
@@ -1316,20 +1316,24 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
   ) {
     return false;
   }
-  const cachedAt = new Date().toISOString();
+  const cachedAt = new Date(requestedAt).toISOString();
   const snapshot = JSON.stringify(sanitiseDashboardBootstrapForCache(bootstrap));
   let wrote = false;
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     if ((await activeAccount(transaction))?.account_key !== account.account_key) return;
-    await transaction.runAsync(
+    // All refresh entry points share this cache. A response finishing late must not erase
+    // the block that already replaced a durable trip receipt.
+    const written = await transaction.runAsync(
       `insert into dashboard_snapshot_cache (
          account_key, snapshot_json, cached_at
        ) values (?, ?, ?)
        on conflict(account_key) do update set
          snapshot_json = excluded.snapshot_json,
-         cached_at = excluded.cached_at`,
+         cached_at = excluded.cached_at
+       where excluded.cached_at > dashboard_snapshot_cache.cached_at`,
       account.account_key, snapshot, cachedAt
     );
+    if (!written.changes) return;
     const backendId = bootstrap.serverBuild?.backendId ?? DAYFRAME_BACKEND_ID;
     if (backendId) {
       const receiptKey = calendarTripReceiptKey({ userId: account.user_id, workspaceId: account.workspace_id, backendId });

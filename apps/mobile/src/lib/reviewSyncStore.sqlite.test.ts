@@ -499,10 +499,14 @@ describe("Review real SQLite transactions", () => {
       expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
       expect(await store.readCalendarTripHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
       const cachedData = { ...data, serverBuild: { ...data.serverBuild!, backendId: owner.backendId } };
-      await store.cacheDashboardBootstrap({ ...cachedData, entries: [] });
+      const recentRead = Date.now();
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 10);
       expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
-      await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] });
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] }, recentRead);
       expect(await store.readCalendarTripHandovers(owner)).toEqual([]);
+      expect(await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 1)).toBe(false);
+      await reopen();
+      expect((await store.loadCachedDashboardBootstrap())?.bootstrap.entries[0]?.id).toBe(entryId);
     } finally {
       unsubscribe();
     }
@@ -721,7 +725,7 @@ describe("Review real SQLite transactions", () => {
       stoppedAt: "2026-08-28T17:30:00.000Z",
       startedAt: "2026-08-28T17:00:00.000Z"
     };
-    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] }, Date.now());
     await store.cacheReviewPresentation({ owner, response: result });
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
@@ -787,7 +791,7 @@ describe("Review real SQLite transactions", () => {
       startedAt: "2026-08-28T17:00:00.000Z",
       stoppedAt: "2026-08-28T17:30:00.000Z"
     };
-    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] }, Date.now());
     await store.cacheReviewPresentation({ owner, response: linked });
 
     expect(count("review_mutation_outbox")).toBe(0);
