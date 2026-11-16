@@ -45,6 +45,11 @@ npm run test -w @dayframe/shared
 
 Do not claim a command passed if it was not run. If a command is skipped, state why.
 
+## Local sync diagnostics (iPhone)
+
+- Run `npm run test -w @dayframe/mobile -- syncDiagnosticHistory api.test connectivityMonitor connectivityRecovery store.sqlite.test preparedExport` with synthetic data for durable settlement, failures, retry timing, retention, account/session isolation and export.
+- Follow the [Sync help device checklist](../../docs/dayframe-regression-checklist.md) on a signed staging build. Confirm offline/reconnect, one server Stop, a Location backoff and acknowledgement, and cancel/reopen of the iOS share sheet. Simulator evidence is separate from physical connectivity and background recovery.
+
 ## Activities, icons and starters
 
 When changing category/activity storage, starter activities, activity icons or automatic Sleep/Commute categories:

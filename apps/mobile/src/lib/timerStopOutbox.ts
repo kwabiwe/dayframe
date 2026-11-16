@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readActiveMobileAccount } from "./mobileAccount";
+import { captureSyncDiagnosticScope, recordSyncDiagnostic } from "./syncDiagnosticHistory";
 
 const TIMER_STOP_OUTBOX_KEY = "dayframe.timerStopOutbox.v1";
 let timerStopOutboxMutationTail: Promise<void> = Promise.resolve();
@@ -34,6 +35,7 @@ export async function getOrCreatePendingStop(input: {
   target: TimerStopTarget;
   occurredAt?: string;
 }) {
+  const diagnosticScope = captureSyncDiagnosticScope(input.owner);
   return withTimerStopOutboxMutation(async () => {
     const outbox = await readPendingTimerStopsUnlocked();
     const existing = outbox.find((item) =>
@@ -54,6 +56,9 @@ export async function getOrCreatePendingStop(input: {
         : { optimisticEntryId: requiredText(input.target.optimisticEntryId, "optimisticEntryId") })
     };
     await writePendingTimerStops([...outbox, next]);
+    recordSyncDiagnostic(diagnosticScope, {
+      lane: "timer_stop", event: "queued", pending: 1 + pendingTimerStopsForOwner(outbox, input.owner).length
+    }, next.clientEventId);
     return next;
   });
 }
@@ -121,6 +126,7 @@ export async function retryTimerStopSyncIssue(
 ) {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return false;
+  const diagnosticScope = captureSyncDiagnosticScope(resolvedOwner);
   return withTimerStopOutboxMutation(async () => {
     const outbox = await readPendingTimerStopsUnlocked();
     let retried = false;
@@ -143,7 +149,10 @@ export async function retryTimerStopSyncIssue(
       } = stop;
       return retryable;
     });
-    if (retried) await writePendingTimerStops(next);
+    if (retried) {
+      await writePendingTimerStops(next);
+      recordSyncDiagnostic(diagnosticScope, { lane: "timer_stop", event: "retry_pending" }, clientEventId);
+    }
     return retried;
   });
 }
@@ -154,6 +163,7 @@ export async function discardTimerStopSyncIssue(
 ) {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return false;
+  const diagnosticScope = captureSyncDiagnosticScope(resolvedOwner);
   return withTimerStopOutboxMutation(async () => {
     const outbox = await readPendingTimerStopsUnlocked();
     const next = outbox.filter((stop) => !(
@@ -163,6 +173,7 @@ export async function discardTimerStopSyncIssue(
     ));
     if (next.length === outbox.length) return false;
     await writePendingTimerStops(next);
+    recordSyncDiagnostic(diagnosticScope, { lane: "timer_stop", event: "discarded" }, clientEventId);
     return true;
   });
 }
@@ -218,19 +229,27 @@ export async function resolvePendingTimerStopTargets(
 
 /** Keep a dependent Stop visible in Sync help without sending it against any other timer. */
 export async function rejectPendingTimerStopsForTarget(owner: TimerStopOwner, optimisticEntryId: string, message: string) {
+  const diagnosticScope = captureSyncDiagnosticScope(owner);
   return withTimerStopOutboxMutation(async () => {
     const all = await readPendingTimerStopsUnlocked();
-    let changed = false;
+    const rejected: PendingTimerStop[] = [];
     const next = all.map((stop): PendingTimerStop => {
       if (!timerStopOwnerMatches(stop, owner) || stop.optimisticEntryId !== optimisticEntryId ||
         (stop.failureKind === "permanent" && stop.lastError === message && stop.refusedSplit)) return stop;
-      changed = true;
+      rejected.push(stop);
       return {
         ...stop, failureKind: "permanent", lastError: message, refusedSplit: true,
         failedAt: new Date().toISOString(), failureCount: (stop.failureCount ?? 0) + 1
       };
     });
-    if (changed) await writePendingTimerStops(next);
+    if (rejected.length) {
+      await writePendingTimerStops(next);
+      for (const stop of rejected) {
+        recordSyncDiagnostic(diagnosticScope, {
+          lane: "timer_stop", event: "rejected", reason: "target_unavailable"
+        }, stop.clientEventId);
+      }
+    }
   });
 }
 

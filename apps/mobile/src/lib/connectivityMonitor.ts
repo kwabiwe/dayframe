@@ -1,5 +1,6 @@
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 import { IS_DAYFRAME_STAGING } from "./config";
+import { captureSyncDiagnosticScope, recordSyncDiagnostic } from "./syncDiagnosticHistory";
 import { installConnectivityEvidenceReporter } from "./connectivityEvidence";
 import {
   CONNECTIVITY_OFFLINE_CONFIRM_MS,
@@ -293,6 +294,9 @@ function applyMachineState(nextState: ConnectivityMachineState) {
   if (connectivitySnapshotsEqual(previousSnapshot, nextSnapshot)) return;
   if (previousSnapshot.status !== nextSnapshot.status) {
     recordConnectivityTransition(previousSnapshot, nextSnapshot);
+    if (nextSnapshot.status === "offline" || nextSnapshot.status === "online") {
+      recordSyncDiagnostic(captureSyncDiagnosticScope(), { lane: "connectivity", event: nextSnapshot.status });
+    }
   }
   publicSnapshot = nextSnapshot;
   for (const listener of listeners) listener();

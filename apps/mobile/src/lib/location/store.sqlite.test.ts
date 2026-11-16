@@ -1,7 +1,16 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
+import { createHash } from "node:crypto";
 import {DatabaseSync} from "node:sqlite";
 import {LOCATION_ENGINE_V2_CONFIG} from "@dayframe/shared";
-const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true),owner:{userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"}}));
+const mocks=vi.hoisted(()=>({ diagnosticStorage: new Map<string,string>(), open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true),owner:{userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"}}));
+vi.mock("expo-sqlite/kv-store", () => ({ SQLiteStorage: class {
+  async getItemAsync(key: string) { return mocks.diagnosticStorage.get(key) ?? null; }
+  async setItemAsync(key: string, value: string) { mocks.diagnosticStorage.set(key, value); }
+} }));
+vi.mock("expo-crypto", () => ({
+  CryptoDigestAlgorithm: { SHA256: "sha256" },
+  digestStringAsync: async (_: string, value: string) => createHash("sha256").update(value).digest("hex")
+}));
 vi.mock("expo-sqlite",()=>({openDatabaseAsync:mocks.open}));
 vi.mock("expo-location", () => ({
   getForegroundPermissionsAsync: async () => ({ status: "granted" }),
@@ -9,15 +18,15 @@ vi.mock("expo-location", () => ({
 }));
 vi.mock("./captureConsent",()=>({readLocationCaptureConsent:async()=>true}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
-vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
-vi.mock("../mobileAccount",()=>({readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountKey:(owner:{userId:string;workspaceId:string})=>`${owner.workspaceId}:${owner.userId}`,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
+vi.mock("../secure-session",()=>({currentSessionGeneration:()=>0,peekAuthenticatedSessionOwner:()=>mocks.owner,SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
+vi.mock("../mobileAccount",()=>({currentMobileAccountEpoch:()=>0,readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountKey:(owner:{userId:string;workspaceId:string})=>`${owner.workspaceId}:${owner.userId}`,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
 
 const owner={userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"};
 let db:DatabaseSync,store:typeof import("./store");
 function adapter(){const value={execAsync:async(sql:string)=>{db.exec(sql);},getFirstAsync:async(sql:string,...args:never[])=>db.prepare(sql).get(...args)??null,getAllAsync:async(sql:string,...args:never[])=>db.prepare(sql).all(...args),runAsync:async(sql:string,...args:never[])=>db.prepare(sql).run(...args),withExclusiveTransactionAsync:async(fn:(t:unknown)=>Promise<void>)=>{db.exec("BEGIN IMMEDIATE");try{await fn(value);db.exec("COMMIT");}catch(error){db.exec("ROLLBACK");throw error;}}};return value;}
 const replay=()=>({ok:true,clientAcknowledgedMode:false,replayVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,rolloutMode:"v2_shadow",finalisedSegmentCount:0,semanticSegmentCount:0,warnings:[]});
 beforeEach(async()=>{
- vi.resetModules();vi.clearAllMocks();vi.stubGlobal("fetch",mocks.fetch);mocks.current.mockReturnValue(true);db=new DatabaseSync(":memory:");mocks.open.mockResolvedValue(adapter());
+ vi.resetModules();vi.clearAllMocks();mocks.diagnosticStorage.clear();vi.stubGlobal("fetch",mocks.fetch);mocks.current.mockReturnValue(true);db=new DatabaseSync(":memory:");mocks.open.mockResolvedValue(adapter());
  mocks.owner={...owner};vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));store=await import("./store");await store.configureLocationAccount({...owner,deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]},"v2_shadow",true);vi.useRealTimers();
  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>{const batch=JSON.parse(init.body as string);return {ok:true,status:200,json:async()=>url.endsWith("/replay")?replay():{ok:true,acknowledgedEvidenceIds:batch.evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId),replayVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,rolloutMode:"v2_shadow",warnings:[]}};});
 });
@@ -25,6 +34,29 @@ afterEach(()=>{db.close();vi.useRealTimers();vi.unstubAllGlobals();});
 async function persistEvidence(items: Parameters<typeof store.persistLocationEvidence>[0]) { return store.persistLocationEvidence(items, await store.captureLocationOwnership()); }
 async function seed(n=1){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`evidence-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(owner);}
 describe("Location real SQLite drain results",()=>{
+ it("records one durable batch through backoff and acknowledgement without evidence in the export", async () => {
+  await seed();
+  mocks.fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ error: "raw-server-error" }), { status: 503 }));
+  expect(await store.syncLocationEvidence()).toMatchObject({ outcome: "server_busy" });
+  const retained = db.prepare("select client_batch_id, next_attempt_at from location_upload_outbox").get()!;
+  await store.syncLocationEvidence();
+  expect(mocks.fetch.mock.calls.filter(([url]) => url.endsWith("/evidence"))).toHaveLength(1);
+  await store.syncLocationEvidence({ forceUploadRetry: true });
+  expect(db.prepare("select state from location_upload_outbox").get()!.state).toBe("acknowledged");
+
+  const history = await import("../syncDiagnosticHistory");
+  const share = vi.fn(async (_content: { message: string }) => {});
+  expect(await history.exportSyncDiagnosticHistory(history.captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+  const message = share.mock.calls[0][0].message;
+  const rows = JSON.parse(message).records;
+  expect(rows.map((row: { event: string }) => row.event)).toEqual(["queued", "attempted", "retry_scheduled", "attempted", "delivered"]);
+  expect(rows[2]).toMatchObject({ status: 503, retryAt: retained.next_attempt_at });
+  expect(rows[4]).toMatchObject({ status: 200, attempt: 2, work: rows[0].work });
+  for (const secret of ["latitude", "longitude", "significant_change", "raw-server-error", "evidence-0",
+    "ios-synthetic", String(retained.client_batch_id), owner.userId, owner.workspaceId]) {
+    expect(message).not.toContain(secret);
+  }
+ });
  it.each(["upload", "replay"])("real %s responses retain compatible cutover and acknowledge actual mode transitions",async endpoint=>{
   vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-09-30T08:00:00Z");vi.setSystemTime(start);
   let mode:"v2_review"|"v2_enabled"|"v2_shadow"="v2_review",sequence=0;

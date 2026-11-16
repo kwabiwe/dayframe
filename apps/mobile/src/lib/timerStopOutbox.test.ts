@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("./syncDiagnosticHistory", () => ({
+  captureSyncDiagnosticScope: () => undefined,
+  recordSyncDiagnostic: () => undefined,
+  MAX_SYNC_DIAGNOSTIC_RECORDS: 200
+}));
+
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 
 vi.mock("@react-native-async-storage/async-storage", () => ({

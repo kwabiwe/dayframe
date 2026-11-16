@@ -1,5 +1,5 @@
 import {createOwnerSyncCoalescer} from "../ownerSyncCoalescer";
-import {MobileHttpResponseError, StaleMobileSessionResponseError, isMobileTransportFailure} from "../mobile-network";
+import {InvalidMobileAcknowledgementError, MobileHttpResponseError, StaleMobileSessionResponseError, isMobileTransportFailure} from "../mobile-network";
 import type {SyncLaneOutcome} from "../syncLane";
 import * as SQLite from "expo-sqlite";
 import * as Location from "expo-location";
@@ -29,6 +29,7 @@ import {
   type MotionCaptureCursor
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "../config";
+import { captureSyncDiagnosticScope, recordSyncDiagnostic, type SyncDiagnosticReason } from "../syncDiagnosticHistory";
 import {
   SecureSessionUnavailableError,
   invalidateMobileSessionIfCurrent,
@@ -907,6 +908,7 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
     ? await currentContextForOwner(owner)
     : await currentContext();
   if (!current) return null;
+  const diagnosticScope = captureSyncDiagnosticScope(current.context);
   const db = await database();
   const excludedBatches=selection.excludeBatchIds??[];
   const excludedEvidence=selection.excludeEvidenceIds??[];
@@ -971,6 +973,7 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
       );
     }
   });
+  recordSyncDiagnostic(diagnosticScope, { lane: "location_upload", event: "queued" }, clientBatchId);
   return {
     account_key: current.key,
     client_batch_id: clientBatchId,
@@ -1340,6 +1343,12 @@ async function uploadLocationEvidenceBatch(
       message?: string;
     }
 > {
+  const diagnosticScope = captureSyncDiagnosticScope(owner);
+  const lane = "location_upload";
+  const attempt = batch.attempt_count + 1;
+  const record = (event: "attempted" | "authentication_required" | "rebatched" | "rejected" |
+      "delivered" | "partial" | "retry_scheduled" | "interrupted", status?: number, retryAt?: number, reason?: SyncDiagnosticReason) =>
+    recordSyncDiagnostic(diagnosticScope, { lane, event, attempt, status, retryAt, reason }, batch.client_batch_id);
   if (
     batch.account_key !== accountKey(owner) ||
     !await isLocationSyncOwnershipCurrent(owner, session)
@@ -1367,6 +1376,7 @@ async function uploadLocationEvidenceBatch(
           onDispatch: () => {
             assertLocationTransferCurrent(options.capture, session);
             attemptStartedAt = Date.now();
+            record("attempted");
           }
         })
     });
@@ -1375,6 +1385,7 @@ async function uploadLocationEvidenceBatch(
     }
     const {response,body} = request.response;
     if (response.status === 401 || response.status === 403) {
+      record("authentication_required", response.status);
       await invalidateMobileSessionIfCurrent(session.token);
       return {status:"stopped",reason:"authentication_required",outcome:"authentication_required"};
     }
@@ -1402,6 +1413,7 @@ async function uploadLocationEvidenceBatch(
         })
       );
       if (applied === null) return { status: "stopped", reason: "session_changed" };
+      record(parsed.evidence.length > 1 ? "rebatched" : "rejected", response.status);
       return { status: "stopped", reason: "payload_too_large" };
     }
     if (disposition === "reject") {
@@ -1420,6 +1432,7 @@ async function uploadLocationEvidenceBatch(
         })
       );
       if (applied === null) return { status: "stopped", reason: "session_changed" };
+      record("rejected", response.status);
       return { status: "rejected" };
     }
     if (!response.ok) throw new LocationHttpResponseError(attemptDetails);
@@ -1473,6 +1486,7 @@ async function uploadLocationEvidenceBatch(
     });
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     attemptOutcome = partition.retryIds.length ? "partial" : "success";
+    record(partition.retryIds.length ? "partial" : "delivered", response.status);
     return {
       status: "success",
       acknowledgedCount: acknowledged.length,
@@ -1482,8 +1496,13 @@ async function uploadLocationEvidenceBatch(
       ) ?? false
     };
   } catch (error) {
-    if (error instanceof LocationTransferPausedError) return { status: "stopped", reason: "location_paused" };
-    if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
+    if (error instanceof LocationTransferPausedError || options.signal?.aborted ||
+        error instanceof Error && error.name === "AbortError") {
+      if (attemptStartedAt !== undefined) record("interrupted");
+      return error instanceof LocationTransferPausedError
+        ? { status: "stopped", reason: "location_paused" }
+        : { status: "stopped", reason: "cancelled", outcome: "cancelled" };
+    }
     if (!await isLocationSyncOwnershipCurrent(owner, session)) {
       return { status: "stopped", reason: "session_changed" };
     }
@@ -1491,6 +1510,7 @@ async function uploadLocationEvidenceBatch(
     const message = locationFailureSummary(error);
     const exponentialDelay = Math.min(3_600_000, 30_000 * 2 ** Math.min(batch.attempt_count, 7));
     const jitteredDelay = Math.round(exponentialDelay * (0.8 + Math.random() * 0.4));
+    const retryAt = Date.now() + jitteredDelay;
     const applied = await serialiseOwnedLocationMutation(owner, session, () =>
       db.withExclusiveTransactionAsync(async (transaction) => {
         await transaction.runAsync(
@@ -1498,7 +1518,7 @@ async function uploadLocationEvidenceBatch(
            set attempt_count = attempt_count + 1, last_error = ?,
                next_attempt_at = ?, updated_at = ? where client_batch_id = ?`,
           message,
-          new Date(Date.now() + jitteredDelay).toISOString(),
+          new Date(retryAt).toISOString(),
           new Date().toISOString(),
           batch.client_batch_id
         );
@@ -1507,7 +1527,10 @@ async function uploadLocationEvidenceBatch(
       })
     );
     if (applied === null) return { status: "stopped", reason: "session_changed" };
-    return { status: "stopped", reason: "request_failed", message,outcome:isMobileTransportFailure(error)?"transport_failure":"server_busy" };
+    const transport = isMobileTransportFailure(error);
+    record("retry_scheduled", attemptDetails.httpStatus ?? undefined, retryAt,
+      transport ? "transport" : error instanceof InvalidMobileAcknowledgementError ? "invalid_acknowledgement" : "server");
+    return { status: "stopped", reason: "request_failed", message, outcome: transport ? "transport_failure" : "server_busy" };
   } finally {
     if (attemptStartedAt !== undefined) {
       await recordLocationAttempt(owner, session, "evidence", attemptStartedAt, attemptOutcome, attemptDetails, options.signal);

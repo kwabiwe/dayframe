@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap, QueuedEvent } from "./api";
 import { friendlyMobileErrorMessage } from "./friendlyError";
@@ -40,7 +41,18 @@ const appState = vi.hoisted(() => ({ currentState: "active" }));
 const healthAcknowledgement = vi.hoisted(() => vi.fn());
 const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
-vi.mock("expo-crypto",()=>({}));
+vi.mock("expo-sqlite/kv-store", () => ({ SQLiteStorage: class {
+  async getItemAsync(key: string) { return asyncStore.get(key) ?? null; }
+  async setItemAsync(key: string, value: string) { asyncStore.set(key, value); }
+} }));
+const enableDiagnosticDigest = vi.hoisted(() => ({ enabled: false }));
+vi.mock("expo-crypto", () => ({
+  CryptoDigestAlgorithm: { SHA256: "sha256" },
+  digestStringAsync: async (_algorithm: string, input: string) => {
+    if (!enableDiagnosticDigest.enabled) throw new Error("diagnostics storage not under test");
+    return createHash("sha256").update(input).digest("hex");
+  }
+}));
 const healthDiscard = vi.hoisted(() => vi.fn(async (_items: unknown[]) => 0));
 const healthDeliveryOpen = vi.hoisted(() => vi.fn(async (_owner: unknown, _id: string) => true));
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard,isHealthDeliveryOpen:healthDeliveryOpen}));
@@ -183,6 +195,64 @@ describe("mobile API client", () => {
     await activateMobileAccount(TIMER_STOP_OWNER);
   });
 
+
+  it("keeps the durable Stop and activity retry lifecycle available after both queues drain", async () => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("synthetic-bearer");
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const owner = TIMER_STOP_OWNER;
+      const stop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+      await enqueueEvent({
+        source: "mobile_app", type: "timer_stop", localId: "synthetic-offline-stop",
+        rawPayload: scopedStopPayload()
+      });
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new TypeError("Network request failed"))
+        .mockResolvedValueOnce(jsonResponse({ error: "private server detail" }, 503))
+        .mockResolvedValueOnce(jsonResponse({ eventId: "synthetic-receipt" }, 201))
+        .mockResolvedValueOnce(jsonResponse({ eventId: "synthetic-activity-receipt" }, 201));
+      vi.stubGlobal("fetch", fetchMock);
+      const first = await deliverPendingTimerStop(stop, owner);
+      expect(first.status).toBe("retryable_failure");
+      expect(await syncQueue()).toMatchObject({ remainingCount: 1, firstError: { failureKind: "server" } });
+      await syncQueue();
+      expect(fetchMock).toHaveBeenCalledTimes(2); // Not yet due.
+      expect((await deliverPendingTimerStop(first.pendingStop, owner)).status).toBe("delivered");
+      expect(await syncQueue({ forceRetry: true })).toMatchObject({ remainingCount: 0, syncedCount: 1 });
+      expect(await readPendingTimerStops()).toEqual([]);
+      await enqueueEvent({
+        source: "health_sleep", type: "health_sleep_import",
+        localId: "healthkit:sleep:private-sample", rawPayload: { sourceSampleIds: ["private-health-id"] }
+      });
+      const rejectedStop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "private refusal detail" }, 422));
+      expect((await deliverPendingTimerStop(rejectedStop, owner)).status).toBe("permanent_failure");
+
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const message = share.mock.calls[0][0].message;
+      const records = JSON.parse(message).records as Array<{ lane: string; event: string; work: string; retryAt?: string; status?: number }>;
+      for (const [lane, retry] of [["timer_stop", "retry_pending"], ["timer_activity", "retry_scheduled"]]) {
+        const queueEvent = records.find((record) => record.lane === lane && record.event === "queued");
+        const work = records.filter((record) => record.lane === lane && record.work === queueEvent?.work);
+        expect(work.map((record) => record.event), message).toEqual(["queued", "attempted", retry, "attempted", "delivered"]);
+        expect(new Set(work.map((record) => record.work)).size).toBe(1);
+        expect(work[0].work).toMatch(/^[a-f0-9]{24}$/);
+        expect(work.at(-1)?.status).toBe(201);
+        if (lane === "timer_activity") expect(work[2]).toMatchObject({ retryAt: expect.any(String), status: 503 });
+      }
+      expect(records.find((record) => record.event === "rejected")).toMatchObject({ lane: "timer_stop", status: 422 });
+      expect(new Set(records.map(({ lane }) => lane))).toEqual(new Set(["timer_stop", "timer_activity"]));
+      for (const secret of ["synthetic-bearer", stop.clientEventId, rejectedStop.clientEventId, TIMER_TARGET_A, "synthetic-offline-stop",
+        "synthetic-receipt", "private server detail", "private refusal detail", "private-health-id", owner.userId, owner.workspaceId]) {
+        expect(message).not.toContain(secret);
+      }
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("preserves captured Health identity across staging/production with cloned account UUIDs", async () => {
     storeBoundSession("session-token");

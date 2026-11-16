@@ -3,6 +3,12 @@ import type { MobileBootstrap } from "./api";
 import type { DurableLocalWork } from "./durableLocalProjection";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 
+vi.mock("./syncDiagnosticHistory", () => ({
+  captureSyncDiagnosticScope: () => undefined,
+  recordSyncDiagnostic: () => undefined,
+  MAX_SYNC_DIAGNOSTIC_RECORDS: 200
+}));
+
 // Split for the running block on iPhone (owner 28 Oct 2026): the durable split command, its Undo hold,
 // delivery, the second part's id and the projection. Synthetic ids, names and times only.
 const storage = vi.hoisted(() => new Map<string, string>());
