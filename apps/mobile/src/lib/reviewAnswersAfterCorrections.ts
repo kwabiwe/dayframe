@@ -1,3 +1,4 @@
+import { parseCalendarPlaceLogSnapshot, type CalendarPlaceLogSnapshot } from "./calendarReviewLog";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import { currentMobileAccountEpoch, mobileAccountOwnersEqual, type MobileAccountOwner } from "./mobileAccount";
@@ -36,7 +37,7 @@ export type AnswerAfterCorrections = MobileAccountOwner & {
    * A Logs as instead of an answer (Codex r4 on #610): `log_place` for this place with this activity, queued only
    * once the sheet's corrections are acknowledged; its `id` is the log's own `clientCorrectionId`.
    */
-  log?: { itemId: string; categoryId?: string; description?: string; visitOnly?: true };
+  log?: { itemId: string; categoryId?: string; description?: string; visitOnly?: true; placeLog?: CalendarPlaceLogSnapshot };
   /** An outing's trips answered with its stay (`confirm_outing` / `ignore_outing`; Codex r10 on #610). */
   outingMemberIds?: string[];
   /**
@@ -96,13 +97,14 @@ function parse(value: unknown): AnswerAfterCorrections | null {
     ? item.venue as ReviewAnswerVenue : null;
   const held = item.held && typeof item.held === "object" && typeof (item.held as { run?: unknown }).run === "string"
     ? { run: (item.held as { run: string }).run } : undefined;
-  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown; description?: unknown; visitOnly?: unknown } | undefined;
+  const rawLog = item.log as { itemId?: unknown; categoryId?: unknown; description?: unknown; visitOnly?: unknown; placeLog?: unknown } | undefined;
   const logCategoryId = typeof rawLog?.categoryId === "string" ? rawLog.categoryId : undefined;
   const logDescription = typeof rawLog?.description === "string" ? rawLog.description : undefined;
+  const placeLog = parseCalendarPlaceLogSnapshot(rawLog?.placeLog);
   const log = rawLog && typeof rawLog === "object" && typeof rawLog.itemId === "string" && (logCategoryId || logDescription?.trim())
     ? { itemId: rawLog.itemId, ...(logCategoryId ? { categoryId: logCategoryId } : {}),
       ...(logDescription !== undefined ? { description: logDescription } : {}),
-      ...(rawLog.visitOnly === true ? { visitOnly: true as const } : {}) } : undefined;
+      ...(rawLog.visitOnly === true ? { visitOnly: true as const } : {}), ...(placeLog ? { placeLog } : {}) } : undefined;
   const outingMemberIds = strings(item.outingMemberIds);
   const backendId = typeof item.backendId === "string" ? item.backendId : undefined;
   return {

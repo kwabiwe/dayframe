@@ -154,22 +154,78 @@ describe("CalendarListView (location v4 step 9)", () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(show({})); });
     expect(labels(tree).some((label) => label.includes("Needs a look"))).toBe(true);
-    act(() => { tree.update(show({ checks: [], loggedTripRows: [pending] })); });
+    act(() => { tree.update(show({ checks: [], loggedReviewRows: [pending] })); });
     expect(labels(tree).some((label) => label.startsWith("Getting around.") && label.endsWith("Logged"))).toBe(true);
     // Undo restores the check in the same position.
-    act(() => { tree.update(show({ loggedTripRows: [] })); });
+    act(() => { tree.update(show({ loggedReviewRows: [] })); });
     expect(labels(tree).some((label) => label.includes("Needs a look"))).toBe(true);
     // The acknowledgement can identify the entry while Timeline is still showing the old trip.
     const actual = block("commute", "Getting around", 8, 9);
-    act(() => { tree.update(show({ checks: [], loggedTripRows: [{ ...pending, entryIds: ["commute"] }], entries: [actual, work] })); });
+    act(() => { tree.update(show({ checks: [], loggedReviewRows: [{ ...pending, entryIds: ["commute"] }], entries: [actual, work] })); });
     expect(tree.root.findAllByProps({ testID: "calendar-list-logged-trip-seg-trip" })).toHaveLength(0);
     expect(labels(tree).some((label) => label.includes("Getting around"))).toBe(true);
 
     // Bootstrap can arrive first, even when an equivalent confirmation has no entry ID.
-    act(() => { tree.update(show({ entries: [actual, work], loggedTripRows: [pending],
+    act(() => { tree.update(show({ entries: [actual, work], loggedReviewRows: [pending],
       tripSegmentByEntryId: new Map([["commute", "seg-trip"]]) })); });
     expect(tree.root.findAllByProps({ testID: "calendar-list-logged-trip-seg-trip" })).toHaveLength(0);
     expect(labels(tree).filter((label) => label.includes("Getting around"))).toHaveLength(1);
+  });
+
+  it.each([false, true])("keeps a confirmed place through delayed data and Undo with Reduce Motion %s", (reduceMotion) => {
+    const check = { id: "visit", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
+    const known = { ...timeline, items: timeline.items.map((item) => item.id === check.segmentId && item.kind === "place"
+      ? { ...item, name: "Cafe", matchKind: "saved" as const } : item) };
+    const log = { kind: "place" as const, check, title: "Cafe", entryIds: [] };
+    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()}
+      checks={[check]} timeline={known} reduceMotion={reduceMotion} {...extra} />;
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(show({})); });
+    expect(labels(tree).some((label) => label.startsWith("Cafe.") && label.endsWith("Needs a look"))).toBe(true);
+    act(() => tree.update(show({ checks: [], loggedReviewRows: [log] })));
+    expect(labels(tree).filter((label) => label.startsWith("Cafe.") && label.endsWith("Logged"))).toHaveLength(1);
+    expect(tree.root.findAllByProps({ testID: "calendar-list-yes-visit" })).toHaveLength(0);
+    // An unlinked refresh can't erase the pending row, even with the known place hidden by the filter.
+    act(() => tree.update(show({ timeline: null, checks: [], loggedReviewRows: [log] })));
+    expect(labels(tree).filter((label) => label.startsWith("Cafe.") && label.endsWith("Logged"))).toHaveLength(1);
+    act(() => tree.update(show({})));
+    expect(labels(tree).some((label) => label.startsWith("Cafe.") && label.endsWith("Needs a look"))).toBe(true);
+    const actual = block("visit-block", "Cafe", 12, 13);
+    act(() => tree.update(show({ checks: [], timeline: null, entries: [actual],
+      loggedReviewRows: [{ ...log, entryIds: ["visit-block"] }] })));
+    expect(labels(tree).filter((label) => label.includes("Cafe"))).toHaveLength(1);
+  });
+
+  it("keeps a place log when a different block exists on that segment or an outing trip arrives first", () => {
+    const check = { id: "visit", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
+    const log = { kind: "place" as const, check, title: "Cafe", entryIds: ["visit-block"] };
+    const partial = { ...timeline, items: timeline.items.map((item) => item.id === check.segmentId && item.kind === "place"
+      ? { ...item, blockIds: ["older"] } : item) };
+    const trip = block("commute", "Getting around", 8, 9);
+    const older = Object.assign(block("older", "Earlier visit block", 12, 13), { stoppedAtMs: at(12, 20) });
+    const { tree } = render({ timeline: partial, entries: [trip, older], loggedReviewRows: [log] });
+    expect(labels(tree).some((label) => label.startsWith("Cafe.") && label.endsWith("Logged"))).toBe(true);
+    act(() => tree.update(<List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()} timeline={partial} entries={[trip, older]}
+      loggedReviewRows={[log]} checks={[{ ...check, id: "other-review" }]} />));
+    expect(labels(tree).some((label) => label.endsWith("Needs a look"))).toBe(true);
+  });
+
+  it("keeps a logged Health check until the exact saved block is displayed", () => {
+    const check = { id: "workout", segmentId: null, startedAt: iso(13), stoppedAt: iso(14) };
+    const log = { kind: "check" as const, check, title: "Workout", entryIds: [] };
+    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()}
+      loggedReviewRows={[log]} {...extra} />;
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(show({ entries: [block("other", "Other workout", 13, 14)] })); });
+    expect(labels(tree).filter((label) => label.startsWith("Workout.") && label.endsWith("Logged"))).toHaveLength(1);
+    const row = () => tree.root.findByProps({ testID: "calendar-list-row-check-workout" });
+    const before = row();
+    const entry = block("workout-block", "Workout", 13, 14);
+    act(() => tree.update(show({ entries: [entry], loggedReviewRows: [{ ...log, entryIds: ["workout-block"] }] })));
+    expect(labels(tree).filter((label) => label.includes("Workout"))).toHaveLength(1);
+    expect(row()).toBe(before);
+    act(() => tree.update(show({ entries: [entry], loggedReviewRows: [] })));
+    expect(row()).toBe(before);
   });
 
   it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {

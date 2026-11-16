@@ -691,8 +691,8 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(Object.fromEntries(statuses.rows.map((row) => [row.id, row.status])))
       .toEqual({ [stayReview]: "ignored", [tripReview]: "accepted", [outReview]: "accepted" });
     // Free time only, your block wins; each trip with its own move activity; the stay with the chosen one.
-    const blocks = await db.query<{ startedAt: Date; stoppedAt: Date; categoryName: string; segment: string | null }>(
-      `select te.started_at as "startedAt", te.stopped_at as "stoppedAt", c.name as "categoryName", ae.raw_payload ->> 'clientSegmentId' as segment
+    const blocks = await db.query<{ id: string; startedAt: Date; stoppedAt: Date; categoryName: string; segment: string | null }>(
+      `select te.id, te.started_at as "startedAt", te.stopped_at as "stoppedAt", c.name as "categoryName", ae.raw_payload ->> 'clientSegmentId' as segment
          from time_entries te join categories c on c.id = te.category_id
          join activity_events ae on ae.id = te.created_from_event_id
         where te.id = any($1::uuid[]) order by te.started_at`, [logged.logged!.entryIds]);
@@ -702,6 +702,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
         [at(base + 10), at(base + 38), "Shop", "o-stay"],
         [at(base + 45), at(base + 55), "Getting around", "o-out"]
       ]);
+    expect(logged.logged!.placeEntryIds).toEqual(blocks.rows.filter((row) => row.segment === "o-stay").map((row) => row.id));
     // The trips' own location events say you decided them, so replay never asks about them again nor logs them.
     const events = await db.query<{ clientEventId: string; reviewStatus: string; disposition: string }>(
       `select client_event_id as "clientEventId", review_status as "reviewStatus", raw_payload ->> 'semanticDisposition' as disposition
@@ -717,6 +718,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     // A retry gets every block it made back, the trips' too.
     const retried = await correctLocationTimeline({ kind: "log_place", subject: "place", itemId: "o-stay", categoryId, clientCorrectionId: id }, session);
     expect([...retried.logged!.entryIds].sort()).toEqual([...logged.logged!.entryIds].sort());
+    expect(retried.logged!.placeEntryIds).toEqual(logged.logged!.placeEntryIds);
   });
   it("ensures Getting around before any row is locked whenever an outing's trips are logged, so an archive mid-request never leaves a trip without an activity (Codex r1 on #612)", async () => {
     const db = database!;

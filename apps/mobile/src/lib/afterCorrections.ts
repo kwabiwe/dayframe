@@ -1,3 +1,4 @@
+import type { CalendarPlaceLogSnapshot } from "./calendarReviewLog";
 import type { MobileAccountOwner } from "./mobileAccount";
 import type { ReviewAnswerVenue } from "./reviewAnswer";
 import { registerAfterCorrections, type AfterCorrectionsQueue } from "./reviewAnswersAfterCorrections";
@@ -29,7 +30,7 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
    */
   action: { kind: "answer"; reviewItemId: string; logged: boolean; venue?: ReviewAnswerVenue | null; logAsCategoryId?: string | null; logAsDescription?: string;
     outingMemberIds?: readonly string[] }
-    | { kind: "log"; categoryId?: string; description?: string; visitOnly?: true };
+    | { kind: "log"; categoryId?: string; description?: string; visitOnly?: true; placeLog?: CalendarPlaceLogSnapshot };
 }) {
   return registerAfterCorrections(owner, {
     id: input.id,
@@ -42,7 +43,8 @@ export function waitForItemCorrections(owner: MobileAccountOwner, input: {
     ...(input.action.kind === "log" ? { log: { itemId: input.itemId,
       ...(input.action.categoryId ? { categoryId: input.action.categoryId } : {}),
       ...(input.action.description ? { description: input.action.description } : {}),
-      ...(input.action.visitOnly ? { visitOnly: true } : {}) } } : {}),
+      ...(input.action.visitOnly ? { visitOnly: true } : {}),
+      ...(input.action.placeLog ? { placeLog: input.action.placeLog } : {}) } } : {}),
     ...(input.action.kind === "answer" && input.action.outingMemberIds?.length ? { outingMemberIds: input.action.outingMemberIds } : {}),
     newIds: input.newIds,
     itemIds: [input.itemId, ...(input.memberItemIds ?? [])]

@@ -291,6 +291,7 @@ async function resolveOuting(
   }
   await lockLocationSegments(client, items, session);
   const entryIds: string[] = [];
+  const anchorEntryIds: string[] = [];
   const inOrder = [...items].sort((a, b) => a.id.localeCompare(b.id));
   // A venue's free time is read first, before the trips' own blocks, so the same answer always logs the same time
   // (Codex r1 on #642).
@@ -300,16 +301,18 @@ async function resolveOuting(
       // A venue with an activity logs only the Stay's free time: any number of blocks, none when fully covered.
       if (item.id === anchor.id && venue && Array.isArray(result?.entryIds)) {
         entryIds.push(...result.entryIds as string[]);
+        anchorEntryIds.push(...result.entryIds as string[]);
         continue;
       }
       if (typeof result?.entryId !== "string") {
         throw new ReviewResolutionError("resolution_conflict", "Part of this outing could not be logged.", { status: 409 });
       }
       entryIds.push(result.entryId);
+      if (item.id === anchor.id) anchorEntryIds.push(result.entryId);
     }
   }
   return { ok: true, action: action.action, status: confirm ? "accepted" : "ignored", reviewItemIds: ids,
-    ...(confirm ? { entryIds } : {}) };
+    ...(confirm ? { entryIds, anchorEntryIds } : {}) };
 }
 
 async function lockLocationReview(client: pg.PoolClient, id: string, session: RequestSession) {

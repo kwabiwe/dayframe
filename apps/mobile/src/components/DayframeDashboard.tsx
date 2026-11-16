@@ -59,7 +59,7 @@ import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
 import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
-import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
+import { usePlaceLogReceipts, useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
@@ -76,8 +76,8 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import type { CalendarTripHandover, CalendarTripLog } from "../lib/calendarTripLog";
-import { forgetCalendarTripHandovers, getReviewItemSyncStates, readCalendarTripHandovers, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarTripHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
+import { calendarPlaceLog, calendarPlaceLogSnapshot, calendarReviewLog, calendarReviewRowKey, type CalendarPlaceLogSnapshot, type CalendarReviewHandover, type CalendarReviewLog } from "../lib/calendarReviewLog";
+import { forgetCalendarReviewHandovers, getReviewItemSyncStates, readCalendarReviewHandovers, readPendingCalendarReviewLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarReviewHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -2016,7 +2016,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // account only: the List's "?", the Calendar badge and Today's chip leave them at once.
   // With them, the suggestions with a waiting or rejected change of their own, which never fold into an
   // outing (the deck's eligibility, Codex r2 on #582).
-  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string>; tripLogs: readonly CalendarTripLog[] } | null>(null);
+  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string>; reviewLogs: readonly CalendarReviewLog[] } | null>(null);
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
@@ -2026,11 +2026,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       Promise.all([
         readSuppressedReviewItemIds(scopedOwner),
         getReviewItemSyncStates(),
-        readPendingCalendarTripLogs(scopedOwner).catch(() => null)
-      ]).then(([ids, states, tripLogs]) => {
+        readPendingCalendarReviewLogs(scopedOwner).catch(() => null)
+      ]).then(([ids, states, reviewLogs]) => {
           if (current && mine === sequence) setLocallyDecided((previous) => ({
             owner: scopedOwnerKey, ids, syncStateIds: new Set(states.keys()),
-            tripLogs: tripLogs ?? (previous?.owner === scopedOwnerKey ? previous.tripLogs : [])
+            reviewLogs: reviewLogs ?? (previous?.owner === scopedOwnerKey ? previous.reviewLogs : [])
           }));
         })
         .catch(() => undefined);
@@ -2076,7 +2076,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Location timeline corrections still on the phone (step 12), this account's.
   const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
     [authState, data]);
+  const canonicalCorrectionEntryIds = useMemo(() => correctionOwner && data ? new Set(bootstrapBlocksById(data).keys()) : undefined,
+    [correctionOwner, data]);
   const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
+  const [localPlaceLogs, setLocalPlaceLogs] = useState<{ owner: string; ids: string[] } | null>(null);
   const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
@@ -2089,19 +2092,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   });
   // A Review lookup hands off its proven trip before it tells readers the outbox row is gone.
   // Keep it for the Calendar until the block can take over or a newer day read has removed the trip.
-  const [tripHandover, setTripHandover] = useState<{
+  const [reviewHandover, setReviewHandover] = useState<{
     owner: string;
-    logs: readonly CalendarTripHandover[];
+    logs: readonly CalendarReviewHandover[];
   } | null>(null);
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) {
-      setTripHandover(null);
+      setReviewHandover(null);
       return;
     }
     let current = true;
-    function receive(logs: readonly CalendarTripHandover[]) {
+    function receive(logs: readonly CalendarReviewHandover[]) {
       if (!current || !scopedOwnerKey || !logs.length) return;
-      setTripHandover((previous) => {
+      setReviewHandover((previous) => {
         const retained = new Map(previous?.owner === scopedOwnerKey ? previous.logs.map((log) => [log.check.id, log]) : []);
         for (const log of logs) {
           if ((retained.get(log.check.id)?.observedAt ?? 0) >= log.observedAt) continue;
@@ -2111,10 +2114,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         return { owner: scopedOwnerKey, logs: [...retained.values()].slice(-REVIEW_PRESENTATION_MAX_IDS) };
       });
     }
-    const unsubscribe = subscribeCalendarTripHandover((owner, logs) => {
+    const unsubscribe = subscribeCalendarReviewHandover((owner, logs) => {
       if (`${owner.backendId}:${owner.workspaceId}:${owner.userId}` === scopedOwnerKey) receive(logs);
     });
-    void readCalendarTripHandovers(scopedOwner).then(receive).catch(() => undefined);
+    void readCalendarReviewHandovers(scopedOwner).then(receive).catch(() => undefined);
     return () => {
       current = false;
       unsubscribe();
@@ -2264,7 +2267,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,
     // Dropped (its change refused): its "?" comes back at once, not at the Review outbox's next read (Codex r3 on #610).
     onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });
-  waitingHidden.current = { ids: answersAfterCorrections.waitingIds, segments: answersAfterCorrections.waitingSegments };
+  const waitingSegments = useMemo(() => new Set([
+    ...answersAfterCorrections.waitingSegments,
+    ...(localPlaceLogs?.owner === scopedOwnerKey ? localPlaceLogs.ids : []),
+    ...correctionQueue.pending.flatMap((item) =>
+      item.request.kind === "log_place" && item.failureKind !== "permanent" ? [item.request.itemId] : [])
+  ]), [answersAfterCorrections.waitingSegments, correctionQueue.pending, localPlaceLogs, scopedOwnerKey]);
+  waitingHidden.current = { ids: answersAfterCorrections.waitingIds, segments: waitingSegments };
   // "?" the server resolved with an acknowledged correction: a Logs as on a place with an open "?" resolves them in
   // the same transaction, as their own "Not now" (#609), and on an outing's stay its trips' too, logged as their own
   // blocks (#612), so they leave at once, until the day is read again (the read the acknowledgement starts, onLogged).
@@ -2280,11 +2289,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const blocks = bootstrapBlocksById(shownCalendarData);
     return settledCheckBase(shownCalendarData?.reviewItems ?? [], {
       decided: locallyDecidedIds, answering: checkAnswers.hiddenIds, resolved: resolvedByCorrections,
-      waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments, syncStateIds: reviewSyncStateIds,
+      waitingIds: answersAfterCorrections.waitingIds, waitingSegments, syncStateIds: reviewSyncStateIds,
       stillAsks: (item) => clashStillAsksHere(item, shownCalendarData, minuteNow, blocks, locallyDeletedIds)
     });
   }, [shownCalendarData, minuteNow, locallyDeletedIds, checkAnswers.hiddenIds, answersAfterCorrections.waitingIds,
-    answersAfterCorrections.waitingSegments,
+    waitingSegments,
     locallyDecidedIds, resolvedByCorrections, reviewSyncStateIds]);
   // Card B part 2: the "?" whose question is open, and the Apple place guessed nearby for it.
   const [openCalendarCheckId, setOpenCalendarCheckId] = useState<string | null>(null);
@@ -2461,6 +2470,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   });
   // Acknowledged corrections stay shown until a timeline asked for after them lands, so nothing flickers back.
   const { timeline: serverCalendarTimeline, requestedAt: calendarTimelineRequestedAt } = serverCalendarSnapshot;
+  const acknowledgedPlaceLogs = usePlaceLogReceipts(correctionOwner, correctionQueue.acknowledged,
+    canonicalCorrectionEntryIds, serverCalendarTimeline, calendarTimelineRequestedAt);
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
@@ -2468,36 +2479,42 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     entry.tripSegmentId && !entry.reviewItemId ? [[entry.id, entry.tripSegmentId] as const] : [])),
   [nativeCalendarBridge.actionEntries]);
   useEffect(() => {
-    if (!scopedOwner || !tripHandover?.logs.length || tripHandover.owner !== scopedOwnerKey) return;
+    if (!scopedOwner || !reviewHandover?.logs.length || reviewHandover.owner !== scopedOwnerKey) return;
     const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
     const canonicalSegments = new Set(tripSegmentByEntryId.values());
     const shownIds = new Set(nativeCalendarModel.entries.filter((entry) => !entry.isReview).map((entry) => entry.entryId));
-    const timelineTrips = new Map((serverCalendarTimeline?.items ?? []).flatMap((item) => item.kind === "trip" ? [[item.id, item] as const] : []));
-    const removed: CalendarTripHandover[] = [];
-    const live = tripHandover.logs.filter((log) => {
-      const trip = timelineTrips.get(log.check.segmentId);
-      if (!checkStillAsks(log.check, fromMs) || canonicalSegments.has(log.check.segmentId)
-        || trip?.blockIds.some((id) => shownIds.has(id))) return false;
+    const timelineItems = new Map((serverCalendarTimeline?.items ?? []).map((item) => [item.id, item] as const));
+    const removed: CalendarReviewHandover[] = [];
+    const live = reviewHandover.logs.filter((log) => {
+      const segment = log.check.segmentId;
+      const item = segment ? timelineItems.get(segment) : undefined;
+      if (!checkStillAsks(log.check, fromMs)) return false;
+      if (log.entryIds.some((id) => shownIds.has(id))) {
+        removed.push(log);
+        return false;
+      }
+      if (!segment || (log.kind ?? "trip") !== "trip") return true;
+      if (canonicalSegments.has(segment) || item?.blockIds.some((id) => shownIds.has(id))) return false;
       const shownDay = listCheckOverlaps(log.check, nativeCalendarModel.dayStartMs, nativeCalendarModel.dayEndMs);
-      if (!shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt || trip?.blockIds.length) return true;
+      if (!shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt || item?.blockIds.length) return true;
       removed.push(log);
       return false;
     });
-    if (removed.length) void forgetCalendarTripHandovers(scopedOwner, removed).catch(() => undefined);
-    if (live.length !== tripHandover.logs.length) {
-      setTripHandover((current) => current === tripHandover ? { ...tripHandover, logs: live } : current);
+    if (removed.length) void forgetCalendarReviewHandovers(scopedOwner, removed).catch(() => undefined);
+    if (live.length !== reviewHandover.logs.length) {
+      setReviewHandover((current) => current === reviewHandover ? { ...reviewHandover, logs: live } : current);
     }
-  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwner, scopedOwnerKey, serverCalendarTimeline, todayKey, tripHandover, tripSegmentByEntryId]);
-  const loggedTripRows = useMemo(() => {
-    const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
+  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwner, scopedOwnerKey, serverCalendarTimeline, todayKey, reviewHandover, tripSegmentByEntryId]);
+  const confirmedReviewLogs = useMemo(() => {
+    const held = new Map(checkAnswers.reviewLogs.map((log) => [log.check.id, log]));
     if (locallyDecided?.owner === scopedOwnerKey) {
-      for (const log of locallyDecided?.tripLogs ?? []) held.set(log.check.id, log);
+      for (const log of locallyDecided?.reviewLogs ?? []) held.set(log.check.id, log);
     }
-    if (tripHandover?.owner === scopedOwnerKey) {
-      for (const log of tripHandover?.logs ?? []) held.set(log.check.id, log);
+    if (reviewHandover?.owner === scopedOwnerKey) {
+      for (const log of reviewHandover?.logs ?? []) held.set(log.check.id, log);
     }
     return [...held.values()];
-  }, [checkAnswers.tripLogs, locallyDecided, scopedOwnerKey, tripHandover]);
+  }, [checkAnswers.reviewLogs, locallyDecided, scopedOwnerKey, reviewHandover]);
   // Steps 16–17: the Grid's Places lane and trip leg strips, from the same timeline.
   const supportsLoggedPlaceChange = data?.serverBuild?.loggedVisitPlaceCorrections === true;
   const gridModel = useMemo(() => calendarLayout === "grid"
@@ -2572,6 +2589,58 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     theme,
     timeline: calendarTimeline
   });
+  useLayoutEffect(() => {
+    const held = locationCorrections.heldLog?.request;
+    const ids = [
+      ...(held?.kind === "log_place" ? [held.itemId] : []),
+      ...locationCorrections.publishingLogs.flatMap((log) => log.request.kind === "log_place"
+        && log.ownerKey === `${correctionOwner?.workspaceId}:${correctionOwner?.userId}` ? [log.request.itemId] : [])
+    ];
+    setLocalPlaceLogs((current) => !ids.length || !scopedOwnerKey ? null
+      : current?.owner === scopedOwnerKey && current.ids.length === ids.length && current.ids.every((id, index) => id === ids[index])
+        ? current : { owner: scopedOwnerKey, ids });
+  }, [correctionOwner, locationCorrections.heldLog, locationCorrections.publishingLogs, scopedOwnerKey]);
+  const loggedReviewRows = useMemo(() => {
+    const byKey = new Map<string, CalendarReviewLog>();
+    const add = (log: CalendarReviewLog | null) => {
+      if (log) byKey.set(calendarReviewRowKey(log), log);
+    };
+    const places = new Map((calendarTimeline?.items ?? []).flatMap((item) =>
+      item.kind === "place" ? [[item.id, item] as const] : []));
+    const addPlace = (id: string, entryIds?: readonly string[], title?: string, captured?: CalendarPlaceLogSnapshot) => {
+      const place = places.get(id);
+      const snapshot = (place && calendarPlaceLogSnapshot(place, title)) || captured;
+      if (snapshot) add(calendarPlaceLog(id, snapshot, entryIds));
+    };
+    for (const ack of acknowledgedPlaceLogs) {
+      if (ack.request.kind !== "log_place") continue;
+      // Older servers don't split outing receipts. Its visit can still be matched after
+      // a fresh timeline links the place itself; the flat receipt contains unrelated trips.
+      if (ack.loggedPlaceEntryIds?.length === 0) continue;
+      const entries = ack.loggedPlaceEntryIds ?? places.get(ack.request.itemId)?.blockIds;
+      addPlace(ack.request.itemId, entries, ack.request.description, ack.preview?.placeLog);
+    }
+    const openItems = new Map((shownCalendarData?.reviewItems ?? []).map((item) => [item.id, item]));
+    for (const record of answersAfterCorrections.waitingLogs) {
+      if (record.log && !record.venue) addPlace(record.log.itemId, [], record.log.description, record.log.placeLog);
+      else if (record.logged) add(calendarReviewLog(openItems.get(record.reviewItemId), [], record.venue?.name));
+    }
+    const heldLog = locationCorrections.heldLog?.request;
+    if (heldLog?.kind === "log_place") addPlace(heldLog.itemId, [], heldLog.description, locationCorrections.heldLog?.placeLog);
+    for (const log of locationCorrections.publishingLogs) {
+      if (log.ownerKey === `${correctionOwner?.workspaceId}:${correctionOwner?.userId}` && log.request.kind === "log_place") {
+        addPlace(log.request.itemId, [], log.request.description, log.placeLog);
+      }
+    }
+    for (const log of confirmedReviewLogs) add(log);
+    for (const pending of correctionQueue.pending) {
+      if (pending.request.kind === "log_place" && pending.failureKind !== "permanent") {
+        addPlace(pending.request.itemId, [], pending.request.description, pending.preview?.placeLog);
+      }
+    }
+    return [...byKey.values()];
+  }, [acknowledgedPlaceLogs, answersAfterCorrections.waitingLogs, calendarTimeline, confirmedReviewLogs,
+    correctionQueue.pending, correctionOwner, locationCorrections.heldLog, locationCorrections.publishingLogs, shownCalendarData]);
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
@@ -4504,7 +4573,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   dayStartMs={nativeCalendarModel.dayStartMs}
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
-                  loggedTripRows={loggedTripRows}
+                  loggedReviewRows={loggedReviewRows}
                   tripSegmentByEntryId={tripSegmentByEntryId}
                   nowMs={minuteNow}
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.

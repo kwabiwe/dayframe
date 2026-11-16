@@ -1,6 +1,8 @@
+import { parseCalendarPlaceLogSnapshot, type CalendarPlaceLogSnapshot } from "./calendarReviewLog";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TimelineCorrectionRequestSchema, type TimelineCorrectionRequest } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import {
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError,
@@ -30,11 +32,20 @@ const PERMANENT_STATUS_CODES = new Set([400, 404, 409, 413, 422]);
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
 export const MOBILE_TIMELINE_CORRECTION_TIMEOUT_MS = 8_000;
 
+type PlaceLogReceipt = {
+  backendId: string;
+  acknowledgedAt: number;
+  loggedPlaceEntryIds?: string[];
+  resolvedReviewItemIds?: string[];
+};
+
 export type PendingTimelineCorrection = MobileAccountOwner & {
   clientCorrectionId: string;
   request: TimelineCorrectionRequest & { clientCorrectionId: string };
   /** What the List shows until the server has it (never sent): the chosen place's name and role. */
   preview?: TimelineCorrectionPreview;
+  /** Confirmed Log activity stays readable through relaunch without returning to the send queue. */
+  placeLogReceipt?: PlaceLogReceipt;
   createdAt: string;
   attemptCount: number;
   nextAttemptAt?: string;
@@ -44,7 +55,7 @@ export type PendingTimelineCorrection = MobileAccountOwner & {
   failureKind?: "retryable" | "permanent";
 };
 
-export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean };
+export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean; placeLog?: CalendarPlaceLogSnapshot };
 
 export type TimelineCorrectionSyncResult = {
   deliveredCount: number;
@@ -60,8 +71,11 @@ export type TimelineCorrectionSyncResult = {
  * `resolvedReviewItemIds`: the "?" the server resolved with it — a Logs as on a place with an open "?" resolves
  * them in the same transaction, as their own "Not now" (#609) — so they leave the List at once.
  */
-export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[] };
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[]; loggedPlaceEntryIds?: string[]; restoredPlaceLog?: boolean };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
+const PLACE_LOG_KEEP_MS = 8 * 86_400_000;
+const MAX_PLACE_LOG_RECEIPTS = 128;
+const correctionBackend = DAYFRAME_BACKEND_ID ?? DAYFRAME_API_BASE;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
 /** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
 let refreshRevision = 0;
@@ -156,12 +170,14 @@ function parseStored(value: unknown): PendingTimelineCorrection | null {
   if (typeof item.userId !== "string" || typeof item.workspaceId !== "string") return null;
   if (item.clientCorrectionId !== request.data.clientCorrectionId) return null;
   if (typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt))) return null;
+  const placeLogReceipt = request.data.kind === "log_place" ? parsePlaceLogReceipt(item.placeLogReceipt) : null;
   return {
     userId: item.userId,
     workspaceId: item.workspaceId,
     clientCorrectionId: request.data.clientCorrectionId,
     request: { ...request.data, clientCorrectionId: request.data.clientCorrectionId },
     ...(parsePreview(item.preview) ? { preview: parsePreview(item.preview)! } : {}),
+    ...(placeLogReceipt ? { placeLogReceipt } : {}),
     createdAt: item.createdAt,
     attemptCount: typeof item.attemptCount === "number" && item.attemptCount >= 0 ? item.attemptCount : 0,
     ...(typeof item.nextAttemptAt === "string" && Number.isFinite(Date.parse(item.nextAttemptAt)) ? { nextAttemptAt: item.nextAttemptAt } : {}),
@@ -171,12 +187,26 @@ function parseStored(value: unknown): PendingTimelineCorrection | null {
   };
 }
 
+function stringIds(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : undefined;
+}
+
+function parsePlaceLogReceipt(value: unknown): PlaceLogReceipt | null {
+  if (!value || typeof value !== "object") return null;
+  const receipt = value as Partial<PlaceLogReceipt>;
+  if (typeof receipt.backendId !== "string" || typeof receipt.acknowledgedAt !== "number"
+    || !Number.isFinite(receipt.acknowledgedAt)) return null;
+  return { backendId: receipt.backendId, acknowledgedAt: receipt.acknowledgedAt,
+    loggedPlaceEntryIds: stringIds(receipt.loggedPlaceEntryIds), resolvedReviewItemIds: stringIds(receipt.resolvedReviewItemIds) };
+}
+
 function parsePreview(value: unknown): TimelineCorrectionPreview | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   if (item.name !== null && typeof item.name !== "string") return null;
+  const placeLog = parseCalendarPlaceLogSnapshot(item.placeLog);
   return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}),
-    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}) };
+    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}), ...(placeLog ? { placeLog } : {}) };
 }
 
 /** Keeps a correction on the phone (it shows at once) and returns it; send with `synchroniseTimelineCorrections`. */
@@ -251,13 +281,54 @@ export async function enqueueTimelineCorrections(
 /** This owner's corrections, oldest first, refused ones included. */
 export async function readPendingTimelineCorrections(owner: MobileAccountOwner) {
   // In the mutation chain: a read may set an unreadable queue aside, which must not race a write.
-  return (await withMutation(readAll)).filter((item) => mobileAccountOwnersEqual(item, owner));
+  const items = (await withMutation(readAll)).filter((item) => mobileAccountOwnersEqual(item, owner));
+  const persisted = new Map(items.flatMap((item) => item.placeLogReceipt?.backendId === correctionBackend
+    ? [[item.clientCorrectionId, { ...item, ...item.placeLogReceipt }] as const] : []));
+  const observed = new Map(acknowledged.filter((item) => !item.placeLogReceipt
+    || !mobileAccountOwnersEqual(item, owner) || persisted.has(item.clientCorrectionId))
+    .map((item) => [item.clientCorrectionId, item]));
+  for (const [id, item] of persisted) {
+    const memory = observed.get(id);
+    observed.set(id, { ...item, restoredPlaceLog: memory?.restoredPlaceLog ?? !memory });
+  }
+  acknowledged = [...observed.values()];
+  return items.filter((item) => !item.placeLogReceipt);
 }
 
-/** This owner's corrections the server has had for less than five minutes (see `AcknowledgedTimelineCorrection`). */
+/** Corrections with a newer read pending. Completed place logs survive cold launch in the same bounded store. */
 export function readAcknowledgedTimelineCorrections(owner: MobileAccountOwner, nowMs = Date.now()) {
-  acknowledged = acknowledged.filter((item) => nowMs - item.acknowledgedAt < ACKNOWLEDGED_KEEP_MS);
+  acknowledged = acknowledged.filter((item) => nowMs - item.acknowledgedAt < (item.placeLogReceipt ? PLACE_LOG_KEEP_MS : ACKNOWLEDGED_KEEP_MS));
   return acknowledged.filter((item) => mobileAccountOwnersEqual(item, owner));
+}
+
+async function retainPlaceLogReceipt(owner: MobileAccountOwner, item: AcknowledgedTimelineCorrection, stillCurrent: () => Promise<boolean>) {
+  const receipt: PlaceLogReceipt = { backendId: correctionBackend, acknowledgedAt: item.acknowledgedAt,
+    loggedPlaceEntryIds: item.loggedPlaceEntryIds, resolvedReviewItemIds: item.resolvedReviewItemIds };
+  const committed = await withMutation(async () => {
+    const stored = await readStore();
+    if (!await stillCurrent() || !stored.items.some((candidate) =>
+      candidate.clientCorrectionId === item.clientCorrectionId && mobileAccountOwnersEqual(candidate, owner))) return false;
+    const prior = stored.items.filter((candidate) => candidate.clientCorrectionId !== item.clientCorrectionId
+      && mobileAccountOwnersEqual(candidate, owner) && candidate.placeLogReceipt?.backendId === correctionBackend);
+    const retained = new Set(prior.filter((candidate) => item.acknowledgedAt - candidate.placeLogReceipt!.acknowledgedAt < PLACE_LOG_KEEP_MS)
+      .slice(-(MAX_PLACE_LOG_RECEIPTS - 1)).map((candidate) => candidate.clientCorrectionId));
+    const older = new Set(prior.filter((candidate) => !retained.has(candidate.clientCorrectionId)).map((candidate) => candidate.clientCorrectionId));
+    const next = stored.items.filter((candidate) => candidate.clientCorrectionId !== item.clientCorrectionId && !older.has(candidate.clientCorrectionId));
+    await writeStore(stored, [...next, { ...item, placeLogReceipt: receipt }]);
+    return true;
+  });
+  return committed ? { ...item, placeLogReceipt: receipt } : null;
+}
+
+/** Once the exact place block is visible, its old receipt must never be projected again. */
+export async function retirePlaceLogReceipts(owner: MobileAccountOwner, clientCorrectionIds: readonly string[]) {
+  if (!clientCorrectionIds.length) return;
+  const ids = new Set(clientCorrectionIds);
+  const matches = (item: PendingTimelineCorrection) => mobileAccountOwnersEqual(item, owner)
+    && item.placeLogReceipt?.backendId === correctionBackend && ids.has(item.clientCorrectionId);
+  await withMutation(() => updateAll((items) => items.filter((item) => !matches(item))));
+  acknowledged = acknowledged.filter((item) => !matches(item));
+  notify();
 }
 
 async function removeQuietly(clientCorrectionIds: readonly string[]) {
@@ -375,7 +446,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
-      const { resolvedReviewItemIds, placeId } = await readReceipt(response);
+      const { resolvedReviewItemIds, loggedPlaceEntryIds, placeId } = await readReceipt(response);
       if (!await stillCurrent()) return finish("session_changed");
       let request = next.request;
       if (request.kind === "save_visit_place") {
@@ -398,14 +469,21 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
         // Not marked: kept, and sent again later; its id answers it (#597).
         return finish("retryable_failure");
       }
-      // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
-      acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-        { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
-      deliveredCount += 1;
+      let saved: AcknowledgedTimelineCorrection = {
+        ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}),
+        ...(loggedPlaceEntryIds ? { loggedPlaceEntryIds } : {})
+      };
       try {
-        await removeQuietly([next.clientCorrectionId]);
+        if (request.kind === "log_place") {
+          const retained = await retainPlaceLogReceipt(input.owner, saved, stillCurrent);
+          if (!retained) return finish("session_changed");
+          saved = retained;
+        }
+        acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId), saved];
+        deliveredCount += 1;
+        if (request.kind !== "log_place") await removeQuietly([next.clientCorrectionId]);
       } catch {
-        // Saved on the server; only the local copy stayed. Sent again later, its id answers it (Codex r2 on #598).
+        // The server already saved it. Keep the queued intent so the next pass can fetch the same receipt.
         return finish("retryable_failure");
       }
       // Published as soon as it settles, never after the rest of the pass (Codex r1 on #617): a Logs as's blocks
@@ -436,14 +514,15 @@ async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorre
 /** The review items the server resolved with this correction (#609), when its reply says so. */
 async function readReceipt(response: Response) {
   try {
-    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown };
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown; placeEntryIds?: unknown };
       correction?: { kind?: unknown; target?: { placeId?: unknown } } };
     const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
     const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
       ? body.correction.target.placeId : null;
-    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], placeId };
+    const entries = body?.logged?.placeEntryIds;
+    return { resolvedReviewItemIds: stringIds(ids) ?? [], loggedPlaceEntryIds: stringIds(entries), placeId };
   } catch {
-    return { resolvedReviewItemIds: [], placeId: null };
+    return { resolvedReviewItemIds: [], loggedPlaceEntryIds: undefined, placeId: null };
   }
 }
 

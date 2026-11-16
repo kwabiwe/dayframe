@@ -1,4 +1,4 @@
-import { calendarTripLog, type CalendarTripLog, type CalendarTripHandover } from "./calendarTripLog";
+import { CALENDAR_BLOCK_LOG_ACTIONS, calendarReviewLog, calendarReviewLogTitle, type CalendarReviewLog, type CalendarReviewHandover } from "./calendarReviewLog";
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
@@ -1306,6 +1306,21 @@ export async function loadCachedDashboardBootstrap(): Promise<{
   }
 }
 
+function calendarBlockIds(bootstrap: MobileBootstrap) {
+  return new Set([bootstrap.entries, bootstrap.dayEntries ?? [], bootstrap.weekEntries ?? [], bootstrap.historyEntries ?? []]
+    .flatMap((entries) => entries.map((entry) => entry.id)));
+}
+
+async function cachedCalendarBlockIds(transaction: SQLite.SQLiteDatabase, key: string) {
+  const row = await transaction.getFirstAsync<CachedDashboardRow>(
+    "select snapshot_json, cached_at from dashboard_snapshot_cache where account_key = ?", key);
+  try {
+    return row ? calendarBlockIds(JSON.parse(row.snapshot_json) as MobileBootstrap) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, requestedAt: number) {
   const db = await database();
   const account = await activeAccount(db);
@@ -1322,7 +1337,7 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, reques
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     if ((await activeAccount(transaction))?.account_key !== account.account_key) return;
     // All refresh entry points share this cache. A response finishing late must not erase
-    // the block that already replaced a durable trip receipt.
+    // the block that already replaced a durable review receipt.
     const written = await transaction.runAsync(
       `insert into dashboard_snapshot_cache (
          account_key, snapshot_json, cached_at
@@ -1336,11 +1351,10 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, reques
     if (!written.changes) return;
     const backendId = bootstrap.serverBuild?.backendId ?? DAYFRAME_BACKEND_ID;
     if (backendId) {
-      const receiptKey = calendarTripReceiptKey({ userId: account.user_id, workspaceId: account.workspace_id, backendId });
-      const receipts = parseTripHandovers(await metadata(receiptKey, transaction));
+      const receiptKey = calendarReviewReceiptKey({ userId: account.user_id, workspaceId: account.workspace_id, backendId });
+      const receipts = parseReviewHandovers(await metadata(receiptKey, transaction));
       if (receipts.length) {
-        const blockIds = new Set([bootstrap.entries, bootstrap.dayEntries ?? [], bootstrap.weekEntries ?? [], bootstrap.historyEntries ?? []]
-          .flatMap((entries) => entries.map((entry) => entry.id)));
+        const blockIds = calendarBlockIds(bootstrap);
         const waiting = receipts.filter((log) => !log.entryIds.some((id) => blockIds.has(id)));
         if (waiting.length !== receipts.length) await setMetadata(receiptKey, JSON.stringify(waiting), transaction);
       }
@@ -1373,7 +1387,7 @@ export async function cacheReviewPresentation(input: {
   const now = new Date().toISOString();
   let wrote = false;
   let evicted = 0;
-  let tripHandover: CalendarTripHandover[] = [];
+  let reviewHandover: CalendarReviewHandover[] = [];
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (
@@ -1457,16 +1471,17 @@ export async function cacheReviewPresentation(input: {
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
     if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt, scopeKey, input.owner.backendId);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
-    const acceptedTrips = await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
-    if (acceptedTrips.length) {
+    const acceptedLogs = await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
+    if (acceptedLogs.length) {
       const observedAt = Date.now();
-      tripHandover = acceptedTrips.map((log) => ({ ...log, observedAt }));
-      const receiptKey = calendarTripReceiptKey(input.owner);
-      const retained = parseTripHandovers(await metadata(receiptKey, transaction));
+      reviewHandover = acceptedLogs.map((log) => ({ ...log, observedAt }));
+      const receiptKey = calendarReviewReceiptKey(input.owner);
+      const retained = parseReviewHandovers(await metadata(receiptKey, transaction));
       const merged = new Map(retained.map((log) => [log.check.id, log]));
-      for (const log of tripHandover) {
+      const cached = await cachedCalendarBlockIds(transaction, key);
+      for (const log of reviewHandover) {
         merged.delete(log.check.id);
-        merged.set(log.check.id, log);
+        if (!log.entryIds.some((id) => cached.has(id))) merged.set(log.check.id, log);
       }
       await setMetadata(receiptKey, JSON.stringify([...merged.values()].slice(-REVIEW_PRESENTATION_MAX_IDS)), transaction);
     }
@@ -1475,8 +1490,8 @@ export async function cacheReviewPresentation(input: {
   }));
   if (wrote) {
     reviewCacheEvictedCount += evicted;
-    if (tripHandover.length) {
-      for (const listener of calendarTripHandoverListeners) listener(input.owner, tripHandover);
+    if (reviewHandover.length) {
+      for (const listener of calendarReviewHandoverListeners) listener(input.owner, reviewHandover);
     }
     emitChange();
   }
@@ -1957,7 +1972,7 @@ async function materialiseAcknowledgedReviewHandover(
   response: ReviewPresentationSnapshot,
   backendId: string
 ) {
-  const tripHandover: CalendarTripLog[] = [];
+  const reviewHandover: CalendarReviewLog[] = [];
   const rows = await transaction.getAllAsync<{
     client_mutation_id: string;
     review_item_id: string;
@@ -2023,12 +2038,15 @@ async function materialiseAcknowledgedReviewHandover(
         accountKeyValue, effect.review_item_id, backendId, response.capturedAt
       );
       if (reopened) continue;
-      if (envelope.mutation.action === "confirm" && effect.review_item_id === row.review_item_id
+      if (CALENDAR_BLOCK_LOG_ACTIONS.includes(envelope.mutation.action) && effect.review_item_id === row.review_item_id
         && terminalById.get(effect.review_item_id) === "accepted") {
-        const present = resultEntryIds.filter((id) => lookupEntries.get(id) === "present");
+        const ownLinks = linksByReviewId.get(effect.review_item_id)?.entryIds;
+        const ownIds = envelope.mutation.action === "confirm_outing"
+          ? acknowledgementAnchorEntryIds(acknowledgement) ?? ownLinks ?? [] : resultEntryIds;
+        const present = ownIds.filter((id) => lookupEntries.get(id) === "present");
         const original = parseReviewSnapshot(row.original_snapshot_json);
-        const log = present.length ? calendarTripLog(original ?? undefined, present) : null;
-        if (log) tripHandover.push(log);
+        const log = present.length ? calendarReviewLog(original ?? undefined, present, calendarReviewLogTitle(envelope.mutation)) : null;
+        if (log) reviewHandover.push(log);
       }
       await transaction.runAsync(
         `delete from review_item_cache where account_key = ? and review_item_id = ?`,
@@ -2043,7 +2061,7 @@ async function materialiseAcknowledgedReviewHandover(
       row.client_mutation_id
     );
   }
-  return tripHandover;
+  return reviewHandover;
 }
 
 function terminalStatusesFromPresentation(response: ReviewPresentationSnapshot) {
@@ -2087,6 +2105,12 @@ function acknowledgementEntryIds(value: Record<string, unknown>) {
     ...(Array.isArray(value.entryIds) ? value.entryIds.filter((id): id is string => typeof id === "string") : [])
   ].filter((id): id is string => Boolean(id));
   return [...new Set(ids)];
+}
+
+function acknowledgementAnchorEntryIds(value: Record<string, unknown>) {
+  if (!Array.isArray(value.anchorEntryIds)) return undefined;
+  const ids = new Set(acknowledgementEntryIds(value));
+  return value.anchorEntryIds.filter((id): id is string => typeof id === "string" && ids.has(id));
 }
 
 function acknowledgementRequiresLinkedResult(
@@ -3122,14 +3146,14 @@ export async function readPendingTimerTripClashEnds(owner: { workspaceId: string
   });
 }
 
-function calendarTripReceiptKey(owner: ReviewPresentationOwner) {
+function calendarReviewReceiptKey(owner: ReviewPresentationOwner) {
   return accountMetadataKey(`calendar_trip_handover:${owner.backendId}`, accountKey(owner));
 }
 
-function parseTripHandovers(value: string | null): CalendarTripHandover[] {
+function parseReviewHandovers(value: string | null): CalendarReviewHandover[] {
   if (!value) return [];
   try {
-    const logs = JSON.parse(value) as CalendarTripHandover[];
+    const logs = JSON.parse(value) as CalendarReviewHandover[];
     const since = Date.now() - 8 * 86_400_000;
     return Array.isArray(logs) ? logs.filter((log) => log?.check?.id && log.observedAt >= since && Array.isArray(log.entryIds)) : [];
   } catch {
@@ -3137,47 +3161,51 @@ function parseTripHandovers(value: string | null): CalendarTripHandover[] {
   }
 }
 
-export async function readCalendarTripHandovers(owner: ReviewPresentationOwner) {
-  return parseTripHandovers(await metadata(calendarTripReceiptKey(owner)));
+export async function readCalendarReviewHandovers(owner: ReviewPresentationOwner) {
+  return parseReviewHandovers(await metadata(calendarReviewReceiptKey(owner)));
 }
 
 /** A fresh day read found the trip's result gone before the bootstrap could display it. */
-export async function forgetCalendarTripHandovers(owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) {
-  const key = calendarTripReceiptKey(owner);
+export async function forgetCalendarReviewHandovers(owner: ReviewPresentationOwner, logs: readonly CalendarReviewHandover[]) {
+  const key = calendarReviewReceiptKey(owner);
   const seen = new Map(logs.map((log) => [log.check.id, log.observedAt]));
   const db = await database();
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     if ((await activeAccount(transaction))?.account_key !== accountKey(owner)) return;
-    const existing = parseTripHandovers(await metadata(key, transaction));
+    const existing = parseReviewHandovers(await metadata(key, transaction));
     const retained = existing.filter((log) => seen.get(log.check.id) !== log.observedAt);
     if (retained.length !== existing.length) await setMetadata(key, JSON.stringify(retained), transaction);
   }));
 }
 
-const calendarTripHandoverListeners = new Set<(owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) => void>();
+const calendarReviewHandoverListeners = new Set<(owner: ReviewPresentationOwner, logs: readonly CalendarReviewHandover[]) => void>();
 
 /** A committed Review lookup can retire an outbox item before the Calendar has read its resulting block. */
-export function subscribeCalendarTripHandover(listener: (owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) => void) {
-  calendarTripHandoverListeners.add(listener);
-  return () => { calendarTripHandoverListeners.delete(listener); };
+export function subscribeCalendarReviewHandover(listener: (owner: ReviewPresentationOwner, logs: readonly CalendarReviewHandover[]) => void) {
+  calendarReviewHandoverListeners.add(listener);
+  return () => { calendarReviewHandoverListeners.delete(listener); };
 }
 
-/** Project accepted trip rows while the outbox is still waiting for canonical data. */
-export async function readPendingCalendarTripLogs(owner: { workspaceId: string; userId: string }): Promise<CalendarTripLog[]> {
+/** Project accepted review rows while the outbox is still waiting for canonical data. */
+export async function readPendingCalendarReviewLogs(owner: { workspaceId: string; userId: string }): Promise<CalendarReviewLog[]> {
   const db = await database();
-  const rows = await db.getAllAsync<{ original_snapshot_json: string; acknowledgement_json: string | null }>(
-    `select original_snapshot_json, acknowledgement_json
+  const rows = await db.getAllAsync<{ original_snapshot_json: string; request_json: string; acknowledgement_json: string | null }>(
+    `select original_snapshot_json, request_json, acknowledgement_json
        from review_mutation_outbox
-      where account_key = ? and action_kind = 'confirm' and (state <> 'needs_attention' or ${unknownOutcomeSql()})
-        and case when json_valid(original_snapshot_json) then json_extract(original_snapshot_json, '$.eventType') end = 'commute_detected'
+      where account_key = ? and action_kind in (${CALENDAR_BLOCK_LOG_ACTIONS.map(() => "?").join(", ")})
+        and (state <> 'needs_attention' or ${unknownOutcomeSql()})
       order by created_at desc, client_mutation_id desc
       limit ?`,
-    accountKey(owner), REVIEW_PRESENTATION_MAX_IDS
+    accountKey(owner), ...CALENDAR_BLOCK_LOG_ACTIONS, REVIEW_PRESENTATION_MAX_IDS
   );
   return rows.flatMap((row) => {
     const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
-    const item = JSON.parse(row.original_snapshot_json) as MobileReviewItem;
-    const log = calendarTripLog(item, acknowledgement ? acknowledgementEntryIds(acknowledgement) : []);
+    const item = parseReviewSnapshot(row.original_snapshot_json);
+    const mutation = parseReviewMutationEnvelope(row.request_json)?.mutation;
+    if (!item || !mutation) return [];
+    const entryIds = !acknowledgement ? [] : mutation.action === "confirm_outing"
+      ? acknowledgementAnchorEntryIds(acknowledgement) ?? [] : acknowledgementEntryIds(acknowledgement);
+    const log = calendarReviewLog(item, entryIds, calendarReviewLogTitle(mutation));
     return log ? [log] : [];
   });
 }

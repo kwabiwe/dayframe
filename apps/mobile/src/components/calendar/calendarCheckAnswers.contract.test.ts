@@ -72,7 +72,7 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(answers).toContain("start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
-    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
+    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments");
   });
 
   it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {
@@ -99,7 +99,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { answer, answeredYesIds, tripLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };");
+    expect(hook).toContain("return { answer, answeredYesIds, reviewLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
     expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
     expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");
