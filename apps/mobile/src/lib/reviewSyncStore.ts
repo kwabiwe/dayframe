@@ -1318,8 +1318,9 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
   }
   const cachedAt = new Date().toISOString();
   const snapshot = JSON.stringify(sanitiseDashboardBootstrapForCache(bootstrap));
-  return serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
-    if ((await activeAccount(transaction))?.account_key !== account.account_key) return false;
+  let wrote = false;
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    if ((await activeAccount(transaction))?.account_key !== account.account_key) return;
     await transaction.runAsync(
       `insert into dashboard_snapshot_cache (
          account_key, snapshot_json, cached_at
@@ -1340,8 +1341,9 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
         if (waiting.length !== receipts.length) await setMetadata(receiptKey, JSON.stringify(waiting), transaction);
       }
     }
-    return true;
+    wrote = true;
   }));
+  return wrote;
 }
 
 /**
