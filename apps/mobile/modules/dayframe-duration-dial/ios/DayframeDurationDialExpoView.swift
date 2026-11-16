@@ -65,6 +65,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   private let endButton = DayframeAdjustableButton(type: .custom)
   private let rangeButton = DayframeAdjustableButton(type: .custom)
   private let roundDurationButton = UIButton(type: .system)
+  private static let roundDurationTitle = "ROUND DURATION"
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -84,7 +85,8 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     pan.cancelsTouchesInView = false
     addGestureRecognizer(pan)
 
-    roundDurationButton.setTitle("Round duration", for: .normal)
+    roundDurationButton.setTitle(Self.roundDurationTitle, for: .normal)
+    roundDurationButton.accessibilityLabel = "Round duration"
     roundDurationButton.accessibilityIdentifier = "time-entry-round-duration"
     roundDurationButton.accessibilityHint = "Rounds the block length. Done saves it."
     roundDurationButton.titleLabel?.numberOfLines = 2
@@ -487,15 +489,26 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     return (result, displaySize)
   }
 
+  private var roundDurationButtonWidth: CGFloat {
+    max(44, min(156, 2 * (dialRadius() - DayframeDurationDialStyle.ringWidth)))
+  }
+
   private var roundDurationFont: UIFont {
-    UIFontMetrics(forTextStyle: .footnote).scaledFont(
+    let font = UIFontMetrics(forTextStyle: .footnote).scaledFont(
       for: .systemFont(ofSize: 12.5, weight: .semibold), maximumPointSize: 14, compatibleWith: traitCollection
     )
+    // The uppercase title can wrap at its space on the condensed dial. Keep each word
+    // intact with padding from the ring, while the 44-point button still fills the centre.
+    let widestWord = Self.roundDurationTitle.split(separator: " ").map {
+      (String($0) as NSString).size(withAttributes: [.font: font]).width
+    }.max() ?? 1
+    let scale = min(1, (roundDurationButtonWidth - 4) / widestWord)
+    return font.withSize(font.pointSize * scale)
   }
 
   private func roundDurationLayout(centre: CGPoint, numberHeight: CGFloat, font: UIFont) -> (numberTop: CGFloat, button: CGRect) {
-    let width = max(44, min(156, 2 * (dialRadius() - DayframeDurationDialStyle.ringWidth)))
-    let titleWidth = ("Round duration" as NSString).size(withAttributes: [.font: font]).width
+    let width = roundDurationButtonWidth
+    let titleWidth = (Self.roundDurationTitle as NSString).size(withAttributes: [.font: font]).width
     let titleHeight = font.lineHeight * (titleWidth > width ? 2 : 1)
     let gap: CGFloat = 2
     let numberTop = centre.y - (numberHeight + gap + titleHeight) / 2
