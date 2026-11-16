@@ -57,6 +57,8 @@ type MobileRequestDispatch = {
   /** Runs within the request deadline, after the final async ownership check. */
   beforeDispatch?: () => Promise<void>;
   onDispatch?: () => void;
+  /** Observe the status while the request still owns its authenticated session. */
+  onAuthenticationRejected?: (status: number) => void;
 };
 
 /**
@@ -69,7 +71,8 @@ type MobileRequestDispatch = {
 export async function mobileFetch(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {},
-  handleAuthentication = true
+  handleAuthentication = true,
+  onAuthenticationRejected?: MobileRequestDispatch["onAuthenticationRejected"]
 ) {
   const requestGeneration = connectivityRequestGeneration();
   let response: Response;
@@ -84,6 +87,7 @@ export async function mobileFetch(
   reportHttpTransportResponse({ requestGeneration });
   const rejectedToken = bearerToken(init.headers);
   if (handleAuthentication && (response.status === 401 || response.status === 403) && rejectedToken) {
+    onAuthenticationRejected?.(response.status);
     const invalidated = await invalidateMobileSessionIfCurrent(rejectedToken);
     if (!invalidated) throw new StaleMobileSessionResponseError();
   }
@@ -117,7 +121,7 @@ export function isRetryableMobileConnectivityFailure(error: unknown) {
 export async function mobileFetchWithTimeout(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {},
-  deadline: MobileRequestDeadline
+  deadline: MobileRequestDeadline & MobileRequestDispatch
 ) {
   return mobileRequestOperation(input, init, deadline, response => Promise.resolve(response));
 }
@@ -182,14 +186,23 @@ async function mobileRequestOperation<T>(
         if (deadline.beforeDispatch) await deadline.beforeDispatch();
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         deadline.onDispatch?.();
-        const response = await mobileFetch(input, { ...init, signal: controller.signal }, handleAuthentication && !authenticateAfterConsume);
+        const response = await mobileFetch(
+          input, { ...init, signal: controller.signal },
+          handleAuthentication && !authenticateAfterConsume,
+          deadline.onAuthenticationRejected && ((status) => {
+            if (!controller.signal.aborted) deadline.onAuthenticationRejected?.(status);
+          })
+        );
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         const result = await consume(response);
         if (controller.signal.aborted) throw callerAbortReason(callerSignal);
         if (isCurrent && !await isCurrent()) throw new StaleMobileSessionResponseError();
         if (handleAuthentication && authenticateAfterConsume && (response.status === 401 || response.status === 403)) {
           const token = bearerToken(init.headers);
-          if (token && !await invalidateMobileSessionIfCurrent(token)) throw new StaleMobileSessionResponseError();
+          if (token) {
+            deadline.onAuthenticationRejected?.(response.status);
+            if (!await invalidateMobileSessionIfCurrent(token)) throw new StaleMobileSessionResponseError();
+          }
         }
         return result;
       })(),

@@ -17,7 +17,7 @@ export const MAX_SYNC_DIAGNOSTIC_RECORDS = 200;
 const MAX_STORAGE_LENGTH = 64 * 1024;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const LANES = ["timer_stop", "timer_activity", "legacy_location", "location_upload", "recovery", "connectivity"] as const;
-const REASONS = ["transport", "server", "invalid_acknowledgement", "target_unavailable"] as const;
+const REASONS = ["transport", "timeout", "server", "invalid_acknowledgement", "target_unavailable"] as const;
 const EVENTS = [
   "queued", "attempted", "delivered", "retry_pending", "retry_scheduled", "rejected",
   "partial", "rebatched", "discarded", "offline", "online", "completed", "failed",
@@ -136,7 +136,10 @@ function flushPendingHistory() {
   writing = Promise.resolve().then(async () => {
     const batch = pending;
     pending = undefined;
-    if (!batch || !isSyncDiagnosticScopeCurrent(batch.scope)) return;
+    if (!batch) return;
+    // Admission already checked the account and session. Finish accepted records for their
+    // original partition, including a 401 that immediately invalidates that session.
+    // The single writer prevents an older batch from overwriting a newer partition's write.
     const partition = await partitionFor(batch.scope);
     const existing = await readHistory(partition);
     const hashes = new Map<string, Promise<string>>();
@@ -150,12 +153,9 @@ function flushPendingHistory() {
       }
       return { ...row, work: (await work).slice(0, 24) };
     }));
-    if (!isSyncDiagnosticScopeCurrent(batch.scope)) return;
     const records = [...existing, ...rows].slice(-MAX_SYNC_DIAGNOSTIC_RECORDS);
     const { syncDiagnosticStorage } = await loadStorage();
-    if (isSyncDiagnosticScopeCurrent(batch.scope)) {
-      await syncDiagnosticStorage.setItemAsync(HISTORY_KEY, JSON.stringify({ partition, records }));
-    }
+    await syncDiagnosticStorage.setItemAsync(HISTORY_KEY, JSON.stringify({ partition, records }));
   }).catch(() => {
     // Diagnostics can be lost if storage is unavailable; delivery must never wait for them.
   }).finally(() => {

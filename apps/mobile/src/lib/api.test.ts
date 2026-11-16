@@ -254,6 +254,62 @@ describe("mobile API client", () => {
     }
   });
 
+  it.each(["timer_stop", "timer_activity"] as const)("retains a %s 401 across invalidation and same-account sign-in", async (lane) => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("expired-synthetic-session");
+      const owner = TIMER_STOP_OWNER;
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "private details" }, 401)));
+      if (lane === "timer_stop") {
+        const stop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+        await expect(deliverPendingTimerStop(stop, owner)).rejects.toBeInstanceOf(AuthRequiredError);
+        expect(await readPendingTimerStops()).toHaveLength(1);
+      } else {
+        await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
+        await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
+        expect(await readQueue()).toHaveLength(1);
+      }
+      expect(await getSessionToken()).toBeNull();
+      await setSessionToken("replacement-synthetic-session", owner);
+      await activateMobileAccount(owner);
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const message = share.mock.calls[0][0].message;
+      const rows = JSON.parse(message).records;
+      expect(rows.map((row: { event: string }) => row.event)).toEqual(["queued", "attempted", "authentication_required"]);
+      expect(rows[2]).toMatchObject({ lane, status: 401, work: rows[0].work });
+      expect(message).not.toContain("private details");
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("explains why a Stop for a refused optimistic Start disappeared", async () => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("synthetic-bearer");
+      const owner = TIMER_STOP_OWNER;
+      await enqueueEvent({ owner, localId: "refused-start", source: "mobile_app", type: "timer_start" });
+      await getOrCreatePendingStop({ owner, target: { optimisticEntryId: "refused-start" } });
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)));
+      await syncQueue({ eventScope: "timer_mutations" });
+      expect(await readPendingTimerStops()).toHaveLength(0);
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const stops = JSON.parse(share.mock.calls[0][0].message).records.filter((row: { lane: string }) => row.lane === "timer_stop");
+      expect(stops).toEqual([
+        expect.objectContaining({ event: "queued" }),
+        expect.objectContaining({ event: "discarded", reason: "target_unavailable", work: stops[0].work })
+      ]);
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("preserves captured Health identity across staging/production with cloned account UUIDs", async () => {
     storeBoundSession("session-token");
     const captured={...TIMER_STOP_OWNER,backendId:"staging-fixture"};

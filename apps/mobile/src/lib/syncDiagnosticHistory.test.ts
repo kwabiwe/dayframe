@@ -153,6 +153,28 @@ describe("local sync diagnostic history", () => {
     expect(share.share).not.toHaveBeenCalled();
   });
 
+  it("serializes an accepted old-account write ahead of the new account's history", async () => {
+    const oldScope = history.captureSyncDiagnosticScope();
+    let release!: () => void;
+    fixture.write.mockImplementationOnce(async (key, value) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      fixture.storage.set(key, value);
+    });
+    history.recordSyncDiagnostic(oldScope, { lane: "timer_stop", event: "authentication_required", status: 401 }, "old-stop");
+    await vi.waitFor(() => expect(fixture.write).toHaveBeenCalledOnce());
+    fixture.owner = { ...ownerA, userId: "replacement-synthetic-user" };
+    fixture.epoch += 1;
+    fixture.generation += 1;
+    history.recordSyncDiagnostic(history.captureSyncDiagnosticScope(), { lane: "location_upload", event: "queued" }, "new-batch");
+    history.recordSyncDiagnostic(oldScope, { lane: "timer_stop", event: "delivered" }, "old-stop");
+    release();
+
+    const share = shareFixture();
+    await share.export();
+    expect(share.json().records).toEqual([expect.objectContaining({ lane: "location_upload", event: "queued" })]);
+    expect(fixture.write).toHaveBeenCalledTimes(2);
+  });
+
   it("does not share after leaving Sync help while preparing and surfaces read failure", async () => {
     const share = shareFixture();
     const scope = history.captureSyncDiagnosticScope();

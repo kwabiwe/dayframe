@@ -257,6 +257,7 @@ export async function removePendingTimerStopsForTarget(
   owner: TimerStopOwner,
   target: TimerStopTarget
 ) {
+  const diagnosticScope = captureSyncDiagnosticScope(owner);
   return withTimerStopOutboxMutation(async () => {
     const outbox = await readPendingTimerStopsUnlocked();
     const removed = outbox.filter((item) =>
@@ -265,6 +266,11 @@ export async function removePendingTimerStopsForTarget(
     if (removed.length === 0) return [];
     const removedIds = new Set(removed.map((item) => item.clientEventId));
     await writePendingTimerStops(outbox.filter((item) => !removedIds.has(item.clientEventId)));
+    for (const item of removed) {
+      recordSyncDiagnostic(diagnosticScope, {
+        lane: "timer_stop", event: "discarded", reason: "target_unavailable"
+      }, item.clientEventId);
+    }
     return removed;
   });
 }

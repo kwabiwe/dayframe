@@ -80,7 +80,7 @@ import {
 } from "./timerBackgroundExecution";
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
-import { captureSyncDiagnosticScope, MAX_SYNC_DIAGNOSTIC_RECORDS, recordSyncDiagnostic } from "./syncDiagnosticHistory";
+import { captureSyncDiagnosticScope, MAX_SYNC_DIAGNOSTIC_RECORDS, recordSyncDiagnostic, type SyncDiagnosticReason } from "./syncDiagnosticHistory";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -1593,6 +1593,7 @@ async function syncQueueItems(
   diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>
 ): Promise<SyncQueueResult> {
   const acceptedStatuses = new Map<string, number>();
+  const failureReasons = new Map<string, SyncDiagnosticReason>();
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
@@ -1665,6 +1666,7 @@ async function syncQueueItems(
     }
 
     const attemptedAt = new Date().toISOString();
+    const lane = activityDiagnosticLane(item);
     let locationTransfer: Awaited<ReturnType<typeof import("./location/store").openLegacyLocationTransfer>> = undefined;
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
@@ -1691,7 +1693,6 @@ async function syncQueueItems(
         }
       }
       const transfer = locationTransfer;
-      const lane = activityDiagnosticLane(item);
       const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
         `${DAYFRAME_API_BASE}/api/events`,
         {
@@ -1719,12 +1720,14 @@ async function syncQueueItems(
             }
             if (lane) recordSyncDiagnostic(diagnosticScope, { lane, event: "attempted", attempt: (item.failureCount ?? 0) + 1 }, item.localId);
           },
+          onAuthenticationRejected: lane ? (status) => recordSyncDiagnostic(diagnosticScope, {
+            lane, event: "authentication_required", status
+          }, item.localId) : undefined,
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
       );
       if (response.status === 401 || response.status === 403) {
-        if (lane) recordSyncDiagnostic(diagnosticScope, { lane, event: "authentication_required", status: response.status }, item.localId);
         throw new AuthRequiredError();
       }
       if (
@@ -1816,6 +1819,12 @@ async function syncQueueItems(
       }
       const message = error instanceof Error ? error.message : "Network request failed";
       const failureKind = isMobileTransportFailure(error) ? "network" : "server";
+      if (lane) {
+        const reason = error instanceof MobileRequestTimeoutError ? "timeout" :
+          error instanceof InvalidMobileAcknowledgementError ? "invalid_acknowledgement" :
+          failureKind === "network" ? "transport" : undefined;
+        if (reason) failureReasons.set(item.localId, reason);
+      }
       const failedItem = keepParked(item, markQueueFailure(item, message, attemptedAt, failureKind));
       firstError ??= queueFailureReport(failedItem, message, failedItem.failureKind ?? failureKind);
       if (isolated && failureKind === "server") {
@@ -1834,7 +1843,7 @@ async function syncQueueItems(
     owner,
     processed: queue,
     remaining,
-    synced: [...synced, ...dropped], acceptedStatuses, diagnosticScope
+    synced: [...synced, ...dropped], acceptedStatuses, failureReasons, diagnosticScope
   });
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).
@@ -2022,7 +2031,6 @@ export async function deliverPendingTimerStop(
   const attempt = (pendingStop.failureCount ?? 0) + 1;
   const lane = "timer_stop";
   try {
-    recordSyncDiagnostic(diagnosticScope, { lane, event: "attempted", attempt }, pendingStop.clientEventId);
     const response = await mobileFetchWithTimeout(
       `${DAYFRAME_API_BASE}/api/events`,
       {
@@ -2045,12 +2053,17 @@ export async function deliverPendingTimerStop(
         signal
       },
       {
+        onDispatch: () => recordSyncDiagnostic(diagnosticScope, {
+          lane, event: "attempted", attempt
+        }, pendingStop.clientEventId),
+        onAuthenticationRejected: (status) => recordSyncDiagnostic(diagnosticScope, {
+          lane, event: "authentication_required", attempt, status
+        }, pendingStop.clientEventId),
         timeoutMilliseconds: MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS,
         timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
       }
     );
     if (response.status === 401 || response.status === 403) {
-      recordSyncDiagnostic(diagnosticScope, { lane, event: "authentication_required", attempt, status: response.status }, pendingStop.clientEventId);
       throw new AuthRequiredError();
     }
     if (
@@ -2090,7 +2103,8 @@ export async function deliverPendingTimerStop(
       failureKind: "retryable"
     });
     if (updated) recordSyncDiagnostic(diagnosticScope, {
-      lane, event: "retry_pending", attempt, reason: isMobileTransportFailure(error) ? "transport" : undefined
+      lane, event: "retry_pending", attempt,
+      reason: error instanceof MobileRequestTimeoutError ? "timeout" : isMobileTransportFailure(error) ? "transport" : undefined
     }, pendingStop.clientEventId);
     return {
       status: "retryable_failure",
@@ -3212,6 +3226,7 @@ function reconcileActivityQueueDrain(input: {
   remaining: readonly QueuedEvent[];
   synced: readonly string[];
   acceptedStatuses: ReadonlyMap<string, number>;
+  failureReasons: ReadonlyMap<string, SyncDiagnosticReason>;
   diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>;
 }) {
   return withQueueMutation(async () => {
@@ -3268,7 +3283,7 @@ function reconcileActivityQueueDrain(input: {
         lane, event: isPermanentlyFailedEvent(failed) && !isParkedNonTimerEvent(failed) ? "rejected"
           : retryAt === undefined ? "retry_pending" : "retry_scheduled",
         attempt: failed.failureCount, status: failed.lastStatusCode, retryAt,
-        reason: failed.failureKind === "network" ? "transport" : "server"
+        reason: input.failureReasons.get(item.localId) ?? (failed.lastStatusCode === undefined ? undefined : "server")
       }, item.localId);
     }
     return next.filter((item) => queuedEventMatchesOwner(item, input.owner));

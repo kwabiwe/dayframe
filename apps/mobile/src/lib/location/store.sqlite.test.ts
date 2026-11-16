@@ -57,6 +57,49 @@ describe("Location real SQLite drain results",()=>{
     expect(message).not.toContain(secret);
   }
  });
+ it("does not claim to schedule a retry for an upload cleared while in flight", async () => {
+  await seed();
+  let finish!: (response: Response) => void;
+  const started = new Promise<void>((resolve) => {
+   mocks.fetch.mockImplementationOnce(() => {
+    resolve();
+    return new Promise<Response>((settle) => { finish = settle; });
+   });
+  });
+  const pass = store.syncLocationEvidence();
+  await started;
+  expect(await store.deleteRetainedLocationEvidence()).toEqual({ deletedCount: 1 });
+  finish(new Response("{}", { status: 503 }));
+  await pass;
+  expect(db.prepare("select count(*) as count from location_upload_outbox").get()!.count).toBe(0);
+
+  const history = await import("../syncDiagnosticHistory");
+  const share = vi.fn(async (_content: { message: string }) => {});
+  expect(await history.exportSyncDiagnosticHistory(history.captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+  const rows = JSON.parse(share.mock.calls[0][0].message).records;
+  expect(rows.map((row: { event: string }) => row.event)).toEqual(["queued", "attempted", "interrupted"]);
+  expect(rows[2]).toMatchObject({ status: 503, work: rows[0].work });
+ });
+
+ it("classifies a Location deadline without claiming an HTTP failure", async () => {
+  vi.useFakeTimers();
+  await seed();
+  let start!: () => void;
+  const started = new Promise<void>((resolve) => { start = resolve; });
+  mocks.fetch.mockImplementationOnce(() => { start(); return new Promise<Response>(() => {}); });
+  const pass = store.syncLocationEvidence({ deadlineAt: Date.now() + 1000 });
+  await started;
+  await vi.advanceTimersByTimeAsync(1000);
+  await pass;
+
+  const history = await import("../syncDiagnosticHistory");
+  const share = vi.fn(async (_content: { message: string }) => {});
+  await history.exportSyncDiagnosticHistory(history.captureSyncDiagnosticScope(owner), share, () => true);
+  const rows = JSON.parse(share.mock.calls[0][0].message).records;
+  expect(rows.at(-1)).toMatchObject({ event: "retry_scheduled", reason: "timeout", retryAt: expect.any(String) });
+  expect(rows.at(-1)).not.toHaveProperty("status");
+ });
+
  it.each(["upload", "replay"])("real %s responses retain compatible cutover and acknowledge actual mode transitions",async endpoint=>{
   vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-09-30T08:00:00Z");vi.setSystemTime(start);
   let mode:"v2_review"|"v2_enabled"|"v2_shadow"="v2_review",sequence=0;
