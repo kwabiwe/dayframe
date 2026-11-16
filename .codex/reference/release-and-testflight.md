@@ -39,16 +39,25 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (149)` (2026-11-15)
+- Last repository-recorded verified build: `0.1.0 (150)` (2026-11-16)
 - Group: `Internal Health Debug`
+- App Store Connect build ID: `d105d184-5326-469d-8c0d-6e14183bd2c1`
+- Archived commit: `f4d85879b055abe390c08d99e4acbad5c2e85170`, built in a detached worktree pinned to that SHA.
+- Apple upload delivery UUID `d105d184-5326-469d-8c0d-6e14183bd2c1`. App Store Connect recorded the upload at 08:53:37 GMT on 16 Nov 2026. The distribution-signed app and Live Activity extension use the production shared containers and `https://dayframe-web.vercel.app`.
+- On the wired iPhone 11, exact signed Staging passed sign-in, Switch suggestions and Cancel, Calendar day navigation, Reports Week and Month, and the description filter with the keyboard open. The field and Apply stayed visible with a populated filter list. Cleanup removed the disposable fixture and runner and restored the prior Staging app and alias.
+- The warm-up measured 6.7672% CPU and +2.8384 MB/min over 335.147 s. The warmed gate measured 6.7206% CPU and +0.5555 MB/min over 335.237 s against the 15.1% CPU and 2 MB/min iPhone 11 limits. The same Today timer advanced 706 s across 706 s between captures.
+- App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 150 includes the aligned block editors and iPhone task suggestions (#728), per-day Calendar review indicators and trip logging (#729), and Reports filters and donut deselection (#730). Installed TestFlight 150 checks are pending.
+- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
+
+Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
+
+Build 149 was verified in Internal Health Debug on 15 Nov 2026.
+
 - App Store Connect build ID: `20c6de28-4853-47d9-858b-0d4a9b86bdba`
 - Archived commit: `7fcc7a04f6aeea1aee3ea9119da73c1883ebcb12`, built in a detached worktree pinned to that SHA.
 - Apple upload delivery UUID `20c6de28-4853-47d9-858b-0d4a9b86bdba`. App Store Connect recorded the upload at 10:06:56 GMT on 15 Nov 2026. The Apple Distribution-signed app and Live Activity extension use the production shared containers and `https://dayframe-web.vercel.app`.
 - The wired iPhone 11 passed exact signed Staging sign-in, Today Switch and Cancel, Calendar date navigation and completed-block editing, and Reports Week and Month. The warm-up measured 6.7705% CPU and +2.2380 MB/min over 363.489 s. The warmed gate measured 6.7796% CPU and +0.4357 MB/min over 334.976 s against the 15.1% CPU and 2 MB/min iPhone 11 limits. The same visible timer advanced 734 s across 734 s between captures. Cleanup verified removal of the disposable fixture and runner, and restoration of the prior signed app and Staging alias.
 - App Store Connect verified `VALID`, export compliance, en-GB notes and `IN_BETA_TESTING` in Internal Health Debug. Build 149 includes distinct pinned activity states (#720), new and recent iPhone task switching (#724), a clearer neutral Calendar block edge (#725), and completed-block move and resize with Undo (#726). Installed TestFlight 149 checks are pending.
-- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
-
-Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
 Build 148 was verified in Internal Health Debug on 9 Nov 2026.
 
