@@ -273,6 +273,18 @@ export function useLocationCorrections({
   // `recordOwner`: the account its waiting record was registered for; every write to it is for that account (Codex r15).
   const [heldLog, setHeldLog] = useState<{ token: number; ownerKey: string; title: string; request: QueuedCorrection["request"];
     afterCorrections?: string; recordOwner?: MobileAccountOwner } | null>(null);
+  // While the outbox write is being published, List keeps the same place row through the handoff.
+  const [publishingLogs, setPublishingLogs] = useState<{
+    id: string; ownerKey: string; request: QueuedCorrection["request"];
+  }[]>([]);
+  useEffect(() => {
+    setPublishingLogs((current) => {
+      const visible = current.filter((log) => log.ownerKey === ownerKey
+        && !pending.some((item) => item.clientCorrectionId === log.id)
+        && !acknowledged.some((item) => item.clientCorrectionId === log.id));
+      return visible.length === current.length ? current : visible;
+    });
+  }, [acknowledged, ownerKey, pending]);
   const logTokens = useRef(0);
   const sentLogs = useRef(new Set<string>());
   // Kept on the phone for the account it was picked for; sent only while the app is in front (the queue's own
@@ -307,11 +319,19 @@ export function useLocationCorrections({
     }
     if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
     const owner = { userId, workspaceId };
-    void enqueueTimelineCorrections(owner, [{ request: log.request }]).then((items) => {
+    const id = createTimelineCorrectionId();
+    setPublishingLogs((current) => [...current, { id, ownerKey: log.ownerKey, request: log.request }]);
+    const drop = () => setPublishingLogs((current) => current.filter((item) => item.id !== id));
+    void enqueueTimelineCorrections(owner, [{ request: { ...log.request, clientCorrectionId: id } }]).then((items) => {
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
       // Sent only while the app is in front, then and at every step of the send (Codex r2 on #606).
       return send && appInFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: appInFront }) : undefined;
-    }).catch(() => sayForLog(log.ownerKey, "That place wasn't logged. Try again."));
+    }).then((result) => {
+      if (result?.refused.some((item) => item.clientCorrectionId === id)) drop();
+    }).catch(() => {
+      drop();
+      sayForLog(log.ownerKey, "That place wasn't logged. Try again.");
+    });
   };
   useEffect(() => {
     if (!heldLog) return;
@@ -563,5 +583,6 @@ export function useLocationCorrections({
   // closes, as opening another item's sheet replaces it.
   const closeSheet = useCallback(() => setOpen(null), []);
 
-  return { closeSheet, heldLog, openPlace, openTripLeg, sheet, undoLog };
+  return { closeSheet, heldLog: heldLog?.ownerKey === ownerKey ? heldLog : null, publishingLogs,
+    openPlace, openTripLeg, sheet, undoLog };
 }

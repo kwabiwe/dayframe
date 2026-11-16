@@ -1,4 +1,4 @@
-import { calendarTripLog } from "../../lib/calendarTripLog";
+import { calendarReviewLog } from "../../lib/calendarReviewLog";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { outingKeyOf, timerTripClashQuestion } from "@dayframe/shared";
@@ -154,7 +154,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   }, say);
   const savingRef = useRef(saving);
   // How each answer held or saving here went (Log it / End it, or not), for what the Calendar shows meanwhile.
-  const answeredLogged = useRef(new Map<string, boolean>());
+  const answeredLogged = useRef(new Map<string, { logged: boolean; title?: string }>());
 
   const isOpen = (item: MobileReviewItem) => isOpenReviewItem(item) && !decidedRef.current.has(item.id);
   // Listed (or brought back) and open, listed and decided (undefined), or left out of the list (the known copy).
@@ -465,7 +465,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
         proposal: options.expected?.members.get(member.id) ?? reviewDeckProposalSignature(member) })) }
       } : {})
     };
-    answeredLogged.current.set(listed.id, logged);
+    answeredLogged.current.set(listed.id, { logged, title: venue?.name });
     hold.hold(decision);
     if (quiet) {
       // Saved now, as backgrounding (or the List going away) saves a held answer: no Undo window, nothing said.
@@ -640,10 +640,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * The "?" answered yes here and not yet handed over to the outbox's own record (held for Undo, or saving): a block
    * that ran into a trip shows ended at the trip's start meanwhile (location v4 design §7). Undo takes it out.
    */
-  const answeredYesIds = useMemo(() => new Set([...hiddenIds].filter((id) => answeredLogged.current.get(id) === true)), [hiddenIds]);
+  const answeredYesIds = useMemo(() => new Set([...hiddenIds].filter((id) => answeredLogged.current.get(id)?.logged === true)), [hiddenIds]);
 
-  const tripLogs = useMemo(() => [...answeredYesIds].flatMap((id) => {
-    const log = calendarTripLog(known.current.get(id));
+  const reviewLogs = useMemo(() => [...answeredYesIds].flatMap((id) => {
+    const log = calendarReviewLog(known.current.get(id), [], answeredLogged.current.get(id)?.title);
     return log ? [log] : [];
   }), [answeredYesIds]);
 
@@ -693,5 +693,5 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
    * can't is refused at once, never accepted and dropped later.
    */
   const canAnswerNow = useCallback((itemId: string) => canAnswerRef.current(itemId), []);
-  return { answer, answeredYesIds, tripLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
+  return { answer, answeredYesIds, reviewLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };
 }

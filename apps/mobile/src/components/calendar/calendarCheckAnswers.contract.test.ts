@@ -99,7 +99,7 @@ describe("the one gated answer entry point (Codex r7 on #610)", () => {
     expect(answer).toContain("void waitForItemCorrections(");
     expect(answer).toContain("newIds: []");
     // The hold itself is internal: only `answer` reaches it, and the hook returns `answer`, never `holdAnswer`.
-    expect(hook).toContain("return { answer, answeredYesIds, tripLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };");
+    expect(hook).toContain("return { answer, answeredYesIds, reviewLogs, canAnswer: canAnswerNow, data: shown, held: shownHeld, hiddenIds, restoreAnswered, answerAfterCorrections, startAfterCorrections, undo };");
     // Every late start of a waiting record, in the answers hook and the place sheets, goes through one completion path.
     expect(hook).toContain("finishWaitingStart(recordOwner, recordId, {");
     expect(source("./useLocationCorrections.tsx")).toContain("finishWaitingStart(owner, id, {");

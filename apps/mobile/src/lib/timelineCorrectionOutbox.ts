@@ -60,7 +60,7 @@ export type TimelineCorrectionSyncResult = {
  * `resolvedReviewItemIds`: the "?" the server resolved with it — a Logs as on a place with an open "?" resolves
  * them in the same transaction, as their own "Not now" (#609) — so they leave the List at once.
  */
-export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[] };
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[]; loggedEntryIds?: string[] };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
 /** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
@@ -375,7 +375,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
-      const { resolvedReviewItemIds, placeId } = await readReceipt(response);
+      const { resolvedReviewItemIds, loggedEntryIds, placeId } = await readReceipt(response);
       if (!await stillCurrent()) return finish("session_changed");
       let request = next.request;
       if (request.kind === "save_visit_place") {
@@ -400,7 +400,8 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
       }
       // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
       acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
-        { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}) }];
+        { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}),
+          ...(loggedEntryIds ? { loggedEntryIds } : {}) }];
       deliveredCount += 1;
       try {
         await removeQuietly([next.clientCorrectionId]);
@@ -436,14 +437,16 @@ async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorre
 /** The review items the server resolved with this correction (#609), when its reply says so. */
 async function readReceipt(response: Response) {
   try {
-    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown };
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown; entryIds?: unknown };
       correction?: { kind?: unknown; target?: { placeId?: unknown } } };
     const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
     const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
       ? body.correction.target.placeId : null;
-    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], placeId };
+    const entries = body?.logged?.entryIds;
+    const loggedEntryIds = Array.isArray(entries) ? entries.filter((id): id is string => typeof id === "string") : undefined;
+    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], loggedEntryIds, placeId };
   } catch {
-    return { resolvedReviewItemIds: [], placeId: null };
+    return { resolvedReviewItemIds: [], loggedEntryIds: undefined, placeId: null };
   }
 }
 

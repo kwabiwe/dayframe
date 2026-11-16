@@ -10,6 +10,7 @@ import {
   recoverAnswersAfterCorrections,
   releaseAnswersAfterCorrections,
   subscribeAnswersAfterCorrections,
+  type AnswerAfterCorrections,
   type AnswerAfterCorrectionsRelease
 } from "../../lib/reviewAnswersAfterCorrections";
 import { enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
@@ -24,6 +25,7 @@ import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { sayIfStillHere } from "../../lib/guardedNotice";
 
 const NONE: ReadonlySet<string> = new Set();
+const NO_LOGS: readonly AnswerAfterCorrections[] = [];
 
 /**
  * The Dashboard's side of answers waiting for corrections (Codex r2 on #610; `reviewAnswersAfterCorrections`):
@@ -47,7 +49,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
   const userId = owner?.userId ?? null;
   const workspaceId = owner?.workspaceId ?? null;
   const key = userId && workspaceId ? `${workspaceId}:${userId}` : null;
-  const [waiting, setWaiting] = useState<{ key: string; ids: ReadonlySet<string>; segments: ReadonlySet<string> } | null>(null);
+  const [waiting, setWaiting] = useState<{ key: string; ids: ReadonlySet<string>; segments: ReadonlySet<string>; logs: readonly AnswerAfterCorrections[] } | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
   const releaseRef = useRef(release);
@@ -106,7 +108,8 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
       void readAnswersAfterCorrectionsWithState(who).then((records) => {
         const hiding = records.filter((each) => each.state !== "abandoned").map((each) => each.record);
         if (live) setWaiting({ key: ownerKey, ids: new Set(hiding.flatMap(answeredReviewItemIds)),
-          segments: new Set(hiding.flatMap((record) => record.log ? [record.log.itemId] : [])) });
+          segments: new Set(hiding.flatMap((record) => record.log ? [record.log.itemId] : [])),
+          logs: hiding.filter((record) => record.logged || record.log) });
       }, () => undefined);
     };
     // The store's recovery runner, in front: on mount, and each return to the front. One given up here says so.
@@ -165,5 +168,6 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
   const ids = waiting && waiting.key === key ? waiting.ids : NONE;
   const segments = waiting && waiting.key === key ? waiting.segments : NONE;
   // `waitingSegments`: places whose Logs as waits; their "?" stay out until it is sent (the server then closes them).
-  return useMemo(() => ({ waitingIds: ids, waitingSegments: segments }), [ids, segments]);
+  const waitingLogs = waiting && waiting.key === key ? waiting.logs : NO_LOGS;
+  return useMemo(() => ({ waitingIds: ids, waitingSegments: segments, waitingLogs }), [ids, segments, waitingLogs]);
 }

@@ -481,29 +481,67 @@ describe("Review real SQLite transactions", () => {
     const owner = { userId: data.user.id, workspaceId: data.workspace.id, backendId: "staging-fixture" };
     const entryId = syntheticId(96);
     const observed = vi.fn();
-    const unsubscribe = store.subscribeCalendarTripHandover(observed);
+    const unsubscribe = store.subscribeCalendarReviewHandover(observed);
     try {
       await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(95), mutation: { action: "confirm" } });
       mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
         ok: true, action: "confirm", status: "accepted", alreadyResolved: true, equivalent: true
       }) });
       await store.synchroniseReviewMutations();
-      expect(await store.readPendingCalendarTripLogs(owner)).toEqual([expect.objectContaining({
+      expect(await store.readPendingCalendarReviewLogs(owner)).toEqual([expect.objectContaining({
         check: expect.objectContaining({ id: item.id, segmentId }), entryIds: []
       })]);
       await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [item.id], entryId) });
-      expect(await store.readPendingCalendarTripLogs(owner)).toEqual([]);
+      expect(await store.readPendingCalendarReviewLogs(owner)).toEqual([]);
       const receipt = expect.objectContaining({ check: expect.objectContaining({ id: item.id, segmentId }), entryIds: [entryId] });
       expect(observed).toHaveBeenCalledExactlyOnceWith(owner, [receipt]);
       await reopen();
-      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
-      expect(await store.readCalendarTripHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([receipt]);
+      expect(await store.readCalendarReviewHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
       const cachedData = { ...data, serverBuild: { ...data.serverBuild!, backendId: owner.backendId } };
       const recentRead = Date.now();
       await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 10);
-      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([receipt]);
       await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] }, recentRead);
-      expect(await store.readCalendarTripHandovers(owner)).toEqual([]);
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([]);
+      expect(await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 1)).toBe(false);
+      await reopen();
+      expect((await store.loadCachedDashboardBootstrap())?.bootstrap.entries[0]?.id).toBe(entryId);
+    } finally {
+      unsubscribe();
+    }
+  });
+  it("hands Calendar the exact visit before the Review lookup lets go of its outbox row", async () => {
+    const data = bootstrap();
+    const existing = data.reviewItems.find((item) => item.eventType === "commute_detected")!;
+    const segmentId = syntheticId(97);
+    const item = { ...existing, eventType: "unknown_stay", rawPayload: { ...existing.rawPayload, clientSegmentId: segmentId } };
+    const owner = { userId: data.user.id, workspaceId: data.workspace.id, backendId: "staging-fixture" };
+    const entryId = syntheticId(96);
+    const observed = vi.fn();
+    const unsubscribe = store.subscribeCalendarReviewHandover(observed);
+    try {
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(95), mutation: { action: "confirm" } });
+      mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
+        ok: true, action: "confirm", status: "accepted", alreadyResolved: true, equivalent: true
+      }) });
+      await store.synchroniseReviewMutations();
+      expect(await store.readPendingCalendarReviewLogs(owner)).toEqual([expect.objectContaining({
+        kind: "place", check: expect.objectContaining({ id: item.id, segmentId }), entryIds: []
+      })]);
+      await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [item.id], entryId) });
+      expect(await store.readPendingCalendarReviewLogs(owner)).toEqual([]);
+      const receipt = expect.objectContaining({ check: expect.objectContaining({ id: item.id, segmentId }), entryIds: [entryId] });
+      expect(observed).toHaveBeenCalledExactlyOnceWith(owner, [receipt]);
+      await reopen();
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([receipt]);
+      expect(await store.readCalendarReviewHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
+      const cachedData = { ...data, serverBuild: { ...data.serverBuild!, backendId: owner.backendId } };
+      const recentRead = Date.now();
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 10);
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([receipt]);
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] }, recentRead);
+      expect(await store.readCalendarReviewHandovers(owner)).toEqual([]);
       expect(await store.cacheDashboardBootstrap({ ...cachedData, entries: [] }, recentRead - 1)).toBe(false);
       await reopen();
       expect((await store.loadCachedDashboardBootstrap())?.bootstrap.entries[0]?.id).toBe(entryId);
