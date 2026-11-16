@@ -282,11 +282,16 @@ export async function enqueueTimelineCorrections(
 export async function readPendingTimelineCorrections(owner: MobileAccountOwner) {
   // In the mutation chain: a read may set an unreadable queue aside, which must not race a write.
   const items = (await withMutation(readAll)).filter((item) => mobileAccountOwnersEqual(item, owner));
-  const observed = new Map(acknowledged.map((item) => [item.clientCorrectionId, item]));
-  const placeReceipts = items.flatMap((item) => item.placeLogReceipt?.backendId === correctionBackend
-    ? [{ ...item, ...item.placeLogReceipt, restoredPlaceLog: observed.get(item.clientCorrectionId)?.restoredPlaceLog ?? !observed.has(item.clientCorrectionId) }]
-    : []);
-  acknowledged = [...acknowledged.filter((item) => !item.placeLogReceipt || !mobileAccountOwnersEqual(item, owner)), ...placeReceipts];
+  const persisted = new Map(items.flatMap((item) => item.placeLogReceipt?.backendId === correctionBackend
+    ? [[item.clientCorrectionId, { ...item, ...item.placeLogReceipt }] as const] : []));
+  const observed = new Map(acknowledged.filter((item) => !item.placeLogReceipt
+    || !mobileAccountOwnersEqual(item, owner) || persisted.has(item.clientCorrectionId))
+    .map((item) => [item.clientCorrectionId, item]));
+  for (const [id, item] of persisted) {
+    const memory = observed.get(id);
+    observed.set(id, { ...item, restoredPlaceLog: memory?.restoredPlaceLog ?? !memory });
+  }
+  acknowledged = [...observed.values()];
   return items.filter((item) => !item.placeLogReceipt);
 }
 
@@ -313,6 +318,17 @@ async function retainPlaceLogReceipt(owner: MobileAccountOwner, item: Acknowledg
     return true;
   });
   return committed ? { ...item, placeLogReceipt: receipt } : null;
+}
+
+/** Once the exact place block is visible, its old receipt must never be projected again. */
+export async function retirePlaceLogReceipts(owner: MobileAccountOwner, clientCorrectionIds: readonly string[]) {
+  if (!clientCorrectionIds.length) return;
+  const ids = new Set(clientCorrectionIds);
+  const matches = (item: PendingTimelineCorrection) => mobileAccountOwnersEqual(item, owner)
+    && item.placeLogReceipt?.backendId === correctionBackend && ids.has(item.clientCorrectionId);
+  await withMutation(() => updateAll((items) => items.filter((item) => !matches(item))));
+  acknowledged = acknowledged.filter((item) => !matches(item));
+  notify();
 }
 
 async function removeQuietly(clientCorrectionIds: readonly string[]) {

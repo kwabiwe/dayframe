@@ -1306,6 +1306,21 @@ export async function loadCachedDashboardBootstrap(): Promise<{
   }
 }
 
+function calendarBlockIds(bootstrap: MobileBootstrap) {
+  return new Set([bootstrap.entries, bootstrap.dayEntries ?? [], bootstrap.weekEntries ?? [], bootstrap.historyEntries ?? []]
+    .flatMap((entries) => entries.map((entry) => entry.id)));
+}
+
+async function cachedCalendarBlockIds(transaction: SQLite.SQLiteDatabase, key: string) {
+  const row = await transaction.getFirstAsync<CachedDashboardRow>(
+    "select snapshot_json, cached_at from dashboard_snapshot_cache where account_key = ?", key);
+  try {
+    return row ? calendarBlockIds(JSON.parse(row.snapshot_json) as MobileBootstrap) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, requestedAt: number) {
   const db = await database();
   const account = await activeAccount(db);
@@ -1339,8 +1354,7 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, reques
       const receiptKey = calendarReviewReceiptKey({ userId: account.user_id, workspaceId: account.workspace_id, backendId });
       const receipts = parseReviewHandovers(await metadata(receiptKey, transaction));
       if (receipts.length) {
-        const blockIds = new Set([bootstrap.entries, bootstrap.dayEntries ?? [], bootstrap.weekEntries ?? [], bootstrap.historyEntries ?? []]
-          .flatMap((entries) => entries.map((entry) => entry.id)));
+        const blockIds = calendarBlockIds(bootstrap);
         const waiting = receipts.filter((log) => !log.entryIds.some((id) => blockIds.has(id)));
         if (waiting.length !== receipts.length) await setMetadata(receiptKey, JSON.stringify(waiting), transaction);
       }
@@ -1464,9 +1478,10 @@ export async function cacheReviewPresentation(input: {
       const receiptKey = calendarReviewReceiptKey(input.owner);
       const retained = parseReviewHandovers(await metadata(receiptKey, transaction));
       const merged = new Map(retained.map((log) => [log.check.id, log]));
+      const cached = await cachedCalendarBlockIds(transaction, key);
       for (const log of reviewHandover) {
         merged.delete(log.check.id);
-        merged.set(log.check.id, log);
+        if (!log.entryIds.some((id) => cached.has(id))) merged.set(log.check.id, log);
       }
       await setMetadata(receiptKey, JSON.stringify([...merged.values()].slice(-REVIEW_PRESENTATION_MAX_IDS)), transaction);
     }

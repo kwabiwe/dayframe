@@ -2076,7 +2076,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Location timeline corrections still on the phone (step 12), this account's.
   const correctionOwner = useMemo(() => authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
     [authState, data]);
-  const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
+  const canonicalCorrectionEntryIds = useMemo(() => correctionOwner && data ? new Set(bootstrapBlocksById(data).keys()) : undefined,
+    [correctionOwner, data]);
+  const correctionQueue = useTimelineCorrectionQueue(correctionOwner, canonicalCorrectionEntryIds);
   const [localPlaceLogs, setLocalPlaceLogs] = useState<{ owner: string; ids: string[] } | null>(null);
   const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
@@ -2484,7 +2486,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const live = reviewHandover.logs.filter((log) => {
       const segment = log.check.segmentId;
       const item = segment ? timelineItems.get(segment) : undefined;
-      if (!checkStillAsks(log.check, fromMs) || log.entryIds.some((id) => shownIds.has(id))) return false;
+      if (!checkStillAsks(log.check, fromMs)) return false;
+      if (log.entryIds.some((id) => shownIds.has(id))) {
+        removed.push(log);
+        return false;
+      }
       if (!segment || (log.kind ?? "trip") !== "trip") return true;
       if (canonicalSegments.has(segment) || item?.blockIds.some((id) => shownIds.has(id))) return false;
       const shownDay = listCheckOverlaps(log.check, nativeCalendarModel.dayStartMs, nativeCalendarModel.dayEndMs);

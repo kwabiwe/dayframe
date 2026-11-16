@@ -289,11 +289,18 @@ describe("the iPhone's timeline correction queue (location v4 step 12)", () => {
       loggedPlaceEntryIds: ["entry-stay"], preview: { name: null, placeLog }, restoredPlaceLog: true
     }]);
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_B)).toEqual([]);
+    // A visible canonical visit retires only its handoff. A later delete and relaunch cannot resurrect it.
+    await outbox.retirePlaceLogReceipts(OWNER_B, [acknowledged[0].clientCorrectionId]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toHaveLength(1);
+    await outbox.retirePlaceLogReceipts(OWNER_A, [acknowledged[0].clientCorrectionId]);
+    outbox.__resetTimelineCorrectionOutboxForTests();
+    expect(await outbox.readPendingTimelineCorrections(OWNER_A)).toEqual([]);
+    expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A)).toEqual([]);
     // A Logs as on a place that was no outing's stay: its own "?" only, unchanged.
     await outbox.enqueueTimelineCorrection(OWNER_A, { kind: "log_place", subject: "place", itemId: "seg-cafe", categoryId: CATEGORY }, { createId });
     vi.stubGlobal("fetch", vi.fn(async () => json(200, { ok: true, logged: { entryIds: ["entry-cafe"], resolvedReviewItemIds: ["review-cafe"] } })));
     await outbox.synchroniseTimelineCorrections({ owner: OWNER_A, force: true });
     expect(outbox.readAcknowledgedTimelineCorrections(OWNER_A).map((item) => item.resolvedReviewItemIds))
-      .toEqual([["review-trip-in", "review-trip-out", "review-stay"], ["review-cafe"]]);
+      .toEqual([["review-cafe"]]);
   });
 });
