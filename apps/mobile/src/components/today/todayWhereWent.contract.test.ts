@@ -46,7 +46,9 @@ describe("Today's \"Where today went\" wiring", () => {
 
   it("marks commits from a load, a recovered refresh and the cached launch as quiet, so the strip never fades in on them", () => {
     // Each is marked before it is published (publishDashboardData writes latestData and state together).
-    expect(dashboard).toContain("loadedBootstrap.current = bootstrap;\n      publishDashboardData(bootstrap);");
+    const fresh = dashboard.indexOf("loadedBootstrap.current = bootstrap;");
+    expect(fresh).toBeGreaterThan(-1);
+    expect(dashboard.slice(fresh, fresh + 430)).toContain("publishDashboardData(bootstrap);");
     expect(dashboard).toContain("loadedBootstrap.current = next;\n    publishDashboardData(next);");
     expect(dashboard).toContain("loadedBootstrap.current = filtered;\n        publishDashboardData(filtered);");
     expect(dashboard).toContain("const todayWhereWentQuiet = data !== previousTodayData.current && data === loadedBootstrap.current;");

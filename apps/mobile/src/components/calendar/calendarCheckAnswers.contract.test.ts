@@ -179,7 +179,7 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     expect(dashboard.match(/setBootstrapCompletions\(\(count\) => count \+ 1\);/g)).toHaveLength(2);
     const publish = dashboard.slice(dashboard.indexOf("function publishDashboardData("), dashboard.indexOf("const [rowPop, setRowPop]"));
     expect(publish).not.toContain("setBootstrapCompletions");
-    for (const landed of ["loadedBootstrap.current = bootstrap;\n      publishDashboardData(bootstrap);\n      // A server bootstrap landed",
+    for (const landed of ["publishDashboardData(bootstrap);\n      // A server bootstrap landed",
       "loadedBootstrap.current = next;\n    publishDashboardData(next);\n    // A server bootstrap landed"]) {
       expect(dashboard).toContain(landed);
     }
@@ -240,7 +240,12 @@ describe("no Review screen on the iPhone (location v4 step 15)", () => {
     // Only an acknowledged delivery holds a tombstone; Undo removes it with its command (Codex r3 on #618).
     expect(dashboard).toContain("own.tombstones.delivered(command, Date.now());");
     // Tombstones and acknowledged ends settle only on server data the refresh guard accepted (Codex r3 on #618).
-    expect(dashboard).toContain("for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);");
+    const readOrder = dashboard.indexOf("dashboardReadOrder.current.accept(readStartedAt)");
+    const listener = dashboard.indexOf("listener(readStartedAt, serverBootstrap)");
+    const publication = dashboard.indexOf("publishDashboardData(bootstrap);", readOrder);
+    expect(readOrder).toBeGreaterThan(-1);
+    expect(listener).toBeGreaterThan(readOrder);
+    expect(publication).toBeGreaterThan(listener);
     expect(dashboard).toContain("if (own.tombstones.applied(startedAtMs)) setQueuedDeletes(");
     expect(dashboard).toContain("if (own.ledger.applied(startedAtMs, server)) setPendingClashEnds(");
     expect(dashboard).not.toContain("seen.get(end.clientMutationId) === data");
