@@ -274,8 +274,8 @@ final class NearbyPointOfInterestCoordinator {
   }
 
   /// At most four requests per visit: Nearby and areas of interest, then optional site and area searches.
-  /// When Nearby has nothing visitable, the shared-name search gives way to one wider Nearby
-  /// request, after giving the known area's name a chance to supply a destination.
+  /// When Nearby has nothing visitable, try either the known area's name or the shared site
+  /// name, leaving room for one wider Nearby request if that still finds no destination.
   private func run(
     latitude: Double,
     longitude: Double,
@@ -324,11 +324,14 @@ final class NearbyPointOfInterestCoordinator {
           publish(values + recovered, areas)
         }
       }
+      let unmatchedArea: ([NearbyPointOfInterestValue], [String]) -> String? = { values, areas in
+        let named = Set(values.map { Self.normalizedName($0.name) })
+        return areas.first(where: { !named.contains(Self.normalizedName($0)) })
+      }
       let searchArea: ([NearbyPointOfInterestValue], [String], Bool) -> Void = { [weak self] values, areas, canWiden in
         guard let self, self.isPending(started) else { return }
         let complete = canWiden ? publishSparse : publish
-        let named = Set(values.map { Self.normalizedName($0.name) })
-        guard let area = areas.first(where: { !named.contains(Self.normalizedName($0)) }) else {
+        guard let area = unmatchedArea(values, areas) else {
           complete(values, areas)
           return
         }
@@ -343,17 +346,20 @@ final class NearbyPointOfInterestCoordinator {
       }
       let proceed: () -> Void = { [weak self] in
         guard let self, self.isPending(started), let areas, let nearby else { return }
-        if Self.normalized(nearby, maximumDistanceMeters: radiusMeters, limit: 1).isEmpty {
-          searchArea(nearby, areas, true)
-          return
-        }
-        guard let context = Self.contextQuery(from: nearby) else {
-          searchArea(nearby, areas, false)
+        let sparse = Self.normalized(nearby, maximumDistanceMeters: radiusMeters, limit: 1).isEmpty
+        let preferArea = sparse && unmatchedArea(nearby, areas) != nil
+        guard !preferArea, let context = Self.contextQuery(from: nearby) else {
+          searchArea(nearby, areas, sparse)
           return
         }
         self.searcher.searchContext(query: context, center: center, radiusMeters: radiusMeters) { [weak self] contextResult in
           guard let self, self.isPending(started) else { return }
-          searchArea(nearby + ((try? contextResult.get()) ?? []), areas, false)
+          let values = nearby + ((try? contextResult.get()) ?? [])
+          if sparse {
+            publishSparse(values, areas)
+          } else {
+            searchArea(values, areas, false)
+          }
         }
       }
 

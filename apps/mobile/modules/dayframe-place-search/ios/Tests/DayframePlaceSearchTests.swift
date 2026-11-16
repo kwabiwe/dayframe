@@ -163,6 +163,26 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertEqual(searcher.contextQueries, [])
   }
 
+  func testSparseNearbyPreservesTheSharedSiteLookup() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(requestId: "sparse", latitude: 10.5, longitude: 20.4, radiusMeters: 400)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Examplegate Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Examplegate Charge Point", distance: 90, relevance: 1, category: .evCharger)
+    ]))
+    XCTAssertEqual(searcher.contextQueries, ["examplegate"])
+    searcher.completeContext(.success([
+      nearby("Examplegate Shopping Centre", distance: 160, relevance: 0, category: .store)
+    ]))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Examplegate Shopping Centre"])
+    XCTAssertEqual(searcher.radiusMeters, 400)
+  }
+
   func testCancellationRejectsLateWiderNearbyResults() async {
     let searcher = FakeNearbySearcher()
     let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
