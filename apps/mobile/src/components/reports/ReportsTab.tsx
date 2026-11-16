@@ -29,11 +29,11 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, placeDisplayName, type ReportFacetFilters, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, placeDisplayName, type ReportSummary } from "@dayframe/shared";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { mobileFailureKind } from "@/lib/friendlyError";
 import type { MobileBootstrap } from "@/lib/api";
-import { createReportFacetMatcher, reportFacetChips, reportRequestWithFacets } from "../../lib/reportsFacets";
+import { type MobileReportFacets, createReportFacetMatcher, reportFacetChips, reportRequestWithFacets } from "../../lib/reportsFacets";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -79,7 +79,7 @@ import { formatLocaleDate } from "../../lib/localeDateFormat";
 type FilterPresentation = {
   id: number;
   draft: ReportFilterDraft;
-  facets: ReportFacetFilters;
+  facets: MobileReportFacets;
 };
 
 type DatePresentation = {
@@ -128,7 +128,7 @@ function ReportsTabView({
   const [selection, setSelection] = useState<ReportCategorySelection>({
     mode: "all",
   });
-  const [facets, setFacets] = useState<ReportFacetFilters>({});
+  const [facets, setFacets] = useState<MobileReportFacets>({});
   const [filterPresentation, setFilterPresentation] =
     useState<FilterPresentation | null>(null);
   const [datePresentation, setDatePresentation] =
@@ -578,7 +578,6 @@ function ReportsTabView({
       key: `${kind}:${value}`, label,
       remove: () => setFacets((current) => {
         if (kind === "description") return { ...current, description: undefined };
-        if (kind === "sources") return { ...current, sources: current.sources?.filter((source) => source !== value) };
         return { ...current, [kind]: current[kind]?.filter((id) => id !== value) };
       }),
     })),

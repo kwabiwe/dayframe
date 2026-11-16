@@ -25,7 +25,7 @@ export function BlocksSheetHead({
   eyebrow,
   eyebrowTestID,
   leading,
-  titleAction,
+  secondaryAction,
   testID,
   textTestID,
   theme,
@@ -36,7 +36,7 @@ export function BlocksSheetHead({
   eyebrowTestID?: string;
   /** Only for a pushed route with no sheet to swipe: a circular back control before the text. */
   leading?: ReactNode;
-  titleAction?: ReactNode;
+  secondaryAction?: ReactNode;
   testID?: string;
   textTestID?: string;
   theme: MobileTheme;
@@ -59,29 +59,33 @@ export function BlocksSheetHead({
           <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>
             {title}
           </Text>
-          {titleAction}
         </View>
       </View>
-      {action ? (
-        <Pressable
-          accessibilityHint={action.accessibilityHint}
-          accessibilityLabel={action.accessibilityLabel ?? action.label}
-          accessibilityRole="button"
-          accessibilityState={{ busy: Boolean(action.busy), disabled: inactive }}
-          disabled={inactive}
-          onPress={action.onPress}
-          style={({ pressed }) => [
-            styles.pill,
-            { backgroundColor: fill },
-            pressed && !inactive ? styles.pressed : null,
-            action.disabled && !action.busy ? styles.disabled : null
-          ]}
-          testID={action.testID}
-        >
-          <Text {...mobileTextProps("control")} numberOfLines={1} style={[styles.pillText, { color: ink }]}>
-            {action.label}
-          </Text>
-        </Pressable>
+      {secondaryAction || action ? (
+        <View style={styles.actions}>
+          {secondaryAction}
+          {action ? (
+            <Pressable
+              accessibilityHint={action.accessibilityHint}
+              accessibilityLabel={action.accessibilityLabel ?? action.label}
+              accessibilityRole="button"
+              accessibilityState={{ busy: Boolean(action.busy), disabled: inactive }}
+              disabled={inactive}
+              onPress={action.onPress}
+              style={({ pressed }) => [
+                styles.pill,
+                { backgroundColor: fill },
+                pressed && !inactive ? styles.pressed : null,
+                action.disabled && !action.busy ? styles.disabled : null
+              ]}
+              testID={action.testID}
+            >
+              <Text {...mobileTextProps("control")} numberOfLines={1} style={[styles.pillText, { color: ink }]}>
+                {action.label}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -90,6 +94,7 @@ export function BlocksSheetHead({
 export const blocksSheetHeadStyles = StyleSheet.create({
   head: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between", minHeight: 52, paddingTop: 4 },
   text: { flex: 1, gap: 2, minWidth: 0 },
+  actions: { flexDirection: "row", alignItems: "center", gap: 6 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 2 },
   eyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   title: { flexShrink: 1, fontSize: 17, fontWeight: "700" },

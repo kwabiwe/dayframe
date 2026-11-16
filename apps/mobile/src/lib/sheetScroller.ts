@@ -4,7 +4,7 @@
  * still waiting for a frame or a measurement.
  */
 export type SheetScroller = {
-  reveal: (view: SheetScrollerView | null, mode: "top" | "whole") => void;
+  reveal: (view: SheetScrollerView | null, mode: "top" | "whole", maximumRevealHeight?: number) => void;
   top: () => void;
   dispose: () => void;
 };
@@ -40,15 +40,17 @@ export function createSheetScroller({ afterScrollBackMs, inner, metrics, nextFra
   const go = (y: number, extra = 0) => scrollTo(Math.max(0, Math.min(y, metrics.content + extra - metrics.viewport)), !reduceMotion);
   return {
     // After a frame: the sheet's new height and the view's own layout are in by then.
-    reveal: (view, mode) => {
+    reveal: (view, mode, maximumRevealHeight) => {
       const asked = ++generation;
+      if (!view) return;
       nextFrame(() => {
         const relativeTo = inner();
-        if (asked !== generation || !view || !relativeTo) return;
+        if (asked !== generation || !relativeTo) return;
         view.measureLayout(relativeTo as never, (_x, y, _width, height) => {
           if (asked !== generation) return;
           if (mode === "whole") {
-            if (y + height > metrics.offset + metrics.viewport) go(Math.min(y, y + height - metrics.viewport));
+            const visibleHeight = Math.min(height, maximumRevealHeight ?? height);
+            if (y + visibleHeight > metrics.offset + metrics.viewport) go(Math.min(y, y + visibleHeight - metrics.viewport));
             else if (y < metrics.offset) go(y);
             return;
           }

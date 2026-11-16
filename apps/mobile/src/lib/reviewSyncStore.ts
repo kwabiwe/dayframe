@@ -1,3 +1,4 @@
+import { calendarTripLog, type CalendarTripLog } from "./calendarTripLog";
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
@@ -3075,6 +3076,26 @@ export async function readPendingTimerTripClashEnds(owner: { workspaceId: string
     return [{ clientMutationId: row.client_mutation_id, reviewItemId: row.review_item_id, timeEntryId: question.timeEntryId,
       tripStartedAt: question.tripStartedAt, acknowledged: row.state === "acknowledged",
       stoppedRunningTimer: acknowledgement?.stoppedRunningTimer === true }];
+  });
+}
+
+/** Project accepted trip rows while the outbox is still waiting for canonical data. */
+export async function readPendingCalendarTripLogs(owner: { workspaceId: string; userId: string }): Promise<CalendarTripLog[]> {
+  const db = await database();
+  const rows = await db.getAllAsync<{ original_snapshot_json: string; acknowledgement_json: string | null }>(
+    `select original_snapshot_json, acknowledgement_json
+       from review_mutation_outbox
+      where account_key = ? and action_kind = 'confirm' and (state <> 'needs_attention' or ${unknownOutcomeSql()})
+        and case when json_valid(original_snapshot_json) then json_extract(original_snapshot_json, '$.eventType') end = 'commute_detected'
+      order by created_at desc, client_mutation_id desc
+      limit ?`,
+    accountKey(owner), REVIEW_PRESENTATION_MAX_IDS
+  );
+  return rows.flatMap((row) => {
+    const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
+    const item = JSON.parse(row.original_snapshot_json) as MobileReviewItem;
+    const log = calendarTripLog(item, acknowledgement ? acknowledgementEntryIds(acknowledgement) : []);
+    return log ? [log] : [];
   });
 }
 

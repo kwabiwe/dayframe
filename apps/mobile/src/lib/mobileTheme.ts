@@ -909,60 +909,6 @@ function createStyles(theme: MobileTheme) {
     durationDialNativeViewCondensed: {
       height: 128
     },
-    durationDialHintRow: {
-      minHeight: 44,
-      flexDirection: "row-reverse",
-      alignItems: "center",
-      zIndex: 3,
-      elevation: 3
-    },
-    durationDialHint: {
-      flex: 1,
-      minWidth: 0,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    // Balances the 44-point time shortcuts control to keep the hint centred.
-    durationDialHintBalanced: {
-      paddingLeft: 44
-    },
-    durationDialHintText: {
-      color: theme.textMuted,
-      fontSize: 12.5,
-      lineHeight: 16,
-      textAlign: "center"
-    },
-    durationDialShortcuts: {
-      flex: 1,
-      minWidth: 0
-    },
-    durationDialShortcutsContent: {
-      alignItems: "center",
-      gap: 8,
-      paddingRight: 8
-    },
-    durationDialShortcut: {
-      minHeight: 36,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 14,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    durationDialShortcutText: {
-      color: theme.textPrimary,
-      fontSize: 13,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    durationDialShortcutToggle: {
-      width: 44,
-      height: 44,
-      borderRadius: DAYFRAME_BLOCKS.radius.pill,
-      backgroundColor: theme.surfaceMuted,
-      alignItems: "center",
-      justifyContent: "center"
-    },
     activeEditSection: {
       gap: 8
     },

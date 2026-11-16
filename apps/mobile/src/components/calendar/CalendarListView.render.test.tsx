@@ -139,6 +139,33 @@ function renderPlacesFilter(visible = true, props: Partial<ListProps> = {}) {
 }
 
 describe("CalendarListView (location v4 step 9)", () => {
+  it("keeps the logged trip visible through a missing server block and reconciles by its receipt", () => {
+    const defaults = listProps();
+    const check = { id: "trip-check", segmentId: "seg-trip", startedAt: iso(8), stoppedAt: iso(9) };
+    const pending = { check, title: "Getting around", entryIds: [] };
+    const work = block("work", "Work", 9, 12);
+    const stale = { ...timeline, items: timeline.items.map((item) => item.kind === "trip" ? { ...item, blockIds: [] } : item) };
+    const review = {
+      checks: [check], checkTitles: new Map([[check.id, pending.title]]),
+      checkQuestions: new Map([[check.id, { question: "Log this trip?", detail: null, yesLabel: "Yes", logLabel: "Log trip", noLabel: "Don't log" }]]),
+      onAnswerCheck: vi.fn()
+    };
+    const show = (extra: Partial<ListProps>) => <CalendarListView {...defaults} {...review} timeline={stale} entries={[work]} {...extra} />;
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(show({})); });
+    expect(labels(tree).some((label) => label.includes("Needs a look"))).toBe(true);
+    act(() => { tree.update(show({ checks: [], loggedTripRows: [pending] })); });
+    expect(labels(tree).some((label) => label.startsWith("Getting around.") && label.endsWith("Logged"))).toBe(true);
+    // Undo restores the check in the same position.
+    act(() => { tree.update(show({ loggedTripRows: [] })); });
+    expect(labels(tree).some((label) => label.includes("Needs a look"))).toBe(true);
+    // The acknowledgement can identify the entry while Timeline is still showing the old trip.
+    const actual = block("commute", "Getting around", 8, 9);
+    act(() => { tree.update(show({ checks: [], loggedTripRows: [{ ...pending, entryIds: ["commute"] }], entries: [actual, work] })); });
+    expect(tree.root.findAllByProps({ testID: "calendar-list-logged-trip-seg-trip" })).toHaveLength(0);
+    expect(labels(tree).some((label) => label.includes("Getting around"))).toBe(true);
+  });
+
   it.each([false, true])("renders the remembered filter on the first warm List frame with Reduce Motion %s", async (reduceMotion) => {
     storage.getItem.mockClear();
     const finish = delayStoredPlacesFilter();

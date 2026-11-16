@@ -73,6 +73,7 @@ import { EntrySplitPanel } from "@/components/EntrySplitPanel";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
+import { roundTimeEntryDialStop } from "@/lib/timeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -2914,7 +2915,7 @@ export function ActiveTimerEditSheet({
                   textTestID="time-entry-sheet-hero"
                   theme={theme}
                   title={headTitle}
-                  titleAction={hasEntryActions ? (
+                  secondaryAction={hasEntryActions ? (
                     <Pressable
                       ref={actionsButtonRef}
                       accessibilityLabel="Block actions"
@@ -2922,7 +2923,7 @@ export function ActiveTimerEditSheet({
                       accessibilityState={{ disabled: busy, expanded: actionsOpen }}
                       disabled={busy}
                       onPress={openEntryActions}
-                      style={pressable([sheetStyles.actionAnchor, { backgroundColor: actionsOpen ? theme.surfaceMuted : "transparent" }], styles.buttonPressed)}
+                      style={pressable([sheetStyles.actionAnchor, { backgroundColor: actionsOpen ? theme.surfaceInset : theme.surfaceMuted }], styles.buttonPressed)}
                       testID="time-entry-actions-menu"
                     >
                       <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.more} size={20} />
@@ -3328,9 +3329,8 @@ export function ActiveTimerEditSheet({
                     styles.activeEditTimeGroups,
                     timeCardsStacked ? styles.activeEditTimeGroupsStacked : null
                   ]}>
-                    {/* The start column holds the START card and the compact
-                        Last stop pill. The end card keeps its own height. */}
-                    <View pointerEvents="box-none" style={[sheetStyles.startColumn, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                    {/* Each time card keeps its shortcut directly below it. */}
+                    <View pointerEvents="box-none" style={[sheetStyles.timeColumn, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
                       <View style={[
                         styles.activeEditTimeGroup,
                         styles.activeEditTimeGroupStacked,
@@ -3413,54 +3413,78 @@ export function ActiveTimerEditSheet({
                       </View>
                     </View>
                     {hasStoppedTime ? (
-                      <View style={[
-                        styles.activeEditTimeGroup,
-                        timeCardsStacked ? styles.activeEditTimeGroupStacked : null,
-                        timeWheel && timeWheel.target !== "end" ? sheetStyles.timeCardStepBack : null
-                      ]}>
-                        {timeWheel?.target === "end" ? (
-                          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colorWithAlpha(theme.textPrimary, 0.08) }]} />
-                        ) : null}
-                        <Pressable
-                          accessibilityActions={TIME_CARD_ACCESSIBILITY_ACTIONS}
-                          accessibilityLabel="End"
-                          accessibilityRole="adjustable"
-                          accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "end" }}
-                          accessibilityHint={timeWheel?.target === "end"
-                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
-                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
-                          accessibilityValue={{ text: `${stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "No time"}, ${formatPickerDate(displayedEndAt)}` }}
-                          disabled={busy}
-                          onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
-                          onPress={() => openTimeWheel("end")}
-                          style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
-                          testID="time-entry-end-card"
-                        >
-                          <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
-                          <Text
-                            {...mobileTextProps("input")}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.7}
-                            numberOfLines={1}
-                            style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
-                            testID="time-entry-end-time"
+                      <View pointerEvents="box-none" style={[sheetStyles.timeColumn, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                        <View style={[
+                          styles.activeEditTimeGroup,
+                          timeCardsStacked ? styles.activeEditTimeGroupStacked : null,
+                          timeWheel && timeWheel.target !== "end" ? sheetStyles.timeCardStepBack : null
+                        ]}>
+                          {timeWheel?.target === "end" ? (
+                            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colorWithAlpha(theme.textPrimary, 0.08) }]} />
+                          ) : null}
+                          <Pressable
+                            accessibilityActions={TIME_CARD_ACCESSIBILITY_ACTIONS}
+                            accessibilityLabel="End"
+                            accessibilityRole="adjustable"
+                            accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "end" }}
+                            accessibilityHint={timeWheel?.target === "end"
+                              ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                              : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
+                            accessibilityValue={{ text: `${stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "No time"}, ${formatPickerDate(displayedEndAt)}` }}
+                            disabled={busy}
+                            onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
+                            onPress={() => openTimeWheel("end")}
+                            style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
+                            testID="time-entry-end-card"
                           >
-                            {stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "--:--"}
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityLabel="Edit end date"
-                          accessibilityValue={{ text: formatPickerDate(displayedEndAt) }}
-                          accessibilityRole="button"
-                          disabled={busy}
-                          onPress={openEndPicker}
-                          style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
-                          testID="time-entry-end-date"
-                        >
-                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
-                            {formatPickerDate(displayedEndAt)}
-                          </Text>
-                        </Pressable>
+                            <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
+                            <Text
+                              {...mobileTextProps("input")}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.7}
+                              numberOfLines={1}
+                              style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
+                              testID="time-entry-end-time"
+                            >
+                              {stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "--:--"}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityLabel="Edit end date"
+                            accessibilityValue={{ text: formatPickerDate(displayedEndAt) }}
+                            accessibilityRole="button"
+                            disabled={busy}
+                            onPress={openEndPicker}
+                            style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                            testID="time-entry-end-date"
+                          >
+                            <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
+                              {formatPickerDate(displayedEndAt)}
+                            </Text>
+                          </Pressable>
+                        </View>
+                        <View style={[sheetStyles.lastStopSlot, timeCardsStacked && sheetStyles.lastStopSlotLarge]}>
+                          <Pressable accessibilityHint="Rounds the end time. Done saves it."
+                            accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
+                            hitSlop={{ top: 6, bottom: 6 }} onPress={() => {
+                              if (busy) return;
+                              dismissTransientEditingSurfaces({ keepTimeWheel: true });
+                              applyDialInterval(roundTimeEntryDialStop({
+                                startMs: parsedStart.date?.getTime() ?? draftStartMs,
+                                endMs: parsedStop.date?.getTime() ?? draftEndMs
+                              }));
+                            }}
+                            style={({ pressed }) => [
+                              sheetStyles.lastStopPill, sheetStyles.roundEndPill,
+                              { backgroundColor: theme.surfaceMuted }, pressed && !busy ? styles.buttonPressed : null
+                            ]}
+                            testID="time-entry-round-stop-time">
+                            <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.time} size={14} />
+                            <Text {...mobileTextProps("metadata")} style={[sheetStyles.lastStopText, { color: busy ? theme.textSecondary : theme.textPrimary }]}>
+                              Round end
+                            </Text>
+                          </Pressable>
+                        </View>
                       </View>
                     ) : (
                       <View accessible accessibilityLabel={`Now, ${formatClockTime(dialNowMs, clockFormat)}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
@@ -3955,14 +3979,15 @@ const sheetStyles = StyleSheet.create({
   tagChipName: { flexShrink: 1, minWidth: 0 },
   // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
   tagAdd: { gap: 4 },
-  // The START card's column holds the card and the fixed Last stop slot directly under it.
-  startColumn: { flex: 1, gap: 6, minWidth: 0 },
+  // Each time column holds its card and its shortcut slot.
+  timeColumn: { flex: 1, gap: 6, minWidth: 0 },
   lastStopSlot: { minHeight: 44, justifyContent: "center" },
   lastStopSlotLarge: { minHeight: 52 },
   lastStopPill: {
     alignItems: "center", alignSelf: "flex-start", borderRadius: 999, flexDirection: "row", gap: 5,
     maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 11
   },
+  roundEndPill: { alignSelf: "flex-end" },
   lastStopText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },

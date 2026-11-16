@@ -75,7 +75,8 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { getReviewItemSyncStates, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
+import type { CalendarTripLog } from "../lib/calendarTripLog";
+import { getReviewItemSyncStates, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -2007,16 +2008,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // account only: the List's "?", the Calendar badge and Today's chip leave them at once.
   // With them, the suggestions with a waiting or rejected change of their own, which never fold into an
   // outing (the deck's eligibility, Codex r2 on #582).
-  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string> } | null>(null);
+  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string>; tripLogs: readonly CalendarTripLog[] } | null>(null);
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
     let sequence = 0;
     const read = () => {
       const mine = ++sequence;
-      Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])
-        .then(([ids, states]) => {
-          if (current && mine === sequence) setLocallyDecided({ owner: scopedOwnerKey, ids: new Set(ids), syncStateIds: new Set(states.keys()) });
+      Promise.all([
+        readSuppressedReviewItemIds(scopedOwner),
+        getReviewItemSyncStates(),
+        readPendingCalendarTripLogs(scopedOwner).catch(() => null)
+      ]).then(([ids, states, tripLogs]) => {
+          if (current && mine === sequence) setLocallyDecided((previous) => ({
+            owner: scopedOwnerKey, ids, syncStateIds: new Set(states.keys()),
+            tripLogs: tripLogs ?? (previous?.owner === scopedOwnerKey ? previous.tripLogs : [])
+          }));
         })
         .catch(() => undefined);
     };
@@ -2072,6 +2079,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     syncStateIds: reviewSyncStateIds,
     waitingHidden
   });
+  const loggedTripRows = useMemo(() => {
+    const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
+    if (locallyDecided?.owner === scopedOwnerKey) {
+      for (const log of locallyDecided?.tripLogs ?? []) held.set(log.check.id, log);
+    }
+    return [...held.values()];
+  }, [checkAnswers.tripLogs, locallyDecided, scopedOwnerKey]);
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
   // "A block ran into your trip" (location v4 design §7): an End it held for Undo, saving, or waiting on this iPhone
@@ -4420,6 +4434,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   dayStartMs={nativeCalendarModel.dayStartMs}
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
+                  loggedTripRows={loggedTripRows}
                   nowMs={minuteNow}
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
                   // Without a backend identity the outbox's record is not read here, so an answer could never

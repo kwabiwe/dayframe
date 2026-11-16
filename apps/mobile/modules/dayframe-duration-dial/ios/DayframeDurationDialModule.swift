@@ -5,7 +5,7 @@ public final class DayframeDurationDialModule: Module {
     Name("DayframeDurationDial")
 
     View(DayframeDurationDialExpoView.self) {
-      Events("onInteraction")
+      Events("onInteraction", "onRoundDuration")
 
       Prop("modelJSON") { (view, modelJSON: String) in
         view.update(modelJSON: modelJSON)
