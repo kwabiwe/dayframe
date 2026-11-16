@@ -163,6 +163,7 @@ import {
 } from "@/lib/connectivityRecovery";
 import {
   captureDashboardRefreshGuard,
+  createDashboardReadOrder,
   reconcileDashboardRefreshCandidate,
   type DashboardRefreshGuard
 } from "@/lib/dashboardRefresh";
@@ -535,6 +536,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
   const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
+  const dashboardReadOrder = useRef(createDashboardReadOrder());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<boolean>>(async () => false);
   // Server data applied (a bootstrap read the refresh guard accepted and published; when its read started): delete
   // tombstones and acknowledged End it projections settle only against this (Codex r3 on #618).
@@ -655,6 +657,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
     recoveredBootstrapGuards.current.clear();
+    dashboardReadOrder.current.reset();
     refreshQueued.current = false;
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
@@ -739,14 +742,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       queueDashboardRefreshAfterConflict();
       return;
     }
-    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard);
+    void applyRecoveredDashboardBootstrap(event.bootstrap, event.serverBootstrap, guard, event.requestedAt);
   }), []);
 
   async function applyRecoveredDashboardBootstrap(
     bootstrap: MobileBootstrap,
     serverBootstrap: MobileBootstrap,
-    guard: DashboardRefreshGuard
+    guard: DashboardRefreshGuard,
+    requestedAt: number
   ) {
+    const generation = noticeSessionGeneration.current;
     const current = latestData.current;
     if (
       authStateCurrent.current !== "authenticated" ||
@@ -768,11 +773,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const next = reconciled.candidate;
     const latest = latestData.current;
     if (
+      generation !== noticeSessionGeneration.current ||
       authStateCurrent.current !== "authenticated" ||
       (latest && !sameTimerStopOwner(timerStopOwner(latest), timerStopOwner(next)))
     ) {
       return;
     }
+    if (!dashboardReadOrder.current.accept(requestedAt)) return;
     refreshQueued.current = false;
     lastStopServerBootstrap.current = serverBootstrap;
     loadedBootstrap.current = next;
@@ -1076,6 +1083,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
     refreshInFlight.current = true;
+    const generation = noticeSessionGeneration.current;
     const settingsSeedGeneration = captureSettingsSeedGeneration();
     const refreshGuard = captureDashboardRefreshGuard({
       currentRevision: dashboardMutationRevision.current,
@@ -1122,17 +1130,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         currentRevision: () => dashboardMutationRevision.current,
         guard: refreshGuard,
         reconcile: reconcileDashboardDeletionState,
-        timerMutationsInFlight: () => timerMutationCount.current,
-        // Only once the guard accepted it, just before it is published: a discarded read settles nothing.
-        onApplied: () => {
-          const applied = serverBootstrap;
-          for (const listener of appliedServerDataListeners.current) listener(readStartedAt, applied);
-        }
+        timerMutationsInFlight: () => timerMutationCount.current
       });
       if (reconciled.action === "refresh") {
         refreshQueued.current = true;
         return false;
       }
+      if (generation !== noticeSessionGeneration.current || !dashboardReadOrder.current.accept(readStartedAt)) return false;
       bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
         timerStateRef.current = {
@@ -1143,6 +1147,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       lastStopServerBootstrap.current = serverBootstrap;
       loadedBootstrap.current = bootstrap;
+      // A discarded or stale read cannot settle local projections.
+      for (const listener of appliedServerDataListeners.current) listener(readStartedAt, serverBootstrap);
       publishDashboardData(bootstrap);
       // A server bootstrap landed: a completed load, unlike timer and other local publications (Codex r6 on #615).
       setBootstrapCompletions((count) => count + 1);

@@ -62,3 +62,18 @@ function guardAllowsRefresh(
     timerMutationWasInFlight: guard.timerMutationWasInFlight
   });
 }
+
+/** The Dashboard and recovered refreshes converge here after async reconciliation. */
+export function createDashboardReadOrder() {
+  let lastApplied = -Infinity;
+  return {
+    accept(requestedAt: number) {
+      if (requestedAt <= lastApplied) return false;
+      lastApplied = requestedAt;
+      return true;
+    },
+    reset() {
+      lastApplied = -Infinity;
+    }
+  };
+}

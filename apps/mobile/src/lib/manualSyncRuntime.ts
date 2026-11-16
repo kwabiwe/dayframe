@@ -182,8 +182,8 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
         };
       },
       async refresh(context) {
-        const publication = beginRecoveredDashboardBootstrapPublication();
         const requestedAt = Date.now();
+        const publication = beginRecoveredDashboardBootstrapPublication(requestedAt);
         try {
           const bootstrap = await fetchBootstrap({
             date: options.date,
