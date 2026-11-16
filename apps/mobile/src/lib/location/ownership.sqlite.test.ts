@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { decideLocationRollout, segmentStartedAfterSemanticCutover } from "../../../../../apps/web/src/lib/location/location-rollout";
 
+vi.mock("../syncDiagnosticHistory", () => ({
+  captureSyncDiagnosticScope: () => undefined,
+  recordSyncDiagnostic: () => undefined,
+  MAX_SYNC_DIAGNOSTIC_RECORDS: 200
+}));
+
 const h = vi.hoisted(() => ({
   open: vi.fn(),
   fetch: vi.fn(),

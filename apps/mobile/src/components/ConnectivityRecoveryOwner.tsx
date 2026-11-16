@@ -8,6 +8,7 @@ import {
   syncQueue
 } from "@/lib/api";
 import { useConnectivity } from "@/lib/connectivity";
+import { captureSyncDiagnosticScope, recordSyncDiagnostic } from "@/lib/syncDiagnosticHistory";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import {
   connectivityAllowsRecovery,
@@ -82,6 +83,7 @@ export function ConnectivityRecoveryOwner() {
   connectivityRef.current = connectivity;
   durableWorkRef.current = durableWork;
 
+  const diagnosticScope = useRef<ReturnType<typeof captureSyncDiagnosticScope>>(undefined);
   const coordinator = useRef<ReturnType<typeof createConnectivityRecoveryCoordinator> | null>(null);
   coordinator.current ??= createConnectivityRecoveryCoordinator({
     canStart: () => {
@@ -92,10 +94,16 @@ export function ConnectivityRecoveryOwner() {
     },
     hasPendingWork: () => getDurableWorkSnapshot().pendingCount > 0,
     onPassStarted: (epoch) => {
+      diagnosticScope.current = captureSyncDiagnosticScope();
+      recordSyncDiagnostic(diagnosticScope.current, { lane: "recovery", event: "attempted" });
       reportConnectivityRecoveryStarted(epoch);
       recordRecoveryLifecycle("start", { epoch });
     },
     onPassFinished: ({ epoch, hasPendingPass, result }) => {
+      recordSyncDiagnostic(diagnosticScope.current, {
+        lane: "recovery",
+        event: result === "completed" || result === "interrupted" || result === "authentication_required" ? result : "failed"
+      });
       recordRecoveryLifecycle("end", { epoch, hasPendingPass, result });
       if (!hasPendingPass) {
         reportConnectivityRecoveryFinished({
@@ -106,6 +114,7 @@ export function ConnectivityRecoveryOwner() {
       void refreshDurableWorkSnapshot();
     },
     onRetryScheduled: ({ attempt, epoch, retryAt }) => {
+      recordSyncDiagnostic(diagnosticScope.current, { lane: "recovery", event: "retry_scheduled", attempt, retryAt });
       recordRecoveryLifecycle("retry", {
         attempt,
         epoch,

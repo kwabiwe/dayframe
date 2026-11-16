@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap, QueuedEvent } from "./api";
 import { friendlyMobileErrorMessage } from "./friendlyError";
@@ -40,7 +41,18 @@ const appState = vi.hoisted(() => ({ currentState: "active" }));
 const healthAcknowledgement = vi.hoisted(() => vi.fn());
 const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
-vi.mock("expo-crypto",()=>({}));
+vi.mock("expo-sqlite/kv-store", () => ({ SQLiteStorage: class {
+  async getItemAsync(key: string) { return asyncStore.get(key) ?? null; }
+  async setItemAsync(key: string, value: string) { asyncStore.set(key, value); }
+} }));
+const enableDiagnosticDigest = vi.hoisted(() => ({ enabled: false }));
+vi.mock("expo-crypto", () => ({
+  CryptoDigestAlgorithm: { SHA256: "sha256" },
+  digestStringAsync: async (_algorithm: string, input: string) => {
+    if (!enableDiagnosticDigest.enabled) throw new Error("diagnostics storage not under test");
+    return createHash("sha256").update(input).digest("hex");
+  }
+}));
 const healthDiscard = vi.hoisted(() => vi.fn(async (_items: unknown[]) => 0));
 const healthDeliveryOpen = vi.hoisted(() => vi.fn(async (_owner: unknown, _id: string) => true));
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard,isHealthDeliveryOpen:healthDeliveryOpen}));
@@ -183,6 +195,120 @@ describe("mobile API client", () => {
     await activateMobileAccount(TIMER_STOP_OWNER);
   });
 
+
+  it("keeps the durable Stop and activity retry lifecycle available after both queues drain", async () => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("synthetic-bearer");
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const owner = TIMER_STOP_OWNER;
+      const stop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+      await enqueueEvent({
+        source: "mobile_app", type: "timer_stop", localId: "synthetic-offline-stop",
+        rawPayload: scopedStopPayload()
+      });
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new TypeError("Network request failed"))
+        .mockResolvedValueOnce(jsonResponse({ error: "private server detail" }, 503))
+        .mockResolvedValueOnce(jsonResponse({ eventId: "synthetic-receipt" }, 201))
+        .mockResolvedValueOnce(jsonResponse({ eventId: "synthetic-activity-receipt" }, 201));
+      vi.stubGlobal("fetch", fetchMock);
+      const first = await deliverPendingTimerStop(stop, owner);
+      expect(first.status).toBe("retryable_failure");
+      expect(await syncQueue()).toMatchObject({ remainingCount: 1, firstError: { failureKind: "server" } });
+      await syncQueue();
+      expect(fetchMock).toHaveBeenCalledTimes(2); // Not yet due.
+      expect((await deliverPendingTimerStop(first.pendingStop, owner)).status).toBe("delivered");
+      expect(await syncQueue({ forceRetry: true })).toMatchObject({ remainingCount: 0, syncedCount: 1 });
+      expect(await readPendingTimerStops()).toEqual([]);
+      await enqueueEvent({
+        source: "health_sleep", type: "health_sleep_import",
+        localId: "healthkit:sleep:private-sample", rawPayload: { sourceSampleIds: ["private-health-id"] }
+      });
+      const rejectedStop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "private refusal detail" }, 422));
+      expect((await deliverPendingTimerStop(rejectedStop, owner)).status).toBe("permanent_failure");
+
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const message = share.mock.calls[0][0].message;
+      const records = JSON.parse(message).records as Array<{ lane: string; event: string; work: string; retryAt?: string; status?: number }>;
+      for (const [lane, retry] of [["timer_stop", "retry_pending"], ["timer_activity", "retry_scheduled"]]) {
+        const queueEvent = records.find((record) => record.lane === lane && record.event === "queued");
+        const work = records.filter((record) => record.lane === lane && record.work === queueEvent?.work);
+        expect(work.map((record) => record.event), message).toEqual(["queued", "attempted", retry, "attempted", "delivered"]);
+        expect(new Set(work.map((record) => record.work)).size).toBe(1);
+        expect(work[0].work).toMatch(/^[a-f0-9]{24}$/);
+        expect(work.at(-1)?.status).toBe(201);
+        if (lane === "timer_activity") expect(work[2]).toMatchObject({ retryAt: expect.any(String), status: 503 });
+      }
+      expect(records.find((record) => record.event === "rejected")).toMatchObject({ lane: "timer_stop", status: 422 });
+      expect(new Set(records.map(({ lane }) => lane))).toEqual(new Set(["timer_stop", "timer_activity"]));
+      for (const secret of ["synthetic-bearer", stop.clientEventId, rejectedStop.clientEventId, TIMER_TARGET_A, "synthetic-offline-stop",
+        "synthetic-receipt", "private server detail", "private refusal detail", "private-health-id", owner.userId, owner.workspaceId]) {
+        expect(message).not.toContain(secret);
+      }
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["timer_stop", "timer_activity"] as const)("retains a %s 401 across invalidation and same-account sign-in", async (lane) => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("expired-synthetic-session");
+      const owner = TIMER_STOP_OWNER;
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "private details" }, 401)));
+      if (lane === "timer_stop") {
+        const stop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+        await expect(deliverPendingTimerStop(stop, owner)).rejects.toBeInstanceOf(AuthRequiredError);
+        expect(await readPendingTimerStops()).toHaveLength(1);
+      } else {
+        await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
+        await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
+        expect(await readQueue()).toHaveLength(1);
+      }
+      expect(await getSessionToken()).toBeNull();
+      await setSessionToken("replacement-synthetic-session", owner);
+      await activateMobileAccount(owner);
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const message = share.mock.calls[0][0].message;
+      const rows = JSON.parse(message).records;
+      expect(rows.map((row: { event: string }) => row.event)).toEqual(["queued", "attempted", "authentication_required"]);
+      expect(rows[2]).toMatchObject({ lane, status: 401, work: rows[0].work });
+      expect(message).not.toContain("private details");
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("explains why a Stop for a refused optimistic Start disappeared", async () => {
+    enableDiagnosticDigest.enabled = true;
+    try {
+      storeBoundSession("synthetic-bearer");
+      const owner = TIMER_STOP_OWNER;
+      await enqueueEvent({ owner, localId: "refused-start", source: "mobile_app", type: "timer_start" });
+      await getOrCreatePendingStop({ owner, target: { optimisticEntryId: "refused-start" } });
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)));
+      await syncQueue({ eventScope: "timer_mutations" });
+      expect(await readPendingTimerStops()).toHaveLength(0);
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      expect(await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(owner), share, () => true)).toBe(true);
+      const stops = JSON.parse(share.mock.calls[0][0].message).records.filter((row: { lane: string }) => row.lane === "timer_stop");
+      expect(stops).toEqual([
+        expect.objectContaining({ event: "queued" }),
+        expect.objectContaining({ event: "discarded", reason: "target_unavailable", work: stops[0].work })
+      ]);
+    } finally {
+      enableDiagnosticDigest.enabled = false;
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("preserves captured Health identity across staging/production with cloned account UUIDs", async () => {
     storeBoundSession("session-token");
@@ -2462,10 +2588,10 @@ describe("mobile API client", () => {
   });
 
   it.each([
-    ["an offline failure", () => Promise.reject(new TypeError("Network request failed"))],
-    ["an invalid acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
-    ["a timeout", () => new Promise<Response>(() => undefined)]
-  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, failure) => {
+    ["an offline failure", "transport", () => Promise.reject(new TypeError("Network request failed"))],
+    ["an invalid acknowledgement", "invalid_acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
+    ["a timeout", "timeout", () => new Promise<Response>(() => undefined)]
+  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, reason, failure) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
     storeBoundSession("session-token");
@@ -2485,9 +2611,18 @@ describe("mobile API client", () => {
     const fetchMock = vi.fn(failure);
     vi.stubGlobal("fetch", fetchMock);
 
-    const pass = syncQueue({ eventScope: "non_timer" });
-    await vi.advanceTimersByTimeAsync(16_000);
-    await pass;
+    enableDiagnosticDigest.enabled = true;
+    try {
+      const pass = syncQueue({ eventScope: "non_timer" });
+      await vi.advanceTimersByTimeAsync(16_000);
+      await pass;
+      const { captureSyncDiagnosticScope, exportSyncDiagnosticHistory } = await import("./syncDiagnosticHistory");
+      const share = vi.fn(async (_content: { message: string }) => {});
+      await exportSyncDiagnosticHistory(captureSyncDiagnosticScope(TIMER_STOP_OWNER), share, () => true);
+      const rows = JSON.parse(share.mock.calls[0][0].message).records;
+      expect(rows.at(-1)).toMatchObject({ lane: "legacy_location", event: "retry_pending", reason });
+      expect(rows.at(-1)).not.toHaveProperty("status");
+    } finally { enableDiagnosticDigest.enabled = false; }
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [parked] = await readQueue();
     expect(parked).toMatchObject({ failureKind: "permanent", lastStatusCode: 500, serverFailureCount: 9 });

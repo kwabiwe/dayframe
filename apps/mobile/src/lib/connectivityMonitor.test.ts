@@ -25,6 +25,12 @@ vi.mock("@react-native-community/netinfo", () => ({
   }
 }));
 
+const diagnostics = vi.hoisted(() => ({ scope: {}, record: vi.fn() }));
+vi.mock("./syncDiagnosticHistory", () => ({
+  captureSyncDiagnosticScope: () => diagnostics.scope,
+  recordSyncDiagnostic: diagnostics.record
+}));
+
 const monitor = await import("./connectivityMonitor");
 
 const ONLINE = {
@@ -42,6 +48,7 @@ const OFFLINE = {
 
 describe("process-wide connectivity monitor", () => {
   beforeEach(() => {
+    diagnostics.record.mockClear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-21T09:00:00.000Z"));
     netInfo.fetch.mockResolvedValue(ONLINE);
@@ -52,6 +59,21 @@ describe("process-wide connectivity monitor", () => {
     monitor.__resetConnectivityMonitorForTests();
     vi.clearAllMocks();
     vi.useRealTimers();
+  });
+
+  it("records only committed connectivity transitions", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    try {
+      await vi.advanceTimersByTimeAsync(2_000);
+      netInfo.emit(OFFLINE);
+      expect(diagnostics.record.mock.calls.map(([, fields]) => fields.event)).toEqual(["online"]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      netInfo.emit(OFFLINE);
+      await vi.advanceTimersByTimeAsync(2_000);
+      netInfo.emit(ONLINE);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(diagnostics.record.mock.calls.map(([, fields]) => fields.event)).toEqual(["online", "offline", "online"]);
+    } finally { stop(); }
   });
 
   it("starts one native listener and cleans it up after the final owner stops", async () => {

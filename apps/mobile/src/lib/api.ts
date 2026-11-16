@@ -80,6 +80,7 @@ import {
 } from "./timerBackgroundExecution";
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
+import { captureSyncDiagnosticScope, MAX_SYNC_DIAGNOSTIC_RECORDS, recordSyncDiagnostic, type SyncDiagnosticReason } from "./syncDiagnosticHistory";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -929,6 +930,8 @@ export async function enqueueEvents(inputs: readonly ActivityEventDraft[]): Prom
 function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
   return withQueueMutation(async () => {
     const activeOwner = await readActiveMobileAccount();
+    const diagnosticScope = captureSyncDiagnosticScope(activeOwner);
+    const queuedDiagnostics: Array<{ lane: "timer_activity" | "legacy_location"; id: string }> = [];
     let all: QueuedEvent[] | null = null;
     let changed = false;
     let acceptedCount = 0;
@@ -1026,6 +1029,11 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
           untaggedByLocalId?.delete(queuedLocalId);
         } else {
           all = [...all, nextItem];
+          const lane = activityDiagnosticLane(nextItem);
+          if (lane) {
+            if (queuedDiagnostics.length === MAX_SYNC_DIAGNOSTIC_RECORDS) queuedDiagnostics.shift();
+            queuedDiagnostics.push({ lane, id: nextItem.localId });
+          }
         }
         queuedIds.add(queuedLocalId);
         changed = true;
@@ -1037,7 +1045,12 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
         break;
       }
     }
-    if (changed && all) await writeAllQueue(all);
+    if (changed && all) {
+      await writeAllQueue(all);
+      for (const { lane, id } of queuedDiagnostics) {
+        recordSyncDiagnostic(diagnosticScope, { lane, event: "queued" }, id);
+      }
+    }
     for (const owner of reservationOwners.values()) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
@@ -1048,6 +1061,13 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
     const queue = all && resultOwner ? all.filter((item) => queuedEventMatchesOwner(item, resultOwner)) : [];
     return { queue, acceptedCount, error };
   });
+}
+
+// Explicitly omit Health and other unclassified sources from this history.
+function activityDiagnosticLane(item: Pick<QueuedEvent, "source" | "type">) {
+  if (item.source === "health_sleep" || item.source === "health_workout") return undefined;
+  if (isQueuedTimerMutationEvent(item)) return "timer_activity";
+  if (isLegacyAutomaticLocationSource(item.source)) return "legacy_location";
 }
 
 function queuedEventMatchesOwner(item: QueuedEvent, owner: MobileAccountOwner) {
@@ -1539,6 +1559,7 @@ async function syncQueueUnlocked(
   options: SyncQueueOptions,
   owner: MobileAccountOwner
 ): Promise<SyncQueueResult> {
+  const diagnosticScope = options.eventScope === "health" ? undefined : captureSyncDiagnosticScope(owner);
   const all = await withQueueMutation(() => readAllQueue(owner));
   const queue = all.filter((item) =>
     queuedEventMatchesOwner(item, owner) && queueEventMatchesScope(item, options.eventScope)
@@ -1553,12 +1574,12 @@ async function syncQueueUnlocked(
       (reservedSignal) => syncQueueItems(
         queue,
         { ...options, signal: options.signal ?? reservedSignal },
-        owner
+        owner, diagnosticScope
       ),
       { beginIfMissing: !options.signal && hasDeliverableTimerMutation }
     );
   }
-  return syncQueueItems(queue, options, owner);
+  return syncQueueItems(queue, options, owner, diagnosticScope);
 }
 
 function activityQueueBackgroundExecutionKey(owner: MobileAccountOwner) {
@@ -1568,8 +1589,11 @@ function activityQueueBackgroundExecutionKey(owner: MobileAccountOwner) {
 async function syncQueueItems(
   queue: QueuedEvent[],
   options: SyncQueueOptions,
-  owner: MobileAccountOwner
+  owner: MobileAccountOwner,
+  diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>
 ): Promise<SyncQueueResult> {
+  const acceptedStatuses = new Map<string, number>();
+  const failureReasons = new Map<string, SyncDiagnosticReason | null>();
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
@@ -1642,6 +1666,7 @@ async function syncQueueItems(
     }
 
     const attemptedAt = new Date().toISOString();
+    const lane = activityDiagnosticLane(item);
     let locationTransfer: Awaited<ReturnType<typeof import("./location/store").openLegacyLocationTransfer>> = undefined;
     try {
       if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
@@ -1689,11 +1714,15 @@ async function syncQueueItems(
           beforeDispatch: transfer ? async () => {
             if (!await transfer.mayDispatch()) throw new StaleMobileSessionResponseError();
           } : undefined,
-          onDispatch: transfer ? () => {
-            if (!transfer.isCurrent() || !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
+          onDispatch: () => {
+            if (transfer && (!transfer.isCurrent() || !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot))) {
               throw new StaleMobileSessionResponseError();
             }
-          } : undefined,
+            if (lane) recordSyncDiagnostic(diagnosticScope, { lane, event: "attempted", attempt: (item.failureCount ?? 0) + 1 }, item.localId);
+          },
+          onAuthenticationRejected: lane ? (status) => recordSyncDiagnostic(diagnosticScope, {
+            lane, event: "authentication_required", status
+          }, item.localId) : undefined,
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1775,6 +1804,7 @@ async function syncQueueItems(
           throw new Error("The Health acknowledgement backend is not verified.");
         }
       }
+      if (lane) acceptedStatuses.set(item.localId, response.status);
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
@@ -1789,6 +1819,12 @@ async function syncQueueItems(
       }
       const message = error instanceof Error ? error.message : "Network request failed";
       const failureKind = isMobileTransportFailure(error) ? "network" : "server";
+      if (lane) {
+        const reason = error instanceof MobileRequestTimeoutError ? "timeout" :
+          error instanceof InvalidMobileAcknowledgementError ? "invalid_acknowledgement" :
+          failureKind === "network" ? "transport" : undefined;
+        failureReasons.set(item.localId, reason ?? null);
+      }
       const failedItem = keepParked(item, markQueueFailure(item, message, attemptedAt, failureKind));
       firstError ??= queueFailureReport(failedItem, message, failedItem.failureKind ?? failureKind);
       if (isolated && failureKind === "server") {
@@ -1807,7 +1843,7 @@ async function syncQueueItems(
     owner,
     processed: queue,
     remaining,
-    synced: [...synced, ...dropped]
+    synced: [...synced, ...dropped], acceptedStatuses, failureReasons, diagnosticScope
   });
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).
@@ -1970,6 +2006,7 @@ export async function deliverPendingTimerStop(
   owner: TimerStopOwner,
   signal?: AbortSignal
 ): Promise<PendingTimerStopDeliveryResult> {
+  const diagnosticScope = captureSyncDiagnosticScope(owner);
   if (!timerStopOwnerMatches(pendingStop, owner)) {
     return { status: "account_mismatch", pendingStop };
   }
@@ -1991,6 +2028,8 @@ export async function deliverPendingTimerStop(
     return { status: "session_changed", pendingStop };
   }
 
+  const attempt = (pendingStop.failureCount ?? 0) + 1;
+  const lane = "timer_stop";
   try {
     const response = await mobileFetchWithTimeout(
       `${DAYFRAME_API_BASE}/api/events`,
@@ -2014,6 +2053,12 @@ export async function deliverPendingTimerStop(
         signal
       },
       {
+        onDispatch: () => recordSyncDiagnostic(diagnosticScope, {
+          lane, event: "attempted", attempt
+        }, pendingStop.clientEventId),
+        onAuthenticationRejected: (status) => recordSyncDiagnostic(diagnosticScope, {
+          lane, event: "authentication_required", attempt, status
+        }, pendingStop.clientEventId),
         timeoutMilliseconds: MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS,
         timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
       }
@@ -2029,7 +2074,9 @@ export async function deliverPendingTimerStop(
     }
     if (response.ok) {
       await settleRunningSplitSecondReceipt(owner, pendingStop.targetEntryId, signal);
-      await removePendingTimerStop(pendingStop.clientEventId);
+      if (await removePendingTimerStop(pendingStop.clientEventId)) {
+        recordSyncDiagnostic(diagnosticScope, { lane, event: "delivered", attempt, status: response.status }, pendingStop.clientEventId);
+      }
       return { status: "delivered", pendingStop };
     }
 
@@ -2040,6 +2087,9 @@ export async function deliverPendingTimerStop(
       failureKind,
       statusCode: response.status
     });
+    if (updated) recordSyncDiagnostic(diagnosticScope, {
+      lane, event: failureKind === "permanent" ? "rejected" : "retry_pending", reason: "server", attempt, status: response.status
+    }, pendingStop.clientEventId);
     const failedStop = updated ?? pendingStop;
     const error = new Error(message);
     return failureKind === "permanent"
@@ -2052,6 +2102,10 @@ export async function deliverPendingTimerStop(
       message: failure.message,
       failureKind: "retryable"
     });
+    if (updated) recordSyncDiagnostic(diagnosticScope, {
+      lane, event: "retry_pending", attempt,
+      reason: error instanceof MobileRequestTimeoutError ? "timeout" : isMobileTransportFailure(error) ? "transport" : undefined
+    }, pendingStop.clientEventId);
     return {
       status: "retryable_failure",
       pendingStop: updated ?? pendingStop,
@@ -3171,22 +3225,32 @@ function reconcileActivityQueueDrain(input: {
   processed: readonly QueuedEvent[];
   remaining: readonly QueuedEvent[];
   synced: readonly string[];
+  acceptedStatuses: ReadonlyMap<string, number>;
+  failureReasons: ReadonlyMap<string, SyncDiagnosticReason | null>;
+  diagnosticScope: ReturnType<typeof captureSyncDiagnosticScope>;
 }) {
   return withQueueMutation(async () => {
     const current = await readAllQueue(input.owner);
-    const processedIds = new Set(input.processed.map((item) => item.localId));
+    const previousById = new Map(input.processed.map((item) => [item.localId, item]));
     const syncedIds = new Set(input.synced);
     const remainingById = new Map(input.remaining.map((item) => [item.localId, item]));
+    const outcomes: { item: QueuedEvent; status?: number; failed?: QueuedEvent }[] = [];
+    const keepOutcome = (outcome: typeof outcomes[number]) => {
+      if (outcomes.length === MAX_SYNC_DIAGNOSTIC_RECORDS) outcomes.shift();
+      outcomes.push(outcome);
+    };
     const next = current.flatMap((item) => {
-      if (
-        !queuedEventMatchesOwner(item, input.owner) ||
-        !processedIds.has(item.localId)
-      ) {
-        return [item];
+      const previous = previousById.get(item.localId);
+      if (!previous || !queuedEventMatchesOwner(item, input.owner)) return [item];
+      const audited = input.diagnosticScope && activityDiagnosticLane(item);
+      if (syncedIds.has(item.localId)) {
+        const status = input.acceptedStatuses.get(item.localId);
+        if (audited && status !== undefined) keepOutcome({ item, status });
+        return [];
       }
-      if (syncedIds.has(item.localId)) return [];
       const processed = remainingById.get(item.localId);
       if (!processed) return [item];
+      if (audited && processed.failureCount !== previous.failureCount) keepOutcome({ item, failed: processed });
       return [{
         ...item,
         ...(processed.failedAt ? { failedAt: processed.failedAt } : {}),
@@ -3206,6 +3270,25 @@ function reconcileActivityQueueDrain(input: {
       }];
     });
     await writeAllQueue(next);
+    for (const { item, status, failed } of outcomes) {
+      const lane = activityDiagnosticLane(item);
+      if (!lane) continue;
+      if (status !== undefined) {
+        recordSyncDiagnostic(input.diagnosticScope, { lane, event: "delivered", status }, item.localId);
+        continue;
+      }
+      if (!failed) continue;
+      const retryAt = failed.nextRetryAt ? Date.parse(failed.nextRetryAt) : undefined;
+      // A parked event retains its previous HTTP status for the issue row. It does not describe
+      // a new failure thrown before this attempt's response was read.
+      const statusCode = input.failureReasons.has(item.localId) ? undefined : failed.lastStatusCode;
+      recordSyncDiagnostic(input.diagnosticScope, {
+        lane, event: isPermanentlyFailedEvent(failed) && !isParkedNonTimerEvent(failed) ? "rejected"
+          : retryAt === undefined ? "retry_pending" : "retry_scheduled",
+        attempt: failed.failureCount, status: statusCode, retryAt,
+        reason: input.failureReasons.get(item.localId) ?? (statusCode === undefined ? undefined : "server")
+      }, item.localId);
+    }
     return next.filter((item) => queuedEventMatchesOwner(item, input.owner));
   });
 }

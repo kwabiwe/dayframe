@@ -1,6 +1,7 @@
 import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
+import { captureSyncDiagnosticScope, exportSyncDiagnosticHistory, isSyncDiagnosticScopeCurrent } from "@/lib/syncDiagnosticHistory";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
 import { freezeDiagnosticsSummary, supportFreezeDiagnostics, type NativeDiagnostics, type NativeDiagnosticsSnapshot } from "@/lib/stallWatchdog";
 import { energySummaryLine, supportEnergyDiagnostics } from "@/lib/energyMetrics";
@@ -1240,6 +1241,14 @@ export default function SettingsScreen() {
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
+  const historyExport = useRef(false);
+  const historyExportVisibility = useRef<symbol | null>(null);
+  const [exportingHistory, setExportingHistory] = useState(false);
+  useFocusEffect(useCallback(() => {
+    if (settingsSection !== "sync") return;
+    historyExportVisibility.current = Symbol();
+    return () => { historyExportVisibility.current = null; };
+  }, [settingsSection]));
   // Sync help › Pauses and crashes: a light overview (no payloads), read on each visit once the
   // opening transition has finished (kept on this iPhone until shared).
   const [freezeSnapshot, setFreezeSnapshot] = useState<NativeDiagnosticsSnapshot | null>(null);
@@ -1658,6 +1667,26 @@ export default function SettingsScreen() {
     } catch (error) {
       setSyncHelpNote("Couldn't clear those items. Nothing was removed.");
     }
+  }
+
+  function shareSyncDiagnosticHistory() {
+    const scope = captureSyncDiagnosticScope();
+    const visible = historyExportVisibility.current;
+    const isVisible = () => visible !== null && historyExportVisibility.current === visible;
+    return runPreparedExport(historyExport, setExportingHistory, async () => {
+      try {
+        const shared = await exportSyncDiagnosticHistory(scope, (content) => Share.share(content), isVisible);
+        if (shared || !isVisible() || (scope && !isSyncDiagnosticScopeCurrent(scope))) return;
+        const note = "Sign in to export diagnostics.";
+        setSyncHelpNote(note);
+        AccessibilityInfo.announceForAccessibility(note);
+      } catch {
+        if (!isVisible() || (scope && !isSyncDiagnosticScopeCurrent(scope))) return;
+        const note = "Couldn't export diagnostics. Try again.";
+        setSyncHelpNote(note);
+        AccessibilityInfo.announceForAccessibility(note);
+      }
+    });
   }
 
   async function exportQueueDiagnostics() {
@@ -2899,6 +2928,14 @@ export default function SettingsScreen() {
                   testID="sync-help-send"
                   theme={theme}
                   title="Try sending again"
+                />
+                <SettingsBlockRow
+                  disabled={exportingHistory}
+                  onPress={() => void shareSyncDiagnosticHistory()}
+                  subtitle={exportingHistory ? "Preparing…" : "Recent sync activity from this iPhone"}
+                  testID="sync-help-export-diagnostics"
+                  theme={theme}
+                  title="Export diagnostics"
                 />
                 <SettingsBlockRow
                   onPress={exportQueueDiagnostics}
