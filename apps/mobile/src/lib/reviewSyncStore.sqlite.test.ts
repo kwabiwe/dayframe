@@ -493,9 +493,16 @@ describe("Review real SQLite transactions", () => {
       })]);
       await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [item.id], entryId) });
       expect(await store.readPendingCalendarTripLogs(owner)).toEqual([]);
-      expect(observed).toHaveBeenCalledExactlyOnceWith(owner, [expect.objectContaining({
-        check: expect.objectContaining({ id: item.id, segmentId }), entryIds: [entryId]
-      })]);
+      const receipt = expect.objectContaining({ check: expect.objectContaining({ id: item.id, segmentId }), entryIds: [entryId] });
+      expect(observed).toHaveBeenCalledExactlyOnceWith(owner, [receipt]);
+      await reopen();
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
+      expect(await store.readCalendarTripHandovers({ ...owner, backendId: "elsewhere" })).toEqual([]);
+      const cachedData = { ...data, serverBuild: { ...data.serverBuild!, backendId: owner.backendId } };
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [] });
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([receipt]);
+      await store.cacheDashboardBootstrap({ ...cachedData, entries: [{ ...data.entries[0], id: entryId }] });
+      expect(await store.readCalendarTripHandovers(owner)).toEqual([]);
     } finally {
       unsubscribe();
     }

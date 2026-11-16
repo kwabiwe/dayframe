@@ -76,8 +76,8 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, keepScopedReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import type { CalendarTripLog } from "../lib/calendarTripLog";
-import { getReviewItemSyncStates, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarTripHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
+import type { CalendarTripHandover, CalendarTripLog } from "../lib/calendarTripLog";
+import { forgetCalendarTripHandovers, getReviewItemSyncStates, readCalendarTripHandovers, readPendingCalendarTripLogs, readPendingTimerTripClashEnds, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeCalendarTripHandover, subscribeReviewSync, subscribeTimerTripClashChanged, type PendingTimerTripClashEnd } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -2084,25 +2084,36 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Keep it for the Calendar until the block can take over or a newer day read has removed the trip.
   const [tripHandover, setTripHandover] = useState<{
     owner: string;
-    logs: readonly (CalendarTripLog & { observedAt: number })[];
+    logs: readonly CalendarTripHandover[];
   } | null>(null);
   useEffect(() => {
-    if (!scopedOwnerKey) {
+    if (!scopedOwner || !scopedOwnerKey) {
       setTripHandover(null);
       return;
     }
-    return subscribeCalendarTripHandover((owner, logs) => {
-      if (`${owner.backendId}:${owner.workspaceId}:${owner.userId}` !== scopedOwnerKey) return;
-      const observedAt = Date.now();
+    let current = true;
+    function receive(logs: readonly CalendarTripHandover[]) {
+      if (!current || !scopedOwnerKey || !logs.length) return;
       setTripHandover((previous) => {
         const retained = new Map(previous?.owner === scopedOwnerKey ? previous.logs.map((log) => [log.check.id, log]) : []);
         for (const log of logs) {
+          if ((retained.get(log.check.id)?.observedAt ?? 0) >= log.observedAt) continue;
           retained.delete(log.check.id);
-          retained.set(log.check.id, { ...log, observedAt });
+          retained.set(log.check.id, log);
         }
         return { owner: scopedOwnerKey, logs: [...retained.values()].slice(-REVIEW_PRESENTATION_MAX_IDS) };
       });
+    }
+    const unsubscribe = subscribeCalendarTripHandover((owner, logs) => {
+      if (`${owner.backendId}:${owner.workspaceId}:${owner.userId}` === scopedOwnerKey) receive(logs);
     });
+    void readCalendarTripHandovers(scopedOwner).then(receive).catch(() => undefined);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedOwnerKey]);
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
   // refresh paged out, until the next read replaces it (Codex r2 on #582).
@@ -2450,23 +2461,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     entry.tripSegmentId && !entry.reviewItemId ? [[entry.id, entry.tripSegmentId] as const] : [])),
   [nativeCalendarBridge.actionEntries]);
   useEffect(() => {
-    if (!tripHandover || tripHandover.owner !== scopedOwnerKey) return;
+    if (!scopedOwner || !tripHandover?.logs.length || tripHandover.owner !== scopedOwnerKey) return;
     const fromMs = checkAskingStartMs(dateFromKey(todayKey).getTime());
     const canonicalSegments = new Set(tripSegmentByEntryId.values());
     const shownIds = new Set(nativeCalendarModel.entries.filter((entry) => !entry.isReview).map((entry) => entry.entryId));
     const timelineTrips = new Map((serverCalendarTimeline?.items ?? []).flatMap((item) => item.kind === "trip" ? [[item.id, item] as const] : []));
+    const removed: CalendarTripHandover[] = [];
     const live = tripHandover.logs.filter((log) => {
       const trip = timelineTrips.get(log.check.segmentId);
       if (!checkStillAsks(log.check, fromMs) || canonicalSegments.has(log.check.segmentId)
         || trip?.blockIds.some((id) => shownIds.has(id))) return false;
       const shownDay = listCheckOverlaps(log.check, nativeCalendarModel.dayStartMs, nativeCalendarModel.dayEndMs);
-      return !shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt
-        || Boolean(trip?.blockIds.length);
+      if (!shownDay || calendarTimelineRequestedAt === null || calendarTimelineRequestedAt <= log.observedAt || trip?.blockIds.length) return true;
+      removed.push(log);
+      return false;
     });
+    if (removed.length) void forgetCalendarTripHandovers(scopedOwner, removed).catch(() => undefined);
     if (live.length !== tripHandover.logs.length) {
       setTripHandover((current) => current === tripHandover ? { ...tripHandover, logs: live } : current);
     }
-  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwnerKey, serverCalendarTimeline, todayKey, tripHandover, tripSegmentByEntryId]);
+  }, [calendarTimelineRequestedAt, nativeCalendarModel, scopedOwner, scopedOwnerKey, serverCalendarTimeline, todayKey, tripHandover, tripSegmentByEntryId]);
   const loggedTripRows = useMemo(() => {
     const held = new Map(checkAnswers.tripLogs.map((log) => [log.check.id, log]));
     if (locallyDecided?.owner === scopedOwnerKey) {

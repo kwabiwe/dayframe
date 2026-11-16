@@ -1530,7 +1530,8 @@ final class DayframeSheetQATests: XCTestCase {
     ] {
       try waitForElement(candidate, description: description)
     }
-    try require(setLastStop.label.hasPrefix("Set start to the last stop time"), "Running last-stop shortcut lost its label.", state: state)
+    try require(setLastStop.label.hasPrefix("Last stop ") || setLastStop.label.hasPrefix("No previous entry"),
+      "Running last-stop shortcut lost its label.", state: state)
     try require(setLastStop.frame.minY >= start.frame.maxY - 1 && setLastStop.frame.maxY <= dial.frame.minY + 1,
       "Last stop was not between Start and the dial.", state: state)
     try require(!element(SheetQAIdentifiers.roundStopTime).exists, "Running sheet exposed Round end.", state: state)

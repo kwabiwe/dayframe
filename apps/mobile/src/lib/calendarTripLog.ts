@@ -8,6 +8,8 @@ export type CalendarTripLog = {
   entryIds: readonly string[];
 };
 
+export type CalendarTripHandover = CalendarTripLog & { observedAt: number };
+
 /** One direct trip answer through its hold and outbox, from the same proposal that was confirmed. */
 export function calendarTripLog(
   item: MobileReviewItem | undefined,

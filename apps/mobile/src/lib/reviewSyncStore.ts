@@ -1,4 +1,4 @@
-import { calendarTripLog, type CalendarTripLog } from "./calendarTripLog";
+import { calendarTripLog, type CalendarTripLog, type CalendarTripHandover } from "./calendarTripLog";
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
@@ -1317,20 +1317,31 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
     return false;
   }
   const cachedAt = new Date().toISOString();
-  await serialiseReviewMutation(() =>
-    db.runAsync(
+  const snapshot = JSON.stringify(sanitiseDashboardBootstrapForCache(bootstrap));
+  return serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    if ((await activeAccount(transaction))?.account_key !== account.account_key) return false;
+    await transaction.runAsync(
       `insert into dashboard_snapshot_cache (
          account_key, snapshot_json, cached_at
        ) values (?, ?, ?)
        on conflict(account_key) do update set
          snapshot_json = excluded.snapshot_json,
          cached_at = excluded.cached_at`,
-      account.account_key,
-      JSON.stringify(sanitiseDashboardBootstrapForCache(bootstrap)),
-      cachedAt
-    )
-  );
-  return true;
+      account.account_key, snapshot, cachedAt
+    );
+    const backendId = bootstrap.serverBuild?.backendId ?? DAYFRAME_BACKEND_ID;
+    if (backendId) {
+      const receiptKey = calendarTripReceiptKey({ userId: account.user_id, workspaceId: account.workspace_id, backendId });
+      const receipts = parseTripHandovers(await metadata(receiptKey, transaction));
+      if (receipts.length) {
+        const blockIds = new Set([bootstrap.entries, bootstrap.dayEntries ?? [], bootstrap.weekEntries ?? [], bootstrap.historyEntries ?? []]
+          .flatMap((entries) => entries.map((entry) => entry.id)));
+        const waiting = receipts.filter((log) => !log.entryIds.some((id) => blockIds.has(id)));
+        if (waiting.length !== receipts.length) await setMetadata(receiptKey, JSON.stringify(waiting), transaction);
+      }
+    }
+    return true;
+  }));
 }
 
 /**
@@ -1356,7 +1367,7 @@ export async function cacheReviewPresentation(input: {
   const now = new Date().toISOString();
   let wrote = false;
   let evicted = 0;
-  let tripHandover: CalendarTripLog[] = [];
+  let tripHandover: CalendarTripHandover[] = [];
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (
@@ -1440,7 +1451,19 @@ export async function cacheReviewPresentation(input: {
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
     if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt, scopeKey, input.owner.backendId);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
-    tripHandover = await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
+    const acceptedTrips = await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
+    if (acceptedTrips.length) {
+      const observedAt = Date.now();
+      tripHandover = acceptedTrips.map((log) => ({ ...log, observedAt }));
+      const receiptKey = calendarTripReceiptKey(input.owner);
+      const retained = parseTripHandovers(await metadata(receiptKey, transaction));
+      const merged = new Map(retained.map((log) => [log.check.id, log]));
+      for (const log of tripHandover) {
+        merged.delete(log.check.id);
+        merged.set(log.check.id, log);
+      }
+      await setMetadata(receiptKey, JSON.stringify([...merged.values()].slice(-REVIEW_PRESENTATION_MAX_IDS)), transaction);
+    }
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
@@ -3093,10 +3116,42 @@ export async function readPendingTimerTripClashEnds(owner: { workspaceId: string
   });
 }
 
-const calendarTripHandoverListeners = new Set<(owner: ReviewPresentationOwner, logs: readonly CalendarTripLog[]) => void>();
+function calendarTripReceiptKey(owner: ReviewPresentationOwner) {
+  return accountMetadataKey(`calendar_trip_handover:${owner.backendId}`, accountKey(owner));
+}
+
+function parseTripHandovers(value: string | null): CalendarTripHandover[] {
+  if (!value) return [];
+  try {
+    const logs = JSON.parse(value) as CalendarTripHandover[];
+    const since = Date.now() - 8 * 86_400_000;
+    return Array.isArray(logs) ? logs.filter((log) => log?.check?.id && log.observedAt >= since && Array.isArray(log.entryIds)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function readCalendarTripHandovers(owner: ReviewPresentationOwner) {
+  return parseTripHandovers(await metadata(calendarTripReceiptKey(owner)));
+}
+
+/** A fresh day read found the trip's result gone before the bootstrap could display it. */
+export async function forgetCalendarTripHandovers(owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) {
+  const key = calendarTripReceiptKey(owner);
+  const seen = new Map(logs.map((log) => [log.check.id, log.observedAt]));
+  const db = await database();
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    if ((await activeAccount(transaction))?.account_key !== accountKey(owner)) return;
+    const existing = parseTripHandovers(await metadata(key, transaction));
+    const retained = existing.filter((log) => seen.get(log.check.id) !== log.observedAt);
+    if (retained.length !== existing.length) await setMetadata(key, JSON.stringify(retained), transaction);
+  }));
+}
+
+const calendarTripHandoverListeners = new Set<(owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) => void>();
 
 /** A committed Review lookup can retire an outbox item before the Calendar has read its resulting block. */
-export function subscribeCalendarTripHandover(listener: (owner: ReviewPresentationOwner, logs: readonly CalendarTripLog[]) => void) {
+export function subscribeCalendarTripHandover(listener: (owner: ReviewPresentationOwner, logs: readonly CalendarTripHandover[]) => void) {
   calendarTripHandoverListeners.add(listener);
   return () => { calendarTripHandoverListeners.delete(listener); };
 }
