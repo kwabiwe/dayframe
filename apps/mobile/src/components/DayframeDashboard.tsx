@@ -59,7 +59,7 @@ import { useCalendarPlaceFilter } from "@/lib/calendarPreferences";
 import { calendarTodayPressAction } from "@/lib/calendarTodayPress";
 import { useCalendarTimelineSnapshot } from "@/lib/useCalendarTimeline";
 import { correctionsToShow, projectTimelineCorrections, reviewItemIdsResolvedByCorrections } from "@/lib/timelineCorrectionProjection";
-import { useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
+import { usePlaceLogReceipts, useTimelineCorrectionQueue } from "@/lib/useTimelineCorrectionQueue";
 import { useLocationCorrections } from "@/components/calendar/useLocationCorrections";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
@@ -2078,7 +2078,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [authState, data]);
   const canonicalCorrectionEntryIds = useMemo(() => correctionOwner && data ? new Set(bootstrapBlocksById(data).keys()) : undefined,
     [correctionOwner, data]);
-  const correctionQueue = useTimelineCorrectionQueue(correctionOwner, canonicalCorrectionEntryIds);
+  const correctionQueue = useTimelineCorrectionQueue(correctionOwner);
   const [localPlaceLogs, setLocalPlaceLogs] = useState<{ owner: string; ids: string[] } | null>(null);
   const waitingHidden = useRef<WaitingAnswersHidden>({ ids: new Set(), segments: new Set() });
   const checkAnswers = useCalendarCheckAnswers({
@@ -2470,6 +2470,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   });
   // Acknowledged corrections stay shown until a timeline asked for after them lands, so nothing flickers back.
   const { timeline: serverCalendarTimeline, requestedAt: calendarTimelineRequestedAt } = serverCalendarSnapshot;
+  const acknowledgedPlaceLogs = usePlaceLogReceipts(correctionOwner, correctionQueue.acknowledged,
+    canonicalCorrectionEntryIds, serverCalendarTimeline, calendarTimelineRequestedAt);
   const calendarTimeline = useMemo(() => projectTimelineCorrections(serverCalendarTimeline,
     correctionsToShow(correctionQueue.acknowledged, correctionQueue.pending, calendarTimelineRequestedAt)),
   [serverCalendarTimeline, calendarTimelineRequestedAt, correctionQueue.acknowledged, correctionQueue.pending]);
@@ -2610,7 +2612,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const snapshot = (place && calendarPlaceLogSnapshot(place, title)) || captured;
       if (snapshot) add(calendarPlaceLog(id, snapshot, entryIds));
     };
-    for (const ack of correctionQueue.acknowledged) {
+    for (const ack of acknowledgedPlaceLogs) {
       if (ack.request.kind !== "log_place") continue;
       // Older servers don't split outing receipts. Its visit can still be matched after
       // a fresh timeline links the place itself; the flat receipt contains unrelated trips.
@@ -2637,7 +2639,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     }
     return [...byKey.values()];
-  }, [answersAfterCorrections.waitingLogs, calendarTimeline, confirmedReviewLogs, correctionQueue.acknowledged,
+  }, [acknowledgedPlaceLogs, answersAfterCorrections.waitingLogs, calendarTimeline, confirmedReviewLogs,
     correctionQueue.pending, correctionOwner, locationCorrections.heldLog, locationCorrections.publishingLogs, shownCalendarData]);
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;

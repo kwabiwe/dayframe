@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { LocationTimeline } from "@dayframe/shared";
 import {
   readAcknowledgedTimelineCorrections,
   readTimelineCorrectionRefreshRevision,
@@ -25,8 +26,7 @@ const NONE_ACKNOWLEDGED: readonly AcknowledgedTimelineCorrection[] = [];
  * until a timeline read after them lands. `delivered` is the queue's refresh revision (up once per
  * send pass that delivered), so the List reads the timeline again then.
  */
-export function useTimelineCorrectionQueue(owner: { userId: string; workspaceId: string } | null,
-  canonicalEntryIds?: ReadonlySet<string>) {
+export function useTimelineCorrectionQueue(owner: { userId: string; workspaceId: string } | null) {
   const [stored, setStored] = useState<Stored | null>(null);
   const userId = owner?.userId ?? null;
   const workspaceId = owner?.workspaceId ?? null;
@@ -54,25 +54,53 @@ export function useTimelineCorrectionQueue(owner: { userId: string; workspaceId:
     };
   }, [userId, workspaceId]);
   const mine = stored && stored.key === key ? stored : null;
-  const receipts = mine?.acknowledged ?? NONE_ACKNOWLEDGED;
+  return {
+    pending: mine?.items ?? NONE,
+    acknowledged: mine?.acknowledged ?? NONE_ACKNOWLEDGED,
+    delivered: mine?.delivered ?? 0
+  };
+}
+
+/** Keep a logged place until its own entry can take over, or a later read confirms it was deleted. */
+export function usePlaceLogReceipts(
+  owner: { userId: string; workspaceId: string } | null,
+  receipts: readonly AcknowledgedTimelineCorrection[],
+  canonicalEntryIds: ReadonlySet<string> | undefined,
+  timeline: LocationTimeline | null,
+  requestedAt: number | null
+) {
+  const userId = owner?.userId;
+  const workspaceId = owner?.workspaceId;
+  const key = userId && workspaceId ? `${workspaceId}:${userId}` : null;
   // Even if retirement is still writing, a just-deleted block must never bring its receipt back.
   const retired = useRef<{ key: string; ids: ReadonlySet<string> } | null>(null);
   const retiredIds = retired.current?.key === key ? retired.current?.ids : undefined;
-  const isOnScreen = (item: AcknowledgedTimelineCorrection) => item.loggedPlaceEntryIds?.some((id) => canonicalEntryIds?.has(id));
-  const settled = receipts.filter((item) => item.placeLogReceipt && (retiredIds?.has(item.clientCorrectionId) || isOnScreen(item)));
+  const { visible, settled } = useMemo(() => {
+    const places = new Map(timeline?.items.flatMap((item) => item.kind === "place" ? [[item.id, item] as const] : []));
+    const settled: string[] = [];
+    const visible = receipts.filter((item) => {
+      if (!item.placeLogReceipt || item.request.kind !== "log_place") return true;
+      const { clientCorrectionId, loggedPlaceEntryIds } = item;
+      const place = places.get(item.request.itemId);
+      // A returned place contains all linked entries, including any that were moved to another day.
+      // A failed read or a day without this place can't tell us that an entry was deleted.
+      const fullPlaceRead = place && requestedAt !== null && requestedAt > item.acknowledgedAt;
+      const deleted = fullPlaceRead && loggedPlaceEntryIds?.length &&
+        !loggedPlaceEntryIds.some((id) => place.blockIds.includes(id));
+      // Older API receipts lack separate place IDs. Use the exact timeline links once the new read arrives.
+      const entryIds = loggedPlaceEntryIds ?? (fullPlaceRead ? place.blockIds : []);
+      const onScreen = entryIds.some((id) => canonicalEntryIds?.has(id));
+      const retired = retiredIds?.has(clientCorrectionId);
+      if (deleted || onScreen || retired) settled.push(clientCorrectionId);
+      // Pass through the first replacement render so List can keep the same row key.
+      return !deleted && (!retired || onScreen);
+    });
+    return { visible, settled };
+  }, [canonicalEntryIds, receipts, requestedAt, retiredIds, timeline]);
   useLayoutEffect(() => {
     if (!key || !userId || !workspaceId || !settled.length) return;
-    const ids = settled.map((item) => item.clientCorrectionId);
-    retired.current = { key, ids: new Set(ids) };
-    void retirePlaceLogReceipts({ userId, workspaceId }, ids).catch(() => undefined);
-    // These are the exact observed receipts; neither a rerender nor a clipped date window can acknowledge another.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, userId, workspaceId, receipts, canonicalEntryIds]);
-  return {
-    pending: mine?.items ?? NONE,
-    // Pass the receipt through the first canonical render so List can reuse the
-    // provisional row's key. After deletion, hide receipts already seen in this lifetime.
-    acknowledged: retiredIds ? receipts.filter((item) => !retiredIds.has(item.clientCorrectionId) || isOnScreen(item)) : receipts,
-    delivered: mine?.delivered ?? 0
-  };
+    retired.current = { key, ids: new Set(settled) };
+    void retirePlaceLogReceipts({ userId, workspaceId }, settled).catch(() => undefined);
+  }, [key, userId, workspaceId, settled]);
+  return visible;
 }
