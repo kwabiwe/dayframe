@@ -450,7 +450,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
       if (found?.id) return { ok: true as const, correction: correctionFromRow(found as CorrectionRow) };
       // "Logs as" makes blocks, not a correction: its retry gets those blocks back.
       if (found && found.eventKind === "log_place" && request.kind === "log_place") {
-        return { ok: true as const, logged: { entryIds: await loggedEntries(client, session, found.eventId),
+        const placeEntryIds = await loggedEntries(client, session, found.eventId);
+        return { ok: true as const, logged: { entryIds: placeEntryIds, placeEntryIds,
           resolvedReviewItemIds: await resolvedFromEvent(client, session, found.eventId) } };
       }
       // The id is taken by an event that made no correction: never a second write under it (Codex r1 on #597).
@@ -892,8 +893,9 @@ async function logPlace(
     // Review emission takes the owner lock this holds, so an outing can't gain a trip since it was read; fail safe.
     throw new TimelineCorrectionError("This place's day changed. Try again.", 409);
   }
+  const placeEntryIds = [...entryIds];
   for (const trip of outingTrips) entryIds.push(...await logOutingTrip(client, session, trip, travelCategoryId!));
-  return { ok: true as const, logged: { entryIds, resolvedReviewItemIds } };
+  return { ok: true as const, logged: { entryIds, placeEntryIds, resolvedReviewItemIds } };
 }
 
 type OutingTrip = { reviewItemId: string; categoryId: string | null; clientSegmentId: string; startedAt: Date; stoppedAt: Date };

@@ -1,3 +1,4 @@
+import { calendarPlaceLogSnapshot, type CalendarPlaceLogSnapshot } from "../../lib/calendarReviewLog";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
@@ -272,10 +273,10 @@ export function useLocationCorrections({
   // the record go, and the record queues `log_place` once they are acknowledged (Codex r4 on #610).
   // `recordOwner`: the account its waiting record was registered for; every write to it is for that account (Codex r15).
   const [heldLog, setHeldLog] = useState<{ token: number; ownerKey: string; title: string; request: QueuedCorrection["request"];
-    afterCorrections?: string; recordOwner?: MobileAccountOwner } | null>(null);
+    placeLog?: CalendarPlaceLogSnapshot; afterCorrections?: string; recordOwner?: MobileAccountOwner } | null>(null);
   // While the outbox write is being published, List keeps the same place row through the handoff.
   const [publishingLogs, setPublishingLogs] = useState<{
-    id: string; ownerKey: string; request: QueuedCorrection["request"];
+    id: string; ownerKey: string; request: QueuedCorrection["request"]; placeLog?: CalendarPlaceLogSnapshot;
   }[]>([]);
   useEffect(() => {
     setPublishingLogs((current) => {
@@ -320,9 +321,10 @@ export function useLocationCorrections({
     if (!userId || !workspaceId || log.ownerKey !== currentOwner.current) return;
     const owner = { userId, workspaceId };
     const id = createTimelineCorrectionId();
-    setPublishingLogs((current) => [...current, { id, ownerKey: log.ownerKey, request: log.request }]);
+    setPublishingLogs((current) => [...current, { id, ownerKey: log.ownerKey, request: log.request, placeLog: log.placeLog }]);
     const drop = () => setPublishingLogs((current) => current.filter((item) => item.id !== id));
-    void enqueueTimelineCorrections(owner, [{ request: { ...log.request, clientCorrectionId: id } }]).then((items) => {
+    void enqueueTimelineCorrections(owner, [{ request: { ...log.request, clientCorrectionId: id },
+      ...(log.placeLog ? { preview: { name: null, placeLog: log.placeLog } } : {}) }]).then((items) => {
       for (const item of items) sentLogs.current.add(item.clientCorrectionId);
       // Sent only while the app is in front, then and at every step of the send (Codex r2 on #606).
       return send && appInFront() ? synchroniseTimelineCorrections({ owner, force: true, isForeground: appInFront }) : undefined;
@@ -416,7 +418,7 @@ export function useLocationCorrections({
   // `generation`: the account lifetime of the tap that began it, captured before its first await and carried here
   // (Codex r16 and r17 on #610): any account change since, even back to this one, makes it stale.
   const logAfterCorrections = async (sheetOwnerKey: string, placeItemId: string, categoryId: string | undefined, title: string,
-    newIds: readonly string[], generation: number, description?: string, visitOnly?: true) => {
+    newIds: readonly string[], generation: number, description?: string, visitOnly?: true, placeLog?: CalendarPlaceLogSnapshot) => {
     if (!userId || !workspaceId || sheetOwnerKey !== currentOwner.current || generation !== currentMobileAccountEpoch()) {
       throw new Error("The account changed.");
     }
@@ -424,7 +426,7 @@ export function useLocationCorrections({
     // The one shared registration (waitForItemCorrections): read, acknowledgements and record in one write.
     const id = createTimelineCorrectionId();
     const record = await waitForItemCorrections(owner, { id, itemId: placeItemId, newIds, action: {
-      kind: "log", categoryId, ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {})
+      kind: "log", categoryId, ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {}), ...(placeLog ? { placeLog } : {})
     } });
     if (!record) return null;
     return {
@@ -440,7 +442,7 @@ export function useLocationCorrections({
             return holdLog({ token: logTokens.current, ownerKey: sheetOwnerKey, title,
               request: { kind: "log_place", subject: "place", itemId: placeItemId,
                 ...(categoryId ? { categoryId } : {}), ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {})
-              }, afterCorrections: id, recordOwner: owner });
+              }, placeLog, afterCorrections: id, recordOwner: owner });
           }
         });
       },
@@ -535,7 +537,8 @@ export function useLocationCorrections({
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = categoryId ? `${shown.label} as ${name}` : description ?? shown.label;
           const generation = currentMobileAccountEpoch();
-          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation, description, visitOnly).then((waiting) => {
+          const placeLog = calendarPlaceLogSnapshot(shown.place, description) ?? undefined;
+          void logAfterCorrections(sheetOwner, placeItemId, categoryId, title, [], generation, description, visitOnly, placeLog).then((waiting) => {
             // A waiting one: the one completion path decides (Codex r14 on #610).
             if (waiting) {
               waiting.start();
@@ -545,7 +548,7 @@ export function useLocationCorrections({
             // it on the phone at once, quietly; otherwise its Undo hold starts.
             if (currentOwner.current !== sheetOwner || generation !== currentMobileAccountEpoch()) return;
             logTokens.current += 1;
-            const log = { token: logTokens.current, ownerKey: sheetOwner, title,
+            const log = { token: logTokens.current, ownerKey: sheetOwner, title, placeLog,
               request: { kind: "log_place" as const, subject: "place" as const, itemId: placeItemId,
                 ...(categoryId ? { categoryId } : {}), ...(description ? { description } : {}), ...(visitOnly ? { visitOnly } : {}) } };
             if (!mounted.current || !appInFront()) commitLogRef.current(log, false);
@@ -555,7 +558,8 @@ export function useLocationCorrections({
         onLogAfter: async (categoryId, ids, generation, description) => {
           const name = allActivities.find((activity) => activity.id === categoryId)?.name ?? "an activity";
           const title = categoryId ? `${shown.label} as ${name}` : description ?? shown.label;
-          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, title, ids, generation, description, visitOnly);
+          const placeLog = calendarPlaceLogSnapshot(shown.place, description) ?? undefined;
+          const waiting = await logAfterCorrections(open.ownerKey, shown.place.id, categoryId, title, ids, generation, description, visitOnly, placeLog);
           if (!waiting) throw new Error("Nothing to wait for.");
           return waiting;
         }

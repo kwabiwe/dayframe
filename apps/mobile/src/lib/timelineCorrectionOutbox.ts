@@ -1,3 +1,4 @@
+import { parseCalendarPlaceLogSnapshot, type CalendarPlaceLogSnapshot } from "./calendarReviewLog";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TimelineCorrectionRequestSchema, type TimelineCorrectionRequest } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
@@ -44,7 +45,7 @@ export type PendingTimelineCorrection = MobileAccountOwner & {
   failureKind?: "retryable" | "permanent";
 };
 
-export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean };
+export type TimelineCorrectionPreview = { name: string | null; role?: string | null; refreshBlocks?: boolean; placeLog?: CalendarPlaceLogSnapshot };
 
 export type TimelineCorrectionSyncResult = {
   deliveredCount: number;
@@ -60,7 +61,7 @@ export type TimelineCorrectionSyncResult = {
  * `resolvedReviewItemIds`: the "?" the server resolved with it — a Logs as on a place with an open "?" resolves
  * them in the same transaction, as their own "Not now" (#609) — so they leave the List at once.
  */
-export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[]; loggedEntryIds?: string[] };
+export type AcknowledgedTimelineCorrection = PendingTimelineCorrection & { acknowledgedAt: number; resolvedReviewItemIds?: string[]; loggedPlaceEntryIds?: string[] };
 const ACKNOWLEDGED_KEEP_MS = 5 * 60_000;
 let acknowledged: AcknowledgedTimelineCorrection[] = [];
 /** Goes up once at the end of each send pass that delivered something: the List reads its timeline again then. */
@@ -175,8 +176,9 @@ function parsePreview(value: unknown): TimelineCorrectionPreview | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   if (item.name !== null && typeof item.name !== "string") return null;
+  const placeLog = parseCalendarPlaceLogSnapshot(item.placeLog);
   return { name: item.name as string | null, ...(typeof item.role === "string" ? { role: item.role } : {}),
-    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}) };
+    ...(item.refreshBlocks === true ? { refreshBlocks: true } : {}), ...(placeLog ? { placeLog } : {}) };
 }
 
 /** Keeps a correction on the phone (it shows at once) and returns it; send with `synchroniseTimelineCorrections`. */
@@ -375,7 +377,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
     if (response.status === 401 || response.status === 403) return finish("authentication_required");
     if (!await stillCurrent()) return finish("session_changed");
     if (response.ok) {
-      const { resolvedReviewItemIds, loggedEntryIds, placeId } = await readReceipt(response);
+      const { resolvedReviewItemIds, loggedPlaceEntryIds, placeId } = await readReceipt(response);
       if (!await stillCurrent()) return finish("session_changed");
       let request = next.request;
       if (request.kind === "save_visit_place") {
@@ -401,7 +403,7 @@ async function runDrain(input: DrainInput): Promise<TimelineCorrectionSyncResult
       // Kept on the List until a timeline read after it lands; the pass says so once, at its end.
       acknowledged = [...acknowledged.filter((item) => item.clientCorrectionId !== next.clientCorrectionId),
         { ...next, request, acknowledgedAt: Date.now(), ...(resolvedReviewItemIds.length ? { resolvedReviewItemIds } : {}),
-          ...(loggedEntryIds ? { loggedEntryIds } : {}) }];
+          ...(loggedPlaceEntryIds ? { loggedPlaceEntryIds } : {}) }];
       deliveredCount += 1;
       try {
         await removeQuietly([next.clientCorrectionId]);
@@ -437,16 +439,16 @@ async function noteRefused(owner: MobileAccountOwner, item: PendingTimelineCorre
 /** The review items the server resolved with this correction (#609), when its reply says so. */
 async function readReceipt(response: Response) {
   try {
-    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown; entryIds?: unknown };
+    const body = await response.json() as { resolvedReviewItemIds?: unknown; logged?: { resolvedReviewItemIds?: unknown; placeEntryIds?: unknown };
       correction?: { kind?: unknown; target?: { placeId?: unknown } } };
     const ids = body?.resolvedReviewItemIds ?? body?.logged?.resolvedReviewItemIds;
     const placeId = body?.correction?.kind === "place" && typeof body.correction.target?.placeId === "string"
       ? body.correction.target.placeId : null;
-    const entries = body?.logged?.entryIds;
-    const loggedEntryIds = Array.isArray(entries) ? entries.filter((id): id is string => typeof id === "string") : undefined;
-    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], loggedEntryIds, placeId };
+    const entries = body?.logged?.placeEntryIds;
+    const loggedPlaceEntryIds = Array.isArray(entries) ? entries.filter((id): id is string => typeof id === "string") : undefined;
+    return { resolvedReviewItemIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [], loggedPlaceEntryIds, placeId };
   } catch {
-    return { resolvedReviewItemIds: [], loggedEntryIds: undefined, placeId: null };
+    return { resolvedReviewItemIds: [], loggedPlaceEntryIds: undefined, placeId: null };
   }
 }
 

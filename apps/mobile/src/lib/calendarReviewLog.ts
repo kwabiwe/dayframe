@@ -43,12 +43,28 @@ export function calendarReviewLog(
   };
 }
 
-export function calendarPlaceLog(place: TimelinePlace, entryIds: readonly string[] = [], title?: string): CalendarReviewLog | null {
-  if (!place.stoppedAt || !(Date.parse(place.stoppedAt) > Date.parse(place.startedAt))) return null;
+export type CalendarPlaceLogSnapshot = { startedAt: string; stoppedAt: string; title: string };
+
+export function parseCalendarPlaceLogSnapshot(value: unknown): CalendarPlaceLogSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const { startedAt, stoppedAt, title } = value as Partial<CalendarPlaceLogSnapshot>;
+  return typeof title === "string" && typeof startedAt === "string" && typeof stoppedAt === "string"
+    && Date.parse(stoppedAt) > Date.parse(startedAt) ? { startedAt, stoppedAt, title } : null;
+}
+
+export function calendarPlaceLogSnapshot(place: TimelinePlace, title?: string) {
+  return parseCalendarPlaceLogSnapshot({
+    startedAt: place.startedAt,
+    stoppedAt: place.stoppedAt,
+    title: title?.trim() || place.name || (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place")
+  });
+}
+
+export function calendarPlaceLog(segmentId: string, snapshot: CalendarPlaceLogSnapshot, entryIds: readonly string[] = []): CalendarReviewLog {
   return {
     kind: "place",
-    check: { id: `place-${place.id}`, segmentId: place.id, startedAt: place.startedAt, stoppedAt: place.stoppedAt },
-    title: title?.trim() || place.name || (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place"),
+    check: { id: `place-${segmentId}`, segmentId, startedAt: snapshot.startedAt, stoppedAt: snapshot.stoppedAt },
+    title: snapshot.title,
     entryIds
   };
 }

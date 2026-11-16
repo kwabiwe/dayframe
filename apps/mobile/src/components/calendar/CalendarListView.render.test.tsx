@@ -177,7 +177,7 @@ describe("CalendarListView (location v4 step 9)", () => {
     const known = { ...timeline, items: timeline.items.map((item) => item.id === check.segmentId && item.kind === "place"
       ? { ...item, name: "Cafe", matchKind: "saved" as const } : item) };
     const log = { kind: "place" as const, check, title: "Cafe", entryIds: [] };
-    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false}
+    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()}
       checks={[check]} timeline={known} reduceMotion={reduceMotion} {...extra} />;
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(show({})); });
@@ -196,10 +196,24 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(labels(tree).filter((label) => label.includes("Cafe"))).toHaveLength(1);
   });
 
+  it("keeps a place log when a different block exists on that segment or an outing trip arrives first", () => {
+    const check = { id: "visit", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) };
+    const log = { kind: "place" as const, check, title: "Cafe", entryIds: ["visit-block"] };
+    const partial = { ...timeline, items: timeline.items.map((item) => item.id === check.segmentId && item.kind === "place"
+      ? { ...item, blockIds: ["older"] } : item) };
+    const trip = block("commute", "Getting around", 8, 9);
+    const older = Object.assign(block("older", "Earlier visit block", 12, 13), { stoppedAtMs: at(12, 20) });
+    const { tree } = render({ timeline: partial, entries: [trip, older], loggedReviewRows: [log] });
+    expect(labels(tree).some((label) => label.startsWith("Cafe.") && label.endsWith("Logged"))).toBe(true);
+    act(() => tree.update(<List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()} timeline={partial} entries={[trip, older]}
+      loggedReviewRows={[log]} checks={[{ ...check, id: "other-review" }]} />));
+    expect(labels(tree).some((label) => label.endsWith("Needs a look"))).toBe(true);
+  });
+
   it("keeps a logged Health check until the exact saved block is displayed", () => {
     const check = { id: "workout", segmentId: null, startedAt: iso(13), stoppedAt: iso(14) };
     const log = { kind: "check" as const, check, title: "Workout", entryIds: [] };
-    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false}
+    const show = (extra: Partial<ListProps>) => <List {...listProps()} showAllPlaces={false} onToggleShowAllPlaces={vi.fn()}
       loggedReviewRows={[log]} {...extra} />;
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(show({ entries: [block("other", "Other workout", 13, 14)] })); });

@@ -72,7 +72,7 @@ describe("the Dashboard's sheet answers, Logs as and \"?\" kinds (Codex r2 on #6
     expect(answers).toContain("start: () => { startWaitingAnswerRef.current(itemId, logged, id, ownerKey, owner, generation, memberIds.length ? { expected, outing: true } : {}); },");
     expect(dashboard).toContain("const answersAfterCorrections = useAnswersAfterCorrections({ data: shownCalendarData, owner: correctionOwner,");
     expect(dashboard).toContain("onDropped: (reviewItemIds) => checkAnswers.restoreAnswered(reviewItemIds) });");
-    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments: answersAfterCorrections.waitingSegments");
+    expect(dashboard).toContain("waitingIds: answersAfterCorrections.waitingIds, waitingSegments");
   });
 
   it("hides the \"?\" a Logs as resolved on the server (#609), an outing's trips' too (#612), at once", () => {

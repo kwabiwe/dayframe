@@ -214,19 +214,16 @@ export function CalendarListView({
     // Associate only explicit timeline or receipt IDs with a review row. Matching by time or
     // place name would hide the wrong row when independent blocks overlap a visit.
     const logs = loggedReviewRows ?? [];
-    const logById = new Map(logs.map((log) => [log.check.id, log]));
     const shownEntryIds = new Set(blocks.map((entry) => entry.entryId));
-    const logByPlace = new Map(logs.flatMap((log) => log.kind === "place" && log.check.segmentId
-      ? [[log.check.segmentId, log] as const] : []));
-    const keyByEntry = new Map<string, string>([...(tripSegmentByEntryId ?? [])].map(([id, tripId]) => [id, `trip-${tripId}`] as const));
+    const keyByEntry = new Map<string, string>([...(tripSegmentByEntryId ?? [])].map(([id, tripId]) => [id, `trip-${tripId}`]));
     for (const item of timeline?.items ?? []) {
-      const key = `${item.kind}-${item.id}`;
-      for (const id of item.blockIds) keyByEntry.set(id, key);
+      if (item.kind === "trip") for (const id of item.blockIds) keyByEntry.set(id, `trip-${item.id}`);
     }
     for (const log of logs) {
-      for (const id of log.entryIds) {
-        if (!keyByEntry.has(id)) keyByEntry.set(id, calendarReviewRowKey(log));
-      }
+      // Ordinary blocks already have a stable entry key when they arrive. Trips have an
+      // existing segment key even after the receipt leaves, so keep the in-place trip handoff.
+      if ((log.kind ?? "trip") !== "trip") continue;
+      for (const id of log.entryIds) if (!keyByEntry.has(id)) keyByEntry.set(id, calendarReviewRowKey(log));
     }
     const represented = new Set<string>();
     const blockRows = blocks.map((entry): ListItem => {
@@ -235,19 +232,22 @@ export function CalendarListView({
       if (linked) represented.add(linked);
       return { kind: "block", key, atMs: entry.startedAtMs, entry };
     });
+    const visibleLogs = logs.filter((log) => !represented.has(calendarReviewRowKey(log))
+      && !log.entryIds.some((id) => shownEntryIds.has(id)));
+    const loggedIds = new Set(logs.map((log) => log.check.id));
+    const logById = new Map(visibleLogs.map((log) => [log.check.id, log]));
     const checksToShow = [
-      ...rowChecks.filter((check) => !logById.has(check.id)
-        && !(check.segmentId && (logByPlace.has(check.segmentId)
-          || represented.has(`trip-${check.segmentId}`)))),
-      ...logs.filter((log) => !represented.has(calendarReviewRowKey(log))
-        && !log.entryIds.some((id) => shownEntryIds.has(id))).map((log) => log.check)
+      ...rowChecks.filter((check) => !loggedIds.has(check.id)
+        && !(check.segmentId && represented.has(`trip-${check.segmentId}`))),
+      ...visibleLogs.map((log) => log.check)
     ];
     // Without the day's places (not read yet, or the read failed), its checks still show on rows of their own.
     const day = timeline ?? (checksToShow.length ? emptyTimeline(dayStartMs, dayEndMs) : null);
     const rows = locationListRows(day, intervals, { nowMs, showAll: showAllPlaces === true, checks: checksToShow, hideCovered: true });
     const locationRows = rows.map((row): ListItem => {
-      const log = row.kind === "check" ? logById.get(row.checkId) : row.kind === "place"
-        && !represented.has(`place-${row.place.id}`) ? logByPlace.get(row.place.id) : undefined;
+      // Another genuinely open question on the same place takes priority over the retained answer.
+      const log = row.kind === "check" ? logById.get(row.checkId) : row.kind === "place" && row.checkIds.length
+        && row.checkIds.every((id) => logById.has(id)) ? logById.get(row.checkIds[0]!) : undefined;
       const linked = log ? calendarReviewRowKey(log) : row.kind === "check"
         ? row.trip ? `trip-${row.trip.id}` : row.place ? `place-${row.place.id}` : row.key : row.key;
       const key = represented.has(linked) ? `location-${row.key}` : linked;

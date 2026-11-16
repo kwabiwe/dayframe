@@ -78,7 +78,7 @@ export function useAnswersAfterCorrections({ data, onDropped, owner, release }: 
           ...(record.log.categoryId ? { categoryId: record.log.categoryId } : {}),
           ...(record.log.description ? { description: record.log.description } : {}),
           ...(record.log.visitOnly ? { visitOnly: true } : {}),
-          clientCorrectionId: record.id } }]);
+          clientCorrectionId: record.id }, ...(record.log.placeLog ? { preview: { name: null, placeLog: record.log.placeLog } } : {}) }]);
         void synchroniseTimelineCorrections({ owner: who, force: true, isForeground: () => AppState.currentState === "active" }).catch(() => undefined);
         return "released";
       }
