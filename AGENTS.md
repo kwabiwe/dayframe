@@ -206,6 +206,7 @@ npm run check:docs
 
 ## Git And Artifacts
 
+- Finish every release with the cleanup in `.codex/reference/release-and-testflight.md`. Preserve unsaved work and release records, remove completed worktrees and generated build caches, and report remaining free space. Create temporary worktrees outside the Projects folder.
 - Do not stage generated QA screenshots such as `.codex-dayframe-*.png` unless explicitly requested.
 - Do not commit secrets, real Supabase keys, session tokens, location exports, or HealthKit payload dumps.
 - Be careful with existing untracked `.codex/` files; they may be local workflow artifacts.

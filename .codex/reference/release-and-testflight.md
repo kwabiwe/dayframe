@@ -148,9 +148,20 @@ If mobile/native/runtime configuration changed or TestFlight is an explicit succ
 10. Assign or verify the internal testing group.
 11. Verify TestFlight state is `IN_BETA_TESTING`.
 12. Restore the repo iOS build number back to its default if it was changed only for upload.
-13. Tell KB the exact build number, delivery UUID, verification state, and what changed.
+13. Record the release, then complete the storage cleanup below.
+14. Tell KB the exact build number, delivery UUID, verification state, what changed, and remaining free space.
 
 Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged (with `gh` run outside any checkout), and `origin` fetched.
+
+## Storage cleanup after each release
+
+Complete this cleanup in the same session after the upload and internal testing group have been verified. Use temporary worktrees outside the Projects folder, leaving the main checkout in place.
+
+1. Save the release record and evidence in the main checkout's git-ignored `.codex-dayframe-qa/testflight/build-<number>/` directory. Keep the commit SHA, upload receipt, App Store Connect state, smoke and performance results, exported IPA, signed archive and dSYMs. Keep signing credentials and local environment files private.
+2. Check active chats, build processes and each worktree's tracked, untracked and ignored files before removing anything. Keep worktrees used by active work or an open PR. Preserve unsaved source changes. If an obsolete worktree has local changes, archive its files and Git base in `.codex-dayframe-qa/storage-cleanup-<date>/`, verify the archive, and preserve the commit before removing the worktree.
+3. Remove completed worktrees with `git worktree remove`. Preserve local branches that contain work. Use `--force` only after inspecting and preserving every local file it would remove. Prune stale worktree registrations afterward.
+4. Remove generated caches belonging to the completed release and its retired worktrees, including Xcode DerivedData, archive and Staging build intermediates, test-runner products, duplicate `node_modules`, CocoaPods sandboxes, Swift `.build` directories and Next.js caches. Check that no running process owns them. Keep shared caches used by other projects and the release artifacts retained in step 1.
+5. Check that the main checkout and preserved work are intact, record the removed paths, and report remaining disk space. A future device check can rebuild its Staging app from the saved release SHA.
 
 ## TestFlight Build Identity
 
