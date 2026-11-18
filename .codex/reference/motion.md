@@ -696,7 +696,7 @@ On the iPhone Calendar, the native pinch and scroll coordinator keeps the existi
 
 ## Repeated Calendar review link on iPhone
 
-- Opening a review link while its place, trip or leg sheet is already visible keeps that presentation, focus, draft and map request. There is no exit or entrance on the repeat, including with Reduce Motion on. The existing sheet owns dismissal.
+- Opening a review link while its place, trip or leg sheet is already visible keeps that presentation, focus, draft and map request. Day and List share one correction modal, so a link can change the layout underneath it. There is no exit or entrance on the repeat, including with Reduce Motion on. The existing sheet owns dismissal.
 - After dismissal, opening the link again starts a new sheet and its normal map load. A late response or dismissal from an earlier presentation cannot affect the new one. Repeated opens are read-only and never enqueue a correction.
 
 ## Calendar List and Reports while data arrives
