@@ -148,7 +148,7 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     expect(sheetOf(tree)).toBeNull();
   });
 
-  it("reads evidence for each presentation when the same place is opened twice", async () => {
+  it("keeps an open place presentation for a repeated link and reads afresh after dismissal", async () => {
     const evidenceFor = (stayRadiusMeters: number) => ({
       segment: { kind: "stay" }, map: { centre: { type: "Point", coordinates: [20, 10] }, stayRadiusMeters }
     });
@@ -161,6 +161,13 @@ describe("the List's correction sheets (location v4 step 12, Codex r1 on #602)",
     const firstSheet = sheetOf(tree)!.props;
     const [, request] = mocks.fetchEvidence.mock.calls[0] as unknown as [unknown, { signal: AbortSignal }];
 
+    await act(async () => { api!.openPlace(place, "Unknown place"); });
+    expect(sheetOf(tree)?.props.presentationId).toBe(firstSheet.presentationId);
+    expect(mocks.fetchEvidence).toHaveBeenCalledOnce();
+    expect(request.signal.aborted).toBe(false);
+
+    act(() => { firstSheet.onDismissed(firstSheet.presentationId); });
+    expect(sheetOf(tree)).toBeNull();
     await act(async () => { api!.openPlace(place, "Unknown place"); });
     expect(mocks.fetchEvidence).toHaveBeenCalledTimes(2);
     expect(request.signal.aborted).toBe(true);

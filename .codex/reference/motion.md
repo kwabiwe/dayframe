@@ -694,6 +694,11 @@ On the iPhone Calendar, the native pinch and scroll coordinator keeps the existi
 - Async outcome: none of its own; it follows whatever the blocks show (optimistic hide, Undo restore, refresh).
 - Accessibility: Reduce Motion — iPhone brackets and the rail move appear at once; web is identical either way. The bracket is decorative (web `aria-hidden`, iPhone `accessibilityHidden`, never hit-tested); each part's own label ends "Part 2 of 3 of School run", so the trip is named once per part without a separate stop. Brackets use theme tokens only (`textMuted` line, `textSecondary` name), so light and dark themes keep their contrast.
 
+## Repeated Calendar review link on iPhone
+
+- Opening a review link while its place, trip or leg sheet is already visible keeps that presentation, focus, draft and map request. There is no exit or entrance on the repeat, including with Reduce Motion on. The existing sheet owns dismissal.
+- After dismissal, opening the link again starts a new sheet and its normal map load. A late response or dismissal from an earlier presentation cannot affect the new one. Repeated opens are read-only and never enqueue a correction.
+
 ## Calendar List and Reports while data arrives
 
 - Calendar List owns the day frame. The places filter has a permanent slot. On an uncached day, a still loading frame gives the location timeline up to 800 ms to join the blocks before the rows appear. A read failure or an elapsed wait leaves the ordinary rows available. The list's existing local layout transition handles later place and trip enrichment, without running a second transition on the filter. A superseded day or account loses its loading frame and pending scroll. Reduce Motion keeps the same layout and omits layout animation.

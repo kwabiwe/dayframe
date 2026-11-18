@@ -138,16 +138,19 @@ export function useLocationCorrections({
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
     if (!ownerKey) return;
+    // A repeated link to the visible sheet keeps its native modal, unsaved draft, and evidence request.
+    if (open?.kind === "place" && open.itemId === place.id && liveStart === place.startedAt) return;
     presentations.current += 1;
     setEvidence(null);
     setOpen({ id: presentations.current, ownerKey, kind: "place", itemId: place.id, label });
-  }, [ownerKey]);
+  }, [liveStart, open, ownerKey]);
   const openTripLeg = useCallback((trip: TimelineTrip, legIndex: number | null) => {
     if (!ownerKey) return;
+    if (open?.kind === "trip" && open.itemId === trip.id && liveStart === trip.startedAt && open.legIndex === legIndex) return;
     presentations.current += 1;
     setEvidence(null);
     setOpen({ id: presentations.current, ownerKey, kind: "trip", itemId: trip.id, legIndex });
-  }, [ownerKey]);
+  }, [liveStart, open, ownerKey]);
 
   const target = useMemo<LocationCorrectionTarget | null>(() => {
     if (!open) return null;
