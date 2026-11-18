@@ -4609,11 +4609,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   theme={theme}
                   timeline={calendarTimeline}
                 />
-                {locationCorrections.sheet}
               </Reanimated.View>
             ) : null}
-            {/* Owner item A (28 Oct 2026): the Grid's items open the same sheets, over the Grid. */}
-            {calendarLayout !== "list" ? locationCorrections.sheet : null}
+            {/* The correction modal stays mounted when the same review link switches Day to List. */}
+            {locationCorrections.sheet}
           </View>
         </SafeAreaView>
       );

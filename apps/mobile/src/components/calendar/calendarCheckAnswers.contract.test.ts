@@ -42,6 +42,11 @@ describe("Calendar › List answers and Today's toasts (Codex r2 on #582)", () =
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
   });
 
+  it("hosts the location correction modal once outside the Calendar List transition", () => {
+    expect(dashboard.match(/locationCorrections\.sheet/g)).toHaveLength(1);
+    expect(dashboard).toMatch(/<\/Reanimated\.View>\s*\) : null\}\s*\{\/\*[^*]*\*\/\}\s*\{locationCorrections\.sheet\}/);
+  });
+
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
     // settledCheckBase folds with calendarCheckOutings (unit-tested in useCalendarCheckAnswers.test.tsx).
     expect(dashboard).toContain("return settledCheckBase(shownCalendarData?.reviewItems ?? [], {");

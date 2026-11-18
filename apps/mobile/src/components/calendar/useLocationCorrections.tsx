@@ -91,9 +91,8 @@ export function useLocationCorrections({
   const [held, setHeld] = useState<{ id: number; target: LocationCorrectionTarget } | null>(null);
   // The presentation whose Done kept corrections: its item may leave the List as the sheet closes.
   const [closingId, setClosingId] = useState<number | null>(null);
-  // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet), with the span and account
-  // it was read for.
-  const [evidence, setEvidence] = useState<{ itemId: string; span: string; ownerKey: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
+  // Each presentation owns its map, including when a review link reopens the same item.
+  const [evidence, setEvidence] = useState<{ presentationId: number; evidence: TimelineItemEvidenceDto | null } | null>(null);
   // The open sheet's own day (Codex r3 on #625): the timeline it was opened from, followed through that day's refreshes
   // and projected corrections, and held while the List browses another day (the Calendar tab's tap goes to today), so
   // the sheet's item, Logs as and Done never depend on the day being shown.
@@ -122,34 +121,36 @@ export function useLocationCorrections({
   const readStart = read?.startedAt ?? null;
   const readKey = read?.span ?? null;
   useEffect(() => {
-    if (!openItemId || !openKind || !readStart || !readKey || !userId || !workspaceId) return;
-    // Fenced to the account it was asked for: another account aborts it, and its answer is never shown there.
-    const forOwner = `${workspaceId}:${userId}`;
+    if (openId === null || !openItemId || !openKind || !readStart || !readKey || !userId || !workspaceId) return;
+    // Replacing the sheet or changing accounts aborts its read.
     const controller = new AbortController();
     fetchTimelineItemEvidence({ id: openItemId, kind: openKind, startedAt: readStart },
       { owner: { userId, workspaceId }, signal: controller.signal }).then(
-      (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: result }); },
-      () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, span: readKey, ownerKey: forOwner, evidence: null }); }
+      (result) => { if (!controller.signal.aborted) setEvidence({ presentationId: openId, evidence: result }); },
+      () => { if (!controller.signal.aborted) setEvidence({ presentationId: openId, evidence: null }); }
     );
     return () => controller.abort();
-  }, [openItemId, openKind, readStart, readKey, userId, workspaceId]);
+  }, [openId, openItemId, openKind, readStart, readKey, userId, workspaceId]);
   // The last map read for this item and account (an older span's stays until the new one arrives; the sheet fences its
   // guess to the times it describes).
-  const shownEvidence = evidence && evidence.itemId === openItemId && evidence.ownerKey === ownerKey && open
+  const shownEvidence = evidence?.presentationId === openId
     ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
     if (!ownerKey) return;
+    // A repeated link to the visible sheet keeps its native modal, unsaved draft, and evidence request.
+    if (open?.kind === "place" && open.itemId === place.id && liveStart === place.startedAt) return;
     presentations.current += 1;
     setEvidence(null);
     setOpen({ id: presentations.current, ownerKey, kind: "place", itemId: place.id, label });
-  }, [ownerKey]);
+  }, [liveStart, open, ownerKey]);
   const openTripLeg = useCallback((trip: TimelineTrip, legIndex: number | null) => {
     if (!ownerKey) return;
+    if (open?.kind === "trip" && open.itemId === trip.id && liveStart === trip.startedAt && open.legIndex === legIndex) return;
     presentations.current += 1;
     setEvidence(null);
     setOpen({ id: presentations.current, ownerKey, kind: "trip", itemId: trip.id, legIndex });
-  }, [ownerKey]);
+  }, [liveStart, open, ownerKey]);
 
   const target = useMemo<LocationCorrectionTarget | null>(() => {
     if (!open) return null;
