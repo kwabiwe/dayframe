@@ -42,6 +42,8 @@ PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f367
 
 | Area | Status | Current evidence and boundary |
 | --- | --- | --- |
+| Weekly Wrapped ([Trello #133](https://trello.com/c/GkXZqGKX)) | Implementation pending | Mobile and web Reports reuse the selected week's data for the recap. Browser and iOS Simulator verified totals, expansion and accessibility layouts. The mobile change is in a signed Staging build. It is still on the implementation branch. |
+| Paired Apple Watch timer ([Trello #99](https://trello.com/c/nPbR8h5P)) | Implementation pending | The Watch shows the iPhone's current timer and sends Start and Stop through the phone's existing timers. The paired watchOS and iOS simulators verified start, stop and reconnect. The signed Staging phone includes its matching Watch companion. Physical Watch validation and release remain pending. |
 | iPhone navigation URL decoder ([Trello #209](https://trello.com/c/HjedswtL)) | Release pending | Expo Router's `query-string` resolves `decode-uri-component` 0.5.1, which addresses [CVE-2026-118664](https://github.com/advisories/GHSA-qr28-fpjm-wq7f). The existing install patch step adapts the CommonJS consumer to the decoder's default export. The regression covers encoded sign-in values, repeated query parameters and Unicode text. |
 | Local iPhone sync diagnostics ([Trello #151](https://trello.com/c/a2RX9oCH)) | Watch — released in TestFlight 152 | Sync help exports a bounded local history of connectivity, recovery and the timer/Location upload lanes. Signed Staging verified offline Stop across relaunch, a synthetic Location retry and the redacted export. Installed JSON export verification is pending. |
 | Web All activities picker ([Trello](https://trello.com/c/KY4d7yW1)) | Shipped — merged #713 (`5360a9b1`, 8 Nov 2026) | Entry editors and Calendar place corrections use the same search pill, count and picker. Calendar keeps its optional activities in place while the picker is open. The choice remains a draft until the dialog saves. Exact stable staging verified search, focus, selection and saved changes at desktop and phone widths. Production is deployed. The iPhone picker is a separate change. |
@@ -387,7 +389,7 @@ PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f367
 - Review on web: save a visit as a place, place-name and address autocomplete, and Review split/merge.
 - Clearer short durations in compact formats, so 10 minutes and 10 seconds can't be confused.
 - Remote reporting and API log correlation for [Trello #151](https://trello.com/c/a2RX9oCH) are a later slice. Decide retention, sampling, consent and production access before enabling remote telemetry. The full accessibility pass is separate.
-- Ideas, unscheduled: iOS widgets, Apple Watch, a Mac companion, a browser extension, an AI time coach, a weekly "wrapped" summary, import from other trackers, splitting a running timer, multi-activity timers.
+- Ideas, unscheduled: iOS widgets, a Mac companion, a browser extension, an AI time coach, import from other trackers, splitting a running timer, multi-activity timers.
 - Owner actions (outside the code): make the GitHub repository private (it is currently public), set up SMTP for password-reset emails with the owner's own domain, and act on the S2 security brief.
 - Billing, teams, and non-iOS mobile remain out of scope unless the PRD changes.
 
