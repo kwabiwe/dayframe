@@ -15,6 +15,7 @@ import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 type Patch = { categoryId: string | null; description: string | null; tagNames: string[]; url?: string };
 
 const server = {
+  workspace: "workspace",
   entry: null as TimeEntryRow | null,
   /** The block a Start replaced, as the server last had it. */
   completed: null as TimeEntryRow | null,
@@ -161,6 +162,7 @@ const { AppShellRuntimeProvider, STOP_WAIT_DEADLINE_MS, useAppShellRuntime } = a
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 beforeEach(() => {
+  server.workspace = "workspace";
   server.entry = null;
   server.completed = null;
   server.patches = [];
@@ -1232,7 +1234,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await waitFor(() => expect(reopened.input.value).toBe("Fix bug more"));
   });
 
-  it("after sign-out or a workspace switch begins, a page exit keeps nothing", async () => {
+  it("after sign-out begins, a page exit keeps nothing", async () => {
     const { beforeSessionChange } = await import("@/lib/session-change");
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
@@ -1243,11 +1245,52 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await user.keyboard(" later");
     act(() => { window.dispatchEvent(new Event("pagehide")); });
     expect(stored()).not.toBeNull();
-    await act(async () => { await beforeSessionChange(100); });
+    await act(async () => { await beforeSessionChange("session-end", 100); });
     expect(storedKeys()).toEqual([]);
     act(() => { window.dispatchEvent(new Event("pagehide")); });
     expect(storedKeys()).toEqual([]);
     await act(async () => { server.release?.(); });
+  });
+
+  it("returns a workspace's unsaved timer text only when the user comes back to its block", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const original = entry({ description: "Fix bug" });
+    const { input, refresh } = await renderShell(original);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} before");
+    await act(async () => { await beforeSessionChange("workspace"); });
+    expect(stored()).toContain("Fix bug before");
+    await user.keyboard(" and after");
+    server.workspace = "other";
+    server.entry = entry({ id: "other-block", description: "Other workspace block" });
+    await refresh();
+    await waitFor(() => expect(input.value).toBe("Other workspace block"));
+    expect(stored()).toContain("Fix bug before and after");
+    expect(descriptions()).not.toContain("Fix bug before and after");
+
+    await act(async () => { await beforeSessionChange("workspace"); });
+    server.workspace = "workspace";
+    server.entry = original;
+    await refresh();
+    await waitFor(() => expect(input.value).toBe("Fix bug before and after"));
+  });
+
+  it("can still stop with all typed text when a requested workspace switch does not happen", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input, stop } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} before");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await act(async () => { await beforeSessionChange("workspace"); });
+    await user.keyboard(" and after");
+    const stopping = stop();
+    await act(async () => { server.release?.(); await stopping; });
+    expect(server.stops).toEqual(["active"]);
+    expect(server.completed).toMatchObject({ id: "active", description: "Fix bug before and after" });
+    expect(storedKeys()).toEqual([]);
   });
 
   it("a tab showing one block never clears the text kept for another", async () => {
@@ -1350,7 +1393,7 @@ function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
     user: { id: "user" },
-    workspace: { id: "workspace" }
+    workspace: { id: server.workspace }
   } as unknown as BootstrapData;
 }
 

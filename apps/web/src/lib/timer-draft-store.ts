@@ -14,7 +14,7 @@ import {
  * text that the server acknowledges clears it, and a reload or restore of the same tab puts it back
  * in the draft when the server still holds one of the copies it was based on, so autosave sends it
  * again. A newly opened tab does not have it (sessionStorage). One record per user, workspace and
- * block, at most a day old. When the session ends (sign-out, workspace switch) every record is
+ * block, at most a day old. When the session ends (sign-out) every record is
  * removed and writes made for the session that ended are refused (`generation`).
  */
 export type PendingTimerDetails = {

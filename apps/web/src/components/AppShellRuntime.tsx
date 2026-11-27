@@ -282,9 +282,57 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return () => gate.dispose();
   }, []);
 
+  // The details save in flight (its block, the base it was sent against, and whether it travels
+  // keepalive). Stop and local draft recovery use it.
+  const detailsInFlightRef = useRef<{
+    entryId: string;
+    base: TimerDraft;
+    fields: TimerDetailField[];
+    keepalive: boolean;
+    version: string | undefined;
+  } | null>(null);
+
+  // The pending-details store's owner and session token (lib/timer-draft-store.ts).
+  const pendingStoreSessionRef = useRef<{ owner: string; generation: number } | null>(null);
+  const pendingOwner = useCallback((snapshot: BootstrapData | null) => {
+    const owner = { userId: snapshot?.user?.id ?? "", workspaceId: snapshot?.workspace?.id ?? "" };
+    const key = `${owner.userId}:${owner.workspaceId}`;
+    if (pendingStoreSessionRef.current?.owner !== key) {
+      pendingStoreSessionRef.current = { owner: key, generation: pendingTimerDetailsGeneration() };
+    }
+    return { owner, generation: pendingStoreSessionRef.current.generation };
+  }, []);
+
+  /**
+   * The base of `entry`'s details: the tab's base when it belongs to that block, otherwise the
+   * block as shown (a block put on screen this instant, such as a Start's optimistic block, was
+   * created with exactly those details).
+   */
+  const baseFor = useCallback((entry: TimeEntryRow) => (
+    baseEntryIdRef.current === entry.id ? canonicalTimerDraftRef.current : timerDraftForEntry(entry)
+  ), []);
+
+  const keepWorkspaceDraft = useCallback((snapshot: BootstrapData | null) => {
+    if (!snapshot?.user?.id || !snapshot.workspace?.id) return;
+    const entry = snapshot.activeEntry;
+    if (!entry || entry.id !== timerDraftEntryIdRef.current) return;
+    const entryId = isOptimisticTimerId(entry.id) ? startHandoffsRef.current.get(entry.id) : entry.id;
+    if (!entryId) return;
+    const base = baseFor(entry);
+    const draft = draftRef.current;
+    const inFlight = detailsInFlightRef.current;
+    const bases = inFlight?.entryId === entry.id ? [base, inFlight.base] : [base];
+    if (!bases.some((copy) => timerDraftEditedFields(draft, copy).length > 0)) return;
+    const { owner, generation } = pendingOwner(snapshot);
+    writePendingTimerDetails(owner, { entryId, draft, bases, savedAt: Date.now() }, generation);
+  }, [baseFor, pendingOwner]);
+
   const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource, onCommit?: (snapshot: BootstrapData) => void) => {
+    const previous = dataRef.current;
+    if (previous?.user?.id && incoming?.user?.id === previous.user.id &&
+        previous.workspace.id !== incoming.workspace.id) keepWorkspaceDraft(previous);
     const nextData = incoming
-      ? reconcileTimerBootstrap(dataRef.current, incoming, source, {
+      ? reconcileTimerBootstrap(previous, incoming, source, {
           keepCurrentActiveOnTie: detailsSavesInFlightRef.current > 0
         })
       : null;
@@ -329,7 +377,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     if (nextData) onCommit?.(nextData);
     setData(nextData);
-  }, []);
+  }, [keepWorkspaceDraft]);
 
   const setTimerDraft = useCallback((draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => {
     if (typeof draft !== "function") draftRef.current = draft;
@@ -345,15 +393,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     baseEntryIdRef.current = entryId;
     setTimerDraftBaseState({ entryId, draft: base });
   }, []);
-
-  /**
-   * The base of `entry`'s details: the tab's base when it belongs to that block, otherwise the
-   * block as shown (a block put on screen this instant, such as a Start's optimistic block, was
-   * created with exactly those details).
-   */
-  const baseFor = useCallback((entry: TimeEntryRow) => (
-    baseEntryIdRef.current === entry.id ? canonicalTimerDraftRef.current : timerDraftForEntry(entry)
-  ), []);
 
   useEffect(() => {
     const activeEntryVersion = timerDraftVersion(data?.activeEntry);
@@ -700,16 +739,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return true;
   }, [commitData, setTimerDraft, setTimerDraftBase]);
 
-  // The details save in flight (its block, the base it was sent against, and whether it travels
-  // keepalive), and the outcome of the last one: a Stop that waited for it, or gave up waiting,
-  // uses both (Codex r1 on #539).
-  const detailsInFlightRef = useRef<{
-    entryId: string;
-    base: TimerDraft;
-    fields: TimerDetailField[];
-    keepalive: boolean;
-    version: string | undefined;
-  } | null>(null);
   const detailsOutcomeRef = useRef<{ seq: number; entryId: string; conflict: boolean; error: string | null }>(
     { seq: 0, entryId: "", conflict: false, error: null }
   );
@@ -726,17 +755,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const versionOf = useCallback((entry: TimeEntryRow | null | undefined) => (
     entry && isOptimisticTimerId(entry.id) ? handoffVersionsRef.current.get(entry.id) : entryVersion(entry)
   ), []);
-  // The pending-details store's owner and session token (lib/timer-draft-store.ts).
-  const pendingStoreSessionRef = useRef<{ owner: string; generation: number } | null>(null);
-  const pendingOwner = useCallback((snapshot: BootstrapData | null) => {
-    const owner = { userId: snapshot?.user?.id ?? "", workspaceId: snapshot?.workspace?.id ?? "" };
-    const key = `${owner.userId}:${owner.workspaceId}`;
-    if (pendingStoreSessionRef.current?.owner !== key) {
-      pendingStoreSessionRef.current = { owner: key, generation: pendingTimerDetailsGeneration() };
-    }
-    return { owner, generation: pendingStoreSessionRef.current.generation };
-  }, []);
-
   // Sends one description PATCH. It is keepalive (it outlives the page if the tab closes or
   // reloads) whenever it fits the browser's keepalive budget beside any other keepalive request
   // this tab has in flight (Codex r3 on #539); `onSent` learns which.
@@ -1407,9 +1425,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     };
     window.addEventListener("pageshow", onShow);
     document.addEventListener("visibilitychange", onShow);
-    // Sign-out or a workspace switch: this session's kept text goes, and its later page exits
-    // write nothing (its token is from before the session ended; Codex r2 on #539).
-    const unregister = onBeforeSessionChange(async () => {
+    // A workspace switch keeps the draft under its original owner and block. Sign-out ends the session
+    // and retires the old page's storage token (Codex r2 on #539).
+    const unregister = onBeforeSessionChange(async (change) => {
+      if (change === "workspace") {
+        keepWorkspaceDraft(dataRef.current);
+        return;
+      }
       pendingOwner(dataRef.current);
       endPendingTimerDetailsSession();
     });
@@ -1418,7 +1440,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       document.removeEventListener("visibilitychange", onShow);
       unregister();
     };
-  }, [pendingOwner, restorePendingDetails]);
+  }, [keepWorkspaceDraft, pendingOwner, restorePendingDetails]);
 
   const updateActiveEntryFromCalendarUntracked = useCallback(async (
     input: ActiveEntryCompactMutationInput

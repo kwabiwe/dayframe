@@ -453,7 +453,7 @@ function ProfileWorkspacePopover({
     if (workspaceId === data.workspace.id) return;
     await run(async () => {
       // Held Review decisions are saved under the workspace they were made in.
-      await beforeSessionChange();
+      await beforeSessionChange("workspace");
       const response = await clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

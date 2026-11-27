@@ -69,6 +69,8 @@ describe("Settings in Blocks", () => {
     mountAccount();
     await userEvents.click(screen.getByRole("button", { name: /Edit profile/ }));
     const dialog = screen.getByRole("dialog");
+    const close = within(dialog).getByRole("button", { name: "Close Edit profile" });
+    await waitFor(() => expect(document.activeElement).toBe(close));
     const name = within(dialog).getByLabelText("Name");
     await userEvents.clear(name);
     await userEvents.type(name, "Sam E");
