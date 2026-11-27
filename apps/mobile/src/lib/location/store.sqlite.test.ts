@@ -32,7 +32,7 @@ beforeEach(async()=>{
 });
 afterEach(()=>{db.close();vi.useRealTimers();vi.unstubAllGlobals();});
 async function persistEvidence(items: Parameters<typeof store.persistLocationEvidence>[0]) { return store.persistLocationEvidence(items, await store.captureLocationOwnership()); }
-async function seed(n=1){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`evidence-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(owner);}
+async function seed(n=1, prefix="evidence", batchOwner=owner){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`${prefix}-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(batchOwner);}
 describe("Location real SQLite drain results",()=>{
  it("records one durable batch through backoff and acknowledgement without evidence in the export", async () => {
   await seed();
@@ -424,6 +424,58 @@ describe("complete saved-place snapshot replay", () => {
   expect(db.prepare("select * from location_engine_state").all()).toEqual(state);
  });
 });
+describe("Oversized Location uploads", () => {
+ const rejectSize = async () => new Response(JSON.stringify({ error: "Location evidence batch is too large." }), { status: 413 });
+ const sizes = () => mocks.fetch.mock.calls
+  .filter(([url]) => String(url).endsWith("/evidence"))
+  .map(([, init]) => JSON.parse(String(init.body)).evidence.length);
+
+ it("retries the same queued evidence in smaller batches, then restores normal sizes", async () => {
+  const now = Date.now();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  await seed(4);
+  mocks.fetch.mockImplementationOnce(rejectSize);
+  await store.syncLocationEvidence();
+  expect(db.prepare("select upload_state from location_evidence_journal").all().map(row => row.upload_state))
+   .toEqual(Array(4).fill("pending"));
+  await store.syncLocationEvidence();
+  expect(sizes()).toEqual([4, 2, 2]);
+  expect(db.prepare("select count(*) as total from location_evidence_journal where upload_state = 'acknowledged'").get()?.total).toBe(4);
+
+  vi.setSystemTime(now + 24 * 60 * 60 * 1000);
+  await seed(4, "next-day");
+  await store.syncLocationEvidence();
+  expect(sizes()).toEqual([4, 2, 2, 4]);
+ });
+
+ it("does not transfer the smaller batch limit when the account changes", async () => {
+  await seed(4);
+  mocks.fetch.mockImplementationOnce(rejectSize);
+  await store.syncLocationEvidence();
+  const other = { ...owner, userId: "91000000-0000-4000-8000-000000000003" };
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = Date.now();
+  mocks.owner = other;
+  expect(await store.configureLocationAccount({ ...other, deviceId: "ios-synthetic", timeZone: "Europe/London", savedPlaces: [], acceptedLearnedPlaces: [] }, "v2_shadow", true)).not.toBeNull();
+  vi.setSystemTime(now + 60_000);
+  await seed(4, "other", other);
+  await store.syncLocationEvidence();
+  expect(sizes()).toEqual([4, 4]);
+  expect(db.prepare("select count(*) as total from location_evidence_journal where upload_state = 'pending'").get()?.total).toBe(4);
+ });
+
+ it("keeps the normal batch limit when only one oversized reading was rejected", async () => {
+  await seed();
+  mocks.fetch.mockImplementationOnce(rejectSize);
+  await store.syncLocationEvidence();
+  expect(db.prepare("select upload_state from location_evidence_journal").get()?.upload_state).toBe("rejected");
+  await seed(4, "normal");
+  await store.syncLocationEvidence();
+  expect(sizes()).toEqual([1, 4]);
+ });
+});
+
 describe("Motion & Fitness upload batches",()=>{
  it("never shares a batch with location readings, so a server refusing motion cannot take them with it",async()=>{
   const at=(i:number)=>new Date(Date.now()-600_000+i*10_000).toISOString();

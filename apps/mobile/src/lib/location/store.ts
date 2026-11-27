@@ -101,6 +101,7 @@ const SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY = "semantic_mode_acknowledged_at";
 const CAPTURE_BINDING_KEY = "capture_binding_v1";
 const SEMANTIC_ELIGIBILITY_PREFIX = "semantic_eligibility:";
 const MOTION_CAPTURE_PREFIX = "motion_capture:";
+const UPLOAD_BATCH_LIMIT_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Where the next Core Motion history query resumes for one capture binding.
@@ -327,6 +328,23 @@ async function metadata(key: string) {
     "select value from location_store_metadata where key = ?",
     key
   ))?.value ?? null;
+}
+
+function uploadBatchLimitKey(ownerKey: string) {
+  return `location_upload_batch_limit:${DAYFRAME_API_BASE}:${ownerKey}`;
+}
+
+async function activeUploadBatchLimit(db: SQLite.SQLiteDatabase, ownerKey: string) {
+  const now = Date.now();
+  const stored = await db.getFirstAsync<MetadataRow>(
+    "select value from location_store_metadata where key = ? and updated_at > ? and updated_at <= ?",
+    uploadBatchLimitKey(ownerKey),
+    new Date(now - UPLOAD_BATCH_LIMIT_RECHECK_MS).toISOString(),
+    new Date(now).toISOString()
+  );
+  const maximum = LOCATION_ENGINE_V2_CONFIG.maxEvidenceItemsPerUpload;
+  const limit = Number(stored?.value);
+  return Number.isInteger(limit) && limit > 0 ? Math.min(limit, maximum) : maximum;
 }
 
 async function setMetadata(key: string, value: string, transaction?: SQLite.SQLiteDatabase) {
@@ -928,13 +946,7 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
        ${excludedEvidence.length ? `and client_evidence_id not in (${excludedEvidence.map(()=>'?').join(',')})` : ''}
      order by occurred_at, client_evidence_id limit ?`,
     current.key,...excludedEvidence,
-    Math.max(
-      1,
-      Math.min(
-        LOCATION_ENGINE_V2_CONFIG.maxEvidenceItemsPerUpload,
-        Number(await metadata("location_upload_batch_limit")) || LOCATION_ENGINE_V2_CONFIG.maxEvidenceItemsPerUpload
-      )
-    )
+    await activeUploadBatchLimit(db, current.key)
   );
   if (rows.length === 0) return null;
   const clientBatchId = generatedId("location-batch");
@@ -1409,7 +1421,10 @@ async function uploadLocationEvidenceBatch(
             parsed.evidence.length > 1 ? "pending" : "rejected",
             batch.client_batch_id
           );
-          await setMetadata("location_upload_batch_limit", String(nextLimit), transaction);
+          if (outboxChanged && parsed.evidence.length > 1) {
+            const currentLimit = await activeUploadBatchLimit(transaction, batch.account_key);
+            await setMetadata(uploadBatchLimitKey(batch.account_key), String(Math.min(nextLimit, currentLimit)), transaction);
+          }
           await setMetadata("last_upload_error", "payload_too_large", transaction);
         })
       );
@@ -1756,8 +1771,8 @@ export function endLocationOwnership(expected: LocationCaptureBinding | null, de
         for (const table of ["location_evidence_journal", "location_engine_state", "location_segment_snapshot", "location_upload_outbox", "location_account_context"]) {
           await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
         }
-        await transaction.runAsync("delete from location_store_metadata where key in (?, ?)",
-          `${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, `${MOTION_CAPTURE_PREFIX}${key}`);
+        await transaction.runAsync("delete from location_store_metadata where key in (?, ?, ?)",
+          `${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, `${MOTION_CAPTURE_PREFIX}${key}`, uploadBatchLimitKey(key));
       } else if (key && eligibility) {
         await setMetadata(`${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, JSON.stringify(eligibility), transaction);
       }
