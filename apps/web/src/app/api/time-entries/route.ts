@@ -39,9 +39,9 @@ export async function POST(request: Request) {
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "start-command", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "start-command", "watch-start", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, start-command, stop, manual, split, split-running, duplicate, join, or copy-completed.");
+      throw new BadRequestError("mode must be one of start, start-command, watch-start, stop, manual, split, split-running, duplicate, join, or copy-completed.");
     }
     const durableCopy = modeResult.data === "copy-completed";
     const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
@@ -154,14 +154,18 @@ export async function POST(request: Request) {
     if (expectedRunningEntryId && (eventSource !== "manual_app" || startedAt)) {
       throw new BadRequestError("Switch activity must use the current time on the web.");
     }
-    // Older deployments reject the new mode instead of processing it as an unfenced Start.
-    const repeatableStart = mode === "start-command";
+    // Older deployments reject guarded modes instead of processing them as an unfenced Start.
+    const watchStart = mode === "watch-start";
+    const repeatableStart = mode === "start-command" || watchStart;
     const startCommandId = repeatableStart ? requestClientCommandId(request) : undefined;
     const startScope = repeatableStart ? WebStartScopeSchema.parse(body.startCommand) : undefined;
     if (repeatableStart) {
-      if (!startScope || !startCommandId || eventSource !== "manual_app" ||
+      if (!startScope || !startCommandId || eventSource !== (watchStart ? "mobile_app" : "manual_app") ||
+          (watchStart && startScope.activeEntryId !== null) ||
           (expectedRunningEntryId && startScope.activeEntryId !== expectedRunningEntryId)) {
-        throw new BadRequestError("A web Start command requires its original account, workspace and running block.");
+        throw new BadRequestError(watchStart
+          ? "A Watch Start command requires its original account, workspace and an idle timer."
+          : "A web Start command requires its original account, workspace and running block.");
       }
       if (startScope.userId !== session.userId || startScope.workspaceId !== session.workspaceId) {
         return NextResponse.json({ error: "The account or workspace changed. Start again in the current workspace." }, { status: 409 });
@@ -170,7 +174,8 @@ export async function POST(request: Request) {
     const startPrecondition = startScope ? startScope.activeEntryId : expectedRunningEntryId;
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
     const rawPayload = {
-      ...(startedAt ? { origin, startedAt } : { origin }),
+      origin: watchStart ? "watch_timer_start" : origin,
+      ...(startedAt ? { startedAt } : {}),
       ...(tagNames ? { tagNames } : {})
     };
 
@@ -179,7 +184,7 @@ export async function POST(request: Request) {
         source: eventSource,
         type: "timer_start",
         occurredAt,
-        ...(startCommandId ? { clientEventId: `web-timer-start:${startCommandId}` } : {}),
+        ...(startCommandId ? { clientEventId: `${watchStart ? "watch" : "web"}-timer-start:${startCommandId}` } : {}),
         projectId: optionalString(body.projectId),
         categoryId: optionalString(body.categoryId),
         placeId: optionalString(body.placeId),
@@ -187,7 +192,7 @@ export async function POST(request: Request) {
         rawPayload
       },
       session,
-      ...(startPrecondition !== undefined ? [{ expectedRunningEntryId: startPrecondition }] : [])
+      ...(watchStart ? [{ watchStart: true }] : startPrecondition !== undefined ? [{ expectedRunningEntryId: startPrecondition }] : [])
     );
     scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: 201 });

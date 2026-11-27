@@ -524,10 +524,10 @@ function healthSchemaReadinessError(
 export async function processActivityEvent(
   rawInput: unknown,
   session: RequestSession = getDevSession(),
-  options: SyncTransactionOptions & { expectedRunningEntryId?: string | null; overdueRunningStopOnly?: boolean } = {}
+  options: SyncTransactionOptions & { expectedRunningEntryId?: string | null; overdueRunningStopOnly?: boolean; watchStart?: boolean } = {}
 ) {
   if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
-    return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId, options.overdueRunningStopOnly);
+    return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId, options.overdueRunningStopOnly, options.watchStart);
   }
   const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
   try {
@@ -551,7 +551,8 @@ async function processActivityEventWithClient(
   session: RequestSession,
   boundedClient?: pg.PoolClient,
   expectedRunningEntryId?: string | null,
-  overdueRunningStopOnly = false
+  overdueRunningStopOnly = false,
+  watchStart = false
 ): Promise<{
   eventId: string;
   candidate: CandidateActivity;
@@ -867,6 +868,9 @@ async function processActivityEventWithClient(
       }
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
+      // The Watch only offers Start while idle. Recheck server truth under the timer lock
+      // before the late-start path can cut a different block that the Watch never saw.
+      if (watchStart) await closeActiveTimersForReplacement(client, session, startedAt, null);
       // A Shortcut Start can reach the server after later blocks or a later Shortcut Stop (it waited
       // offline, or the app delivered it after a Stop). It then fills its own slot instead of replacing
       // the running block: the block it interrupted ends at its start, and it ends where the next block
@@ -875,7 +879,9 @@ async function processActivityEventWithClient(
       // 22 Oct, PR A option a); it used to fail on every retry and hold every later timer change behind it.
       const lateStart = (parsed.source === "shortcut" || parsed.source === "mobile_app") &&
           isExplicitStartEvent(parsed.type)
-        ? await lateShortcutStartWindow(client, session, startedAt, { sameStartSupersedes: parsed.source === "shortcut" })
+        ? await lateShortcutStartWindow(client, session, startedAt, {
+            sameStartSupersedes: parsed.source === "shortcut", requiresEmptyStart: watchStart
+          })
         : null;
       if (lateStart?.kind === "same_start") {
         startOutcome = "superseded";
@@ -893,7 +899,7 @@ async function processActivityEventWithClient(
           await reconcileTimerTripClashes(client, session, { entryIds: interrupted.rows.map((row) => row.id) });
         }
         startOutcome = "recorded_completed";
-      } else if (candidate.shouldClosePrevious) {
+      } else if (candidate.shouldClosePrevious && !watchStart) {
         const replaced = await closeActiveTimersForReplacement(client, session, startedAt, expectedRunningEntryId);
         await reconcileTimerTripClashes(client, session, { entryIds: replaced });
       }
@@ -1288,7 +1294,7 @@ async function lateShortcutStartWindow(
   startedAt: string | Date,
   // The phone needs a block for every in-app Start it delivers, so only a Shortcut Start at the same
   // moment as an existing block is folded into it.
-  options: { sameStartSupersedes: boolean } = { sameStartSupersedes: true }
+  options: { sameStartSupersedes: boolean; requiresEmptyStart?: boolean } = { sameStartSupersedes: true }
 ): Promise<
   | { kind: "window"; stoppedAt: Date; interruptedEntryIds: string[] }
   | { kind: "same_start" }
@@ -1320,6 +1326,7 @@ async function lateShortcutStartWindow(
      for update`,
     [session.workspaceId, session.userId, at]
   );
+  if (options.requiresEmptyStart && covering.rows.length) throw new TimerSwitchConflictError();
   const later = await client.query<{
     nextStartedAt: string | Date | null;
     laterShortcutStopAt: string | Date | null;

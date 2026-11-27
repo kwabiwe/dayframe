@@ -155,6 +155,29 @@ describe("POST /api/time-entries", () => {
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
   });
 
+  it("keeps Watch Start mobile, idempotent, and guarded by server idle state", async () => {
+    const response = await POST(jsonRequest({
+      mode: "watch-start", source: "mobile_app", startedAt: "2026-07-04T11:50:00.000Z",
+      startCommand: { userId: session.userId, workspaceId: session.workspaceId, activeEntryId: null }
+    }, { "X-Dayframe-Client-Command-Id": "watch-start-123" }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "timer_start", source: "mobile_app", clientEventId: "watch-timer-start:watch-start-123",
+      rawPayload: expect.objectContaining({ origin: "watch_timer_start" })
+    }), session, { watchStart: true });
+  });
+
+  it("does not allow Watch Start to request replacing a block", async () => {
+    const response = await POST(jsonRequest({
+      mode: "watch-start", source: "mobile_app",
+      startCommand: { userId: session.userId, workspaceId: session.workspaceId, activeEntryId: "11111111-1111-4111-8111-111111111111" }
+    }, { "X-Dayframe-Client-Command-Id": "watch-start-123" }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+  });
+
   it("splits or duplicates a finished block by id, fenced and with its command id, and keeps a bare split for the timer (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: false });
@@ -275,7 +298,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, start-command, stop, manual, split, split-running, duplicate, join, or copy-completed."
+      error: "mode must be one of start, start-command, watch-start, stop, manual, split, split-running, duplicate, join, or copy-completed."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();

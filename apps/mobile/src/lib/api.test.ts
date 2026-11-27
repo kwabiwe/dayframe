@@ -1023,6 +1023,30 @@ describe("mobile API client", () => {
     expect(await readQueue()).toHaveLength(1);
   });
 
+  it("delivers a queued Watch Start only through the guarded command and treats an active timer as a refusal", async () => {
+    storeBoundSession("session-token");
+    const occurredAt = new Date("2026-10-22T10:00:00.000Z");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "watch-start", source: "mobile_app", type: "timer_start",
+      occurredAt, rawPayload: { origin: "watch_timer_start" }
+    });
+    const fetchMock = vi.fn(async (_url: string, _options: RequestInit) =>
+      jsonResponse({ code: "timer_switch_conflict", error: "The timer changed." }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toMatch(/\/api\/time-entries$/);
+    expect(new Headers(request.headers).get("X-Dayframe-Client-Command-Id")).toBe("watch-start");
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      mode: "watch-start", source: "mobile_app", startedAt: occurredAt.toISOString(),
+      startCommand: { ...TIMER_STOP_OWNER, activeEntryId: null }
+    });
+    expect(result.failed).toEqual([expect.objectContaining({ localId: "watch-start", failureKind: "permanent" })]);
+  });
+
   // Stability audit 22 Oct 2026 (iphone-timer-sync-3): the rollback for a refused queued Start had no
   // caller, so its Stops waited forever and one of its Edits held the account's Edit/Delete outbox.
   it("settles what waits on a queued Start the server permanently refuses", async () => {

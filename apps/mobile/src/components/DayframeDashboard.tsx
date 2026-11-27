@@ -1696,7 +1696,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (command.action === "stop") return stopActiveTimer(command.entryId);
       return startTaskWith(
         { startedAt: null },
-        { canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
+        { fromWatch: true, canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
       );
     }
   );
@@ -3100,7 +3100,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     description?: string | null;
     startedAt?: string | null;
     tagNames?: string[];
-  }, options: { blankStartToken?: number; canStart?: () => boolean } = {}) {
+  }, options: { blankStartToken?: number; canStart?: () => boolean; fromWatch?: boolean } = {}) {
     const generation = noticeSessionGeneration.current;
     const undoInFlight = runningSplit.undoInFlight();
     if (undoInFlight) await undoInFlight;
@@ -3140,7 +3140,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         categoryId: pendingEntry.categoryId ?? undefined,
         description: pendingEntry.description?.trim() || undefined,
         rawPayload: {
-          origin: "mobile_timer_start",
+          origin: options.fromWatch ? "watch_timer_start" : "mobile_timer_start",
           startedAt: pendingEntry.startedAt,
           tagNames: pendingEntry.tagNames ?? []
         },

@@ -16,6 +16,7 @@ import {
   REVIEW_COUNT_CARDS,
   REVIEW_COUNT_REQUEST_HEADER,
   TIME_ENTRY_CACHE_RECEIPT_HEADER,
+  TIME_ENTRY_CLIENT_COMMAND_ID_HEADER,
   type ActivityEventInput,
   type PlaceVisitStats,
   type ActivityEventType,
@@ -1703,8 +1704,9 @@ async function syncQueueItems(
         }
       }
       const transfer = locationTransfer;
+      const watchStart = item.type === "timer_start" && item.rawPayload?.origin === "watch_timer_start";
       const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
-        `${DAYFRAME_API_BASE}/api/events`,
+        `${DAYFRAME_API_BASE}/api/${watchStart ? "time-entries" : "events"}`,
         {
           method: "POST",
           headers: {
@@ -1712,9 +1714,18 @@ async function syncQueueItems(
             Authorization: `Bearer ${sessionRead.snapshot.token}`,
             // The reply's Review count counts cards, an outing once (PR 12c).
             [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
+            ...(watchStart ? { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: item.localId } : {}),
             ...(item.type === "timer_start" || item.type === "timer_stop" ? { [TIME_ENTRY_CACHE_RECEIPT_HEADER]: "1" } : {})
           },
-          body: JSON.stringify(queuedEventRequestBody(item)),
+          body: JSON.stringify(watchStart ? {
+            mode: "watch-start",
+            source: "mobile_app",
+            startedAt: item.occurredAt.toISOString(),
+            categoryId: item.categoryId,
+            description: item.description,
+            tagNames: item.rawPayload?.tagNames,
+            startCommand: { userId: item.userId, workspaceId: item.workspaceId, activeEntryId: null }
+          } : queuedEventRequestBody(item)),
           signal: locationTransfer?.signal ?? options.signal
         },
         {
@@ -1758,7 +1769,8 @@ async function syncQueueItems(
           firstError ??= queueFailureReport(failedItem, failedItem.lastError ?? message, failedItem.failureKind ?? "server", response.status);
           continue;
         }
-        const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
+        const watchStartConflict = watchStart && response.status === 409;
+        const failureKind = watchStartConflict || permanentStatusCodes.has(response.status) ? "permanent" : "server";
         // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
         // is refused again, and the person was already told (Codex r2 on #532). The refusal is kept on
         // the item, so a transient failure between Retries (422, 500, 422) can't announce it twice
