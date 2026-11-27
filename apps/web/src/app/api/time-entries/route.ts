@@ -23,7 +23,7 @@ import {
   validateManualTimeEntryWindow
 } from "@/lib/manual-time-entry";
 import { getTimeEntryById } from "@/lib/queries";
-import { ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
+import { ExpectedUpdatedAtSchema, WEB_TIMER_SPLIT_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
@@ -45,6 +45,10 @@ export async function POST(request: Request) {
     }
     const durableCopy = modeResult.data === "copy-completed";
     const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
+    const splitOwner = request.headers.get(WEB_TIMER_SPLIT_OWNER_HEADER);
+    if (splitOwner !== null && splitOwner !== `${session.userId}:${session.workspaceId}`) {
+      return NextResponse.json({ error: "The account or workspace changed.", code: "timer_scope_changed" }, { status: 409 });
+    }
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
     const tagNames = optionalTagNames(body.tagNames);

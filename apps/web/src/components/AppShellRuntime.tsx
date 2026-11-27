@@ -15,6 +15,7 @@ import { joinSplitTimeEntries, newBlockCommandId, splitRunningTimeEntry } from "
 import { onBeforeSessionChange } from "@/lib/session-change";
 import { webTimerStatePollDelay } from "@/lib/timer-state-poll";
 import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
+import { deliverWebTimerWrite, runTimerRequestWithDeadline } from "@/lib/web-timer-requests";
 import {
   applyPendingTimerDetails,
   clearPendingTimerDetails,
@@ -166,7 +167,6 @@ export const DATE_DATA_CACHE_LIMIT = 8;
 /** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
 export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 const TIMER_POLL_READ_LIMIT_MS = 15_000;
-const TIMER_WRITE_ATTEMPT_LIMIT_MS = 10_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -1379,45 +1379,64 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [baseFor, saveActiveDetails, serverEntryId]);
 
   /** Runs a split or its Undo (inside the gate), then saves the edits left unsaved whatever its outcome. */
-  const endingWithLeftoverEdits = useCallback(async <T,>(action: () => Promise<T>): Promise<T> => {
+  const endingWithLeftoverEdits = useCallback(async <T,>(action: () => Promise<T>, sameOwner: () => boolean): Promise<T> => {
     try {
       return await action();
     } finally {
-      await saveLeftoverEdits().catch(() => undefined);
+      if (sameOwner()) await saveLeftoverEdits().catch(() => undefined);
     }
   }, [saveLeftoverEdits]);
 
+  const captureSplitOwner = useCallback((snapshot: BootstrapData) => {
+    const workspaceGeneration = workspaceGenerationRef.current;
+    const sessionGeneration = pendingTimerDetailsGeneration();
+    return {
+      key: `${snapshot.user.id}:${snapshot.workspace.id}`,
+      isCurrent: () => workspaceGenerationRef.current === workspaceGeneration &&
+        pendingTimerDetailsGeneration() === sessionGeneration &&
+        dataRef.current?.user.id === snapshot.user.id && dataRef.current?.workspace.id === snapshot.workspace.id
+    };
+  }, []);
+
   const splitActiveTimerUntracked = useCallback(async (atMs: number): Promise<ActiveSplitOutcome> => {
-    const requested = dataRef.current?.activeEntry;
-    if (!requested) return { ok: false, error: "There is no running block to split." };
+    const initial = dataRef.current;
+    const requested = initial?.activeEntry;
+    if (!initial || !requested) return { ok: false, error: "There is no running block to split." };
+    const owner = captureSplitOwner(initial);
+    const changedOwner = "The account or workspace changed. Check the current block before trying again.";
     // As Stop and Discard: a block whose Start is still in flight waits behind it, and a rejected Start
     // leaves nothing to split.
     if (!serverEntryId(requested.id)) {
       await mutationGateRef.current.whenIdle();
-      if (dataRef.current?.activeEntry?.id !== requested.id) {
+      const currentId = dataRef.current?.activeEntry?.id;
+      if (currentId !== requested.id && currentId !== serverEntryId(requested.id)) {
         return { ok: false, error: "That block did not start, so there was nothing to split." };
       }
     }
     const result = await mutationGateRef.current.run(() => endingWithLeftoverEdits(async (): Promise<ActiveSplitOutcome> => {
+      if (!owner.isCurrent()) return { ok: false, error: changedOwner };
       const before = dataRef.current;
       const entry = before?.activeEntry;
       const targetId = entry ? serverEntryId(entry.id) : null;
       if (!before || !entry || !targetId) return { ok: false, error: "There is no running block to split." };
       // The split copies the block as saved: this tab's edits to it are saved first, so both parts keep them.
       const saved = await saveActiveDetails(before, draftRef.current);
+      if (!owner.isCurrent()) return { ok: false, error: changedOwner };
       if (!saved.ok) return saved;
       const current = dataRef.current?.activeEntry;
+      if (!current || serverEntryId(current.id) !== targetId) return { ok: false, error: "That block is no longer running." };
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
       const draftAtSend = draftRef.current;
       try {
         const outcome = await splitRunningTimeEntry(clientFetch, {
-          entryId: targetId, atMs, expectedUpdatedAt: current?.id === entry.id ? versionOf(current) : undefined
+          entryId: targetId, atMs, expectedUpdatedAt: versionOf(current), owner
         });
+        if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         if (!outcome.ok) {
           setTimerError(outcome.error);
-          if (outcome.changed) await refresh({ force: true });
+          if (outcome.changed) await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
           return outcome;
         }
         // Whether the second part runs is read from the blocks as the server has them now: one that had stopped
@@ -1437,23 +1456,29 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (shown) commitData(applyServerTimerBlocks(shown, outcome.entries, gone), "optimistic");
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
-        await refresh({ force: true });
+        await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+        if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         if (!newEntryId) return { ok: false, error: "This block was already split and put back together." };
         return { ok: true, entryId: targetId, newEntryId, running };
       } finally {
         setIsTimerBusy(false);
       }
-    }));
+    }, owner.isCurrent));
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId, versionOf]);
+  }, [captureSplitOwner, commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId, versionOf]);
   const splitActiveTimer = useCallback(
     (...args: Parameters<typeof splitActiveTimerUntracked>) => trackTimerAction(() => splitActiveTimerUntracked(...args)),
     [splitActiveTimerUntracked, trackTimerAction]
   );
 
   const joinSplitTimerUntracked = useCallback(async (split: { entryId: string; newEntryId: string; commandId?: string }): Promise<MutationOutcome> => {
+    const initial = dataRef.current;
+    if (!initial) return { ok: false, error: "No block is available to put back together." };
+    const owner = captureSplitOwner(initial);
+    const changedOwner = "The account or workspace changed. Check the current block before trying again.";
     await mutationGateRef.current.whenIdle();
     const result = await mutationGateRef.current.run(() => endingWithLeftoverEdits(async (): Promise<MutationOutcome> => {
+      if (!owner.isCurrent()) return { ok: false, error: changedOwner };
       // Edits typed into the second part and not saved yet would be lost by the join (Codex r2 on #607).
       const shownActive = dataRef.current?.activeEntry;
       if (shownActive && serverEntryId(shownActive.id) === split.newEntryId && timerDraftEditedFields(draftRef.current, baseFor(shownActive)).length) {
@@ -1465,7 +1490,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       try {
         const draftAtSend = draftRef.current;
         let carried = false;
-        const outcome = await joinSplitTimeEntries(clientFetch, { entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId });
+        const outcome = await joinSplitTimeEntries(clientFetch, {
+          entryId: split.entryId, splitEntryId: split.newEntryId, commandId: split.commandId, owner
+        });
+        if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         if (outcome.ok) {
           // Typed while the Undo was on its way: the text goes on to the joined block (saved as its edit), never
           // reset by the change of block (Codex r3 on #607).
@@ -1485,14 +1513,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           }
         }
         // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
-        if (outcome.ok || outcome.changed) await refresh({ force: true });
+        if (owner.isCurrent() && (outcome.ok || outcome.changed)) {
+          await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+        }
+        if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         return outcome.ok ? outcome : { ok: false, error: outcome.error };
       } finally {
         setIsTimerBusy(false);
       }
-    }));
+    }, owner.isCurrent));
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId]);
+  }, [baseFor, captureSplitOwner, commitData, endingWithLeftoverEdits, refresh, saveActiveDetails, serverEntryId]);
   const joinSplitTimer = useCallback(
     (...args: Parameters<typeof joinSplitTimerUntracked>) => trackTimerAction(() => joinSplitTimerUntracked(...args)),
     [joinSplitTimerUntracked, trackTimerAction]
@@ -2019,24 +2050,6 @@ function withCurrentSharedBootstrap(
     taskSuggestions: current.taskSuggestions,
     taskSuggestionCandidates: current.taskSuggestionCandidates
   };
-}
-
-async function runTimerRequestWithDeadline<T>(send: (signal: AbortSignal) => Promise<T>, limitMs: number) {
-  const controller = new AbortController();
-  const deadline = window.setTimeout(() => controller.abort(), limitMs);
-  try {
-    return await send(controller.signal);
-  } finally {
-    window.clearTimeout(deadline);
-  }
-}
-
-/** Each attempt sends the same command. A lost reply can follow a commit. */
-async function deliverWebTimerWrite<T>(send: (signal: AbortSignal) => Promise<T | null>, sameOwner: () => boolean) {
-  const sendAttempt = () => runTimerRequestWithDeadline(send, TIMER_WRITE_ATTEMPT_LIMIT_MS).catch(() => null);
-  if (!sameOwner()) return null;
-  const first = await sendAttempt();
-  return first ?? (sameOwner() ? sendAttempt() : null);
 }
 
 function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop" | "discard") {

@@ -4,6 +4,9 @@ import { z } from "zod";
 /** Opts web Discard into exact, account-bound replay. Value is `userId:workspaceId`. */
 export const WEB_TIMER_DISCARD_OWNER_HEADER = "x-dayframe-web-discard-owner";
 
+/** Carries the signed-in owner at the time a web Split or Undo was requested. */
+export const WEB_TIMER_SPLIT_OWNER_HEADER = "x-dayframe-web-split-owner";
+
 /**
  * Optimistic concurrency for a block's details (web timer autosave, 13 Oct 2026). A PATCH may
  * carry `expectedDetails`: for each detail field it changes, the value its edit was based on. If

@@ -83,6 +83,18 @@ describe("POST /api/time-entries", () => {
     vi.useRealTimers();
   });
 
+  it.each(["split", "join"])("refuses a web %s command after its session owner changes", async (mode) => {
+    const entryId = "11111111-1111-4111-8111-111111111111";
+    const response = await POST(jsonRequest({
+      mode, entryId, splitEntryId: "22222222-2222-4222-8222-222222222222", splitAt: "2026-07-04T11:30:00.000Z"
+    }, { "x-dayframe-web-split-owner": `${session.userId}:00000000-0000-4000-8000-000000000099` }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("timer_scope_changed");
+    expect(mocks.splitFinishedEntry).not.toHaveBeenCalled();
+    expect(mocks.joinSplitEntries).not.toHaveBeenCalled();
+  });
+
   it("starts a category-only task without requiring a project", async () => {
     const response = await POST(jsonRequest({ mode: "start", projectId: "", categoryId: categoryId(), description: "Focus" }));
 

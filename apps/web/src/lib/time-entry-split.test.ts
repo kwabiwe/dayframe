@@ -78,6 +78,45 @@ describe("duplicating a block (card G)", () => {
 });
 
 describe("splitting the running block (owner 28 Oct 2026)", () => {
+  it("retries the same Split when the server sends headers but never finishes its reply", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn<Fetcher>()
+        .mockImplementationOnce(async (_url, init) => new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"ok":true,'));
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+          }
+        }), { status: 201 }))
+        .mockImplementationOnce(async () => Response.json({ ok: true, newEntryId: "entry-2", entries: [] }));
+      const split = splitRunningTimeEntry(fetcher, { entryId: "entry-1", atMs: ms("2026-03-02T10:30:00.000Z") });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const [first, retry] = fetcher.mock.calls.map(([, init]) => init!);
+      expect(first.signal?.aborted).toBe(true);
+      expect(retry.headers).toEqual(first.headers);
+      expect(retry.body).toBe(first.body);
+      await expect(split).resolves.toEqual({ ok: true, newEntryId: "entry-2", entries: [] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not replay Undo after the original owner changes", async () => {
+    let isCurrent = true;
+    const owner = { key: "user-1:workspace-1", isCurrent: () => isCurrent };
+    const fetcher = vi.fn<Fetcher>().mockImplementationOnce(async () => {
+      isCurrent = false;
+      throw new TypeError("Connection closed");
+    });
+
+    await expect(joinSplitTimeEntries(fetcher, { entryId: "entry-1", splitEntryId: "entry-2", owner }))
+      .resolves.toMatchObject({ ok: false, changed: true });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({ "x-dayframe-web-split-owner": owner.key });
+  });
+
   it("never splits within its first minute or the last minute before now, and grows with now", () => {
     const running = block({ stoppedAt: null });
     const bounds = runningSplitBounds(running, ms("2026-03-02T10:40:30.000Z"))!;

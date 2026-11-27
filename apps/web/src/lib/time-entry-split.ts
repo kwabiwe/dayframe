@@ -1,5 +1,7 @@
 import { clampSplit, splitBounds, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, type SplitBounds } from "@dayframe/shared";
 import type { TimeEntryRow } from "./queries";
+import { WEB_TIMER_SPLIT_OWNER_HEADER } from "./time-entry-details-precondition";
+import { deliverWebTimerWrite } from "./web-timer-requests";
 
 /**
  * Split and Duplicate a finished block (card G, Toggl #261), each one request to the normal entries endpoint
@@ -31,34 +33,31 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
  */
 export type BlockMutationOutcome = { ok: true } | { ok: false; error: string; changed?: boolean };
 type SentOutcome = { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string; changed?: boolean };
+type SplitOwner = { key: string; isCurrent: () => boolean };
 
 const CHANGED_ELSEWHERE = "This block changed somewhere else. Open it again to see it as it is now.";
 
 const UNKNOWN = "Couldn't confirm this with Dayframe, so it may or may not have saved. Check the day before trying again.";
 
-async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string, commandId?: string): Promise<SentOutcome> {
+async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string, options?: { commandId?: string; owner?: SplitOwner }): Promise<SentOutcome> {
   const init: RequestInit = {
     method: "POST",
-    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: commandId ?? newBlockCommandId(String(body.mode)) },
+    headers: {
+      "Content-Type": "application/json",
+      [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: options?.commandId ?? newBlockCommandId(String(body.mode)),
+      ...(options?.owner ? { [WEB_TIMER_SPLIT_OWNER_HEADER]: options.owner.key } : {})
+    },
     body: JSON.stringify(body)
   };
-  // A dropped connection or a server error (5xx) may follow a commit: the same command once more is safe, as
-  // the server answers a repeat with what it already did (Codex r1 and r2 on #596).
-  let response: Response | null = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      response = await fetcher("/api/time-entries", init);
-    } catch {
-      response = null;
-      continue;
-    }
-    if (response.status < 500) break;
-  }
-  if (!response || response.status >= 500) return { ok: false, error: UNKNOWN, changed: true };
-  if (response.ok) return { ok: true, body: await response.json().catch(() => null) as Record<string, unknown> | null };
-  if (response.status === 409) return { ok: false, error: CHANGED_ELSEWHERE, changed: true };
-  const json = await response.json().catch(() => null) as { error?: unknown } | null;
-  return { ok: false, error: typeof json?.error === "string" && json.error.trim() ? json.error : fallback };
+  const outcome = await deliverWebTimerWrite<SentOutcome>(async (signal) => {
+    const response = await fetcher("/api/time-entries", { ...init, signal });
+    if (response.status >= 500) return null;
+    if (response.status === 409) return { ok: false, error: CHANGED_ELSEWHERE, changed: true };
+    const json = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (response.ok) return json?.ok === true ? { ok: true, body: json } : null;
+    return { ok: false, error: typeof json?.error === "string" && json.error.trim() ? json.error : fallback };
+  }, options?.owner?.isCurrent ?? (() => true));
+  return outcome ?? { ok: false, error: UNKNOWN, changed: true };
 }
 
 /** Splits a finished block at `atMs` (snapped and clamped): two blocks with the same details. */
@@ -94,12 +93,12 @@ export type RunningSplitOutcome =
  */
 export async function splitRunningTimeEntry(
   fetcher: Fetch,
-  input: { entryId: string; atMs: number; expectedUpdatedAt?: string }
+  input: { entryId: string; atMs: number; expectedUpdatedAt?: string; owner?: SplitOwner }
 ): Promise<RunningSplitOutcome> {
   const outcome = await send(fetcher, {
     mode: "split", entryId: input.entryId, splitAt: new Date(input.atMs).toISOString(),
     ...(input.expectedUpdatedAt ? { expectedUpdatedAt: input.expectedUpdatedAt } : {})
-  }, "Couldn't split this block.");
+  }, "Couldn't split this block.", { owner: input.owner });
   if (!outcome.ok) return outcome;
   const newEntryId = outcome.body?.newEntryId;
   const entries = Array.isArray(outcome.body?.entries) ? outcome.body.entries as TimeEntryRow[] : [];
@@ -113,10 +112,10 @@ export async function splitRunningTimeEntry(
 /** Undo of a split: `splitEntryId` goes and `entryId` takes its end again (running again if it ran). */
 export async function joinSplitTimeEntries(
   fetcher: Fetch,
-  input: { entryId: string; splitEntryId: string; commandId?: string }
+  input: { entryId: string; splitEntryId: string; commandId?: string; owner?: SplitOwner }
 ): Promise<{ ok: true; entry: TimeEntryRow | null } | { ok: false; error: string; changed?: boolean }> {
   const outcome = await send(
-    fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input.commandId
+    fetcher, { mode: "join", entryId: input.entryId, splitEntryId: input.splitEntryId }, "Couldn't put this block back together.", input
   );
   if (!outcome.ok) return outcome;
   const entry = outcome.body?.entry;
