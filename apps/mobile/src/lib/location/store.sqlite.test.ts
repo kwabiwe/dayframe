@@ -34,6 +34,29 @@ afterEach(()=>{db.close();vi.useRealTimers();vi.unstubAllGlobals();});
 async function persistEvidence(items: Parameters<typeof store.persistLocationEvidence>[0]) { return store.persistLocationEvidence(items, await store.captureLocationOwnership()); }
 async function seed(n=1, prefix="evidence", batchOwner=owner){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`${prefix}-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(batchOwner);}
 describe("Location real SQLite drain results",()=>{
+ it("keeps the original batch and readings when the server rejects a future semantic cutover", async () => {
+  await seed(2);
+  const original = db.prepare("select client_batch_id, body_json from location_upload_outbox").get()!;
+  mocks.fetch.mockResolvedValueOnce(new Response(
+    JSON.stringify({ code: "invalid_semantic_mode_acknowledgement" }),
+    { status: 409 }
+  ));
+
+  await store.syncLocationEvidence();
+
+  expect(db.prepare("select client_batch_id, body_json, attempt_count from location_upload_outbox").get())
+    .toEqual({ ...original, attempt_count: 1 });
+  expect(db.prepare("select count(*) as count from location_evidence_journal where upload_state = 'rejected'").get())
+    .toEqual({ count: 0 });
+
+  await store.syncLocationEvidence({ forceUploadRetry: true });
+
+  const uploads = mocks.fetch.mock.calls.filter(([url]) => url.endsWith("/evidence"));
+  expect(uploads.map(([, init]) => init.body)).toEqual([original.body_json, original.body_json]);
+  expect(db.prepare("select count(*) as count from location_evidence_journal where upload_state = 'acknowledged'").get())
+    .toEqual({ count: 2 });
+ });
+
  it("records one durable batch through backoff and acknowledgement without evidence in the export", async () => {
   await seed();
   mocks.fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ error: "raw-server-error" }), { status: 503 }));

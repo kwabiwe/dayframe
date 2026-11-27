@@ -427,9 +427,11 @@ function validateSemanticAcknowledgementTime(
   // This timestamp is the durable semantic cutover, not evidence. It may
   // legitimately be older than the raw-evidence retention window.
   if (acknowledgedAt > latest) {
+    // Mobile treats 422 as a permanent failure for every reading in the batch.
+    // A cutover ahead of the server clock can become valid on a later retry.
     throw new LocationIngestError(
       "The semantic-mode acknowledgement cannot be in the future.",
-      422,
+      409,
       "invalid_semantic_mode_acknowledgement"
     );
   }
