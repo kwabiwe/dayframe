@@ -5,6 +5,11 @@
 
 export type PreparedExportGuard = { current: boolean };
 
+export function captureExportVisibility(visibility: { current: symbol | null }): () => boolean {
+  const visit = visibility.current;
+  return () => visit !== null && visibility.current === visit;
+}
+
 /** Resolves after the next frame has painted: one animation frame, then a macrotask. */
 export function afterNextPaint(): Promise<void> {
   return new Promise((resolve) => {

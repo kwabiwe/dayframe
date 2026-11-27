@@ -199,7 +199,7 @@ import {
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
 import { useMapKitChecks } from "@/lib/useMapKitChecks";
-import { runPreparedExport } from "@/lib/preparedExport";
+import { captureExportVisibility, runPreparedExport } from "@/lib/preparedExport";
 import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-motion-activity";
 import {
@@ -1242,12 +1242,13 @@ export default function SettingsScreen() {
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
   const historyExport = useRef(false);
-  const historyExportVisibility = useRef<symbol | null>(null);
+  // The native share sheet belongs to the Sync help visit that started its preparation.
+  const syncHelpExportVisibility = useRef<symbol | null>(null);
   const [exportingHistory, setExportingHistory] = useState(false);
   useFocusEffect(useCallback(() => {
     if (settingsSection !== "sync") return;
-    historyExportVisibility.current = Symbol();
-    return () => { historyExportVisibility.current = null; };
+    syncHelpExportVisibility.current = Symbol();
+    return () => { syncHelpExportVisibility.current = null; };
   }, [settingsSection]));
   // Sync help › Pauses and crashes: a light overview (no payloads), read on each visit once the
   // opening transition has finished (kept on this iPhone until shared).
@@ -1671,8 +1672,7 @@ export default function SettingsScreen() {
 
   function shareSyncDiagnosticHistory() {
     const scope = captureSyncDiagnosticScope();
-    const visible = historyExportVisibility.current;
-    const isVisible = () => visible !== null && historyExportVisibility.current === visible;
+    const isVisible = captureExportVisibility(syncHelpExportVisibility);
     return runPreparedExport(historyExport, setExportingHistory, async () => {
       try {
         const shared = await exportSyncDiagnosticHistory(scope, (content) => Share.share(content), isVisible);
@@ -1690,6 +1690,7 @@ export default function SettingsScreen() {
   }
 
   async function exportQueueDiagnostics() {
+    const isVisible = captureExportVisibility(syncHelpExportVisibility);
     try {
       // Every account-scoped section is read for this one owner (Codex r6 on #355): the Review and
       // Location stores keep their own active account, which can differ while accounts reconcile.
@@ -1710,7 +1711,7 @@ export default function SettingsScreen() {
       ]);
       // Read before the owner is checked again, so the share never waits after that check (Codex r1 on #619).
       const accuracyTrialState = await readAccuracyBurstState().catch(() => null);
-      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isVisible()) return;
       if (freezes) setFreezeSnapshot(freezes);
       const snapshot = {
         exportedAt: new Date().toISOString(),
@@ -1772,9 +1773,9 @@ export default function SettingsScreen() {
         title: `Dayframe sync diagnostics ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      await refreshQueueLatest();
+      if (isVisible()) await refreshQueueLatest();
     } catch (error) {
-      setSyncHelpNote("Couldn't prepare the support details. Try again.");
+      if (isVisible()) setSyncHelpNote("Couldn't prepare the support details. Try again.");
     }
   }
 
@@ -1918,21 +1919,22 @@ export default function SettingsScreen() {
 
   // The row reads "Preparing…" and is disabled before the replay blocks JS; a second press does nothing.
   function shareLocationDiagnostics() {
-    return runPreparedExport(locationDiagnosticsExport, setPreparingLocationDiagnostics, shareLocationDiagnosticsNow);
+    const isVisible = captureExportVisibility(syncHelpExportVisibility);
+    return runPreparedExport(locationDiagnosticsExport, setPreparingLocationDiagnostics, () => shareLocationDiagnosticsNow(isVisible));
   }
 
-  async function shareLocationDiagnosticsNow() {
+  async function shareLocationDiagnosticsNow(isVisible: () => boolean) {
     const owner = await readActiveMobileAccount();
     if (!owner) return;
     const session = await readOwnedAuthenticatedSessionSnapshot(owner);
-    if (session.status !== "authenticated") return;
+    if (session.status !== "authenticated" || !isVisible()) return;
     // The local journal replay is this export's alone (stability audit 22 Oct 2026, location-3): it runs
     // here, at most every ten minutes, never on a bootstrap or foreground pass, and never rejects. Its
     // numbers carry their run time (`lastLocalReplayAt`) and any failure (`lastLocalReplayError`).
     await refreshLocalJournalReplayForDiagnostics();
-    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
-    const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
-    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isVisible()) return;
+    const [local, native] = await Promise.all([getLocationStoreDiagnostics(owner), getNativeLocationIntelligenceStatus().catch(() => null)]);
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot) || !isVisible()) return;
     await Share.share({
       title: "Dayframe location diagnostics",
       message: JSON.stringify({
@@ -2053,10 +2055,12 @@ export default function SettingsScreen() {
   }
 
   async function exportAppleHealthDebug() {
+    const isVisible = captureExportVisibility(syncHelpExportVisibility);
     setExportingHealthDebug(true);
     setSyncHelpNote("Preparing Apple Health details…");
     try {
       const snapshot = await exportHealthDebugSnapshot();
+      if (!isVisible()) return;
       const summary =
         `${snapshot.healthKit.sleep.sampleCount} sleep samples, ` +
         `${snapshot.healthKit.sleep.sessions.length} sleep sessions and ` +
@@ -2065,8 +2069,9 @@ export default function SettingsScreen() {
         title: `Dayframe Health debug ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      setSyncHelpNote(summary);
+      if (isVisible()) setSyncHelpNote(summary);
     } catch (error) {
+      if (!isVisible()) return;
       const message = friendlyHealthKitError(error, "export Health debug data");
       setSyncHelpNote(message);
       Alert.alert("Apple Health", message);

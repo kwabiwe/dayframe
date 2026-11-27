@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { runPreparedExport } from "./preparedExport";
+import { captureExportVisibility, runPreparedExport } from "./preparedExport";
 
 describe("prepared Settings exports (Share location details, stability audit location-3; Codex r1 on #537)", () => {
   it("shows Preparing and lets a frame paint before the blocking work starts", async () => {
@@ -38,12 +38,27 @@ describe("prepared Settings exports (Share location details, stability audit loc
 
   it("Share location details goes through it and its row reads Preparing… and is disabled meanwhile", () => {
     const settings = readFileSync(fileURLToPath(new URL("../../app/settings.tsx", import.meta.url)), "utf8");
-    expect(settings).toContain("runPreparedExport(locationDiagnosticsExport, setPreparingLocationDiagnostics, shareLocationDiagnosticsNow)");
+    expect(settings).toContain("runPreparedExport(locationDiagnosticsExport, setPreparingLocationDiagnostics, () => shareLocationDiagnosticsNow(isVisible))");
     const row = settings.slice(settings.lastIndexOf("<SettingsBlockRow", settings.indexOf('testID="sync-help-location"')), settings.indexOf('testID="sync-help-location"'));
     expect(row).toContain("disabled={preparingLocationDiagnostics}");
     expect(row).toContain('preparingLocationDiagnostics ? "Preparing…"');
     expect(row).toContain("onPress={() => void shareLocationDiagnostics()}");
     // Only the guarded entry point runs the replay.
     expect(settings.match(/shareLocationDiagnosticsNow/g)).toHaveLength(2);
+  });
+
+  it("only allows presentation during the visit that initiated the export", () => {
+    const visibility = { current: null as symbol | null };
+    const captureWhileHidden = captureExportVisibility(visibility);
+    visibility.current = Symbol();
+    const firstVisit = captureExportVisibility(visibility);
+    expect(captureWhileHidden()).toBe(false);
+    expect(firstVisit()).toBe(true);
+
+    visibility.current = null;
+    expect(firstVisit()).toBe(false);
+    visibility.current = Symbol();
+    expect(firstVisit()).toBe(false);
+    expect(captureExportVisibility(visibility)()).toBe(true);
   });
 });
