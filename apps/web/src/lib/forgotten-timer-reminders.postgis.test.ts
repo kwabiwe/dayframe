@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { pool } from "./db";
+import { GET as runReminderSweep } from "../app/api/cron/forgotten-timers/route";
+import * as reminderTransport from "./live-activity-push";
 import { hashSessionToken } from "./auth/local";
 import { processActivityEvent } from "./event-service";
 import {
@@ -112,6 +114,41 @@ describe.runIf(process.env.DAYFRAME_RUN_FORGOTTEN_TIMER_DB_TEST === "1" && Boole
       await pool.query("update auth_sessions set revoked_at = statement_timestamp() where token_hash = $1", [hashedToken]);
       await expect(isForgottenTimerDeviceRegistered(session, token)).resolves.toBe(false);
       await expect(registerForgottenTimerDevice(session, token, device)).resolves.toBe(false);
+    });
+
+    it("delivers through the authenticated scheduler only once and skips stopped blocks", async () => {
+      const sessionToken = randomUUID();
+      const cronSecret = randomUUID();
+      const session = { ...owner, authMode: "provider" as const, scopes: [] };
+      const device = { environment: "development" as const, token: randomUUID().replaceAll("-", "") };
+      const stopped = await runningTimer(600);
+      await pool.query("update time_entries set stopped_at = statement_timestamp() where id = $1", [stopped]);
+      const current = await runningTimer(479);
+      await pool.query(`insert into auth_sessions (workspace_id, user_id, token_hash, expires_at)
+        values ($1, $2, $3, statement_timestamp() + interval '1 hour')`, [
+        owner.workspaceId, owner.userId, hashSessionToken(sessionToken)
+      ]);
+      await expect(registerForgottenTimerDevice(session, sessionToken, device)).resolves.toBe(true);
+
+      const send = vi.fn(async () => ({ ok: true, status: 200, body: "", retryAfter: null, apnsId: null }));
+      const prepare = vi.spyOn(reminderTransport, "prepareForgottenTimerAlert").mockReturnValue(send);
+      vi.stubEnv("CRON_SECRET", cronSecret);
+      const url = "http://localhost/api/cron/forgotten-timers";
+      const run = () => runReminderSweep(new Request(url, { headers: { authorization: `Bearer ${cronSecret}` } }));
+      try {
+        expect((await runReminderSweep(new Request(url))).status).toBe(401);
+        expect(await (await run()).json()).toEqual({ delivered: 0, failed: 0 });
+        expect(prepare).not.toHaveBeenCalled();
+
+        await pool.query("update time_entries set started_at = statement_timestamp() - interval '8 hours' where id = $1", [current]);
+        expect(await (await run()).json()).toEqual({ delivered: 1, failed: 0 });
+        expect(await (await run()).json()).toEqual({ delivered: 0, failed: 0 });
+        expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ ...device, entryId: current }));
+        expect(send).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllEnvs();
+        prepare.mockRestore();
+      }
     });
   }
 );
