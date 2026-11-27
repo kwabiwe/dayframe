@@ -2243,7 +2243,7 @@ PODS:
     - ReactNativeDependencies
     - RNWorklets
     - Yoga
-  - RNScreens (4.26.2):
+  - RNScreens (4.30.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2265,9 +2265,9 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-    - RNScreens/common (= 4.26.2)
+    - RNScreens/common (= 4.30.0)
     - Yoga
-  - RNScreens/common (4.26.2):
+  - RNScreens/common (4.30.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2531,7 +2531,7 @@ DEPENDENCIES:
   - "RNCMaskedView (from `../../../node_modules/@react-native-masked-view/masked-view`)"
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
-  - RNScreens (from `../../../node_modules/react-native-screens`)
+  - RNScreens (from `../node_modules/react-native-screens`)
   - RNSVG (from `../../../node_modules/react-native-svg`)
   - RNWorklets (from `../node_modules/react-native-worklets`)
   - UMAppLoader (from `../../../node_modules/unimodules-app-loader/ios`)
@@ -2780,7 +2780,7 @@ EXTERNAL SOURCES:
   RNReanimated:
     :path: "../node_modules/react-native-reanimated"
   RNScreens:
-    :path: "../../../node_modules/react-native-screens"
+    :path: "../node_modules/react-native-screens"
   RNSVG:
     :path: "../../../node_modules/react-native-svg"
   RNWorklets:
@@ -2911,7 +2911,7 @@ SPEC CHECKSUMS:
   RNCMaskedView: eb2b2e538afa907f05a5848a1a1ac26092e6fec9
   RNGestureHandler: 2ff61eac036eaf89f6818bf4ed9c39771a17d134
   RNReanimated: 07fe6682b1d90b9d536540614562850503c63dbb
-  RNScreens: c1a06fd73d0581a2a28a160577be393f579662b9
+  RNScreens: 76cdcb7f44e27a03f59778ec9c6631520c3ad248
   RNSVG: 04044c3abcf177fd674a1a3d13097efa1adebcbe
   RNWorklets: 2b1732dea513e38333481dc919029c1e14dc647d
   UMAppLoader: b7d22886a244871c20b5a8f2fcea13c18534e677

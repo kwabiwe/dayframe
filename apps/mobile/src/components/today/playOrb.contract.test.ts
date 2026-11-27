@@ -22,9 +22,11 @@ describe("Play orb wiring (Blocks parity step 3)", () => {
     // Fixed for the process: toggling it at runtime would re-key the tab view and remount every tab.
     expect(trigger).toContain("hidden={!PLAY_ORB_SLOT}");
     expect(layout).not.toContain("usePlayOrbAvailable");
-    expect(trigger).toContain("if (!INLINE_PLAY_ORB_SLOT)");
+    expect(trigger).toContain("if (!MODERN_PLAY_ORB_SLOT)");
     expect(trigger).toMatch(/AccessibilityInfo\.isScreenReaderEnabled\(\)\.then\(\(enabled\) => \{\s*if \(enabled\) requestPlayOrbTap\(\)/);
-    expect(trigger).toContain("<NativeTabs.Trigger.Label hidden={INLINE_PLAY_ORB_SLOT}>");
+    expect(trigger).toContain("<NativeTabs.Trigger.Label hidden={MODERN_PLAY_ORB_SLOT}>");
+    expect(trigger).toContain('unstable_nativeProps={MODERN_PLAY_ORB_SLOT');
+    expect(trigger).toContain('{ ios: { role: "search", automaticallyActivatesSearch: true } }');
     expect(trigger).toContain('name={DAYFRAME_NATIVE_TABS.orb.route}');
     expect(trigger).toContain('role="search"');
     // A deep link to the slot lands on Today; nothing navigates there.

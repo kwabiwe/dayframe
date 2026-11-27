@@ -41,7 +41,7 @@ describe("native tab configuration", () => {
       expect(tabsLayout).toContain(`<NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.${tab}} renderingMode="template" />`);
     }
     expect(tabsLayout).toContain('require("../../assets/tab-icons/orb.png")');
-    expect(tabsLayout).toContain("src={INLINE_PLAY_ORB_SLOT ? BLANK_ORB_SLOT_ICON : DAYFRAME_TAB_ICON_IMAGES.orb}");
+    expect(tabsLayout).toContain("src={MODERN_PLAY_ORB_SLOT ? BLANK_ORB_SLOT_ICON : DAYFRAME_TAB_ICON_IMAGES.orb}");
     // Owner decision 7 Oct: the selected tab is coral (accentText), because a neutral tint washes out
     // over Liquid Glass when bright activity blocks scroll beneath it. Unselected tabs stay neutral.
     expect(tabsLayout).toContain("iconColor={{ default: theme.textSecondary, selected: theme.accentText }}");

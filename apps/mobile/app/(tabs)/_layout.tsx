@@ -21,8 +21,8 @@ const PLAY_ORB_SLOT = playOrbSupported({
   Version: Platform.Version,
   isPad: Platform.OS === "ios" && Platform.isPad
 });
-// UIKit 27 renders this reserved item inside the bar even with the search role.
-const INLINE_PLAY_ORB_SLOT = PLAY_ORB_SLOT && Number.parseInt(String(Platform.Version), 10) >= 27;
+// UIKit 27 separates a native search tab, while the legacy search item appears inline.
+const MODERN_PLAY_ORB_SLOT = PLAY_ORB_SLOT && Number.parseInt(String(Platform.Version), 10) >= 27;
 const BLANK_ORB_SLOT_ICON = require("../../assets/tab-icons/orb-slot.png");
 
 export default function DashboardTabsLayout() {
@@ -80,8 +80,9 @@ function DashboardTabs() {
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.reports.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
-        {/* Reserve the coral orb's space using a disabled native item. When UIKit puts it inline,
-            hide its icon and title so only the coral control is visible. Keep its spoken label. */}
+        {/* Reserve a separate circle for the coral orb. On iOS 27 the native search role and
+            automatic activation give the item prominent placement. Selection stays disabled,
+            so the slot does not open a search screen. Keep its spoken label for VoiceOver. */}
         <NativeTabs.Trigger
           // A system "search" item keeps its own title, so VoiceOver needs the label set here.
           accessibilityLabel={timerRunning ? "Stop recording" : "Start a block"}
@@ -91,7 +92,7 @@ function DashboardTabs() {
           hidden={!PLAY_ORB_SLOT}
           listeners={{
             tabPress: () => {
-              if (!INLINE_PLAY_ORB_SLOT) {
+              if (!MODERN_PLAY_ORB_SLOT) {
                 requestPlayOrbTap();
                 return;
               }
@@ -102,12 +103,15 @@ function DashboardTabs() {
           }}
           name={DAYFRAME_NATIVE_TABS.orb.route}
           role="search"
+          unstable_nativeProps={MODERN_PLAY_ORB_SLOT
+            ? { ios: { role: "search", automaticallyActivatesSearch: true } }
+            : undefined}
         >
           <NativeTabs.Trigger.Icon
-            src={INLINE_PLAY_ORB_SLOT ? BLANK_ORB_SLOT_ICON : DAYFRAME_TAB_ICON_IMAGES.orb}
+            src={MODERN_PLAY_ORB_SLOT ? BLANK_ORB_SLOT_ICON : DAYFRAME_TAB_ICON_IMAGES.orb}
             renderingMode="template"
           />
-          <NativeTabs.Trigger.Label hidden={INLINE_PLAY_ORB_SLOT}>
+          <NativeTabs.Trigger.Label hidden={MODERN_PLAY_ORB_SLOT}>
             {timerRunning ? "Stop recording" : "Start a block"}
           </NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
