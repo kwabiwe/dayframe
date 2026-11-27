@@ -716,7 +716,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const presentation = calendarEditPresentationRef.current;
       if (presentation) setCalendarEditDismissRequestId(presentation.id);
     },
-    reject: (localId, error, alert) => rejectOptimisticTimerStart(localId, null, error, alert),
+    reject: (localId, error, alert, removedEntryId) => {
+      for (const id of new Set([localId, removedEntryId ?? localId])) {
+        rejectOptimisticTimerStart(id, null, error, alert, Boolean(removedEntryId));
+      }
+    },
     refresh: () => queueDashboardRefreshAfterConflict()
   });
 
@@ -3103,12 +3107,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     optimisticId: string,
     previousData: MobileBootstrap | null,
     error: unknown,
-    alert = true
+    alert = true,
+    superseded = false
   ) {
-    const rollbackSnapshot = supersededStopRollbackTracker.current.consume(
+    const rollback = supersededStopRollbackTracker.current.consume(
       optimisticId,
       previousData
     );
+    const rollbackSnapshot = superseded ? null : rollback;
     // Only this block leaves a pending deletion; any saved blocks deleted with it keep their Undo
     // (Codex r2 on #532). A deletion left with nothing to delete releases its sheet token.
     const pending = deletionCoordinator.current?.current();

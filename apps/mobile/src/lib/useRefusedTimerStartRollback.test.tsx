@@ -116,4 +116,15 @@ describe("useRefusedTimerStartRollback", () => {
     expect(first.reject).not.toHaveBeenCalled();
     expect(second.reject).toHaveBeenCalledOnce();
   });
+
+  it("quietly closes the exact editor when a replayed Start has lost its block", () => {
+    const rollback = rollbackFixture({ calendarEditorEntryId: "saved-a" });
+    act(() => { tree = create(<Harness rollback={rollback} />); });
+
+    emit({ ...refusal(), removedEntryId: "saved-a" });
+
+    expect(rollback.dismissCalendarEditor).toHaveBeenCalledOnce();
+    expect(rollback.reject).toHaveBeenCalledWith("optimistic-a", expect.any(Error), false, "saved-a");
+    expect(rollback.refresh).toHaveBeenCalledOnce();
+  });
 });

@@ -83,7 +83,7 @@ import {
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
 import { captureSyncDiagnosticScope, MAX_SYNC_DIAGNOSTIC_RECORDS, recordSyncDiagnostic, type SyncDiagnosticReason } from "./syncDiagnosticHistory";
-import { acknowledgeTimerCacheEffect, readTimerCacheRevision, timerCacheEntryEffect, type TimerCacheEffect } from "./timerCacheAcknowledgements";
+import { acknowledgeSupersededTimerStart, acknowledgeTimerCacheEffect, readTimerCacheRevision, timerCacheEntryEffect, type TimerCacheEffect } from "./timerCacheAcknowledgements";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -1607,6 +1607,7 @@ async function syncQueueItems(
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
   const refusedStarts: RefusedTimerStart[] = [];
+  const supersededStarts: RefusedTimerStart[] = [];
   const dropped: string[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
@@ -1784,8 +1785,20 @@ async function syncQueueItems(
           payload.clientEventId !== undefined && payload.clientEventId !== item.localId) {
         throw new InvalidMobileAcknowledgementError();
       }
-      if (item.type === "timer_start") {
-        if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
+      if (item.type === "timer_start" && payload.startOutcome === "superseded" && payload.timeEntryId == null) {
+        const correlatedId = (await readTimerEntryIdCorrelations(owner)).get(item.localId);
+        const removedEntryId = await acknowledgeSupersededTimerStart(owner, item.localId, correlatedId);
+        const start = { localId: item.localId, owner, removedEntryId, message: "This block changed elsewhere and is no longer available." };
+        if (!await settleRefusedTimerStart(start)) {
+          throw new Error("Dayframe couldn't save the block's final state. It will retry automatically.");
+        }
+        if (correlatedId) await removeTimerEntryIdCorrelation(item.localId, owner);
+        if (item.runningSplitPredecessorId) {
+          await settleRunningSplitSwitchReceipt(owner, item.runningSplitPredecessorId, options.signal);
+        }
+        supersededStarts.push(start);
+      } else if (item.type === "timer_start") {
+        if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId.trim()) {
           throw new Error("The server didn't return the started block.");
         }
         const entryId = payload.timeEntryId;
@@ -1870,6 +1883,7 @@ async function syncQueueItems(
     remaining,
     synced: [...synced, ...dropped], acceptedStatuses, failureReasons, diagnosticScope
   });
+  for (const start of supersededStarts) notifyUnavailableTimerStart(start);
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).
   const stillRefused = reconciledRemaining.filter((item) =>
@@ -1930,11 +1944,11 @@ async function deliverRunningSplitDependencies(
   return !options.signal?.aborted && !await stillWaiting();
 }
 
-export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner };
+export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner; removedEntryId?: string };
 
 const refusedTimerStartListeners = new Set<(start: RefusedTimerStart) => void>();
 
-/** Told once when the server permanently refuses a queued Start (its block is never created). */
+/** Told once when a queued Start is permanently refused or no longer owns a block. */
 export function subscribeRefusedTimerStarts(listener: (start: RefusedTimerStart) => void) {
   refusedTimerStartListeners.add(listener);
   return () => {
@@ -1952,13 +1966,16 @@ async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[], n
   for (const start of refused) {
     // Storage failed: the Start stays queued, so the next pass (or a Clear) settles it again.
     await settleRefusedTimerStart(start);
-    if (!newlyRefused.has(start.localId)) continue;
-    for (const listener of refusedTimerStartListeners) {
-      try {
-        listener(start);
-      } catch {
-        // A listener's failure never stops the others or the sync pass.
-      }
+    if (newlyRefused.has(start.localId)) notifyUnavailableTimerStart(start);
+  }
+}
+
+function notifyUnavailableTimerStart(start: RefusedTimerStart) {
+  for (const listener of refusedTimerStartListeners) {
+    try {
+      listener(start);
+    } catch {
+      // A listener's failure never stops the others or the sync pass.
     }
   }
 }
@@ -1971,9 +1988,12 @@ async function settleRefusedTimerStart(start: RefusedTimerStart) {
       import("./timeEntryOutbox")
     ]);
     await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
+    if (start.removedEntryId && start.removedEntryId !== start.localId) {
+      await removePendingTimerStopsForTarget(start.owner, { targetEntryId: start.removedEntryId });
+    }
     // Also fences the block's ID, so an Edit or Delete written for it later is refused as it is
     // written, even after Clear has removed the Start (Codex r3 on #532).
-    await refuseTimeEntryCommandsForOptimisticEntry(start.owner, start.localId);
+    await refuseTimeEntryCommandsForOptimisticEntry(start.owner, start.localId, start.removedEntryId ? start.message : undefined);
     return true;
   } catch {
     return false;

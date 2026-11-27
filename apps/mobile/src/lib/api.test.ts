@@ -131,6 +131,7 @@ const {
   normaliseLocationReviewRequestError,
   readQueue,
   readTimerEntryIdCorrelations,
+  recordTimerEntryIdCorrelation,
   HealthReprocessCancelledError,
   reprocessHealthReviewItems,
   retryFailedQueuedEvents,
@@ -1964,6 +1965,54 @@ describe("mobile API client", () => {
     const shown = projectDurableLocalWork(stale, await readDurableLocalWork(TIMER_STOP_OWNER));
     expect(shown.activeEntry).toBeNull();
     expect(shown.entries).toEqual([canonical]);
+  });
+
+  it("settles a duplicate Start whose block was deleted and delivers the next queued Start", async () => {
+    storeBoundSession("session-token");
+    const owner = TIMER_STOP_OWNER;
+    const localId = "optimistic-active-timer:removed-start";
+    const followingId = "optimistic-active-timer:next-start";
+    const outbox = await import("./timeEntryOutbox");
+    const { readDurableLocalWork } = await import("./durableLocalWork");
+    const { acknowledgeTimerCacheEffect } = await import("./timerCacheAcknowledgements");
+    await enqueueEvent({ localId, source: "mobile_app", type: "timer_start", occurredAt: new Date("2026-08-22T09:00:00.000Z") });
+    await enqueueEvent({ localId: followingId, source: "mobile_app", type: "timer_start", occurredAt: new Date("2026-08-22T11:00:00.000Z") });
+    await getOrCreatePendingStop({ owner, target: { optimisticEntryId: localId } });
+    await outbox.enqueueTimeEntryUpdate({ owner, target: { optimisticEntryId: localId }, patch: { description: "Unsaved title" } });
+    const original = timerRecoveryEntry(TIMER_TARGET_A);
+    await acknowledgeTimerCacheEffect(owner, localId, { kind: "entry", entry: original });
+    await recordTimerEntryIdCorrelation(localId, TIMER_TARGET_A, owner);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ eventId: "original-receipt", clientEventId: localId, duplicate: true, startOutcome: "superseded" }))
+      .mockResolvedValueOnce(jsonResponse({ eventId: "following-receipt", clientEventId: followingId, timeEntryId: "entry-next" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+
+    expect(result.synced).toEqual([localId, followingId]);
+    expect(result.remaining).toEqual([]);
+    expect(result.timerEntryIdCorrelations).toEqual([{ localId: followingId, timeEntryId: "entry-next" }]);
+    expect((await readTimerEntryIdCorrelations(owner)).get(localId)).toBeUndefined();
+    expect(await readPendingTimerStops()).toEqual([]);
+    expect(await outbox.listTimeEntrySyncIssues(owner)).toEqual([
+      expect.objectContaining({ optimisticEntryId: localId, failureKind: "permanent", lastError: "This block changed elsewhere and is no longer available." })
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init.body)).clientEventId)).toEqual([localId, followingId]);
+    const relaunched = projectDurableLocalWork(timerRecoveryBootstrap(original), await readDurableLocalWork(owner));
+    expect(relaunched.activeEntry?.id).toBe("entry-next");
+    expect(relaunched.entries.map((entry) => entry.id)).toEqual(["entry-next"]);
+  });
+
+  it("retains a queued Start when its acknowledgement has neither a block nor a superseded outcome", async () => {
+    storeBoundSession("session-token");
+    const localId = "optimistic-active-timer:missing-receipt";
+    await enqueueEvent({ localId, source: "mobile_app", type: "timer_start" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ eventId: "event", clientEventId: localId })));
+
+    const result = await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+
+    expect(result.synced).toEqual([]);
+    expect(result.remaining).toEqual([expect.objectContaining({ localId, failureKind: "server" })]);
   });
 
   it("converges an offline timer Start from local projection to one canonical server entry", async () => {

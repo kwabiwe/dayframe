@@ -9,7 +9,7 @@ export type RefusedTimerStartRollback = {
   /** What Today shows of the refused block right now (read when the refusal arrives). */
   describe: (start: RefusedTimerStart) => RefusedTimerStartPresentationInput;
   /** Rolls the block back; never from the Start's own (possibly hours-old) snapshot. */
-  reject: (localId: string, error: Error, alert: boolean) => void;
+  reject: (localId: string, error: Error, alert: boolean, removedEntryId?: string) => void;
   /** Closes the Calendar editor open on the block through its own exit. */
   dismissCalendarEditor: () => void;
   /** Refreshes Today from the server. */
@@ -26,10 +26,17 @@ export function useRefusedTimerStartRollback(rollback: RefusedTimerStartRollback
   latest.current = rollback;
   useEffect(() => subscribeRefusedTimerStarts((start) => {
     const current = latest.current;
-    const decision = refusedTimerStartPresentation(current.describe(start));
+    const presentation = current.describe(start);
+    const decision = refusedTimerStartPresentation({
+      ...presentation,
+      calendarEditorEntryId: start.removedEntryId === presentation.calendarEditorEntryId
+        ? start.localId : presentation.calendarEditorEntryId
+    });
     if (!decision.run) return;
     if (decision.dismissCalendarEditor) current.dismissCalendarEditor();
-    current.reject(start.localId, new Error(start.message), decision.alert);
+    const error = new Error(start.message);
+    if (start.removedEntryId) current.reject(start.localId, error, false, start.removedEntryId);
+    else current.reject(start.localId, error, decision.alert);
     current.refresh();
   }), []);
 }

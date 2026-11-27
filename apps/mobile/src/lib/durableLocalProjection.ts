@@ -148,7 +148,11 @@ export function projectDurableLocalWork(
 }
 
 function projectAcknowledgedChange(bootstrap: MobileBootstrap, effect: TimerCacheEffect): MobileBootstrap {
-  if (effect.kind === "delete") return optimisticDeleteTimeEntry(bootstrap, effect.entryId) ?? bootstrap;
+  if (effect.kind === "delete") {
+    const updated = optimisticDeleteTimeEntry(bootstrap, effect.entryId) ?? bootstrap;
+    if (!effect.optimisticEntryId || effect.optimisticEntryId === effect.entryId) return updated;
+    return optimisticDeleteTimeEntry(updated, effect.optimisticEntryId) ?? updated;
+  }
   if (effect.kind === "stop") {
     const current = mobileTimeEntryById(bootstrap, effect.entryId);
     // A stale delivery may target a block the cache already shows completed at the server's time.

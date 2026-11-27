@@ -9,7 +9,7 @@ export type TimerCacheEffect =
   | { kind: "start"; block: StartedBlock }
   | { kind: "stop"; entryId: string; stoppedAt: string }
   | { kind: "edit"; entryId: string; patch: TimeEntryUpdatePatch; expectedUpdatedAt?: string; updatedAt?: string }
-  | { kind: "delete"; entryId: string };
+  | { kind: "delete"; entryId: string; optimisticEntryId?: string };
 
 export type TimerCacheAcknowledgement = { commandId: string; revision: number; effect: TimerCacheEffect };
 
@@ -69,18 +69,36 @@ export function acknowledgeTimerCacheEffect(owner: MobileAccountOwner, commandId
   return serialise(async () => {
     const current = await read(owner);
     if (current.records.some((record) => record.commandId === commandId)) return;
-    const revision = current.revision + 1;
-    let records = current.records;
-    if (records.length >= MAX_RECORDS) {
-      // Keep recent receipts for reads already in flight. Compact only records a durable cache has covered.
-      const uncached = records.filter((record) => record.revision > current.cachedThrough);
-      if (uncached.length >= MAX_RECORDS) throw new Error("Dayframe needs to refresh before confirming another block change.");
-      records = records.slice(-(MAX_RECORDS - 1));
-    }
-    await AsyncStorage.setItem(storageKey(owner), JSON.stringify({
-      revision, cachedThrough: current.cachedThrough, records: [...records, { commandId, revision, effect }]
-    }));
+    await writeAcknowledgement(owner, current, commandId, effect);
   });
+}
+
+/** Replace an older receipt when replay confirms that its Start no longer owns a block. */
+export function acknowledgeSupersededTimerStart(owner: MobileAccountOwner, localId: string, correlatedId?: string) {
+  return serialise(async () => {
+    const current = await read(owner);
+    const previous = current.records.find((record) => record.commandId === localId)?.effect;
+    if (previous?.kind === "delete" && previous.optimisticEntryId === localId) return previous.entryId;
+    const previousId = previous?.kind === "entry" ? previous.entry.id :
+      previous?.kind === "start" ? previous.block.id : previous?.kind === "delete" ? previous.entryId : undefined;
+    const entryId = previousId ?? correlatedId ?? localId;
+    await writeAcknowledgement(owner, current, localId, { kind: "delete", entryId, optimisticEntryId: localId });
+    return entryId;
+  });
+}
+
+async function writeAcknowledgement(owner: MobileAccountOwner, current: Acknowledgements, commandId: string, effect: TimerCacheEffect) {
+  const revision = current.revision + 1;
+  let records = current.records.filter((record) => record.commandId !== commandId);
+  if (records.length >= MAX_RECORDS) {
+    // Keep recent receipts for reads already in flight. Compact only records a durable cache has covered.
+    const uncached = records.filter((record) => record.revision > current.cachedThrough);
+    if (uncached.length >= MAX_RECORDS) throw new Error("Dayframe needs to refresh before confirming another block change.");
+    records = records.slice(-(MAX_RECORDS - 1));
+  }
+  await AsyncStorage.setItem(storageKey(owner), JSON.stringify({
+    revision, cachedThrough: current.cachedThrough, records: [...records, { commandId, revision, effect }]
+  }));
 }
 
 /** A cache write proves that older receipts can be compacted without losing offline state. */
