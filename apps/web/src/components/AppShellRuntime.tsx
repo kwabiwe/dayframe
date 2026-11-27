@@ -815,6 +815,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!targetId) return { ok: false, error: "The block is still starting." };
     const patch = timerDetailsPatch(draft, base);
     if (!patch) return { ok: true };
+    const draftAtSend = draftRef.current;
     setIsTimerBusy(true);
     setTimerError(null);
     refreshRequestRef.current += 1;
@@ -876,12 +877,26 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       clearPendingTimerDetails(pendingOwner(dataRef.current ?? snapshot).owner, targetId, draft);
       return { ok: true } as const;
     } catch {
-      const message = DETAILS_FAILED_MESSAGE;
+      const current = dataRef.current;
+      const shown = current?.activeEntry;
+      if (!current || shown?.id !== activeEntry.id || writeSeq !== detailsWriteSeqRef.current) {
+        settle(false, DETAILS_FAILED_MESSAGE);
+        return { ok: false, error: DETAILS_FAILED_MESSAGE } as const;
+      }
+
+      // Roll back only this save’s optimistic row. A newer server row or page may have arrived.
+      const restored = shown === optimistic.activeEntry ? activeEntry : shown;
+      const latestDraft = draftRef.current;
+      const newerFields = timerDraftEditedFields(latestDraft, draftAtSend);
+      const kept = pickTimerDraftFields(latestDraft, base, newerFields);
+      const reconciled = reconcileTimerDraftWithBase(false, kept, base, timerDraftForEntry(restored));
+      if (restored !== shown) commitData(applyServerActiveEntry(current, shown.id, restored), "optimistic");
+      setTimerDraftBase(reconciled.base, shown.id);
+      setTimerDraft(reconciled.draft);
+      const message = timerDraftEditedFields(reconciled.draft, reconciled.base).length
+        ? "Block details were not saved. Your newer edits are still here."
+        : DETAILS_FAILED_MESSAGE;
       settle(false, message);
-      if (!stillShown()) return { ok: false, error: message } as const;
-      commitData(snapshot, "optimistic");
-      setTimerDraftBase(timerDraftForEntry(snapshot.activeEntry), activeEntry.id);
-      setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
       setTimerError(message);
       return { ok: false, error: message } as const;
     } finally {

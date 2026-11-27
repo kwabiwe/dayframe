@@ -221,6 +221,7 @@ Required checks:
 - Web start timer.
 - Web stop timer.
 - Press Stop immediately after editing the running block’s details. Drop the detail-save reply after it commits. Check that the browser retries the same command and payload, the edit persists, and Stop closes that block. If both detail-save attempts time out, check that the draft is still available and Stop can be tried again.
+- Hold a running-block autosave, type more text, then fail the pending request. The description keeps the newer text and can save it on the same block. A newer server activity or Calendar period that arrived during the save stays in place.
 - Web clock skew (WEB-UI-7). Run `appShellTimerIntent.dom.test.tsx` and check an ordinary web Start and Stop with the browser clock ahead and behind the server. On reload the saved end reflects server time. Verify that an explicit end edit still keeps its chosen time and that queued iPhone events still replay their original tap timestamps.
 - Mobile start timer.
 - Mobile stop timer.

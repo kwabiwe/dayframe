@@ -878,6 +878,44 @@ describe("Stop and leaving the page never lose a typed description (stability au
   };
   const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
 
+  it("keeps typing made after an autosave left when that save fails", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    await act(async () => { server.release?.(); });
+
+    expect(input.value).toBe("Fix bug more later");
+    await screen.findByText("Block details were not saved. Your newer edits are still here.");
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(server.sent[1]).toMatchObject({
+      description: "Fix bug more later",
+      expectedDetails: { description: "Fix bug" }
+    });
+  });
+
+  it("keeps a newer server activity when a pending description save fails", async () => {
+    const { input, refresh } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    server.entry = { ...server.entry!, categoryId: "write", categoryName: "Writing", updatedAt: "2026-08-17T05:30:00.000Z" };
+    await refresh();
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    await act(async () => { server.release?.(); });
+
+    expect(input.value).toBe("Fix bug");
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    expect(server.entry.categoryId).toBe("write");
+  });
+
   it("Stop clicked while the autosave PATCH is in flight stops the block with every typed word", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
