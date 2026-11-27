@@ -2,11 +2,8 @@
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, {
-  type GeoJSONSource,
-  type Map as MapLibreMap,
-  type StyleSpecification
-} from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
 import { clientFetch } from "@/lib/client-auth-fetch";

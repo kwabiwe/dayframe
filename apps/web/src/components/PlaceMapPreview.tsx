@@ -1,10 +1,7 @@
 "use client";
 
-import maplibregl, {
-  type GeoJSONSource,
-  type Map as MapLibreMap,
-  type Marker
-} from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 import type { WebPlaceCoordinate } from "@/lib/web-place-editor";
 
@@ -91,7 +88,8 @@ function ConfiguredPlaceMap({
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-    map.on("load", () => {
+    // Draw the place as soon as the style accepts layers, even while the base tiles are loading.
+    map.once("style.load", () => {
       const currentCoordinate = coordinateRef.current;
       const currentRadius = radiusRef.current;
       map.addSource(SOURCE_ID, {
@@ -130,9 +128,10 @@ function ConfiguredPlaceMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !coordinate || !map.isStyleLoaded()) return;
+    const marker = markerRef.current;
+    if (!map || !marker) return;
     map.jumpTo({ center: [coordinate.longitude, coordinate.latitude] });
-    markerRef.current?.setLngLat([coordinate.longitude, coordinate.latitude]);
+    marker.setLngLat([coordinate.longitude, coordinate.latitude]);
     const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
     source?.setData(radiusFeature(coordinate, radiusMeters));
   }, [coordinate, radiusMeters]);

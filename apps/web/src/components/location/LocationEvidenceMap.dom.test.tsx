@@ -36,6 +36,7 @@ vi.mock("maplibre-gl", () => {
     addSource = vi.fn((id: string) => { this.sources.set(id, { setData: vi.fn() }); });
     addControl = vi.fn();
     fitBounds = vi.fn();
+    jumpTo = vi.fn();
     getSource = vi.fn((id: string) => this.sources.get(id));
     isStyleLoaded = vi.fn(() => false);
     remove = vi.fn();
@@ -56,6 +57,14 @@ vi.mock("maplibre-gl", () => {
       this.handlers[event] ??= [];
       this.handlers[event].push(handler);
       return this;
+    }
+
+    once(event: string, handler: (event?: unknown) => void) {
+      const runOnce = (payload?: unknown) => {
+        this.handlers[event] = this.handlers[event]!.filter((listener) => listener !== runOnce);
+        handler(payload);
+      };
+      return this.on(event, runOnce);
     }
 
     emit(event: string, payload?: unknown) {
@@ -86,6 +95,31 @@ vi.mock("maplibre-gl", () => {
 });
 
 const { LocationEvidenceMap, resetLocationMapStyleCache } = await import("./LocationEvidenceMap");
+const { PlaceMapPreview } = await import("../PlaceMapPreview");
+
+describe("PlaceMapPreview", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  it("draws and updates the radius while base tiles are still loading", async () => {
+    mocks.maps.length = 0;
+    mocks.autoStyle = false;
+    vi.stubEnv("NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL", "/map-style.json");
+    const coordinate = { latitude: 51.5, longitude: 0.1 };
+    const onChange = vi.fn();
+    const { rerender } = render(<PlaceMapPreview coordinate={coordinate} onChange={onChange} radiusMeters={100} />);
+    const map = mocks.maps[0]!;
+    expect(map.addSource).not.toHaveBeenCalled();
+
+    act(() => map.emit("style.load"));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: "dayframe-place-radius-fill" }));
+    const source = map.sources.get("dayframe-place-radius")!;
+    rerender(<PlaceMapPreview coordinate={coordinate} onChange={onChange} radiusMeters={200} />);
+    expect(source.setData).toHaveBeenCalledOnce();
+  });
+});
 
 describe("LocationEvidenceMap", () => {
   beforeEach(() => {
