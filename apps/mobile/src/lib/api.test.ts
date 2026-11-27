@@ -952,6 +952,29 @@ describe("mobile API client", () => {
     ]);
   });
 
+  it("releases a pending Stop when the server error body stalls after headers", async () => {
+    vi.useFakeTimers();
+    storeBoundSession("session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream(), { status: 503 }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let outcome: Awaited<ReturnType<typeof deliverPendingTimerStop>> | undefined;
+    void deliverPendingTimerStop(pending, TIMER_STOP_OWNER).then((result) => { outcome = result; });
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(outcome).toMatchObject({ status: "retryable_failure" });
+    const [retained] = await readPendingTimerStops();
+    expect(retained?.clientEventId).toBe(pending.clientEventId);
+    expect(await deliverPendingTimerStop(retained, TIMER_STOP_OWNER)).toMatchObject({ status: "delivered" });
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    expect(await readPendingTimerStops()).toEqual([]);
+  });
+
   it("migrates stale queue workspace fields without losing Health payload details", async () => {
     asyncStore.set(
       "dayframe.offlineQueue.v1",

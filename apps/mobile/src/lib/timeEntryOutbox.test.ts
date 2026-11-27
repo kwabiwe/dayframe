@@ -267,6 +267,31 @@ describe("durable time-entry outbox", () => {
     }
   );
 
+  it.each(["edit", "copy"] as const)("releases the outbox when the %s response body stalls after headers", async (action) => {
+    const command = action === "edit" ? await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A, target: { targetEntryId: "entry-a" }, patch: { description: "Preserved edit" }
+    }) : await outbox.enqueueCompletedEntryCopy({
+      owner: OWNER_A, entryId: "entry-a", expectedUpdatedAt: "2026-08-22T11:00:00.000Z", action: { kind: "duplicate" }
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream(), { status: action === "edit" ? 503 : 201 }))
+      .mockResolvedValueOnce(Response.json(action === "edit" ? { ok: true } : { newEntryId: command.copy?.copyId }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { owner: OWNER_A, correlations: new Map<string, string>(), force: true };
+    let outcome: Awaited<ReturnType<typeof outbox.synchroniseTimeEntryCommands>> | undefined;
+    void outbox.synchroniseTimeEntryCommands(input).then((result) => { outcome = result; });
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(outcome).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    outbox.__resetTimeEntryOutboxForTests();
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([
+      expect.objectContaining({ clientCommandId: command.clientCommandId, failureKind: "retryable" })
+    ]);
+    expect((await outbox.synchroniseTimeEntryCommands(input)).deliveredCount).toBe(1);
+    expect(fetchMock.mock.calls[1][1].headers).toEqual(fetchMock.mock.calls[0][1].headers);
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+  });
+
   it("retains an in-flight Edit when finite background execution expires", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,
@@ -302,6 +327,22 @@ describe("durable time-entry outbox", () => {
         targetEntryId: "entry-expiry"
       })
     ]);
+  });
+
+  it("keeps the previous account's command untouched if its reply stalls across an account switch", async () => {
+    const command = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A, target: { targetEntryId: "entry-a" }, patch: { description: "Account A edit" }
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream(), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const sync = outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await account.activateMobileAccount(OWNER_B);
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(await sync).toMatchObject({ reason: "session_changed" });
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([command]);
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_B)).toEqual([]);
   });
 
   it("reserves finite execution only after an immediately deliverable Edit is durable", async () => {

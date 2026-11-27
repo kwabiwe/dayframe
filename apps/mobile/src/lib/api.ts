@@ -42,7 +42,8 @@ import {
   mobileFetch,
   mobileJsonRequest,
   InvalidMobileAcknowledgementError,
-  mobileFetchWithTimeout
+  mobileFetchWithTimeout,
+  mobileResponseWithTimeout
 } from "./mobile-network";
 import {
   bindAuthenticatedSessionOwner,
@@ -2030,8 +2031,10 @@ export async function deliverPendingTimerStop(
 
   const attempt = (pendingStop.failureCount ?? 0) + 1;
   const lane = "timer_stop";
+  const isCurrent = async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) &&
+    mobileAccountOwnersEqual(await readActiveMobileAccount(), owner);
   try {
-    const response = await mobileFetchWithTimeout(
+    const { response, failureMessage } = await mobileResponseWithTimeout(
       `${DAYFRAME_API_BASE}/api/events`,
       {
         method: "POST",
@@ -2061,15 +2064,18 @@ export async function deliverPendingTimerStop(
         }, pendingStop.clientEventId),
         timeoutMilliseconds: MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS,
         timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
-      }
+      },
+      async (response) => ({
+        response,
+        failureMessage: response.ok || response.status === 401 || response.status === 403
+          ? null
+          : await errorMessage(response, "Couldn't sync the Stop")
+      })
     );
     if (response.status === 401 || response.status === 403) {
       throw new AuthRequiredError();
     }
-    if (
-      !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
-      !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
-    ) {
+    if (!await isCurrent()) {
       return { status: "session_changed", pendingStop };
     }
     if (response.ok) {
@@ -2080,7 +2086,7 @@ export async function deliverPendingTimerStop(
       return { status: "delivered", pendingStop };
     }
 
-    const message = await errorMessage(response, "Couldn't sync the Stop");
+    const message = failureMessage ?? "Couldn't sync the Stop";
     const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "retryable";
     const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
       message,
@@ -2097,6 +2103,7 @@ export async function deliverPendingTimerStop(
       : { status: "retryable_failure", pendingStop: failedStop, error };
   } catch (error) {
     if (error instanceof AuthRequiredError) throw error;
+    if (!await isCurrent()) return { status: "session_changed", pendingStop };
     const failure = error instanceof Error ? error : new Error("Network request failed");
     const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
       message: failure.message,

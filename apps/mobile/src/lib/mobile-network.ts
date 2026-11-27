@@ -123,7 +123,17 @@ export async function mobileFetchWithTimeout(
   init: Parameters<typeof fetch>[1] = {},
   deadline: MobileRequestDeadline & MobileRequestDispatch
 ) {
-  return mobileRequestOperation(input, init, deadline, response => Promise.resolve(response));
+  return mobileResponseWithTimeout(input, init, deadline, response => Promise.resolve(response));
+}
+
+/** Bound any body reads needed to settle a command, including server error text. */
+export function mobileResponseWithTimeout<T>(
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit,
+  deadline: MobileRequestDeadline & MobileRequestDispatch,
+  consume: (response: Response) => Promise<T>
+) {
+  return mobileRequestOperation(input, init, deadline, consume);
 }
 
 export class InvalidMobileAcknowledgementError extends Error {

@@ -10,7 +10,7 @@ import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
   isMobileTransportFailure,
-  mobileFetchWithTimeout
+  mobileResponseWithTimeout
 } from "./mobile-network";
 import {
   isAuthenticatedSessionSnapshotCurrent,
@@ -904,6 +904,8 @@ async function runTimeEntryCommandDrain(input: {
     } else {
       markDispatched(original.clientCommandId);
     }
+    const isCurrent = async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) &&
+      mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner);
     try {
       const copy = original.copy;
       const split = original.split;
@@ -920,7 +922,7 @@ async function runTimeEntryCommandDrain(input: {
           ...original.patch,
           ...(original.expectedUpdatedAt ? { expectedUpdatedAt: original.expectedUpdatedAt } : {})
         } : undefined;
-      const response = await mobileFetchWithTimeout(
+      const { response, receipt, failureMessage } = await mobileResponseWithTimeout(
         DAYFRAME_API_BASE + path,
         {
           method: copy || split ? "POST" : original.operation === "delete" ? "DELETE" : "PATCH",
@@ -939,6 +941,15 @@ async function runTimeEntryCommandDrain(input: {
         {
           timeoutMilliseconds: MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS,
           timeoutMessage: "This change is saved on your iPhone and will retry automatically."
+        },
+        async (response) => {
+          if (response.ok) {
+            const receipt = copy || split ? await response.json().catch(() => null) : null;
+            return { response, receipt, failureMessage: null };
+          }
+          const needsMessage = response.status !== 401 && response.status !== 403 &&
+            !(original.operation === "delete" && response.status === 404);
+          return { response, receipt: null, failureMessage: needsMessage ? await safeResponseMessage(response) : null };
         }
       );
       if (response.status === 401 || response.status === 403) {
@@ -949,16 +960,12 @@ async function runTimeEntryCommandDrain(input: {
           "authentication_required"
         );
       }
-      if (
-        !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
-        !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)
-      ) {
+      if (!await isCurrent()) {
         return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
       }
       if (response.ok && copy) {
-        const result = await response.json().catch(() => null);
-        const exists = result?.newEntryId === copy.copyId;
-        const removedSince = result?.replayed === true && result?.newEntryId === null;
+        const exists = receipt?.newEntryId === copy.copyId;
+        const removedSince = receipt?.replayed === true && receipt?.newEntryId === null;
         if (exists || removedSince) {
           try {
             const acknowledged = await acknowledgeCompletedCopy(original.clientCommandId, removedSince);
@@ -976,7 +983,6 @@ async function runTimeEntryCommandDrain(input: {
       }
       if (response.ok && split) {
         try {
-          const receipt = await response.json();
           if (typeof receipt?.newEntryId === "string" &&
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receipt.newEntryId) &&
             receipt.newEntryId !== targetEntryId) {
@@ -1019,7 +1025,7 @@ async function runTimeEntryCommandDrain(input: {
         continue;
       }
 
-      const message = await safeResponseMessage(response);
+      const message = failureMessage ?? `Time entry request failed: ${response.status}`;
       const unsupportedSplit = split && response.status === 400 &&
         message.startsWith("mode must be one of ") && !message.includes("split-running");
       const permanent = !unsupportedSplit && (PERMANENT_STATUS_CODES.has(response.status) || response.status === 404);
@@ -1033,6 +1039,7 @@ async function runTimeEntryCommandDrain(input: {
         return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
       }
     } catch (error) {
+      if (!await isCurrent()) return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
       const retryable = Boolean(original.split) || input.signal?.aborted ||
         error instanceof MobileRequestTimeoutError ||
         isMobileTransportFailure(error);
