@@ -89,6 +89,11 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
     Task { @MainActor in self.sendSnapshot() }
   }
 
+  // The iPhone can already have a timer snapshot when the Watch app finishes installing.
+  nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+    Task { @MainActor in self.sendSnapshot() }
+  }
+
   nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
 
   nonisolated func sessionDidDeactivate(_ session: WCSession) {
