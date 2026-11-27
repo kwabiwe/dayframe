@@ -96,7 +96,15 @@ export async function dispatchOverdueTimerReminder<T>(
       [owner.workspaceId, owner.userId, entryId]
     );
     if (pending.rowCount !== 1) return null;
-    if (validateRecipient && !await validateRecipient(client)) return null;
+    if (validateRecipient && !await validateRecipient(client)) {
+      // No request was started. Let a later sweep pick the current device instead.
+      await client.query(
+        `delete from dayframe_sync.forgotten_timer_reminders
+         where entry_id = $1 and kept_at is null`,
+        [entryId]
+      );
+      return null;
+    }
     const delivery = initiate();
     // The provider can fail before the database transaction releases the owner lock.
     void delivery.catch(() => {});

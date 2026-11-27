@@ -66,6 +66,24 @@ describe.runIf(process.env.DAYFRAME_RUN_FORGOTTEN_TIMER_DB_TEST === "1" && Boole
       expect(send).toHaveBeenCalledTimes(1);
     });
 
+    it("releases an unsent claim when the selected device changes", async () => {
+      const id = await runningTimer(480);
+      const send = vi.fn(async () => "sent");
+      await expect(dispatchOverdueTimerReminder(owner, id, send, async () => false)).resolves.toBeNull();
+      expect(send).not.toHaveBeenCalled();
+      await expect(dispatchOverdueTimerReminder(owner, id, send, async () => true)).resolves.toBe("sent");
+      await expect(dispatchOverdueTimerReminder(owner, id, send, async () => true)).resolves.toBeNull();
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the claim when transport fails after starting", async () => {
+      const id = await runningTimer(480);
+      const send = vi.fn(async () => { throw new Error("transport outcome unknown"); });
+      await expect(dispatchOverdueTimerReminder(owner, id, send)).rejects.toThrow("transport outcome unknown");
+      await expect(dispatchOverdueTimerReminder(owner, id, send)).resolves.toBeNull();
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
     it("suppresses a stopped block, its old reminder after Switch, and a durable Keep running", async () => {
       const old = await runningTimer(540);
       await pool.query("update time_entries set stopped_at = statement_timestamp() where id = $1", [old]);
