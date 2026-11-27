@@ -31,6 +31,9 @@ const server = {
   rejectStart: false,
   /** The next PATCH or Start waits (the request is recorded) until `release()`. */
   holdNext: null as "patch" | "start" | "bootstrap" | null,
+  loseStartReply: false,
+  startReceipts: new Map<string, string>(),
+  startRequestIds: [] as string[],
   /** Tags the workspace knows besides the running block's. */
   tags: [] as string[],
   release: null as (() => void) | null,
@@ -122,8 +125,14 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (method === "POST" && url === "/api/time-entries") {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       server.posts.push(body);
+      const command = new Headers(init?.headers).get("X-Dayframe-Client-Command-Id");
+      if (command) {
+        server.startRequestIds.push(command);
+        const receipt = server.startReceipts.get(command);
+        if (receipt) return reply(true, { timeEntryId: receipt, duplicate: true });
+      }
       await maybeHold("start");
-      if (server.rejectStart) return reply(false, { error: "Start rejected" });
+      if (server.rejectStart) return { ...reply(false, { error: "Start rejected" }), status: 422 };
       if (server.entry) server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
       server.entry = {
         ...(server.entry ?? entry()),
@@ -134,6 +143,11 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      if (command) server.startReceipts.set(command, server.entry.id);
+      if (server.loseStartReply) {
+        server.loseStartReply = false;
+        return { ...reply(true, {}), json: async () => { throw new TypeError("Lost the response body"); } };
+      }
       // As `POST /api/time-entries` does: the processed event, with the started block's id.
       return reply(true, { timeEntryId: server.entry.id });
     }
@@ -177,6 +191,9 @@ beforeEach(() => {
   server.tags = [];
   server.rejectPatches = false;
   server.dead = false;
+  server.loseStartReply = false;
+  server.startReceipts.clear();
+  server.startRequestIds = [];
   server.dropHeld = false;
   server.landsAfterClose = false;
   initialPageData = null;
@@ -498,6 +515,25 @@ describe("Codex r7: acknowledgements and handoffs keep newer edits", () => {
     expect(server.patches[0]).toMatchObject({ categoryId: "write", description: "Plan" });
     expect(activityLabel()).toBe("Activity: Writing");
     expect(server.posts).toHaveLength(1);
+  });
+
+  it("retries a lost Start reply with the same command and leaves one block running", async () => {
+    const { input } = await renderShell(null);
+    const user = userEvent.setup();
+    server.loseStartReply = true;
+    await user.click(input);
+    await user.keyboard("Plan{Enter}");
+
+    await waitFor(() => expect(server.posts).toHaveLength(2));
+    expect(server.posts[0]).toMatchObject({
+      description: "Plan",
+      startCommand: { userId: "user", workspaceId: "workspace", activeEntryId: null }
+    });
+    expect(server.posts[1]).toEqual(server.posts[0]);
+    expect(server.startRequestIds).toHaveLength(2);
+    expect(server.startRequestIds[1]).toBe(server.startRequestIds[0]);
+    expect(server.entry).toMatchObject({ id: "started-1", description: "Plan" });
+    expect(server.completed).toBeNull();
   });
 
   it("an activity block change while a Start is pending is kept and saved to the real block", async () => {

@@ -27,15 +27,21 @@ import { ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
 import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
+const WebStartScopeSchema = z.object({
+  userId: z.uuid(),
+  workspaceId: z.uuid(),
+  activeEntryId: z.uuid().nullable()
+});
+
 export async function POST(request: Request) {
   let session: Awaited<ReturnType<typeof resolveRequestSession>> | null = null;
   let entryId: string | null = null;
   try {
     session = await resolveRequestSession(request);
     const body = await parseJsonBody(request);
-    const modeResult = z.enum(["start", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
+    const modeResult = z.enum(["start", "start-command", "stop", "manual", "split", "split-running", "duplicate", "join", "copy-completed"]).safeParse(body.mode);
     if (!modeResult.success) {
-      throw new BadRequestError("mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed.");
+      throw new BadRequestError("mode must be one of start, start-command, stop, manual, split, split-running, duplicate, join, or copy-completed.");
     }
     const durableCopy = modeResult.data === "copy-completed";
     const mode = durableCopy ? z.enum(["split", "duplicate"]).parse(body.action) : modeResult.data;
@@ -144,6 +150,20 @@ export async function POST(request: Request) {
     if (expectedRunningEntryId && (eventSource !== "manual_app" || startedAt)) {
       throw new BadRequestError("Switch activity must use the current time on the web.");
     }
+    // Older deployments reject the new mode instead of processing it as an unfenced Start.
+    const repeatableStart = mode === "start-command";
+    const startCommandId = repeatableStart ? requestClientCommandId(request) : undefined;
+    const startScope = repeatableStart ? WebStartScopeSchema.parse(body.startCommand) : undefined;
+    if (repeatableStart) {
+      if (!startScope || !startCommandId || eventSource !== "manual_app" ||
+          (expectedRunningEntryId && startScope.activeEntryId !== expectedRunningEntryId)) {
+        throw new BadRequestError("A web Start command requires its original account, workspace and running block.");
+      }
+      if (startScope.userId !== session.userId || startScope.workspaceId !== session.workspaceId) {
+        return NextResponse.json({ error: "The account or workspace changed. Start again in the current workspace." }, { status: 409 });
+      }
+    }
+    const startPrecondition = startScope ? startScope.activeEntryId : expectedRunningEntryId;
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
     const rawPayload = {
       ...(startedAt ? { origin, startedAt } : { origin }),
@@ -155,6 +175,7 @@ export async function POST(request: Request) {
         source: eventSource,
         type: "timer_start",
         occurredAt,
+        ...(startCommandId ? { clientEventId: `web-timer-start:${startCommandId}` } : {}),
         projectId: optionalString(body.projectId),
         categoryId: optionalString(body.categoryId),
         placeId: optionalString(body.placeId),
@@ -162,7 +183,7 @@ export async function POST(request: Request) {
         rawPayload
       },
       session,
-      ...(expectedRunningEntryId ? [{ expectedRunningEntryId }] : [])
+      ...(startPrecondition !== undefined ? [{ expectedRunningEntryId: startPrecondition }] : [])
     );
     scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: 201 });

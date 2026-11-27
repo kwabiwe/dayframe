@@ -4,13 +4,14 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { useSearchParams } from "next/navigation";
 import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
+  TIME_ENTRY_CLIENT_COMMAND_ID_HEADER,
   completedEntriesChanged,
   timerStateChanged,
   type DayframePaletteKey,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { joinSplitTimeEntries, splitRunningTimeEntry } from "@/lib/time-entry-split";
+import { joinSplitTimeEntries, newBlockCommandId, splitRunningTimeEntry } from "@/lib/time-entry-split";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import { webTimerStatePollDelay } from "@/lib/timer-state-poll";
 import {
@@ -164,6 +165,7 @@ export const DATE_DATA_CACHE_LIMIT = 8;
 /** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
 export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 const TIMER_POLL_READ_LIMIT_MS = 15_000;
+const TIMER_START_ATTEMPT_LIMIT_MS = 10_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -901,12 +903,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
+    const generation = workspaceGenerationRef.current;
+    const sameOwner = () => generation === workspaceGenerationRef.current &&
+      dataRef.current?.workspace.id === snapshot.workspace.id && dataRef.current?.user.id === snapshot.user.id;
+    const changedOwner = "The account or workspace changed. Start again in the current workspace.";
+    let deliveryUnconfirmed = false;
     const outgoing = snapshot.activeEntry;
     if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) {
       outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing) });
     }
     const outcome = await runTimerStartMutation({
       beforeStart: async () => {
+        if (!sameOwner()) return;
         // The block this Start replaces gets its pending edits first, at its real id.
         const current = dataRef.current;
         const entry = current?.activeEntry;
@@ -920,7 +928,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
       },
       dedupeRunning: options.dedupeRunning,
-      guard: options.guard,
+      guard: (current) => sameOwner() ? options.guard?.(current) ?? null : changedOwner,
       // Shown ended by an End it held or saving: never "already running" (Codex r2 on #618).
       isShownRunning: (entry) => !projectedEndsRef.current.has(entry.id),
       startAt: options.startedAt,
@@ -936,28 +944,57 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         refreshRequestRef.current += 1;
       },
       onRollback: (draft, entryId) => {
-        rollbackDraftRef.current = { draft, entryId };
+        if (sameOwner()) rollbackDraftRef.current = { draft, entryId };
       },
-      commit: (nextData) => commitData(nextData, "optimistic"),
-      setDraft: setTimerDraft,
+      commit: (nextData) => { if (sameOwner()) commitData(nextData, "optimistic"); },
+      setDraft: (draft) => { if (sameOwner()) setTimerDraft(draft); },
       setBusy: setIsTimerBusy,
-      setError: setTimerError,
-      send: async (payload) => {
-        const expectedRunningEntryId = options.expectedRunningEntryId
-          ? serverEntryId(options.expectedRunningEntryId)
-          : undefined;
-        if (options.expectedRunningEntryId && !expectedRunningEntryId) {
-          throw new Error("The block is still syncing. Try Switch activity again.");
+      setError: (error) => { if (sameOwner()) setTimerError(error); },
+      send: async (payload, original) => {
+        const outgoingId = options.expectedRunningEntryId ?? original.activeEntry?.id;
+        const activeEntryId = outgoingId ? serverEntryId(outgoingId) : null;
+        if (outgoingId && !activeEntryId) {
+          throw new Error("The block is still syncing. Try again in a moment.");
         }
-        const response = await clientFetch("/api/time-entries", {
+        const request: RequestInit = {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(expectedRunningEntryId ? { ...payload, expectedRunningEntryId } : payload)
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
+          headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: newBlockCommandId("start") },
+          body: JSON.stringify({
+            ...payload,
+            mode: "start-command",
+            ...(options.expectedRunningEntryId ? { expectedRunningEntryId: activeEntryId } : {}),
+            startCommand: { userId: original.user.id, workspaceId: original.workspace.id, activeEntryId }
+          })
+        };
+        const sendAttempt = async () => {
+          const controller = new AbortController();
+          const deadline = window.setTimeout(() => controller.abort(), TIMER_START_ATTEMPT_LIMIT_MS);
+          try {
+            const response = await clientFetch("/api/time-entries", { ...request, signal: controller.signal });
+            if (response.status >= 500) return null;
+            if (!response.ok) {
+              return { error: await responseError(response, `Unable to start the block: ${response.status}`) };
+            }
+            const result = await response.json() as { timeEntryId?: unknown } | null;
+            return { serverId: typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined };
+          } catch {
+            return null;
+          } finally {
+            window.clearTimeout(deadline);
+          }
+        };
+        // A lost reply can follow a committed Start. Retry the original command once so the server
+        // can return its receipt. A definite refusal remains a refusal.
+        const first = await sendAttempt();
+        const receipt = first ?? (sameOwner() ? await sendAttempt() : null);
+        if (!sameOwner()) throw new Error(changedOwner);
+        if (!receipt) {
+          deliveryUnconfirmed = true;
+          throw new Error("Dayframe couldn’t confirm the new block. Check what’s recording before trying again.");
+        }
+        if (receipt.error) throw new Error(receipt.error);
+        const { serverId } = receipt;
         // Accepted: record which real block the optimistic one on screen is, from the POST itself.
-        const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
-        const serverId = typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined;
         const snapshot = dataRef.current;
         const optimisticId = snapshot?.activeEntry?.id ?? null;
         if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || !serverId) return serverId;
@@ -974,9 +1011,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         return serverId;
       },
       refresh: async () => {
-        await refresh({ force: true });
+        if (sameOwner()) await refresh({ force: true });
       }
     });
+    if (deliveryUnconfirmed && sameOwner() && !mutationGateRef.current.isActive()) void refresh({ force: true });
     return outcome;
   }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId, setTimerDraft]);
   const startTimer = useCallback(

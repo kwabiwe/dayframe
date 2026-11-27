@@ -523,7 +523,7 @@ function healthSchemaReadinessError(
 export async function processActivityEvent(
   rawInput: unknown,
   session: RequestSession = getDevSession(),
-  options: SyncTransactionOptions & { expectedRunningEntryId?: string } = {}
+  options: SyncTransactionOptions & { expectedRunningEntryId?: string | null } = {}
 ) {
   if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
     return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId);
@@ -549,7 +549,7 @@ async function processActivityEventWithClient(
   rawInput: unknown,
   session: RequestSession,
   boundedClient?: pg.PoolClient,
-  expectedRunningEntryId?: string
+  expectedRunningEntryId?: string | null
 ): Promise<{
   eventId: string;
   candidate: CandidateActivity;
@@ -1500,7 +1500,7 @@ async function closeActiveTimersForReplacement(
   client: pg.PoolClient,
   session: RequestSession,
   stoppedAt: string | Date,
-  expectedRunningEntryId?: string
+  expectedRunningEntryId?: string | null
 ) {
   const activeResult = await client.query<{ id: string; startedAt: string | Date }>(
     `select id, started_at as "startedAt"
@@ -1514,7 +1514,9 @@ async function closeActiveTimersForReplacement(
   const activeEntry = activeResult.rows[0];
   // Recheck under the same row lock that ends the outgoing block. A Stop scoped to
   // this row can run without the broader timer lock, so an earlier read is insufficient.
-  if (expectedRunningEntryId && activeEntry?.id !== expectedRunningEntryId) throw new TimerSwitchConflictError();
+  if (expectedRunningEntryId !== undefined && (activeEntry?.id ?? null) !== expectedRunningEntryId) {
+    throw new TimerSwitchConflictError();
+  }
   if (!activeEntry) return [];
 
   const activeStartedMs = new Date(activeEntry.startedAt).getTime();

@@ -450,6 +450,7 @@ function bootstrap(activeEntry: TimeEntryRow | null, selectedDate = "2026-08-17"
       weekStart: "2026-08-17T00:00:00.000Z",
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace" }
   } as unknown as BootstrapData;
 }

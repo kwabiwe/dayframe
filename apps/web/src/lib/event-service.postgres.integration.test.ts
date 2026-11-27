@@ -189,12 +189,13 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
     expect(await getCompletedEntryRevision(owner)).toBe("0");
   });
 
-  it("refuses a switch after another device replaces its outgoing block", async () => {
+  it("fences stale web Starts and returns one receipt for a retried replacement", async () => {
     const userId = randomUUID();
     const workspaceId = randomUUID();
     const session = { authMode: "provider" as const, scopes: ["app:write", "events:write"], userId, workspaceId };
-    const start = (minutesAgo: number, description: string, expectedRunningEntryId?: string) =>
+    const start = (minutesAgo: number, description: string, expectedRunningEntryId?: string | null, clientEventId?: string) =>
       processActivityEvent({
+        clientEventId,
         source: "manual_app",
         type: "timer_start",
         occurredAt: new Date(Date.now() - minutesAgo * 60_000),
@@ -214,6 +215,10 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
         code: "timer_switch_conflict",
         status: 409
       });
+      await expect(start(2, "Delayed Start from idle", null, `web-timer-start:${randomUUID()}`)).rejects.toMatchObject({
+        code: "timer_switch_conflict",
+        status: 409
+      });
 
       const stored = await pool.query(
         `select description, stopped_at is null as running from time_entries
@@ -230,7 +235,19 @@ describe.runIf(runDatabaseIntegration)("timer mutations in Postgres", () => {
       );
       expect(events.rows[0]?.count).toBe(2);
       expect(replacement.timeEntryId).toBeDefined();
-      expect((await start(1, "Intentional switch", replacement.timeEntryId)).timeEntryId).toBeDefined();
+      const command = `web-timer-start:${randomUUID()}`;
+      const [first, retry] = await Promise.all([
+        start(1, "Intentional switch", replacement.timeEntryId, command),
+        start(1, "Intentional switch", replacement.timeEntryId, command)
+      ]);
+      expect(first.timeEntryId).toBeDefined();
+      expect(retry).toMatchObject({ eventId: first.eventId, timeEntryId: first.timeEntryId });
+      expect([first, retry].filter((result) => result.duplicate)).toHaveLength(1);
+      const newer = await start(0, "Newer timer", first.timeEntryId);
+      await expect(start(1, "Intentional switch", replacement.timeEntryId, command)).resolves.toMatchObject({
+        eventId: first.eventId, timeEntryId: first.timeEntryId, duplicate: true
+      });
+      expect(await getTimerState(session)).toMatchObject({ activeEntryId: newer.timeEntryId });
     } finally {
       await pool.query("delete from workspaces where id = $1", [workspaceId]);
       await pool.query("delete from users where id = $1", [userId]);

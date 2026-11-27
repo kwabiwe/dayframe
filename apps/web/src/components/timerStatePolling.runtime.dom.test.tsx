@@ -27,6 +27,7 @@ const server = vi.hoisted(() => ({
   maxInFlight: 0,
   /** Start POSTs wait to be released, one at a time. */
   holdPosts: false,
+  stallStartAttempts: 0,
   heldPosts: [] as Array<() => void>,
   /** The next bootstrap waits to be released (it reads the server when released). */
   holdNextBootstrap: false,
@@ -86,6 +87,12 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       }, "bootstrap body");
     }
     if (method === "POST" && url === "/api/time-entries") {
+      if (server.stallStartAttempts > 0) {
+        server.stallStartAttempts -= 1;
+        await new Promise<never>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
       if (server.holdPosts) await new Promise<void>((resolve) => server.heldPosts.push(resolve));
       server.started += 1;
       const at = new Date().toISOString();
@@ -130,6 +137,7 @@ beforeEach(() => {
   server.inFlight = 0;
   server.maxInFlight = 0;
   server.holdPosts = false;
+  server.stallStartAttempts = 0;
   server.heldPosts = [];
   server.holdNextBootstrap = false;
   server.releaseBootstrap = null;
@@ -277,6 +285,41 @@ describe("web timer-state polling cadence", () => {
     });
     await advance(10);
     expect(polls().length - beforeStop).toBe(1);
+  });
+
+  it.each([1, 2])("settles a Start after %s stalled delivery attempt(s)", async (attempts) => {
+    await mount();
+    server.stallStartAttempts = attempts;
+    const before = bootstraps().length;
+    let pending!: ReturnType<NonNullable<typeof probe.runtime>["startTimer"]>;
+    await act(async () => { pending = probe.runtime!.startTimer({ description: "Writing" }); });
+    await advance(attempts * 10_000 + 10);
+
+    if (attempts === 1) {
+      await expect(pending).resolves.toMatchObject({ ok: true, startedServerId: "started-1" });
+      expect(shownId()).toBe("started-1");
+    } else {
+      await expect(pending).resolves.toMatchObject({ ok: false, error: expect.stringContaining("couldn’t confirm") });
+      expect(shownId()).toBeNull();
+    }
+    expect(server.requests.filter(({ request }) => request === "POST /api/time-entries")).toHaveLength(2);
+    expect(bootstraps().length).toBeGreaterThan(before);
+  });
+
+  it("abandons a stalled Start when its original workspace is gone", async () => {
+    await mount();
+    server.stallStartAttempts = 1;
+    let pending!: ReturnType<NonNullable<typeof probe.runtime>["startTimer"]>;
+    await act(async () => { pending = probe.runtime!.startTimer({ description: "Old workspace" }); });
+    server.workspace = "workspace-2";
+    phoneStart();
+    await act(async () => { await probe.runtime!.refresh({ force: true }); });
+    await advance(10_000);
+
+    await expect(pending).resolves.toMatchObject({ ok: false, error: expect.stringContaining("workspace changed") });
+    expect(server.requests.filter(({ request }) => request === "POST /api/time-entries")).toHaveLength(1);
+    expect(probe.runtime!.shellData?.workspace.id).toBe("workspace-2");
+    expect(shownId()).toBe("phone-1");
   });
 
   it("queued actions confirm once, after the last one's own reload, and no poll supersedes that reload (Codex r1 on #637)", async () => {

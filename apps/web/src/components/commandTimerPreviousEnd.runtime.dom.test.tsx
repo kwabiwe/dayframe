@@ -186,6 +186,7 @@ function bootstrap(): BootstrapData {
       weekStart: "2026-10-12T00:00:00.000Z",
       weekEnd: "2026-10-19T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace" }
   } as unknown as BootstrapData;
 }

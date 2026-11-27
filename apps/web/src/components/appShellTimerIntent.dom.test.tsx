@@ -156,7 +156,12 @@ describe("AppShellRuntime latest block intent", () => {
     }));
     const starts = requests.filter((request) => request.url === "/api/time-entries");
     expect(starts).toHaveLength(1);
-    expect(starts[0].body).toEqual({ mode: "start", categoryId: "focus", tagNames: [] });
+    expect(starts[0].body).toEqual({
+      mode: "start-command",
+      categoryId: "focus",
+      tagNames: [],
+      startCommand: { userId: "user", workspaceId: "workspace", activeEntryId: null }
+    });
     expect(requests.findIndex((request) => request.url === "/api/events"))
       .toBeLessThan(requests.findIndex((request) => request.url === "/api/time-entries"));
   });
@@ -174,7 +179,7 @@ describe("AppShellRuntime rejected Start", () => {
       mocks.clientFetch.mockImplementation(async (url: string) => {
         if (url === "/api/time-entries") {
           await new Promise<void>((resolve) => { rejectStart = resolve; });
-          return response({ error: "Server unavailable" }, 503);
+          return response({ error: "The Start was refused" }, 422);
         }
         if (url.startsWith("/api/bootstrap")) return response(idle);
         if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
@@ -244,6 +249,7 @@ function bootstrap(activeEntry: TimeEntryRow | null, entries = activeEntry ? [ac
       weekStart: "2026-08-17T00:00:00.000Z",
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace", name: "Dayframe" }
   } as unknown as BootstrapData;
 }

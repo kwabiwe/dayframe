@@ -114,6 +114,35 @@ describe("POST /api/time-entries", () => {
     expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
   });
 
+  it("reuses the web Start receipt and carries the original active-block precondition", async () => {
+    mocks.processActivityEvent.mockResolvedValueOnce({ eventId: "event-1", timeEntryId: "block-1", duplicate: true });
+    const response = await POST(jsonRequest({
+      mode: "start-command",
+      startCommand: { userId: session.userId, workspaceId: session.workspaceId, activeEntryId: null }
+    }, { "X-Dayframe-Client-Command-Id": "web-start-123" }));
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).timeEntryId).toBe("block-1");
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "timer_start", clientEventId: "web-timer-start:web-start-123" }),
+      session,
+      { expectedRunningEntryId: null }
+    );
+  });
+
+  it.each(["userId", "workspaceId"] as const)("rejects a Start replay for another %s", async (field) => {
+    const response = await POST(jsonRequest({
+      mode: "start-command",
+      startCommand: {
+        userId: session.userId, workspaceId: session.workspaceId, activeEntryId: null,
+        [field]: "88888888-8888-4888-8888-888888888888"
+      }
+    }, { "X-Dayframe-Client-Command-Id": "web-start-123" }));
+
+    expect(response.status).toBe(409);
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+  });
+
   it("splits or duplicates a finished block by id, fenced and with its command id, and keeps a bare split for the timer (card G)", async () => {
     const entryId = "11111111-1111-4111-8111-111111111111";
     mocks.splitFinishedEntry.mockResolvedValue({ id: entryId, newEntryId: "new-1", replayed: false });
@@ -234,7 +263,7 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "mode must be one of start, stop, manual, split, split-running, duplicate, join, or copy-completed."
+      error: "mode must be one of start, start-command, stop, manual, split, split-running, duplicate, join, or copy-completed."
     });
     expect(mocks.processActivityEvent).not.toHaveBeenCalled();
     expect(mocks.createManualEntry).not.toHaveBeenCalled();
@@ -461,10 +490,10 @@ describe("POST /api/time-entries", () => {
   });
 });
 
-function jsonRequest(body: unknown) {
+function jsonRequest(body: unknown, headers: Record<string, string> = {}) {
   return new Request("https://dayframe.test/api/time-entries", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body)
   });
 }

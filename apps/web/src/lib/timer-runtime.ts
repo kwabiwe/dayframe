@@ -391,7 +391,7 @@ export async function runTimerStartMutation({
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
   /** Sends the Start; may resolve with the server's id for the new block. */
-  send: (payload: TimerStartRequestPayload) => Promise<string | void>;
+  send: (payload: TimerStartRequestPayload, snapshot: BootstrapData) => Promise<string | void>;
   refresh: () => Promise<void>;
   /**
    * Runs first inside the gate: saves the outgoing block's pending edits before it is replaced. A
@@ -439,7 +439,7 @@ export async function runTimerStartMutation({
     setDraft(draft);
 
     try {
-      const startedServerId = (await send(timerStartRequestPayload(draft, startAt))) || undefined;
+      const startedServerId = (await send(timerStartRequestPayload(draft, startAt), acceptedSnapshot)) || undefined;
       return {
         ok: true,
         own: true,
