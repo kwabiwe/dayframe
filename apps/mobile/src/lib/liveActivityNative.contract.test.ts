@@ -220,6 +220,29 @@ describe("native Live Activity presentation contract", () => {
     expect(directClient).toContain("URLSessionConfiguration.ephemeral");
   });
 
+  it("reuses one stateless session for ordinary Shortcuts and NFC events", () => {
+    const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
+    const start = directClient.indexOf("private static let shortcutEventSession");
+    const transport = directClient.slice(start, directClient.indexOf("static func submit(", start));
+    expect(transport).toContain("URLSessionConfiguration.ephemeral");
+    expect(transport).toContain("configuration.httpShouldSetCookies = false");
+    expect(transport).toContain("configuration.httpCookieStorage = nil");
+    expect(transport).toContain("configuration.urlCredentialStorage = nil");
+    expect(transport).toContain("configuration.urlCache = nil");
+    expect(transport).toContain("timeoutIntervalForRequest = 8");
+    expect(transport).toContain("timeoutIntervalForResource = 10");
+
+    const delivery = directClient.slice(directClient.indexOf("private static func deliver("), directClient.indexOf("static func submitLiveActivityStop("));
+    expect(delivery).not.toContain("URLSession(configuration:");
+    const schedule = delivery.indexOf("await shortcutEventSession.data(for: request)");
+    expect(schedule).toBeGreaterThan(-1);
+    const beforeSend = delivery.slice(0, schedule);
+    expect(beforeSend).toContain("DayframeShortcutRuntimeContextStore.current()");
+    expect(beforeSend).toContain("context.userId == userId");
+    expect(beforeSend).toContain("context.workspaceId == workspaceId");
+    expect(beforeSend).toContain('request.setValue("Bearer \\(context.sessionToken)", forHTTPHeaderField: "Authorization")');
+  });
+
   it("compiles Stop and its storage into the extension with matching shared capabilities", () => {
     const project = readFileSync(`${mobileRoot}ios/Dayframe.xcodeproj/project.pbxproj`, "utf8");
     const sharedStorage = readFileSync(

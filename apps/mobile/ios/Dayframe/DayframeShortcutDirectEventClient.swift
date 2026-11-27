@@ -55,6 +55,19 @@ enum DayframeShortcutDirectEventClient {
     "https://dayframe-web.vercel.app"
   ])
 
+  /// Ordinary Shortcuts can run repeatedly in the same process. Reuse their connection,
+  /// while keeping each request's bearer, event and ownership check local to that request.
+  private static let shortcutEventSession: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 8
+    configuration.timeoutIntervalForResource = 10
+    configuration.httpShouldSetCookies = false
+    configuration.httpCookieStorage = nil
+    configuration.urlCredentialStorage = nil
+    configuration.urlCache = nil
+    return URLSession(configuration: configuration)
+  }()
+
   /// Delivers a queued Shortcut event with the app's mirrored session, only when that session belongs to
   /// the event's account; otherwise the event waits in the queue for the app to deliver it.
   static func submit(_ event: DayframeShortcutEvent) async -> Bool {
@@ -167,13 +180,8 @@ enum DayframeShortcutDirectEventClient {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(context.sessionToken)", forHTTPHeaderField: "Authorization")
 
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.timeoutIntervalForRequest = 8
-    configuration.timeoutIntervalForResource = 10
-    let session = URLSession(configuration: configuration)
-
     do {
-      let (data, response) = try await session.data(for: request)
+      let (data, response) = try await shortcutEventSession.data(for: request)
       guard let httpResponse = response as? HTTPURLResponse else {
         DayframeShortcutDeliveryDiagnosticStore.record(.responseInvalid)
         return nil
