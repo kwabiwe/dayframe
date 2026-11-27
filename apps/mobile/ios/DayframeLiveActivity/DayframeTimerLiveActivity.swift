@@ -166,6 +166,9 @@ private struct DayframeLockScreenTimerView: View {
     }
     .padding(.vertical, 14)
     .padding(.horizontal, 18)
+    // The paired Mac shows this same presentation. Keep the opaque fill with the
+    // content so its ink remains paired with the intended background on host materials.
+    .background { ContainerRelativeShape().fill(colors.fill) }
     .activityBackgroundTint(colors.fill)
     .activitySystemActionForegroundColor(colors.text)
   }
