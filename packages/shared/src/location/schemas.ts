@@ -39,6 +39,7 @@ export const LocationRolloutModeRequestSchema = z
 export const LocationEvidenceMetadataSchema = z
   .object({
     visitDepartureOpen: z.boolean().optional(),
+    visitArrivalUnknown: z.literal(true).optional(),
     geofenceState: z.enum(["inside", "outside", "unknown"]).optional(),
     providerEnabled: z.boolean().optional(),
     authorizationStatus: z
@@ -82,6 +83,9 @@ function validateEvidenceShape(
   value: {
     kind: z.infer<typeof LocationEvidenceKindSchema>;
     latitude?: number | null; longitude?: number | null; occurredAt: string; endedAt?: string | null;
+    savedPlaceId?: string | null; geofenceIdentifier?: string | null;
+    horizontalAccuracyMeters?: number | null; altitudeMeters?: number | null;
+    speedMetersPerSecond?: number | null; courseDegrees?: number | null;
     metadata?: z.infer<typeof LocationEvidenceMetadataSchema>;
   },
   context: z.RefinementCtx
@@ -100,6 +104,16 @@ function validateEvidenceShape(
     const hasLongitude = value.longitude != null;
     if (hasLatitude !== hasLongitude) {
       context.addIssue({ code: "custom", message: "Latitude and longitude must be supplied together." });
+    }
+    if (value.metadata?.visitArrivalUnknown && (
+      value.kind !== "visit" || !value.endedAt || Date.parse(value.endedAt) !== Date.parse(value.occurredAt) ||
+      hasLatitude || hasLongitude || value.savedPlaceId != null || value.geofenceIdentifier != null ||
+      value.horizontalAccuracyMeters != null || value.altitudeMeters != null ||
+      value.speedMetersPerSecond != null || value.courseDegrees != null ||
+      value.metadata.visitDepartureOpen === true
+    )) {
+      context.addIssue({ code: "custom", path: ["metadata", "visitArrivalUnknown"],
+        message: "An unknown Visit arrival may report only a departure time." });
     }
     if (value.endedAt && Date.parse(value.endedAt) < Date.parse(value.occurredAt)) {
       context.addIssue({ code: "custom", path: ["endedAt"], message: "Departure cannot precede arrival." });

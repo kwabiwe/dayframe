@@ -237,6 +237,15 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
 /// Signal timestamps. Visits keep whole seconds (their two callbacks pair on the
 /// exact arrival text); significant-change fixes and callback times keep milliseconds.
 enum DayframeSignalTime {
+  static func visit(arrival: Date, departure: Date) -> (occurredAt: Date, endedAt: Date?, arrivalUnknown: Bool)? {
+    let endedAt = departure == .distantFuture ? nil : departure
+    if arrival == .distantPast {
+      guard let endedAt else { return nil }
+      return (endedAt, endedAt, true)
+    }
+    return (arrival, endedAt, false)
+  }
+
   // Reused because retention parses every journal record. ISO8601DateFormatter
   // is thread-safe, and these are never mutated after creation.
   nonisolated(unsafe) private static let wholeSeconds = ISO8601DateFormatter()

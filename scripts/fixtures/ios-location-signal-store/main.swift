@@ -32,6 +32,35 @@ func inode(_ url: URL) -> UInt64? {
 }
 func bytes(_ url: URL) -> Data { (try? Data(contentsOf: url)) ?? Data() }
 
+// An unknown Core Location arrival still has a real departure timestamp.
+do {
+  let url = journalURL()
+  let departure = base.addingTimeInterval(-2)
+  let timing = DayframeSignalTime.visit(arrival: .distantPast, departure: departure)!
+  check(timing.occurredAt == departure && timing.endedAt == departure && timing.arrivalUnknown,
+    "a departure-only Visit has no invented arrival")
+  check(DayframeSignalTime.visit(arrival: .distantPast, departure: .distantFuture) == nil,
+    "a Visit with both times unknown has no signal")
+  let open = DayframeSignalTime.visit(arrival: departure, departure: .distantFuture)
+  check(open?.occurredAt == departure && open?.endedAt == nil && open?.arrivalUnknown == false,
+    "a known arrival still opens a Visit")
+  let record = DayframeLocationSignal(
+    id: "departure-only", kind: "visit", occurredAt: DayframeSignalTime.seconds(timing.occurredAt),
+    endedAt: timing.endedAt.map(DayframeSignalTime.seconds), latitude: nil, longitude: nil,
+    horizontalAccuracyMeters: nil, metadata: ["visitArrivalUnknown": "true"]
+  )
+  let store = DayframeLocationSignalStore(fileURL: url, retentionSeconds: 60, now: { base })
+  store.append(record)
+  store.append(record)
+  check(store.count() == 1, "the active journal stores the departure exactly once")
+  let restored = DayframeLocationSignalStore(fileURL: url, retentionSeconds: 60, now: { base })
+  let saved = restored.read(limit: 10)
+  check(saved.count == 1 && saved[0].occurredAt == saved[0].endedAt &&
+    saved[0].metadata["visitArrivalUnknown"] == "true", "the real departure is durable and idempotent")
+  let expired = DayframeLocationSignalStore(fileURL: url, retentionSeconds: 60, now: { base.addingTimeInterval(60) })
+  check(expired.read(limit: 10).isEmpty, "departure-only signals follow the ordinary retention limit")
+}
+
 // Appends add one line at the end of the same file; earlier bytes are never rewritten.
 do {
   let url = journalURL()

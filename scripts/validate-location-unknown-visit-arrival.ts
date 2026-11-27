@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { runLocationEngine } from "@dayframe/shared";
+import { LocationEvidenceBatchRequestSchema, runLocationEngine } from "@dayframe/shared";
 import { shiftedCompletedUnknownVisitFixture, unknownVisitArrivalFixture } from "../packages/shared/test/fixtures/unknownVisitArrival";
 import { pool } from "../apps/web/src/lib/db";
 import { ingestLocationEvidence, replayRetainedLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
@@ -114,6 +114,27 @@ async function scenario(completedFirst: boolean) {
     const before = await snapshot();
     await replay();
     assert.deepEqual(await snapshot(), before, "Identical retained replay changed persisted output.");
+
+    const departureTime = "2026-09-27T10:51:39.000Z";
+    const departureBatch = LocationEvidenceBatchRequestSchema.parse({
+      ...request, clientBatchId: randomUUID(), timeZone: "Europe/London", evidence: [{
+        clientEvidenceId: "departure-only", kind: "visit", occurredAt: departureTime, endedAt: departureTime,
+        receivedAt: processingAt, metadata: { visitArrivalUnknown: true }
+      }]
+    });
+    await ingestLocationEvidence(departureBatch, session, processingAt);
+    await ingestLocationEvidence(departureBatch, session, processingAt);
+    await replay();
+    const retained = await owned(`select accepted, coordinate is null as "hasNoPosition", occurred_at, ended_at,
+      metadata->>'visitArrivalUnknown' as "arrivalUnknown" from location_evidence
+      where workspace_id=$1 and user_id=$2 and device_id=$3 and client_evidence_id='departure-only'`, [deviceId]);
+    assert.deepEqual(retained.rows, [{ accepted: true, hasNoPosition: true, occurred_at: new Date(departureTime),
+      ended_at: new Date(departureTime), arrivalUnknown: "true" }]);
+    const after = await snapshot();
+    // The ingest receipt is an activity_event. Semantic events, Review and lineage must all match.
+    after.rows.activity_events = after.rows.activity_events.filter((row) => row.client_event_id !==
+      `location-batch:${deviceId}:${departureBatch.clientBatchId}`);
+    assert.deepEqual(after, before, "An unknown-arrival departure changed semantic output.");
 
     console.log(`PASS unknown Visit retained replay (${completedFirst ? "completed first" : "arrival first"})`);
   } finally {

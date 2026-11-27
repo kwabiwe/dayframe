@@ -381,6 +381,7 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
   const evidence = signals.flatMap(signal => {
     const metadata: LocationEvidenceMetadata = {
       ...(signal.metadata.visitDepartureOpen === "true" ? { visitDepartureOpen: true } : {}),
+      ...(signal.metadata.visitArrivalUnknown === "true" ? { visitArrivalUnknown: true } : {}),
       ...(signal.metadata.authorizationStatus ? { authorizationStatus: signal.metadata.authorizationStatus as LocationEvidenceMetadata["authorizationStatus"] } : {}),
       ...(signal.metadata.accuracyAuthorization ? { accuracyAuthorization: signal.metadata.accuracyAuthorization as LocationEvidenceMetadata["accuracyAuthorization"] } : {}),
       ...(signal.metadata.errorCode ? { errorCode: signal.metadata.errorCode } : {}),

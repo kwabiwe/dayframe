@@ -20,6 +20,26 @@ function unknownStay(input: LocationEngineInput) {
 }
 
 describe("unknown native Visit arrival uncertainty", () => {
+  it("records a departure-only Visit without changing a stay, trip or inferred state", () => {
+    const fixture = unknownVisitArrivalFixture();
+    const marker = {
+      clientEvidenceId: "departure-only", deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion, kind: "visit" as const,
+      occurredAt: departure, endedAt: departure, receivedAt: fixture.processingAt, timeZone: "Europe/London",
+      metadata: { visitArrivalUnknown: true as const }
+    };
+    const before = runLocationEngine(fixture);
+    const after = runLocationEngine({ ...fixture, evidence: [...fixture.evidence, marker] });
+    expect(after.segmentUpserts).toEqual(before.segmentUpserts);
+    expect(after.openTrip).toEqual(before.openTrip);
+    expect(after.acceptedEvidence).toEqual(before.acceptedEvidence);
+    expect(after.nextState).toEqual({ ...before.nextState,
+      processedEvidenceIds: [...before.nextState.processedEvidenceIds, marker.clientEvidenceId].sort()
+    });
+    expect(after.diagnostics.acceptedCount).toBe(before.diagnostics.acceptedCount + 1);
+    expect(runLocationEngine({ ...fixture, evidence: [marker] }).segmentUpserts).toEqual([]);
+  });
+
   it("keeps the plausible Visit estimate without exact-looking arrival bounds", () => {
     const fixture = unknownVisitArrivalFixture();
     const result = runLocationEngine(fixture);

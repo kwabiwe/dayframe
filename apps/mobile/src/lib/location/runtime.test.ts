@@ -181,11 +181,25 @@ describe("location runtime binding and drain", () => {
       mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 1, admittedIds: ["visit-old"] } as never);
       await drainNativeLocationSignalsInBatches();
       expect(burstMocks.maybeStartAccuracyBurst).not.toHaveBeenCalled();
+      const departureTime = "2026-08-11T12:18:00.000Z";
+      const departureOnly = {
+        id: "visit-departure-only", kind: "visit" as const, occurredAt: departureTime, endedAt: departureTime,
+        latitude: null, longitude: null, horizontalAccuracyMeters: null, metadata: { visitArrivalUnknown: "true" }
+      };
       // A Visit not admitted (another owner's, or before the binding) starts nothing.
-      mocks.drainSignals.mockResolvedValueOnce([visit("visit-other", "2026-08-11T12:18:00.000Z")]);
+      mocks.drainSignals.mockResolvedValueOnce([departureOnly]);
       mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 0, admittedIds: [] } as never);
       await drainNativeLocationSignalsInBatches();
       expect(burstMocks.maybeStartAccuracyBurst).not.toHaveBeenCalled();
+      mocks.drainSignals.mockResolvedValueOnce([departureOnly]);
+      mocks.persistLocationEvidence.mockResolvedValueOnce({ insertedCount: 1, admittedIds: [departureOnly.id] } as never);
+      mocks.persistLocationEvidence.mockClear();
+      await drainNativeLocationSignalsInBatches();
+      expect(mocks.persistLocationEvidence.mock.calls[0]?.[0]).toEqual([expect.objectContaining({
+        clientEvidenceId: departureOnly.id, occurredAt: departureTime, endedAt: departureTime,
+        latitude: null, longitude: null, metadata: expect.objectContaining({ visitArrivalUnknown: true })
+      })]);
+      expect(burstMocks.maybeStartAccuracyBurst).toHaveBeenCalledExactlyOnceWith("departure", expect.anything(), "visit");
     } finally {
       vi.useRealTimers();
     }

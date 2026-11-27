@@ -1547,7 +1547,10 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
 
 function runLocationEnginePass(input: LocationEngineInput): { output: LocationEngineOutput; unusedCompanionIds: string[] } {
   const preprocessed = preprocess(input);
-  const { accepted: acceptedWithMotion, rejectedEvidence } = preprocessed;
+  const { accepted: journalEvidence, rejectedEvidence } = preprocessed;
+  // A time-only departure can wake capture on the phone. It cannot establish
+  // position, start a stay, corroborate continuity or bound a trip in replay.
+  const acceptedWithMotion = journalEvidence.filter(({ evidence }) => !evidence.metadata?.visitArrivalUnknown);
   // This run's own broad readings, and those stored earlier as rejected (times only, never positions).
   const broadReadingTimes = [...preprocessed.broadReadingTimes, ...(input.broadReadingTimes ?? [])].sort((a, b) => a - b);
   const rejectedReadingTimes = [...preprocessed.rejectedReadingTimes, ...(input.rejectedReadingTimes ?? input.broadReadingTimes ?? [])]
@@ -2121,7 +2124,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
   const processedEvidenceIds = [...new Set([
     ...input.priorState.processedEvidenceIds,
-    ...acceptedWithMotion.map(({ evidence }) => evidence.clientEvidenceId),
+    ...journalEvidence.map(({ evidence }) => evidence.clientEvidenceId),
     ...rejectedEvidence.map((evidence) => evidence.clientEvidenceId)
   ])].sort();
   const activeStay = stays.find((stay) => stay.status === "open") ?? null;
@@ -2152,7 +2155,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       acceptedWithMotion, input.config, input.processingAt, motionTimeline, broadReadingTimes),
     diagnostics: {
       inputCount: input.evidence.length,
-      acceptedCount: acceptedWithMotion.length,
+      acceptedCount: journalEvidence.length,
       rejectedCount: rejectedEvidence.length,
       duplicateCount: rejectedEvidence.filter((item) => item.reason === "duplicate").length,
       stayCount: stays.length,

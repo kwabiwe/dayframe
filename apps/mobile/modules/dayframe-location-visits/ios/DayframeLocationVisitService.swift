@@ -103,14 +103,16 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
   }
 
   public func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
-    let openDeparture = visit.departureDate == Date.distantFuture
+    guard let timing = DayframeSignalTime.visit(arrival: visit.arrivalDate, departure: visit.departureDate) else { return }
+    // An averaged Visit coordinate can predate this account's capture binding
+    // when its arrival is unknown. Only the reported departure crosses the journal.
     appendSignal(
       kind: "visit",
-      occurredAt: visit.arrivalDate,
-      endedAt: openDeparture ? nil : visit.departureDate,
-      coordinate: visit.coordinate,
-      horizontalAccuracy: visit.horizontalAccuracy,
-      metadata: ["visitDepartureOpen": String(openDeparture)]
+      occurredAt: timing.occurredAt,
+      endedAt: timing.endedAt,
+      coordinate: timing.arrivalUnknown ? nil : visit.coordinate,
+      horizontalAccuracy: timing.arrivalUnknown ? nil : visit.horizontalAccuracy,
+      metadata: timing.arrivalUnknown ? ["visitArrivalUnknown": "true"] : ["visitDepartureOpen": String(timing.endedAt == nil)]
     )
   }
 

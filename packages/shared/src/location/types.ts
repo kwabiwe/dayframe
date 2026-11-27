@@ -20,6 +20,8 @@ export type MotionTravelMode = "walking" | "running" | "cycling" | "automotive";
 
 export type LocationEvidenceMetadata = {
   visitDepartureOpen?: boolean;
+  /** A time-only departure callback. occurredAt and endedAt both hold the reported departure. */
+  visitArrivalUnknown?: true;
   geofenceState?: "inside" | "outside" | "unknown";
   providerEnabled?: boolean;
   authorizationStatus?: "not_determined" | "restricted" | "denied" | "when_in_use" | "always";

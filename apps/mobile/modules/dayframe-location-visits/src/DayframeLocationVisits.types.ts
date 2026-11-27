@@ -15,6 +15,7 @@ export type DayframeLocationNativeSignal = {
   speedMetersPerSecond?: number | null;
   metadata: {
     visitDepartureOpen?: string;
+    visitArrivalUnknown?: string;
     authorizationStatus?: string;
     accuracyAuthorization?: string;
     errorCode?: string;
