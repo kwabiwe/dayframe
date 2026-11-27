@@ -151,7 +151,7 @@ npm run export:workspace -- ./dayframe-backup.json
 ## Product Scope Rules
 
 - Personal productivity tracker first; no team/billing workflows unless explicitly requested.
-- MVP is iOS-only.
+- The mobile app supports iPhone and iPad. Use the space available to the current window for adaptive layouts.
 - Non-iOS mobile support is out of scope and should not be added, documented, or configured unless explicitly requested.
 - HealthKit MVP includes sleep and workout/walking summaries.
 - Monetization is out of scope.

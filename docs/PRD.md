@@ -6,7 +6,7 @@ Dayframe is a personal time-intelligence product that combines manual task track
 
 The core value proposition is to reduce manual time-tracking friction without losing user trust. Dayframe should capture manual timer actions, trusted-place automation, HealthKit sleep/workout summaries, and mobile offline activity signals, then sync them into a clear web/mobile timeline. Ambiguous or low-confidence signals should be reviewable instead of silently becoming incorrect time entries.
 
-The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
+The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, available on iPhone and iPad, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
 This PRD is deliberately stable product intent. `docs/feature-fix-tracker.md` is the source of truth for delivery, release, Watch, and decision state; `docs/architecture.md` is the source of truth for runtime/data ownership. Do not copy build numbers or active-branch snapshots into this document.
 
@@ -45,6 +45,8 @@ Key needs and pain points:
 ## 4. MVP Scope
 
 ### In Scope
+
+- On iPad and wider iPhone windows, Calendar can show a second pane. Available window width controls the layout, and resizing preserves the selected day and the current Calendar view.
 
 Core Functionality:
 
