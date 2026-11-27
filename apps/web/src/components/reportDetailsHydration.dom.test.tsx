@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { computeAccessibleName } from "dom-accessibility-api";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,6 +58,6 @@ describe("Reports block row hydration (React #418)", () => {
     const when = `${formatTime(entry.startedAt, "24h")}–${formatTime(entry.stoppedAt!, "24h")}`;
     expect(container.textContent).toContain(when);
     expect(container.textContent).toContain(formatDate(entry.startedAt));
-    expect(container.querySelector(".df-erow-main")?.getAttribute("aria-label")).toContain(when);
+    expect(computeAccessibleName(container.querySelector(".df-erow-main")!)).toContain(when);
   });
 });

@@ -5,7 +5,7 @@ import { askingChecks, checkBlockId, clashBlocksFrom, clashStillAsks } from "@/l
 import { CalendarLegStrip, CalendarPlacesLane, placesLaneWidth } from "@/components/location/CalendarPlacesLane";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -43,7 +43,6 @@ import {
   calendarBracketDayRailPx,
   calendarBracketRailPx,
   calendarBlockPrimaryParts,
-  calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
   calendarBlockVisualGapPx,
   calendarBlockVisualGeometry,
@@ -957,6 +956,7 @@ export function CalendarReview({
     /** Owner item A: a Grid item (a lane item, or a "?") opens its own dialog. */
     onOpen: (item: TimelinePlace | TimelineTrip, timeline: LocationTimeline, checkId: string | null) => void };
 }) {
+  const calendarId = useId();
   // Step 16: every shown day's trips by the blocks made from them, for the leg strip.
   const tripsByBlock = useMemo(() => new Map([...(locations?.timelines.values() ?? [])].flatMap((timeline) => [...tripsByBlockId(timeline)])),
     [locations]);
@@ -2098,7 +2098,8 @@ export function CalendarReview({
                   const top = Math.round(geometry.top);
                   const blockKey = calendarBlockKey(entry.id, day);
                   const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
-                  const label = calendarBlockDetailsLabel(entry, null, 0, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
+                  const details = calendarBlockAccessibleDetails(entry, null, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
+                  const label = `${details.title}. ${details.description}`;
                   return (
                     <button
                       aria-label={label}
@@ -2186,12 +2187,13 @@ export function CalendarReview({
                     blockPositionStyle,
                     continuesIntoNextDay,
                     density,
-                    durationSeconds,
                     entry,
                     startsBeforeDay
                   } = block;
                   const asking = askingByBlock.get(entry.id);
-                  const detailsLabel = `${calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id))}${asking ? ", Needs a look" : ""}`;
+                  const details = calendarBlockAccessibleDetails(entry, activeDraft, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
+                  const description = `${details.description}${asking ? " Needs a look." : ""}`;
+                  const descriptionId = `${calendarId}-${blockKey}-description`;
                   const lane = lanes.get(blockKey) ?? fullLane;
                   const label = denseBlockLabel(blockPositionStyle.height, density.canDirectResize,
                     calendarBlockDetailLines(entry, capturedNow, clock).length);
@@ -2252,9 +2254,9 @@ export function CalendarReview({
                       <button
                         type="button"
                         className="calendar-entry-primary"
-                        aria-label={detailsLabel}
+                        aria-describedby={descriptionId}
                         aria-pressed={selected}
-                        title={detailsLabel}
+                        title={`${details.title}. ${description}`}
                         onClick={(event) => {
                           if (event.detail > 0) event.currentTarget.blur();
                           const anchor = event.currentTarget.closest<HTMLElement>("[data-calendar-block-key]");
@@ -2282,7 +2284,9 @@ export function CalendarReview({
                         onMouseDown={(event) => event.preventDefault()}
                       >
                         {/* The title always wins: it wraps to the lines that fit, ending after a whole word. */}
-                        <span className="calendar-entry-title"><CalendarTitleWords text={calendarBlockPrimaryParts(displayEntry).description} /></span>
+                        <span className="sr-only">{details.title}</span>
+                        <span hidden id={descriptionId}>{description}</span>
+                        <span aria-hidden="true" className="calendar-entry-title"><CalendarTitleWords text={details.title} /></span>
                         {/* Calendar v3: icon lines under the title while they fit (place, trip or Health, tags, times). */}
                         <CalendarDetailLines lines={calendarBlockDetailLines(displayEntry, capturedNow, clock)} />
                         {/* Its one "?" (design §7): the amber dot; the press opens its editor with the question. */}
@@ -2659,10 +2663,9 @@ function calendarBlockLaneStyle({
   };
 }
 
-function calendarBlockDetailsLabel(
+function calendarBlockAccessibleDetails(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
-  _durationSeconds: number,
   day: Date,
   capturedNow: Date,
   clock: ClockFormat,
@@ -2676,7 +2679,13 @@ function calendarBlockDetailsLabel(
     stoppedAt: draft?.stoppedAt ?? entry.stoppedAt
   };
   const tags = entry.tagNames.length ? ` All tags: ${entry.tagNames.join(", ")}.` : "";
-  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}.${tags}${partOf ? ` ${partOf}` : ""}${details.continuation ? ` ${details.continuation}` : ""}`;
+  const { description: title, category } = calendarBlockPrimaryParts(displayEntry);
+  const [placeOrSource] = calendarBlockDetailLines(displayEntry, capturedNow, clock);
+  // The title can be whole, truncated or completely hidden at different zoom levels. The
+  // control always exposes the whole name, with the contextual details available separately.
+  const context = [category, placeOrSource?.glyph === "map-pin" || placeOrSource?.glyph === "route" ||
+    placeOrSource?.glyph === "heart-pulse" ? placeOrSource.text : null].filter(Boolean).join(" · ");
+  return { title, description: `${context ? `${context}. ` : ""}${calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}.${tags}${partOf ? ` ${partOf}` : ""}${details.continuation ? ` ${details.continuation}` : ""}` };
 }
 
 function calendarEntrySliceDetails(

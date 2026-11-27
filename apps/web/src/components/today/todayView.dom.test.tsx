@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { computeAccessibleDescription, computeAccessibleName } from "dom-accessibility-api";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -69,7 +70,7 @@ function checkItem(id: string, startedAt: string, stoppedAt: string): ReviewItem
 function rowLabels(container: HTMLElement) {
   return [...container.querySelectorAll(".df-erow-main")]
     .filter((button) => !button.closest(".df-erow-children"))
-    .map((button) => button.getAttribute("aria-label")?.split(",")[0]);
+    .map((button) => button.querySelector(".df-erow-text b")?.textContent);
 }
 
 describe("Today", () => {
@@ -127,7 +128,7 @@ describe("Today", () => {
     vi.setSystemTime(NOW);
     const { container, root } = await mount(bootstrap());
     const inbox = [...container.querySelectorAll<HTMLButtonElement>(".df-erow-main")].find((button) =>
-      button.getAttribute("aria-label")?.startsWith("Inbox"));
+      computeAccessibleName(button).startsWith("Inbox"));
     expect(inbox).toBeDefined();
 
     inbox!.focus();
@@ -186,7 +187,8 @@ describe("Today", () => {
       const running = container.querySelector(".df-erow.is-live .df-erow-main");
       const duration = running?.querySelector(".df-erow-dur");
       expect(duration?.textContent).toBe("0:00:29");
-      expect(running?.getAttribute("aria-label")).toContain("elapsed 0:00:29");
+      expect(computeAccessibleName(running!)).toMatch(/^Deep work.*0:00:29$/);
+      expect(computeAccessibleDescription(running!)).toContain("Running. Edit.");
       await act(async () => vi.advanceTimersByTime(1_000));
       expect(duration?.textContent).toBe("0:00:30");
       expect(container.querySelector(".df-erow:not(.is-live) .df-erow-dur")?.textContent).toBe("1h");
@@ -209,8 +211,9 @@ describe("Today", () => {
     data.historyEntries = [...data.historyEntries, night];
     const { container, root } = await mount(data);
     const row = [...container.querySelectorAll(".df-erow-main")].find((button) =>
-      button.getAttribute("aria-label")?.startsWith("Late shift"));
-    expect(row?.getAttribute("aria-label")).toContain("23:00 to 01:00, 2h");
+      computeAccessibleName(button).startsWith("Late shift"));
+    expect(computeAccessibleName(row!)).toContain("2h");
+    expect(computeAccessibleDescription(row!)).toContain("23:00 to 01:00");
     expect(row?.querySelector(".df-erow-dur")?.textContent).toBe("2h");
     await act(async () => root.unmount());
   });
@@ -333,7 +336,8 @@ describe("Today", () => {
       const { container, root } = await mount(withTrip());
       expect(rowLabels(container)).toEqual(["Deep work", "Inbox", "School run"]);
       const named = container.querySelector<HTMLButtonElement>(".df-erow-named .df-erow-main")!;
-      expect(named.getAttribute("aria-label")).toContain("School run, 3 parts: Travel, then School, then Travel, 08:00 to 08:40, 40m. Show the parts");
+      expect(computeAccessibleName(named)).toMatch(/^School run.*40m$/);
+      expect(computeAccessibleDescription(named)).toContain("Travel, then School, then Travel. Show the parts");
       expect(named.getAttribute("aria-expanded")).toBe("false");
       expect(container.querySelectorAll(".df-erow-parts i")).toHaveLength(3);
       expect(container.querySelector(".df-erow-named .df-erow-when")?.textContent).toBe("08:00–08:40 · 3 parts");
@@ -358,7 +362,7 @@ describe("Today", () => {
       });
       const { container, root } = await mount(withTrip());
       const inbox = [...container.querySelectorAll<HTMLButtonElement>(".df-erow-main")].find((button) =>
-        button.getAttribute("aria-label")?.startsWith("Inbox"))!;
+        computeAccessibleName(button).startsWith("Inbox"))!;
       inbox.focus();
       await act(async () => inbox.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true })));
       await act(async () => vi.advanceTimersByTime(200));

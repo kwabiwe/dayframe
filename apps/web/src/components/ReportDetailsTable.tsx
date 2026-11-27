@@ -1,7 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -121,6 +121,7 @@ export function ReportBlockRow({
   icon: string | null;
   onEdit: () => void;
 }) {
+  const descriptionId = useId();
   const title = timeEntryTitle(entry);
   const activity = timeEntryCategoryLabel(entry);
   const tags = entry.tagNames.map((tag) => `#${tag}`).join(" ");
@@ -141,7 +142,7 @@ export function ReportBlockRow({
   return (
     <li className={`df-erow df-report-row${entry.isRunning ? " is-live" : ""}`}>
       <button
-        aria-label={`${title}, ${meta}, ${hydrated ? `${day} ${when}, ` : ""}${duration}${entry.isRunning ? ", running" : ""}${overlap ? `, ${overlap}` : ""}. Edit.`}
+        aria-describedby={descriptionId}
         className="df-erow-main"
         disabled={disabled}
         onClick={onEdit}
@@ -165,6 +166,7 @@ export function ReportBlockRow({
           <span>{when}</span>
         </span>
         <span className="df-erow-dur">{duration}</span>
+        <span hidden id={descriptionId}>{entry.isRunning ? "Running. " : ""}{overlap ? `${overlap}. ` : ""}Edit.</span>
       </button>
       <span className="df-erow-acts">
         <button aria-label={`Edit ${title}`} className="df-icon-action" data-tip="Edit" disabled={disabled} onClick={onEdit} type="button">

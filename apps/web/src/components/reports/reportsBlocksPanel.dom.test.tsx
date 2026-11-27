@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { computeAccessibleDescription, computeAccessibleName } from "dom-accessibility-api";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -131,8 +132,10 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => root.render(
       <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
     ));
-    const row = container.querySelector<HTMLAnchorElement>('a[aria-label^="Filter by Work"]')!;
+    const row = container.querySelector<HTMLAnchorElement>('.df-ctable a[href="/reports?categories=work"]')!;
     expect(row.getAttribute("href")).toBe("/reports?categories=work");
+    expect(computeAccessibleName(row)).toBe("Work 9h 90%");
+    expect(computeAccessibleDescription(row)).toBe("Filter by this activity.");
     await act(async () => row.focus());
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(true);
     expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("data-key"))).toEqual(["work"]);
@@ -150,7 +153,8 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => root.render(
       <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
     ));
-    const row = container.querySelector<HTMLAnchorElement>('a[aria-label^="Filter by No activity"]')!;
+    const row = [...container.querySelectorAll<HTMLAnchorElement>(".df-ctable a")]
+      .find((link) => computeAccessibleName(link).startsWith("No activity"))!;
     await act(async () => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
     expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("data-key"))).toEqual(["uncategorized"]);
     expect(container.querySelector(".df-donut")?.classList.contains("has-hot")).toBe(true);
@@ -183,7 +187,7 @@ describe("Reports blocks and Where it went", () => {
     expect(list.classList.contains("has-hot")).toBe(true);
     expect(view.hotKeys()).toEqual(["Work, 9h, Day 5", "Work, 2h, Day 7"]);
     expect(container.querySelector('circle[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
-    expect(container.querySelector('a[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
+    expect(container.querySelector('.df-ctable a[href="/reports?categories=work"]')?.classList.contains("is-hot")).toBe(true);
     expect(view.centre()).toBe("9hWork");
     // Over the empty top of a column, a mouse is on no block.
     await pointer(list, "pointermove", 120, 40);
@@ -217,7 +221,7 @@ describe("Reports blocks and Where it went", () => {
     expect(view.centre()).toBe("1hNo activity");
     expect(view.hotKeys()).toEqual(["No activity, 1h, Day 5", "No activity, 30m, Day 7"]);
     // A row's hover ending does not clear it either.
-    const row = view.container.querySelector('a[aria-label^="Filter by Work"]')!;
+    const row = view.container.querySelector('.df-ctable a[href="/reports?categories=work"]')!;
     await act(async () => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
     expect(view.centre()).toBe("9hWork");
     await act(async () => row.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));

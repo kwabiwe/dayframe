@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
+import { computeAccessibleDescription, computeAccessibleName } from "dom-accessibility-api";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
@@ -180,7 +181,7 @@ describe("Calendar in Blocks", () => {
     act(() => observed.forEach((measure) => measure()));
     expect(shown("none")).toEqual(["Supercalifragilistic"]);
     expect(shown("cut")).toEqual(["Plan", "Supercalifragilistic", "review"]);
-    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!.getAttribute("aria-label")).toContain("Supercalifragilistic");
+    expect(computeAccessibleName(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!)).toContain("Supercalifragilistic");
     vi.unstubAllGlobals();
   });
 
@@ -213,8 +214,8 @@ describe("Calendar in Blocks", () => {
       entry({ id: "b", description: "Last", startedAt: local(11), stoppedAt: local(12) })
     ]);
     const stops = [...document.querySelectorAll<HTMLElement>(".calendar-entry-primary, .calendar-moment")]
-      .map((element) => element.getAttribute("aria-label")?.split(",")[0]);
-    expect(stops.map((label) => label?.split(" ")[0])).toEqual(["First", "Moment", "Last"]);
+      .map((element) => computeAccessibleName(element));
+    expect(stops.map((label) => label.split(/[ .]/)[0])).toEqual(["First", "Moment", "Last"]);
   });
 
   it("returns focus to a moment when its editor closes, and marks it selected while open (Codex r1 on #579)", async () => {
@@ -372,7 +373,7 @@ describe("Calendar in Blocks", () => {
     expect(block.classList.contains("is-asking")).toBe(true);
     expect(block.querySelector(".calendar-block-ask-dot")).not.toBeNull();
     const primary = block.querySelector<HTMLButtonElement>(".calendar-entry-primary")!;
-    expect(primary.getAttribute("aria-label")).toMatch(/, Needs a look$/);
+    expect(computeAccessibleDescription(primary)).toMatch(/Needs a look\.$/);
     await act(async () => {
       primary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }));
     });
@@ -399,7 +400,7 @@ describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
   });
   // Parts at least 18 px tall at 64 px an hour, so none is lifted into an overlap lane by its minimum height.
   const trip = () => [part("there", [8, 0], [8, 20]), part("stay", [8, 20], [9, 0]), part("back", [9, 0], [9, 20])];
-  const label = (id: string) => document.querySelector(`[data-entry-id="${id}"] .calendar-entry-primary`)!.getAttribute("aria-label");
+  const label = (id: string) => computeAccessibleDescription(document.querySelector(`[data-entry-id="${id}"] .calendar-entry-primary`)!);
   const left = (id: string) => document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!.style.left;
 
   it("draws one decorative bracket with the name from the first part's start to the last part's end", () => {

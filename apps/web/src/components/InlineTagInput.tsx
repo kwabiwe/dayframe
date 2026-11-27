@@ -648,7 +648,7 @@ export function InlineTagInput({
           role="combobox"
           value={value}
         />
-        <span className="inline-selected-tags" aria-label="Selected tags">
+        <span className="inline-selected-tags" role="group" aria-label="Selected tags">
           {tagDisplay.visible.map((tagName) => (
             <button
               // The visible "#name" first, then what pressing it does (WUI-034, WCAG 2.5.3).

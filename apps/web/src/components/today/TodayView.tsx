@@ -59,6 +59,7 @@ const ROW_EXIT_MS = 180;
  * server and the hydration pass draw the same empty frame and never disagree about time zones.
  */
 export function TodayView({ initialData }: { initialData: BootstrapData; renderedAt: string }) {
+  const weekDescriptionId = useId();
   const data = useRuntimePageData(initialData);
   const hydrated = useIsHydrated();
   const {
@@ -301,7 +302,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         <div className="df-mini-week">
           {week.map((day) => (
             <Link
-              aria-label={`${formatWeekdayLong(day.dayStartMs)}, ${formatDuration(day.totalSeconds)} framed. Open in Calendar.`}
+              aria-describedby={`${weekDescriptionId}-${day.dateKey}`}
               className="df-mw-row"
               href={`/timeline?view=calendar&scope=day&date=${day.dateKey}`}
               key={day.dateKey}
@@ -321,6 +322,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
                 ))}
               </span>
               <span className="df-tnum">{formatDuration(day.totalSeconds)}</span>
+              <span hidden id={`${weekDescriptionId}-${day.dateKey}`}>{formatWeekdayLong(day.dayStartMs)}. Open in Calendar.</span>
             </Link>
           ))}
         </div>
@@ -768,7 +770,7 @@ function TodayNamedRow({
         <button
           aria-controls={panelId}
           aria-expanded={isOpen}
-          aria-label={`${name}, ${parts.length} parts: ${titles.join(", then ")}, ${start} to ${end}, ${spokenDuration(seconds)}. ${isOpen ? "Hide" : "Show"} the parts; Delete or Backspace deletes all of them.`}
+          aria-describedby={`${panelId}-description`}
           className="df-erow-main"
           onClick={onToggle}
           onKeyDown={onKeyDown}
@@ -796,6 +798,9 @@ function TodayNamedRow({
           </span>
           <span className="df-erow-when">{start}–{end} · {parts.length} parts</span>
           <span className="df-erow-dur">{formatDuration(seconds)}</span>
+          <span hidden id={`${panelId}-description`}>
+            {titles.join(", then ")}. {isOpen ? "Hide" : "Show"} the parts. Delete or Backspace deletes all of them.
+          </span>
         </button>
         <span className="df-erow-acts">
           <button
@@ -852,6 +857,7 @@ function TodayBlockRow({
   startDisabled: boolean;
 }) {
   const clock = useClockFormat();
+  const descriptionId = useId();
   const title = timeEntryTitle(entry);
   const live = !entry.stoppedAt;
   const activity = entry.categoryId ? entry.categoryName?.trim() || "No activity" : "No activity";
@@ -861,7 +867,6 @@ function TodayBlockRow({
   // A row is the whole block: its times and duration include any part before midnight.
   const elapsedSeconds = durationMs / 1000;
   const durationLabel = live ? formatClockDuration(elapsedSeconds) : formatDuration(elapsedSeconds);
-  const accessibleDuration = live ? `elapsed ${durationLabel}` : spokenDuration(elapsedSeconds);
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -874,8 +879,7 @@ function TodayBlockRow({
   return (
     <li className={`df-erow${live ? " is-live" : ""}${isLeaving ? " is-leaving" : ""}`}>
       <button
-        // Everything the row shows, in its order: title, activity · #tags, times, duration (WUI-034).
-        aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : ""}, ${start} to ${live ? "now" : end}, ${accessibleDuration}. Edit${live ? "" : "; Delete or Backspace deletes"}.`}
+        aria-describedby={descriptionId}
         className="df-erow-main"
         onClick={onEdit}
         onKeyDown={onKeyDown}
@@ -895,8 +899,9 @@ function TodayBlockRow({
           <b>{title}</b>
           <span>{activity}{tags ? ` · ${tags}` : ""}</span>
         </span>
-        <span className="df-erow-when">{start}–{end}</span>
+        <span aria-hidden="true" className="df-erow-when">{start}–{end}</span>
         <span className="df-erow-dur">{durationLabel}</span>
+        <span hidden id={descriptionId}>{start} to {end}. {live ? "Running. Edit." : "Edit. Delete or Backspace deletes."}</span>
       </button>
       <span className="df-erow-acts">
         {!live ? (
@@ -949,9 +954,4 @@ function formatWeekdayShort(ms: number) {
 
 function formatWeekdayLong(ms: number) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(new Date(ms));
-}
-
-
-function spokenDuration(seconds: number) {
-  return seconds > 0 && seconds < 60 ? "under a minute" : formatDuration(seconds);
 }

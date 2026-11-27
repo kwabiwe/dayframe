@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import Link from "next/link";
 import { blockStyle } from "@/lib/block-style";
 import type { CalendarHeadModel } from "@/lib/calendar-head";
@@ -38,6 +38,7 @@ export function CalendarHead({
 }) {
   const row = variant === "row";
   const daysRef = useRef<HTMLDivElement | null>(null);
+  const stripId = useId();
   const selectedKey = model.days.find((day) => day.selected)?.key;
   // On the narrowest phones the strip scrolls sideways; keep the chosen day in view (inside the strip
   // only, never scrolling the page).
@@ -56,7 +57,8 @@ export function CalendarHead({
       {showDays ? <div aria-label="Choose a day" className="df-cal-days" ref={daysRef} role="group">
         {model.days.map((day) => (
           <button
-            aria-label={day.accessibleName}
+            aria-current={day.isToday ? "date" : undefined}
+            aria-describedby={`${stripId}-${day.key}`}
             aria-pressed={showSelected ? day.selected : undefined}
             className={`df-cal-day${day.isToday ? " is-today" : ""}${showSelected && day.selected ? " is-selected" : ""}`}
             data-tip={row ? day.tip : undefined}
@@ -65,9 +67,10 @@ export function CalendarHead({
             onClick={() => onSelectDay(day.key)}
             type="button"
           >
-            <small aria-hidden="true">{day.initial}</small>
-            <b aria-hidden="true" className="df-tnum">{day.dateNumber}</b>
-            {row ? null : <span aria-hidden="true" className="df-cal-day-total df-tnum">{day.total}</span>}
+            <small>{day.initial}</small>
+            <b className="df-tnum">{day.dateNumber}</b>
+            {row ? null : <span className="df-cal-day-total df-tnum">{day.total}</span>}
+            <span hidden id={`${stripId}-${day.key}`}>{day.accessibleName}</span>
             <span aria-hidden="true" className="df-cal-day-bars">
               {day.bars.map((bar) => (
                 <i

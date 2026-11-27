@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { computeAccessibleDescription } from "dom-accessibility-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData } from "@/lib/queries";
 
@@ -138,9 +139,9 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(recoverable).toEqual([]);
     const monday = container.querySelector('[data-calendar-day-key="2026-10-12"]')!;
     const lateCall = monday.querySelector(`[data-entry-id="${LATE_CALL.id}"] .calendar-entry-primary`);
-    expect(lateCall?.getAttribute("aria-label")).toContain("00:30");
+    expect(computeAccessibleDescription(lateCall!)).toContain("00:30");
     expect(container.querySelector(`[data-calendar-day-key="2026-10-11"] [data-entry-id="${LATE_CALL.id}"]`)).toBeNull();
-    expect(container.querySelector(`[data-calendar-day-key="2026-10-14"] [data-entry-id="${WEDNESDAY.id}"] .calendar-entry-primary`)?.getAttribute("aria-label")).toContain("14:00");
+    expect(computeAccessibleDescription(container.querySelector(`[data-calendar-day-key="2026-10-14"] [data-entry-id="${WEDNESDAY.id}"] .calendar-entry-primary`)!)).toContain("14:00");
     expect(monday.querySelector(".calendar-now-line")).not.toBeNull();
     // Future time (#369) follows the same post-hydration now: none of it in the server frame, then
     // the not-allowed zone starts exactly at the now line and later days are marked.
@@ -150,7 +151,7 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
       .toBe(monday.querySelector<HTMLElement>(".calendar-now-line")?.style.top);
     expect(container.querySelector('[data-calendar-day-key="2026-10-13"]')?.classList.contains("is-future")).toBe(true);
     expect(monday.classList.contains("is-future")).toBe(false);
-    expect(container.querySelector(".df-cal-dayrow .df-cal-day.is-today")?.getAttribute("aria-label")).toContain("12 October");
+    expect(computeAccessibleDescription(container.querySelector(".df-cal-dayrow .df-cal-day.is-today")!)).toContain("12 October");
     expect(container.querySelector(".calendar-grid-scroller")?.hasAttribute("aria-busy")).toBe(false);
     // 45 minutes on Monday (London) and an hour on Wednesday.
     expect(container.querySelector(".df-cal-weektotal")?.textContent).toBe("1h 45m");

@@ -43,7 +43,6 @@ describe("formats (WUI-032, WUI-033)", () => {
 describe("accessible names (WUI-034, WUI-044)", () => {
   it("starts each name with what is shown", () => {
     expect(source("components/InlineTagInput.tsx")).toContain("aria-label={`#${tagName}, remove tag`}");
-    expect(source("components/today/TodayView.tsx")).toContain("aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : \"\"}, ${start} to");
     const shell = source("components/AppShell.tsx");
     expect(shell).toContain("`${initials(shellIdentity.userName)}: profile and settings for ${shellIdentity.userName}`");
     expect(shell).toContain('<span className="sr-only">Profile and settings</span>');

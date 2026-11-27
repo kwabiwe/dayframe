@@ -314,8 +314,9 @@ describe("Calendar click-to-create DOM interactions", () => {
       expect(block.querySelector(".calendar-entry-title")?.textContent).toBe(title);
       // Unbreakable words, so a clamped line ends after a whole word.
       expect([...block.querySelectorAll(".calendar-entry-title .calendar-entry-word")].map((word) => word.textContent)).toEqual(title.split(" "));
-      // Activity, tags and times stay in the block's name for screen readers and the tooltip.
-      expect(block.querySelector(".calendar-entry-primary")?.getAttribute("aria-label")).toContain(`${title} · Work · #Planning +2.`);
+      // Keep the complete title as the name even when the glyph leaves no room to draw it.
+      // The description preserves activity, tags and time for the same control.
+      expect(within(block).getByRole("button", { name: title, description: /Work.*All tags: Planning, Review, Deep work/ })).toBeTruthy();
     }
 
     const tiny = document.querySelector<HTMLElement>('[data-entry-id="tiny-entry"]') as HTMLElement;

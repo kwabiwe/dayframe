@@ -2,6 +2,7 @@
 
 import { act, cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { computeAccessibleDescription } from "dom-accessibility-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import type { ContinuousListProps } from "./EntriesTable";
@@ -97,8 +98,11 @@ async function renderList() {
   await act(async () => undefined);
   return view;
 }
-const pressedDay = (container: HTMLElement) => container.querySelector('.df-cal-day[aria-pressed="true"]')?.getAttribute("aria-label") ?? null;
-const dayLabels = (container: HTMLElement) => [...container.querySelectorAll(".df-cal-day")].map((day) => day.getAttribute("aria-label"));
+const pressedDay = (container: HTMLElement) => {
+  const button = container.querySelector('.df-cal-day[aria-pressed="true"]');
+  return button ? computeAccessibleDescription(button) : null;
+};
+const dayLabels = (container: HTMLElement) => [...container.querySelectorAll(".df-cal-day")].map((day) => computeAccessibleDescription(day));
 
 describe("Calendar › List header follows the List's top day (Codex r1 on #625)", () => {
   it("moves the week strip, its totals and its report link to the week the List has scrolled into", async () => {
@@ -148,7 +152,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
     act(() => listed.continuous!.onVisibleDay!(local(12, 0).getTime()));
     expect(pressedDay(container)).toMatch(/12 Oct/);
     const user = userEvent.setup({ advanceTimers: () => undefined });
-    const fourteenth = () => getByRole("button", { name: /14 Oct/ });
+    const fourteenth = () => getByRole("button", { name: /14/, description: /14 Oct/ });
     await user.click(fourteenth());
     const afterClick = listed.continuous!.focusRequest;
     expect(afterClick).not.toBe(first);
@@ -225,7 +229,7 @@ describe("Calendar › List header follows the List's top day (Codex r1 on #625)
       document.addEventListener("click", stay);
       const user = userEvent.setup({ advanceTimers: () => undefined });
       // Choose the 16th: its period starts loading.
-      await user.click(getByRole("button", { name: /16 Oct/ }));
+      await user.click(getByRole("button", { name: /16/, description: /16 Oct/ }));
       expect(loadDate).toHaveBeenCalledWith("2026-10-16");
       // Calendar is tapped while it loads, then the read finishes.
       await user.click(getByRole("link", { name: /^Calendar/ }));

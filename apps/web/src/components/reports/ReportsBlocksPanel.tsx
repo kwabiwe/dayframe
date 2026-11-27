@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
@@ -111,6 +111,7 @@ export function ReportsBlocksPanel({
   totalLabel: string;
   totalSeconds: number;
 }) {
+  const activityFilterDescriptionId = useId();
   // Slice ids per source, resolved against the current slices each render.
   const [trace, setTrace] = useState<Trace>(NO_TRACE);
   const hotId = trace.hover ?? trace.focus ?? trace.tap;
@@ -545,11 +546,12 @@ export function ReportsBlocksPanel({
                 <small>{hot ? hot.name : totalLabel}</small>
               </figcaption>
             </figure>
+            <span hidden id={activityFilterDescriptionId}>Filter by this activity.</span>
             <ul aria-label="Time by activity" className="df-ctable">
               {slices.map((slice) => (
                 <li key={slice.id}>
                   <Link
-                    aria-label={`Filter by ${slice.name}, ${formatDuration(slice.seconds)}, ${slice.percentage}%`}
+                    aria-describedby={activityFilterDescriptionId}
                     className={`df-crow${hot?.id === slice.id ? " is-hot" : ""}`}
                     href={slice.href}
                     onBlur={() => highlight(slice)(false, "focus")}
