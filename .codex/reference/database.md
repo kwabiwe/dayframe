@@ -4,7 +4,8 @@ Use this when changing schema, RLS, hosted auth, timer/event writes, or migratio
 
 ## Schema Sources
 
-- Local schema history lives in the ordered SQL files under `packages/db/migrations`. `001_init.sql` is the base; the numbered files after it (tags, Live Activity delivery, Health, location, activities, places, sessions and goals) run through `022_location_timeline_corrections.sql`, each with a hosted twin in `supabase/migrations`. The setup script applies every SQL file in filename order.
+- Local schema history lives in the ordered SQL files under `packages/db/migrations`. `001_init.sql` is the base. The setup script applies every SQL file in filename order. Hosted and local migration filenames reflect their own histories.
+- Local `025_location_lineage_index_parity.sql` mirrors the existing hosted Location replay indexes. It keeps the oldest link for a given reading, segment and role before adding the local unique indexes. Separate roles, separate segments and the raw location readings are preserved.
 - Hosted Supabase-only migrations live in `supabase/migrations`.
 - `integration_tokens` is server-only authentication material: hosted schemas must enable RLS, expose no client policies, and grant no table privileges to `PUBLIC`, `anon`, or `authenticated`.
 - Hosted deployments must run all required Supabase migrations before the Vercel code that depends on them is deployed or smoke-tested.
