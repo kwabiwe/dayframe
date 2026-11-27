@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap } from "@/lib/api";
 import type { ReportSummary, ReportSummaryRequest } from "@dayframe/shared";
 import type { ReportRangeChoice } from "@/lib/reportsRanges";
+import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
@@ -620,9 +621,12 @@ describe("Blocks Reports owner (parity step 10a)", () => {
             node.findAllByType("Text" as never).some((text) => text.props.children === "Weekly Wrapped"))!;
         const before = mocks.fetch.mock.calls.length;
         expect(recap().props.accessibilityState.expanded).toBe(false);
+        const title = recap().findAllByType("Text" as never).find((text) => text.props.children === "Weekly Wrapped");
+        expect(title?.props.maxFontSizeMultiplier).toBe(REPORT_TEXT_CAP.heading);
         await act(async () => recap().props.onPress());
         expect(recap().props.accessibilityState.expanded).toBe(true);
-        expect(tree.root.findAllByType("Text" as never).some((text) => text.props.children === "1h logged")).toBe(true);
+        const total = tree.root.findAllByType("Text" as never).find((text) => text.props.children === "1h logged");
+        expect(total?.props.maxFontSizeMultiplier).toBe(REPORT_TEXT_CAP.numeric);
         if (fontScale === 1) {
           const dayColumns = tree.root.findAllByType("View" as never)
             .filter((view) => view.props.accessible === true &&
@@ -631,7 +635,8 @@ describe("Blocks Reports owner (parity step 10a)", () => {
         } else {
           expect(tree.root.findAllByType("Text" as never)
             .filter((text) => Array.isArray(text.props.children) && text.props.children[1] === " · ")
-            .length).toBeGreaterThanOrEqual(7);
+            .filter((text) => text.props.maxFontSizeMultiplier === REPORT_TEXT_CAP.calendar))
+            .toHaveLength(7);
         }
         expect(mocks.fetch.mock.calls).toHaveLength(before);
         await act(async () => tree.unmount());
