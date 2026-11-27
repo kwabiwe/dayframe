@@ -609,6 +609,38 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     return tree;
   };
 
+  it("reuses the current report when expanding Weekly Wrapped and offers a large-text day list", async () => {
+    const originalScale = mocks.fontScale;
+    try {
+      for (const fontScale of [1, 1.8]) {
+        mocks.fontScale = fontScale;
+        const tree = await week();
+        const recap = () => tree.root.findAllByType("Pressable" as never)
+          .find((node) => node.props.accessibilityState?.expanded !== undefined &&
+            node.findAllByType("Text" as never).some((text) => text.props.children === "Weekly Wrapped"))!;
+        const before = mocks.fetch.mock.calls.length;
+        expect(recap().props.accessibilityState.expanded).toBe(false);
+        await act(async () => recap().props.onPress());
+        expect(recap().props.accessibilityState.expanded).toBe(true);
+        expect(tree.root.findAllByType("Text" as never).some((text) => text.props.children === "1h logged")).toBe(true);
+        if (fontScale === 1) {
+          const dayColumns = tree.root.findAllByType("View" as never)
+            .filter((view) => view.props.accessible === true &&
+              /, (upcoming|[0-9]|no time)/i.test(view.props.accessibilityLabel ?? ""));
+          expect(dayColumns).toHaveLength(7);
+        } else {
+          expect(tree.root.findAllByType("Text" as never)
+            .filter((text) => Array.isArray(text.props.children) && text.props.children[1] === " · ")
+            .length).toBeGreaterThanOrEqual(7);
+        }
+        expect(mocks.fetch.mock.calls).toHaveLength(before);
+        await act(async () => tree.unmount());
+      }
+    } finally {
+      mocks.fontScale = originalScale;
+    }
+  });
+
   it("opens on this week with seven day columns, a hero total and the change pill", async () => {
     // The previous-period read returns 30 minutes; this week has an hour.
     mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) =>
