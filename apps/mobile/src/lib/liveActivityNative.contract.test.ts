@@ -428,6 +428,22 @@ describe("native Live Activity presentation contract", () => {
     expect(liveActivity).toContain(".fixedSize(horizontal: false, vertical: true)");
   });
 
+  it("draws the mirrored Live Activity's own fill behind its on-block ink", () => {
+    const widget = readFileSync(
+      `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,
+      "utf8"
+    );
+    const card = widget.slice(
+      widget.indexOf("private struct DayframeLockScreenTimerView"),
+      widget.indexOf("private struct DayframeIslandLabel")
+    );
+
+    expect(card).toContain(".background { ContainerRelativeShape().fill(colors.fill) }");
+    expect(card).toContain(".activityBackgroundTint(colors.fill)");
+    expect(card).toContain(".foregroundStyle(colors.text)");
+    expect(card).toContain("size: .lockScreen, runningColor: colors.text");
+  });
+
   it("is drawn in Blocks: token colours per appearance, Bricolage digits, block markers, no SF Symbols (UIA-028)", () => {
     const liveActivity = readFileSync(
       `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,
