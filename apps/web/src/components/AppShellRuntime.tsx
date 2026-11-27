@@ -1454,14 +1454,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
+    const activeEntry = snapshot.activeEntry;
     const draftSnapshot = draftRef.current;
+    const previousBase = baseFor(activeEntry);
     refreshRequestRef.current += 1;
     const outcome = await runActiveEntryCompactMutation({
       commit: (nextData) => commitData(nextData, "optimistic"),
       draftSnapshot,
       gate: mutationGateRef.current,
       getCurrentData: () => dataRef.current,
+      getCurrentDraft: () => draftRef.current,
       input,
+      onRollback: () => setTimerDraftBase(previousBase, activeEntry.id),
       refresh: async () => {
         await refresh({ force: true });
       },
@@ -1469,7 +1473,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         // A same-tab editor save owns the base like the bar's own saves: the fields it writes
         // become the base the moment it is sent, so typing in the bar while it is pending is a
         // newer edit based on the editor's values, never a false conflict (Codex r1 on #387).
-        const previousBase = baseFor(snapshot.activeEntry!);
         const resolved = input.plan.resolved;
         setTimerDraftBase({
           categoryId: "categoryId" in payload ? resolved.categoryId ?? "" : previousBase.categoryId,
@@ -1487,9 +1490,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
           }
           return (await response.json()) as { updatedAt?: string };
-        } catch (error) {
-          setTimerDraftBase(previousBase, entryId);
-          throw error;
         } finally {
           detailsSavesInFlightRef.current -= 1;
         }

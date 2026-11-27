@@ -402,6 +402,7 @@ describe("shell timer runtime", () => {
       draftSnapshot,
       gate,
       getCurrentData: () => data,
+      getCurrentDraft: () => draft,
       input: { plan: compactPlan() },
       refresh,
       send: async (entryId, payload) => {
@@ -458,6 +459,7 @@ describe("shell timer runtime", () => {
       draftSnapshot,
       gate: createTimerMutationGate(),
       getCurrentData: () => data,
+      getCurrentDraft: () => draft,
       input: { plan },
       refresh: async () => undefined,
       send,
@@ -475,7 +477,7 @@ describe("shell timer runtime", () => {
     expect(data.activeEntry?.placeId).toBe("place-office");
   });
 
-  it("restores the exact active snapshot and timer draft after a compact edit failure", async () => {
+  it("restores the active timer and draft after a compact edit failure", async () => {
     const active = entry({ id: "active-calendar", placeId: "place-office", tagNames: ["ship"] });
     const snapshot = bootstrapData(active);
     const draftSnapshot = timerDraftForEntry(active);
@@ -489,6 +491,7 @@ describe("shell timer runtime", () => {
       draftSnapshot,
       gate: createTimerMutationGate(),
       getCurrentData: () => data,
+      getCurrentDraft: () => draft,
       input: { plan: compactPlan() },
       refresh: async () => undefined,
       send: async () => { throw new Error("Server kept the previous timer"); },
@@ -498,11 +501,65 @@ describe("shell timer runtime", () => {
       snapshot
     })).resolves.toEqual({ ok: false, error: "Server kept the previous timer" });
 
-    expect(data).toBe(snapshot);
+    expect(data.activeEntry).toBe(active);
     expect(draft).toBe(draftSnapshot);
     expect(error).toBe("Server kept the previous timer");
     expect(busy).toBe(false);
   });
+
+  it.each(["calendar navigation", "more typing", "a newer timer", "a workspace switch"] as const)(
+    "scopes a failed compact edit to its own timer after %s",
+    async (change) => {
+      const active = entry({ id: "active-calendar", description: "Original" });
+      const snapshot = bootstrapData(active);
+      const draftSnapshot = timerDraftForEntry(active);
+      let data = snapshot;
+      let draft = draftSnapshot;
+      const completed = entry({ id: "completed-elsewhere", stoppedAt: "2026-07-22T09:30:00.000Z" });
+      const nextDate = { ...snapshot.dateRange, selectedDate: "2026-07-23" };
+
+      const outcome = await runActiveEntryCompactMutation({
+        commit: (nextData) => { data = nextData; },
+        draftSnapshot,
+        gate: createTimerMutationGate(),
+        getCurrentData: () => data,
+        getCurrentDraft: () => draft,
+        input: { plan: compactPlan() },
+        refresh: async () => undefined,
+        send: async () => {
+          if (change === "a workspace switch") {
+            data = { ...bootstrapData(null), workspace: { ...snapshot.workspace, id: "other-workspace" } };
+            draft = timerDraftForEntry(null);
+          } else {
+            data = { ...data, dateRange: nextDate, entries: [completed, ...data.entries] };
+            if (change === "more typing") draft = { ...draft, description: "Text typed during the save" };
+            if (change === "a newer timer") {
+              data.activeEntry = entry({ id: active.id, description: "Newer server copy", updatedAt: "2026-07-22T11:00:00.000Z" });
+              draft = timerDraftForEntry(data.activeEntry);
+            }
+          }
+          throw new Error("Server declined the edit");
+        },
+        setBusy: () => undefined,
+        setDraft: (nextDraft) => { draft = nextDraft; },
+        setError: () => undefined,
+        snapshot
+      });
+
+      expect(outcome.ok).toBe(false);
+      if (change === "a workspace switch") {
+        expect(data.workspace.id).toBe("other-workspace");
+        expect(data.activeEntry).toBeNull();
+        expect(draft.description).toBe("");
+      } else {
+        expect(data.dateRange).toBe(nextDate);
+        expect(data.entries).toContain(completed);
+        const description = change === "a newer timer" ? "Newer server copy" : "Original";
+        expect(data.activeEntry?.description).toBe(description);
+        expect(draft.description).toBe(change === "more typing" ? "Text typed during the save" : description);
+      }
+    }
+  );
 
   it("builds a category, description, and tags-only continuation draft", () => {
     const source = entry({

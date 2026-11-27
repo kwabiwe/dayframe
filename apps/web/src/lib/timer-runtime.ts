@@ -690,7 +690,9 @@ export async function runActiveEntryCompactMutation({
   draftSnapshot,
   gate,
   getCurrentData,
+  getCurrentDraft,
   input,
+  onRollback,
   refresh,
   send,
   setBusy,
@@ -702,7 +704,9 @@ export async function runActiveEntryCompactMutation({
   draftSnapshot: TimerDraft;
   gate: TimerMutationGate;
   getCurrentData: () => BootstrapData | null;
+  getCurrentDraft: () => TimerDraft;
   input: ActiveEntryCompactMutationInput;
+  onRollback?: () => void;
   refresh: () => Promise<void>;
   send: (entryId: string, payload: CalendarEntryCompactPatch) => Promise<{ updatedAt?: string }>;
   setBusy: (busy: boolean) => void;
@@ -720,20 +724,29 @@ export async function runActiveEntryCompactMutation({
   const result = await gate.run(async () => {
     setBusy(true);
     setError(null);
-    commit(applyOptimisticActiveEntryCompactPatch(snapshot, input.plan));
+    const optimistic = applyOptimisticActiveEntryCompactPatch(snapshot, input.plan);
+    commit(optimistic);
     setDraft(nextDraft);
     try {
       const response = await send(activeEntry.id, input.plan.payload);
       const current = getCurrentData();
-      if (response.updatedAt && current) {
+      if (response.updatedAt && current?.activeEntry === optimistic.activeEntry) {
         commit(applyAuthoritativeActiveEntryVersion(current, activeEntry.id, response.updatedAt));
       }
       return { ok: true } as const;
     } catch (error) {
-      commit(snapshot);
-      setDraft(draftSnapshot);
       const message = timerCompactEditErrorMessage(error);
-      setError(message);
+      const current = getCurrentData();
+      // A period change can keep the optimistic timer while replacing everything around it.
+      // A newer server timer or workspace has already replaced the object this edit projected.
+      if (current?.activeEntry === optimistic.activeEntry) {
+        const typed = getCurrentDraft();
+        const newerFields = timerDraftEditedFields(typed, nextDraft);
+        commit(applyServerActiveEntry(current, activeEntry.id, activeEntry));
+        onRollback?.();
+        setDraft(newerFields.length ? pickTimerDraftFields(typed, draftSnapshot, newerFields) : draftSnapshot);
+        setError(message);
+      }
       return { ok: false, error: message } as const;
     } finally {
       setBusy(false);
