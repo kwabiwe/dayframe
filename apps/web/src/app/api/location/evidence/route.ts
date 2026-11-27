@@ -22,6 +22,30 @@ function privateJson(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: PRIVATE_LOCATION_HEADERS });
 }
 
+async function readEvidenceBody(request: Request): Promise<string | null> {
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+
+      bytes += value.byteLength;
+      if (bytes > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export const maxDuration = 15;
 
 export async function POST(request: Request) {
@@ -35,8 +59,8 @@ export async function POST(request: Request) {
       return respond({ error: "Location evidence batch is too large." }, 413);
     }
     const session = await resolveRequestSession(request);
-    const text = await request.text();
-    if (new TextEncoder().encode(text).byteLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
+    const text = await readEvidenceBody(request);
+    if (text === null) {
       return respond({ error: "Location evidence batch is too large." }, 413);
     }
     let body: unknown;

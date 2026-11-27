@@ -57,6 +57,33 @@ describe("POST /api/location/evidence", () => {
     expect(mocks.ingestLocationEvidence).not.toHaveBeenCalled();
   });
 
+  it("cancels an oversized stream as soon as it crosses the byte limit", async () => {
+    const chunks = [
+      new Uint8Array(512 * 1024),
+      new Uint8Array(1),
+      new Uint8Array(1)
+    ];
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      const chunk = chunks.shift();
+      if (chunk) controller.enqueue(chunk);
+      else controller.close();
+    });
+    const cancel = vi.fn();
+    const init = {
+      method: "POST",
+      body: new ReadableStream({ pull, cancel }, { highWaterMark: 0 }),
+      duplex: "half"
+    };
+
+    const response = await POST(new Request("https://dayframe.test/api/location/evidence", init));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "Location evidence batch is too large." });
+    expect(pull).toHaveBeenCalledTimes(2);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.ingestLocationEvidence).not.toHaveBeenCalled();
+  });
+
   it("returns 201 for a newly ingested private batch", async () => {
     const body = { clientBatchId: "batch-1", evidence: [{ clientEvidenceId: "evidence-1" }] };
     const response = await POST(new Request("https://dayframe.test/api/location/evidence", {
@@ -69,6 +96,30 @@ describe("POST /api/location/evidence", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
+  });
+
+  it("keeps a multibyte character split across request chunks intact", async () => {
+    const body = { clientBatchId: "café", evidence: [] };
+    const bytes = new TextEncoder().encode(JSON.stringify(body));
+    const split = bytes.indexOf(0xc3) + 1;
+    const init = {
+      method: "POST",
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, split));
+          controller.enqueue(bytes.subarray(split));
+          controller.close();
+        }
+      }),
+      duplex: "half"
+    };
+
+    const response = await POST(new Request("https://dayframe.test/api/location/evidence", init));
+
+    expect(response.status).toBe(201);
+    expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(
+      body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
   });
 
   it("adds the open Review count for the phone's evening reminder", async () => {
