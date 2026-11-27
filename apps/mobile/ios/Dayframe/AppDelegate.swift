@@ -16,6 +16,7 @@ class AppDelegate: ExpoAppDelegate {
     DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
     DayframeDiagnosticsService.shared.start()
     DayframeLocalDatabaseBackup.exclude()
+    application.shortcutItems = DayframeHomeScreenTimerAction.allCases.map(\.shortcutItem)
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -62,6 +63,9 @@ final class DayframeSceneDelegate: UIResponder, UIWindowSceneDelegate {
     // Let Expo record the initial link before JS starts. Supply the same URL in
     // React Native's launch options for callers using its Linking module.
     var launchOptions: [UIApplication.LaunchOptionsKey: Any] = [:]
+    if let shortcut = connectionOptions.shortcutItem {
+      _ = handleHomeScreenShortcut(shortcut)
+    }
     if let context = connectionOptions.urlContexts.first {
       forward(context, to: appDelegate)
       launchOptions[.url] = context.url
@@ -83,6 +87,20 @@ final class DayframeSceneDelegate: UIResponder, UIWindowSceneDelegate {
     for context in URLContexts {
       forward(context, to: appDelegate)
     }
+  }
+
+  func windowScene(
+    _ windowScene: UIWindowScene,
+    performActionFor shortcutItem: UIApplicationShortcutItem,
+    completionHandler: @escaping (Bool) -> Void
+  ) {
+    completionHandler(handleHomeScreenShortcut(shortcutItem))
+  }
+
+  private func handleHomeScreenShortcut(_ shortcut: UIApplicationShortcutItem) -> Bool {
+    guard let action = DayframeHomeScreenTimerAction(rawValue: shortcut.type) else { return false }
+    action.submit()
+    return true
   }
 
   func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
@@ -118,6 +136,28 @@ final class DayframeSceneDelegate: UIResponder, UIWindowSceneDelegate {
     options[.sourceApplication] = context.options.sourceApplication
     options[.annotation] = context.options.annotation
     _ = appDelegate.application(UIApplication.shared, open: context.url, options: options)
+  }
+}
+
+private extension DayframeHomeScreenTimerAction {
+  var shortcutItem: UIApplicationShortcutItem {
+    let title: String
+    let symbol: String
+    switch self {
+    case .start:
+      title = NSLocalizedString("Start a block", comment: "Home Screen timer action")
+      symbol = "play.fill"
+    case .stop:
+      title = NSLocalizedString("Stop running block", comment: "Home Screen timer action")
+      symbol = "stop.fill"
+    }
+    return UIApplicationShortcutItem(
+      type: rawValue,
+      localizedTitle: title,
+      localizedSubtitle: nil,
+      icon: UIApplicationShortcutIcon(systemImageName: symbol),
+      userInfo: nil
+    )
   }
 }
 

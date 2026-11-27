@@ -133,6 +133,29 @@ private enum DayframeShortcutAction {
   case stopLiveActivity(activityId: String, entryId: String, apiBase: String, clientEventId: String)
 }
 
+enum DayframeHomeScreenTimerAction: String, CaseIterable {
+  case start = "com.layereight.dayframe.home-screen.start"
+  case stop = "com.layereight.dayframe.home-screen.stop"
+
+  /// Capture the owner and the action time before launching or resuming the React UI.
+  /// The same durable Shortcuts queue and receipt-based delivery own the mutation.
+  func submit() {
+    let catalog = DayframeShortcutCatalogStore.catalog
+    guard catalog.user != nil, catalog.workspace != nil else { return }
+    let action: DayframeShortcutAction
+    switch self {
+    case .start:
+      action = .start(description: nil, categoryName: nil, workspaceName: nil)
+    case .stop:
+      action = .stopRunning
+    }
+    let event = DayframeShortcutEvent(action: action, catalog: catalog)
+    Task {
+      await DayframeShortcutPerformer.perform(action, capturedEvent: event)
+    }
+  }
+}
+
 private func dayframeCleanText(_ value: String?) -> String? {
   guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
     return nil
@@ -141,14 +164,15 @@ private func dayframeCleanText(_ value: String?) -> String? {
 }
 
 private enum DayframeShortcutPerformer {
-  static func perform(_ action: DayframeShortcutAction) async {
+  static func perform(_ action: DayframeShortcutAction, capturedEvent: DayframeShortcutEvent? = nil) async {
     let catalog = DayframeShortcutCatalogStore.catalog
     // App Intents can run while Dayframe is signed out. Never create an
     // ownerless event that a different account could inherit later.
     guard catalog.user != nil, catalog.workspace != nil else {
       return
     }
-    let event = DayframeShortcutEvent(action: action, catalog: catalog)
+    let event = capturedEvent ?? DayframeShortcutEvent(action: action, catalog: catalog)
+    guard catalog.ownedBy(event) else { return }
 
     switch action {
     case .start(_, let categoryName, _):

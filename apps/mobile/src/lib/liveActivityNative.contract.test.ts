@@ -6,6 +6,25 @@ import { DAYFRAME_BLOCKS, DAYFRAME_THEME } from "@dayframe/shared";
 const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 describe("native Live Activity presentation contract", () => {
+  it("routes cold and warm Home Screen actions into the existing owner-scoped timer delivery", () => {
+    const app = readFileSync(`${mobileRoot}ios/Dayframe/AppDelegate.swift`, "utf8");
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const action = shortcuts.slice(
+      shortcuts.indexOf("enum DayframeHomeScreenTimerAction"),
+      shortcuts.indexOf("private func dayframeCleanText")
+    );
+
+    expect(app).toContain("application.shortcutItems = DayframeHomeScreenTimerAction.allCases");
+    expect(app).toContain("connectionOptions.shortcutItem");
+    expect(app).toContain("performActionFor shortcutItem: UIApplicationShortcutItem");
+    expect(app).toContain("DayframeHomeScreenTimerAction(rawValue: shortcut.type)");
+    expect(action).toContain(".start(description: nil, categoryName: nil, workspaceName: nil)");
+    expect(action).toContain("action = .stopRunning");
+    expect(action.indexOf("let event = DayframeShortcutEvent")).toBeLessThan(action.indexOf("Task {"));
+    expect(action).toContain("perform(action, capturedEvent: event)");
+    expect(shortcuts).toContain("guard catalog.ownedBy(event) else { return }");
+  });
+
   it("keeps uncategorized shortcut starts consistent with app starts", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
 
