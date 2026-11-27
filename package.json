@@ -6,6 +6,11 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "query-string@7.1.3": {
+      "decode-uri-component": "0.5.1"
+    }
+  },
   "scripts": {
     "postinstall": "node scripts/apply-native-patches.mjs",
     "dev:web": "npm run dev -w @dayframe/web",
