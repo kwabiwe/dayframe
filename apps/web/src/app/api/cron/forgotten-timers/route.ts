@@ -13,6 +13,6 @@ export async function GET(request: Request) {
       headers: { "Cache-Control": "private, no-store" }
     });
   } catch {
-    return NextResponse.json({ error: "Timer reminder delivery failed." }, { status: 500 });
+    return NextResponse.json({ error: "Reminder delivery failed." }, { status: 500 });
   }
 }

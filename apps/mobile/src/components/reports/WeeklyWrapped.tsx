@@ -3,9 +3,9 @@ import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-na
 import Animated, { FadeIn } from "react-native-reanimated";
 import { buildWeeklyWrapped } from "@dayframe/shared";
 import type { MobileTheme } from "@/lib/mobileTheme";
-import { MOBILE_DISPLAY_FONT } from "@/lib/mobileTypography";
+import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
 import type { ReportRange } from "@/lib/reportsRanges";
-import { spokenReportDuration } from "@/lib/reportsPresentation";
+import { spokenReportDuration } from "../../lib/reportsPresentation";
 import { compactDuration } from "../today/todayBlocksLayout";
 import type { ReportDayStack } from "./ReportsBlocks";
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { randomUUID } from "expo-crypto";
 import Reanimated from "react-native-reanimated";
 import { TimeWheelPanel } from "@/components/TimeWheelPanel";
@@ -113,9 +114,9 @@ export function ForgottenTimerCard({ entryId, startedAt, owner, refresh, visible
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 16, padding: 16, gap: 10 },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, padding: 16, gap: 10 },
   title: { fontSize: 18, fontWeight: "700" },
   actions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   picker: { gap: 8 },
-  button: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 22 }
+  button: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: DAYFRAME_BLOCKS.radius.pill }
 });

@@ -2518,7 +2518,7 @@ export default function SettingsScreen() {
                 />
               </SettingsBlockGroup>
 
-              <SettingsBlockGroup theme={theme} title="Timer">
+              <SettingsBlockGroup theme={theme} title="Reminders">
                 <ForgottenTimerAlertsSetting theme={theme} />
               </SettingsBlockGroup>
 

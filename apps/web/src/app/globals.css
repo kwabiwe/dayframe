@@ -16182,25 +16182,11 @@ button.timeline-location-hit:focus-visible {
 }
 
 /* Touch screens: segments and text fields at 44 px, last in the cascade (WUI-019, WUI-046). */
-@media (any-pointer: coarse) {
-  .df-seg a,
-  .ui-segmented-control button,
-  .df-pe-seg span,
-  .df-flist-search input,
-  .df-mw-row {
-    min-height: 44px;
-  }
-
-  .df-flist-search {
-    height: auto;
-  }
-}
-
 .weekly-wrapped > summary {
   cursor: pointer;
   min-height: 44px;
   align-content: center;
-  font-weight: 650;
+  font-weight: var(--fw-strong);
 }
 
 .weekly-wrapped-body {
@@ -16209,7 +16195,7 @@ button.timeline-location-hit:focus-visible {
 }
 
 .weekly-wrapped-body h2 {
-  font-size: clamp(2rem, 6vw, 4.5rem);
+  font-size: clamp(32px, 6vw, 72px);
   line-height: 1.05;
   margin: 6px 0;
 }
@@ -16229,18 +16215,18 @@ button.timeline-location-hit:focus-visible {
   flex: 1;
   min-width: 0;
   text-align: center;
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
 }
 
 .weekly-wrapped-days li.is-busiest {
   flex: 1.5;
-  font-weight: 700;
+  font-weight: var(--fw-strong);
 }
 
 .weekly-wrapped-track,
 .weekly-wrapped-lead {
   background: var(--surface-muted);
-  border-radius: 12px;
+  border-radius: var(--r-card);
 }
 
 .weekly-wrapped-track {
@@ -16294,5 +16280,19 @@ button.timeline-location-hit:focus-visible {
 
   @keyframes dayframe-week-column-in {
     from { transform: scaleY(0); }
+  }
+}
+
+@media (any-pointer: coarse) {
+  .df-seg a,
+  .ui-segmented-control button,
+  .df-pe-seg span,
+  .df-flist-search input,
+  .df-mw-row {
+    min-height: 44px;
+  }
+
+  .df-flist-search {
+    height: auto;
   }
 }

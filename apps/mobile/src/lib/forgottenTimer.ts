@@ -38,7 +38,7 @@ export async function respondToForgottenTimer(owner: MobileAccountOwner, entryId
   const result = await request(owner, encodeURIComponent(entryId), "POST", response);
   if (result.response.ok) return "saved";
   if (result.response.status === 409) return "changed";
-  throw new Error("The timer response could not be saved.");
+  throw new Error("The block response could not be saved.");
 }
 
 export async function readForgottenTimerAlerts(owner: MobileAccountOwner) {
