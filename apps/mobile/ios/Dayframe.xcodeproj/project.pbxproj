@@ -10,17 +10,15 @@
 		04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		4818EFEB6FC558C0DBAEC671 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 640246549EE50B97A533725A /* Assets.xcassets */; };
 		779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		BF7E33F3DCE112F7CE2673E1 /* DayframeWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA33902D18B30AD5502B1C28 /* DayframeWatchApp.swift */; };
 		DFA7110001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */; };
 		DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
 		DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
 		DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */; };
 		DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */; };
-		DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */; };
-		DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */; };
-		DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */; };
-		DFB0200001BC49B8811A0004 /* DayframeThreadSampler.c in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */; };
 		DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
 		DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */; };
 		DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */; };
@@ -37,14 +35,28 @@
 		DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
 		DFB0100001BC49B8811A0001 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
 		DFB0100001BC49B8811A0002 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
+		DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */; };
+		DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */; };
+		DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */; };
+		DFB0200001BC49B8811A0004 /* DayframeThreadSampler.c in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */; };
 		DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */; };
 		DFB2000001BC49B8811A0005 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
+		EE13BC1587F4A22F42C24F2A /* DayframeWatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD5C58D4E61748CE2DC07ADE /* DayframeWatchBridge.swift */; };
+		EF620005708E792B9056D2EB /* DayframeWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 60D3BA50ECE0A8C113A8C509 /* DayframeWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
+		FCDE78B9E863EDD3C8AD405A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A92C06C15FF3F8DA44AD7830 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		468C28569789529DC747E6F5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6E5C2952D95049C94BC09615;
+			remoteInfo = DayframeWatch;
+		};
 		DFA7120001BC49B8811A0032 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
@@ -62,6 +74,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		0121273AFD82BE10A831F90C /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				EF620005708E792B9056D2EB /* DayframeWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DFA7120001BC49B8811A0024 /* Embed App Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -83,19 +106,18 @@
 		1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Dayframe.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.release.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.release.xcconfig"; sourceTree = "<group>"; };
 		47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Dayframe/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		60D3BA50ECE0A8C113A8C509 /* DayframeWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayframeWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		640246549EE50B97A533725A /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		883B29D3ECC403AF19A0A13D /* Pods-Dayframe.staging.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.staging.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.staging.xcconfig"; sourceTree = "<group>"; };
+		A92C06C15FF3F8DA44AD7830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Dayframe/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		BD5C58D4E61748CE2DC07ADE /* DayframeWatchBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DayframeWatchBridge.swift; path = Dayframe/DayframeWatchBridge.swift; sourceTree = "<group>"; };
 		DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeShortcuts.swift; path = Dayframe/DayframeShortcuts.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityAttributes.swift; path = Dayframe/DayframeLiveActivityAttributes.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityController.swift; path = Dayframe/DayframeLiveActivityController.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityModule.swift; path = Dayframe/DayframeLiveActivityModule.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeLiveActivityModuleBridge.m; path = Dayframe/DayframeLiveActivityModuleBridge.m; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnosticsCore.swift; path = Dayframe/DayframeDiagnosticsCore.swift; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnostics.swift; path = Dayframe/DayframeDiagnostics.swift; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeDiagnosticsModuleBridge.m; path = Dayframe/DayframeDiagnosticsModuleBridge.m; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = DayframeThreadSampler.c; path = Dayframe/DayframeThreadSampler.c; sourceTree = "<group>"; };
-		DFB0200001BC49B8811A0015 /* DayframeThreadSampler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = DayframeThreadSampler.h; path = Dayframe/DayframeThreadSampler.h; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeLiveActivityBundle.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeTimerLiveActivity.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -108,8 +130,14 @@
 		DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetQAHarness.swift; sourceTree = "<group>"; };
 		DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedStorageConfiguration.swift; path = Dayframe/DayframeSharedStorageConfiguration.swift; sourceTree = "<group>"; };
 		DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedFileLock.swift; path = Dayframe/DayframeSharedFileLock.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnosticsCore.swift; path = Dayframe/DayframeDiagnosticsCore.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnostics.swift; path = Dayframe/DayframeDiagnostics.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeDiagnosticsModuleBridge.m; path = Dayframe/DayframeDiagnosticsModuleBridge.m; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0014 /* DayframeThreadSampler.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = DayframeThreadSampler.c; path = Dayframe/DayframeThreadSampler.c; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0015 /* DayframeThreadSampler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = DayframeThreadSampler.h; path = Dayframe/DayframeThreadSampler.h; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-Bold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-ExtraBold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-ExtraBold.ttf"; sourceTree = "<group>"; };
+		EA33902D18B30AD5502B1C28 /* DayframeWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DayframeWatchApp.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -122,6 +150,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		339137D35069295A9DD9D58A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FCDE78B9E863EDD3C8AD405A /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,6 +212,7 @@
 				47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */,
 				DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */,
 				DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */,
+				BD5C58D4E61748CE2DC07ADE /* DayframeWatchBridge.swift */,
 			);
 			name = Dayframe;
 			sourceTree = "<group>";
@@ -185,8 +222,27 @@
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */,
+				80AF4E69296466B44FC4420B /* watchOS */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		3540F42AFD06243871FAA3DA /* DayframeWatch */ = {
+			isa = PBXGroup;
+			children = (
+				EA33902D18B30AD5502B1C28 /* DayframeWatchApp.swift */,
+				640246549EE50B97A533725A /* Assets.xcassets */,
+			);
+			name = DayframeWatch;
+			path = DayframeWatch;
+			sourceTree = "<group>";
+		};
+		80AF4E69296466B44FC4420B /* watchOS */ = {
+			isa = PBXGroup;
+			children = (
+				A92C06C15FF3F8DA44AD7830 /* Foundation.framework */,
+			);
+			name = watchOS;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -207,6 +263,7 @@
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				8B53C3DAD95134FCC8817840 /* Pods */,
 				BAD062834DAA0307FD7E7788 /* ExpoModulesProviders */,
+				3540F42AFD06243871FAA3DA /* DayframeWatch */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -219,6 +276,7 @@
 				13B07F961A680F5B00A75B9A /* Dayframe.app */,
 				DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */,
 				DFA7200001BC49B8811A0012 /* DayframeSheetQATests.xctest */,
+				60D3BA50ECE0A8C113A8C509 /* DayframeWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -286,15 +344,34 @@
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				986EA460A2C4C44DDFF08D75 /* [CP] Embed Pods Frameworks */,
+				0121273AFD82BE10A831F90C /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				DFA7120001BC49B8811A0033 /* PBXTargetDependency */,
+				3F342A61DA2C15BAC2231A7C /* PBXTargetDependency */,
 			);
 			name = Dayframe;
 			productName = Dayframe;
 			productReference = 13B07F961A680F5B00A75B9A /* Dayframe.app */;
+			productType = "com.apple.product-type.application";
+		};
+		6E5C2952D95049C94BC09615 /* DayframeWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E9A1A72AF241C2530CDE00CA /* Build configuration list for PBXNativeTarget "DayframeWatch" */;
+			buildPhases = (
+				C1EB8C53EF9222CDF6483FD3 /* Sources */,
+				339137D35069295A9DD9D58A /* Frameworks */,
+				3468838133EAC13249EEC791 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DayframeWatch;
+			productName = DayframeWatch;
+			productReference = 60D3BA50ECE0A8C113A8C509 /* DayframeWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
 		DFA7120001BC49B8811A0031 /* DayframeLiveActivity */ = {
@@ -368,6 +445,7 @@
 				13B07F861A680F5B00A75B9A /* Dayframe */,
 				DFA7120001BC49B8811A0031 /* DayframeLiveActivity */,
 				DFA7200001BC49B8811A0040 /* DayframeSheetQATests */,
+				6E5C2952D95049C94BC09615 /* DayframeWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -383,6 +461,14 @@
 				F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */,
 				DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */,
 				DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3468838133EAC13249EEC791 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4818EFEB6FC558C0DBAEC671 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -551,6 +637,15 @@
 				DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */,
 				DFB0200001BC49B8811A0004 /* DayframeThreadSampler.c in Sources */,
 				04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */,
+				EE13BC1587F4A22F42C24F2A /* DayframeWatchBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1EB8C53EF9222CDF6483FD3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF7E33F3DCE112F7CE2673E1 /* DayframeWatchApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -582,6 +677,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		3F342A61DA2C15BAC2231A7C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = DayframeWatch;
+			target = 6E5C2952D95049C94BC09615 /* DayframeWatch */;
+			targetProxy = 468C28569789529DC747E6F5 /* PBXContainerItemProxy */;
+		};
 		DFA7120001BC49B8811A0033 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = DFA7120001BC49B8811A0031 /* DayframeLiveActivity */;
@@ -674,6 +775,30 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		4DE3E22D9FD03DBB20187DC6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Dayframe;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.layereight.dayframe;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1073,6 +1198,56 @@
 			};
 			name = Release;
 		};
+		E050B404F54025D0F45EED5A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Dayframe;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.layereight.dayframe;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		FCB28DF9801C2FF5B05A0C21 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Dayframe Staging";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.layereight.dayframe.staging;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.staging.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Staging;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1112,6 +1287,16 @@
 				DFA7200001BC49B8811A0051 /* Debug */,
 				DFA7200001BC49B8811A0052 /* Staging */,
 				DFA7200001BC49B8811A0053 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E9A1A72AF241C2530CDE00CA /* Build configuration list for PBXNativeTarget "DayframeWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E050B404F54025D0F45EED5A /* Release */,
+				4DE3E22D9FD03DBB20187DC6 /* Debug */,
+				FCB28DF9801C2FF5B05A0C21 /* Staging */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

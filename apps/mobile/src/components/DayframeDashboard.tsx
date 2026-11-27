@@ -1,5 +1,9 @@
 import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
+import { KeepTodayAwake, useKeepTodayAwake } from "@/lib/deviceDisplay";
+import { useWatchTimer } from "@/lib/watchTimer";
+import { FORGOTTEN_TIMER_AGE_MS, subscribeForgottenTimerOpens } from "@/lib/forgottenTimer";
+import { ForgottenTimerCard } from "@/components/today/ForgottenTimerCard";
 import { CalendarDayInspector, calendarInspectorWidth } from "@/components/calendar/CalendarDayInspector";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
 import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
@@ -456,6 +460,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const appIsForeground = useAppForeground();
+  const keepTodayAwake = useKeepTodayAwake();
   // Reports' running totals read the Dashboard's seconds; coming back to Reports reads the time in that render.
   const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
@@ -1680,6 +1685,32 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // another account lifetime, is dropped).
   const stopActiveTimerRef = useRef<() => Promise<boolean>>(async () => false);
   useShortcutStopHandoff(authState === "authenticated" && data !== null, () => stopActiveTimerRef.current());
+  useWatchTimer(
+    authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}:${noticeSessionGeneration.current}` : null,
+    data?.activeEntry?.id ?? null,
+    data?.activeEntry?.startedAt ?? null,
+    async (command) => {
+      if (authState !== "authenticated" || !latestData.current || !data) return false;
+      const owner = todayNoticeOwner();
+      if (!todayNoticeOwnerStill(owner)) return false;
+      if (command.action === "stop") return stopActiveTimer(command.entryId);
+      return startTaskWith(
+        { startedAt: null },
+        { canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
+      );
+    }
+  );
+
+  const hasAuthenticatedTimerState = authState === "authenticated" && data !== null;
+  useEffect(() => {
+    if (!hasAuthenticatedTimerState || Platform.OS !== "ios") return;
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    void subscribeForgottenTimerOpens((entryId) => {
+      if (!disposed && latestData.current?.activeEntry?.id === entryId) router.navigate("/(tabs)/today");
+    }).then((remove) => { if (disposed) remove(); else cleanup = remove; }).catch(() => undefined);
+    return () => { disposed = true; cleanup?.(); };
+  }, [hasAuthenticatedTimerState]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
@@ -3653,13 +3684,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [shiftSelectedCalendarDay]);
 
   stopActiveTimerRef.current = stopActiveTimer;
-  async function stopActiveTimer() {
+  async function stopActiveTimer(expectedEntryId?: string) {
     const generation = noticeSessionGeneration.current;
     const undoInFlight = runningSplit.undoInFlight();
     if (undoInFlight) await undoInFlight;
     if (generation !== noticeSessionGeneration.current) return false;
     const activeEntry = latestData.current?.activeEntry;
-    if (!activeEntry) return false;
+    if (!activeEntry || (expectedEntryId && activeEntry.id !== expectedEntryId)) return false;
     if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) return false;
     const bootstrap = latestData.current;
     if (!bootstrap) return false;
@@ -4351,6 +4382,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function renderTodayTab(isFocused: boolean) {
     todayTabFocused.current = isFocused;
     const currentDate = new Date(now);
+    const overdue = data?.activeEntry && now - Date.parse(data.activeEntry.startedAt) >= FORGOTTEN_TIMER_AGE_MS
+      ? data.activeEntry : null;
     return (
       <TodayReviewPresentationProvider
         bootstrap={data}
@@ -4361,6 +4394,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         refreshGeneration={todayPresentationRefreshGeneration}
       >
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
+        {keepTodayAwake && isFocused && appIsForeground && data?.activeEntry ? <KeepTodayAwake /> : null}
         {/* Behind the list: the blocks show in the gap a pull opens above Today. */}
         <TodayPullBlocks
           refreshing={isFocused && refreshing}
@@ -4398,6 +4432,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               </View>
 
               <TodayGoalFrame dateLabel={formatEyebrowDay(currentDate)} theme={theme} {...todayGoalFrame} />
+
+              {overdue && data ? <ForgottenTimerCard
+                key={`${data.workspace.id}:${data.user.id}:${overdue.id}`}
+                entryId={overdue.id}
+                startedAt={overdue.startedAt}
+                owner={timerStopOwner(data)}
+                visible={isFocused && appIsForeground}
+                refresh={() => { void load({ silent: true }); }}
+                reduceMotion={reduceMotion}
+                theme={theme}
+                clockFormat={clockFormat}
+              /> : null}
 
               <TodayTimerSurface
                 // While the Stop flight's ghost holds the block's place, the block is hidden; once Stop

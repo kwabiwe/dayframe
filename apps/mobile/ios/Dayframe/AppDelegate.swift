@@ -16,6 +16,7 @@ class AppDelegate: ExpoAppDelegate {
     DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
     DayframeDiagnosticsService.shared.start()
     DayframeLocalDatabaseBackup.exclude()
+    DayframeWatchPhoneLink.shared.activate()
     application.shortcutItems = DayframeHomeScreenTimerAction.allCases.map(\.shortcutItem)
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
@@ -25,6 +26,14 @@ class AppDelegate: ExpoAppDelegate {
     reactNativeFactory = factory
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  public override func application(
+    _ application: UIApplication,
+    supportedInterfaceOrientationsFor window: UIWindow?
+  ) -> UIInterfaceOrientationMask {
+    if (window?.traitCollection.userInterfaceIdiom ?? UIDevice.current.userInterfaceIdiom) == .pad { return .all }
+    return DayframeDeviceDisplay.landscapeAllowed ? .allButUpsideDown : .portrait
   }
 
   // Linking API
@@ -44,6 +53,31 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+}
+
+@objc(DayframeDeviceDisplay)
+final class DayframeDeviceDisplay: NSObject {
+  private static let landscapeKey = "dayframe.device-display.landscape"
+  static var landscapeAllowed: Bool { UserDefaults.standard.bool(forKey: landscapeKey) }
+
+  @objc(landscapeEnabled:rejecter:)
+  func landscapeEnabled(_ resolve: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) {
+    resolve(Self.landscapeAllowed)
+  }
+
+  @objc(setLandscapeEnabled:resolver:rejecter:)
+  func setLandscapeEnabled(_ enabled: Bool, resolver resolve: @escaping RCTPromiseResolveBlock,
+                           rejecter reject: RCTPromiseRejectBlock) {
+    DispatchQueue.main.async {
+      UserDefaults.standard.set(enabled, forKey: Self.landscapeKey)
+      for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+      where scene.traitCollection.userInterfaceIdiom == .phone {
+        scene.windows.first(where: \.isKeyWindow)?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        if !enabled { scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) }
+      }
+      resolve(nil)
+    }
   }
 }
 

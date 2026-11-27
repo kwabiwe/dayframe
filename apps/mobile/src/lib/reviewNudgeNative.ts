@@ -40,13 +40,13 @@ export async function cancelReviewNudge() {
 export function subscribeReviewNudgeOpens(onOpen: (accountKey: string | null) => void) {
   const handle = (response: Notifications.NotificationResponse | null) => {
     const data = response?.notification.request.content.data as { kind?: unknown; accountKey?: unknown } | undefined;
-    if (data?.kind !== "review-nudge") return;
+    if (data?.kind !== "review-nudge") return false;
     onOpen(typeof data.accountKey === "string" ? data.accountKey : null);
+    return true;
   };
   const subscription = Notifications.addNotificationResponseReceivedListener(handle);
   void Notifications.getLastNotificationResponseAsync().then((response) => {
-    handle(response);
-    if (response) void Notifications.clearLastNotificationResponseAsync();
+    if (handle(response)) void Notifications.clearLastNotificationResponseAsync();
   }).catch(() => undefined);
   return () => subscription.remove();
 }

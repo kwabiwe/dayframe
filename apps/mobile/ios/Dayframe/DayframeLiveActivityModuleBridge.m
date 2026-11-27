@@ -1,6 +1,9 @@
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
 @interface RCT_EXTERN_MODULE(DayframeLiveActivityModule, NSObject)
+
+RCT_EXTERN_METHOD(apnsEnvironment:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(start:(NSString *)title
                   entryId:(NSString *)entryId
@@ -58,4 +61,14 @@ RCT_EXTERN_METHOD(clearRuntimeContextIfToken:(NSString *)sessionToken
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+@end
+
+@interface RCT_EXTERN_MODULE(DayframeWatchBridge, RCTEventEmitter)
+RCT_EXTERN_METHOD(updateTimerSnapshot:(NSString *)revision entryId:(NSString *)entryId startedAt:(NSString *)startedAt)
+RCT_EXTERN_METHOD(completeTimerCommand:(NSString *)requestId accepted:(BOOL)accepted)
+@end
+
+@interface RCT_EXTERN_MODULE(DayframeDeviceDisplay, NSObject)
+RCT_EXTERN_METHOD(landscapeEnabled:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(setLandscapeEnabled:(BOOL)enabled resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 @end

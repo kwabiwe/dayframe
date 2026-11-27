@@ -1,4 +1,6 @@
 import { DIVIDER_INSET_PAST_TILE, InsetDivider } from "../src/components/InsetDivider";
+import { ForgottenTimerAlertsSetting } from "@/components/settings/ForgottenTimerAlertsSetting";
+import { DeviceDisplaySettings } from "@/components/settings/DeviceDisplaySettings";
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { captureSyncDiagnosticScope, exportSyncDiagnosticHistory, isSyncDiagnosticScopeCurrent } from "@/lib/syncDiagnosticHistory";
@@ -2516,7 +2518,12 @@ export default function SettingsScreen() {
                 />
               </SettingsBlockGroup>
 
+              <SettingsBlockGroup theme={theme} title="Timer">
+                <ForgottenTimerAlertsSetting theme={theme} />
+              </SettingsBlockGroup>
+
               <SettingsBlockGroup theme={theme} title="Appearance">
+                <DeviceDisplaySettings theme={theme} />
                 <SettingsBlockRow
                   control={
                     <SettingsSegmented

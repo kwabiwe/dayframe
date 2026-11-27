@@ -8,7 +8,9 @@ describe("shortcut Stop hand-off contract", () => {
     expect(dashboard).toContain("useShortcutStopHandoff(authState === \"authenticated\" && data !== null, () => stopActiveTimerRef.current());");
     expect(dashboard).toContain("stopActiveTimerRef.current = stopActiveTimer;");
     // stopActiveTimer persists a Stop aimed at the running entry, never an untargeted one.
-    const stop = dashboard.slice(dashboard.indexOf("async function stopActiveTimer()"), dashboard.indexOf("async function deleteActiveTimer("));
+    const stop = dashboard.slice(dashboard.indexOf("async function stopActiveTimer("), dashboard.indexOf("async function deleteActiveTimer("));
+    expect(stop.indexOf("activeEntry.id !== expectedEntryId")).toBeGreaterThan(-1);
+    expect(stop.indexOf("activeEntry.id !== expectedEntryId")).toBeLessThan(stop.indexOf("persistPendingTimerStop({"));
     expect(stop).toContain("persistPendingTimerStop({");
     expect(stop).toContain("{ targetEntryId: persistedId }");
   });

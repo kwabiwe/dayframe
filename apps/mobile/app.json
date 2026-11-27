@@ -4,7 +4,7 @@
     "slug": "dayframe",
     "scheme": "dayframe",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "backgroundColor": "#050914",
     "userInterfaceStyle": "automatic",
     "ios": {

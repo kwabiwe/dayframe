@@ -8,6 +8,11 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
+  @objc(apnsEnvironment:rejecter:)
+  func apnsEnvironment(_ resolve: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) {
+    resolve(DayframeLiveActivityController.pushEnvironment())
+  }
+
   @objc(start:entryId:apiBase:categoryName:categoryColor:startedAt:categoryColorLight:resolver:rejecter:)
   func start(
     title: String,
