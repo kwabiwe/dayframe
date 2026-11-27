@@ -12,6 +12,7 @@ const extensionEntitlements = readFileSync(
   "utf8"
 );
 const hostInfo = readFileSync(resolve(iosRoot, "Dayframe/Info.plist"), "utf8");
+const hostAppDelegate = readFileSync(resolve(iosRoot, "Dayframe/AppDelegate.swift"), "utf8");
 const extensionInfo = readFileSync(resolve(iosRoot, "DayframeLiveActivity/Info.plist"), "utf8");
 const eas = JSON.parse(readFileSync(resolve(mobileRoot, "eas.json"), "utf8"));
 const app = JSON.parse(readFileSync(resolve(mobileRoot, "app.json"), "utf8"));
@@ -48,6 +49,16 @@ for (const [configuration, identity] of [
 }
 expect(eas.build?.preview?.ios?.buildConfiguration === "Staging", "EAS preview must explicitly use Staging.");
 expect(eas.build?.production?.ios?.buildConfiguration === "Release", "EAS production must explicitly use Release.");
+expect(
+  hostInfo.includes("<key>UIApplicationSceneManifest</key>") &&
+    plistValueFromText(hostInfo, "UISceneDelegateClassName") === "$(PRODUCT_MODULE_NAME).DayframeSceneDelegate" &&
+    /<key>UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/.test(hostInfo),
+  "Dayframe must declare its single-window scene delegate for iOS 27 SDK launches."
+);
+expect(
+  hostAppDelegate.includes("UIWindow(windowScene: windowScene)"),
+  "Dayframe must attach its React Native window to the UIKit scene."
+);
 expect(
   eas.build?.preview?.env?.EXPO_PUBLIC_DAYFRAME_API_BASE === "https://dayframe-staging.vercel.app",
   "EAS preview must target the staging Dayframe API."
@@ -148,6 +159,10 @@ console.log("iOS build configuration check passed.");
 function verifyBuiltProducts(appPath) {
   const hostInfoPath = resolve(appPath, "Info.plist");
   const identity = plistValue(hostInfoPath, "CFBundleIdentifier");
+  expect(
+    plistValue(hostInfoPath, "UIApplicationSceneManifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication.0.UISceneDelegateClassName") === "Dayframe.DayframeSceneDelegate",
+    "The built app must resolve the Dayframe scene delegate class."
+  );
   for (const font of hostFonts) {
     expect(existsSync(resolve(appPath, font)), `Built app is missing the registered font ${font}.`);
   }

@@ -4,7 +4,7 @@ import ReactAppDependencyProvider
 
 @main
 class AppDelegate: ExpoAppDelegate {
-  var window: UIWindow?
+  weak var window: UIWindow?
 
   var reactNativeDelegate: ExpoReactNativeFactoryDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
@@ -22,14 +22,6 @@ class AppDelegate: ExpoAppDelegate {
 
     reactNativeDelegate = delegate
     reactNativeFactory = factory
-
-#if os(iOS) || os(tvOS)
-    window = UIWindow(frame: UIScreen.main.bounds)
-    factory.startReactNative(
-      withModuleName: "main",
-      in: window,
-      launchOptions: launchOptions)
-#endif
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -51,6 +43,81 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+}
+
+final class DayframeSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    let application = UIApplication.shared
+    guard let windowScene = scene as? UIWindowScene,
+          let appDelegate = application.delegate as? AppDelegate,
+          let factory = appDelegate.reactNativeFactory else { return }
+
+    // Let Expo record the initial link before JS starts. Supply the same URL in
+    // React Native's launch options for callers using its Linking module.
+    var launchOptions: [UIApplication.LaunchOptionsKey: Any] = [:]
+    if let context = connectionOptions.urlContexts.first {
+      forward(context, to: appDelegate)
+      launchOptions[.url] = context.url
+    } else if let activity = connectionOptions.userActivities.first(where: {
+      $0.activityType == NSUserActivityTypeBrowsingWeb && $0.webpageURL != nil
+    }) {
+      _ = appDelegate.application(application, continue: activity, restorationHandler: { _ in })
+      launchOptions[.url] = activity.webpageURL
+    }
+
+    let window = UIWindow(windowScene: windowScene)
+    self.window = window
+    appDelegate.window = window
+    factory.startReactNative(withModuleName: "main", in: window, launchOptions: launchOptions)
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    for context in URLContexts {
+      forward(context, to: appDelegate)
+    }
+  }
+
+  func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+    let application = UIApplication.shared
+    guard let appDelegate = application.delegate as? AppDelegate else { return }
+    _ = appDelegate.application(application, continue: userActivity, restorationHandler: { _ in })
+  }
+
+  // Expo SDK 56 forwards these delegate callbacks to its subscribers. UIKit
+  // calls the scene delegate for them once the app adopts scenes.
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    let application = UIApplication.shared
+    (application.delegate as? AppDelegate)?.applicationDidBecomeActive(application)
+  }
+
+  func sceneWillResignActive(_ scene: UIScene) {
+    let application = UIApplication.shared
+    (application.delegate as? AppDelegate)?.applicationWillResignActive(application)
+  }
+
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    let application = UIApplication.shared
+    (application.delegate as? AppDelegate)?.applicationWillEnterForeground(application)
+  }
+
+  func sceneDidEnterBackground(_ scene: UIScene) {
+    let application = UIApplication.shared
+    (application.delegate as? AppDelegate)?.applicationDidEnterBackground(application)
+  }
+
+  private func forward(_ context: UIOpenURLContext, to appDelegate: AppDelegate) {
+    var options: [UIApplication.OpenURLOptionsKey: Any] = [.openInPlace: context.options.openInPlace]
+    options[.sourceApplication] = context.options.sourceApplication
+    options[.annotation] = context.options.annotation
+    _ = appDelegate.application(UIApplication.shared, open: context.url, options: options)
   }
 }
 

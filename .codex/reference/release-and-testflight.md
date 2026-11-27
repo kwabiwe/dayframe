@@ -18,6 +18,8 @@ App Group selection must use the same `DAYFRAME_APP_GROUP` setting in the host/e
 
 Xcode 27 source builds require the ExpoModulesJSI SDK 56 setter fix, included in `56.0.13`. CocoaPods raises dependencies with lower iOS deployment targets to the app’s existing minimum. The app’s supported iOS versions and signing configuration stay the same.
 
+iOS 27 enforces the UIKit scene lifecycle for Xcode 27 builds. Verify the built app’s scene manifest with `check:ios-config`, then cold-launch the signed build on an iOS 27 device. Check background and foreground transitions and cold and warm links through the existing router. The launch and linking smoke does not replace the Health or Location background capture checks.
+
 ## Version Truth Table
 
 A Dayframe fix may span several independently deployed surfaces:
