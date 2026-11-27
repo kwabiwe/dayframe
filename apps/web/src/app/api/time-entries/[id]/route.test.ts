@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthError } from "@/lib/session";
+import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -341,6 +342,8 @@ describe("PATCH /api/time-entries/[id]", () => {
 });
 
 describe("DELETE /api/time-entries/[id]", () => {
+  const discardId = "80000000-0000-4000-8000-000000000001";
+  const discardHeader = { [WEB_TIMER_DISCARD_OWNER_HEADER]: `${session.userId}:${session.workspaceId}` };
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
@@ -375,6 +378,28 @@ describe("DELETE /api/time-entries/[id]", () => {
     await expect(response.json()).resolves.toEqual({ error: "Block not found." });
   });
 
+  it("acknowledges an exact web Discard already absent in the verified scope", async () => {
+    mocks.deleteTimeEntry.mockRejectedValueOnce(new mocks.TimeEntryNotFoundError());
+
+    const response = await DELETE(deleteRequest(discardId, discardHeader), routeContext(discardId));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, id: discardId, deleted: true });
+    expect(mocks.deleteTimeEntry).toHaveBeenCalledWith(discardId, session);
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
+  });
+
+  it("refuses a web Discard addressed to another account or workspace before any write", async () => {
+    const request = deleteRequest(discardId, { [WEB_TIMER_DISCARD_OWNER_HEADER]: `${session.userId}:${session.userId}` });
+    expect((await DELETE(request, routeContext(discardId))).status).toBe(409);
+    expect(mocks.deleteTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it("requires a canonical block id for web Discard", async () => {
+    expect((await DELETE(deleteRequest("invalid", discardHeader), routeContext("invalid"))).status).toBe(400);
+    expect(mocks.deleteTimeEntry).not.toHaveBeenCalled();
+  });
+
   it("returns the auth error when the user is unauthenticated", async () => {
     mocks.resolveRequestSession.mockRejectedValueOnce(new AuthError("Login required."));
 
@@ -394,9 +419,10 @@ function jsonRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-function deleteRequest(id = "entry-1") {
+function deleteRequest(id = "entry-1", headers?: Record<string, string>) {
   return new Request(`https://dayframe.test/api/time-entries/${id}`, {
-    method: "DELETE"
+    method: "DELETE",
+    headers
   });
 }
 

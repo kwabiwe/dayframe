@@ -1,6 +1,9 @@
 import { normalizeTagName, TagNameSchema } from "@dayframe/shared";
 import { z } from "zod";
 
+/** Opts web Discard into exact, account-bound replay. Value is `userId:workspaceId`. */
+export const WEB_TIMER_DISCARD_OWNER_HEADER = "x-dayframe-web-discard-owner";
+
 /**
  * Optimistic concurrency for a block's details (web timer autosave, 13 Oct 2026). A PATCH may
  * carry `expectedDetails`: for each detail field it changes, the value its edit was based on. If

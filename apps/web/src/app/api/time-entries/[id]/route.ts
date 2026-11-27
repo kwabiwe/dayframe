@@ -12,7 +12,7 @@ import { resolveRequestSession } from "@/lib/ingest-auth";
 import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { getTimeEntryById } from "@/lib/queries";
-import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
+import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema, WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -88,9 +88,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  let discardId: string | null = null;
   try {
     const session = await resolveRequestSession(request);
     const { id } = await context.params;
+    const discardOwner = request.headers.get(WEB_TIMER_DISCARD_OWNER_HEADER);
+    if (discardOwner !== null) {
+      if (discardOwner !== `${session.userId}:${session.workspaceId}`) {
+        return NextResponse.json({ error: "The account or workspace changed. Check the current block before trying again." }, { status: 409 });
+      }
+      if (!z.uuid().safeParse(id).success) {
+        return NextResponse.json({ error: "A web Discard must target a specific block." }, { status: 400 });
+      }
+      discardId = id;
+    }
     const result = await deleteTimeEntry(id, session);
     scheduleLiveActivityNotification(session);
     return NextResponse.json({ ok: true, ...result });
@@ -98,6 +109,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof TimeEntryNotFoundError) {
+      // A reply may have been lost after commit. The exact id is already absent in the verified scope.
+      if (discardId) return NextResponse.json({ ok: true, id: discardId, deleted: true });
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
     throw error;

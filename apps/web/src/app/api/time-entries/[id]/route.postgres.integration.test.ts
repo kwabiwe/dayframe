@@ -7,6 +7,7 @@ vi.mock("@/lib/live-activity-post-response", () => ({ scheduleLiveActivityNotifi
 
 import type pg from "pg";
 import { pool } from "@/lib/db";
+import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 import { POST as postEvent } from "../../events/route";
 import { POST as postEntry } from "../route";
 import { DELETE, PATCH } from "./route";
@@ -68,6 +69,26 @@ describe.runIf(runDatabaseIntegration)("Block catalogue ownership and Edit recei
 
   afterAll(async () => {
     await pool.end();
+  });
+
+  it("replays a lost Discard reply without deleting a replacement timer", async () => {
+    await pool.query("update time_entries set stopped_at = null where id = $1", [entryId]);
+    const discard = (owner = `${userId}:${workspaceId}`) => DELETE(
+      new Request(`http://localhost/api/time-entries/${entryId}`, {
+        method: "DELETE", headers: { [WEB_TIMER_DISCARD_OWNER_HEADER]: owner }
+      }), { params: Promise.resolve({ id: entryId }) }
+    );
+    expect((await discard(`${userId}:${otherWorkspaceId}`)).status).toBe(409);
+    expect((await discard()).status).toBe(200);
+    const replacement = (await pool.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, description, started_at)
+       values ($1, $2, 'replacement', $3) returning id`, [workspaceId, userId, T("11:00")]
+    )).rows[0]!.id;
+    const retry = await discard();
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual({ ok: true, id: entryId, deleted: true });
+    const rows = await pool.query("select id, stopped_at from time_entries where workspace_id = $1 and user_id = $2", [workspaceId, userId]);
+    expect(rows.rows).toEqual([{ id: replacement, stopped_at: null }]);
   });
 
   async function patch(body: Record<string, unknown>, commandId?: string) {

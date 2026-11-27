@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 
 // Production report, 13 Oct 2026 (web timer bar): a running "BAU" / Work / #Cubic block was edited
 // to "app testing" / Coding / no tags in one window; within a second or two the description went
@@ -15,13 +16,16 @@ import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 // match.
 
 type Details = { categoryId: string | null; description: string | null; tagNames: string[] };
-type Hold = "patch" | "start" | "bootstrap";
+type Hold = "patch" | "start" | "bootstrap" | "discard";
 
 const server = {
   entry: null as TimeEntryRow | null,
   /** Every PATCH body exactly as sent. */
   patches: [] as Array<{ url: string; body: Record<string, unknown> }>,
   deletes: [] as string[],
+  dropDiscardReply: false,
+  stallDiscardReply: false,
+  refuseDiscard: false,
   posts: [] as Record<string, unknown>[],
   conflicts: 0,
   /** 409s caused by a stale `expectedUpdatedAt` alone. */
@@ -82,8 +86,17 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     }
     if (method === "DELETE" && url.startsWith("/api/time-entries/")) {
       server.deletes.push(url);
-      if (url !== `/api/time-entries/${server.entry?.id}`) return reply(404, { error: "Block not found." });
+      await maybeHold("discard");
+      if (server.refuseDiscard) return reply(409, { error: "Discard refused." });
+      if (url !== `/api/time-entries/${server.entry?.id}`) {
+        return new Headers(init?.headers).get(WEB_TIMER_DISCARD_OWNER_HEADER) === "user:workspace"
+          ? reply(200, { ok: true }) : reply(404, { error: "Block not found." });
+      }
       server.entry = null;
+      if (server.dropDiscardReply) throw new TypeError("Lost the Discard reply after commit");
+      if (server.stallDiscardReply) await new Promise<void>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      });
       return reply(200, { ok: true });
     }
     if (method === "POST" && url === "/api/time-entries") {
@@ -116,6 +129,9 @@ beforeEach(() => {
   server.entry = null;
   server.patches = [];
   server.deletes = [];
+  server.dropDiscardReply = false;
+  server.stallDiscardReply = false;
+  server.refuseDiscard = false;
   server.posts = [];
   server.conflicts = 0;
   server.versionConflicts = 0;
@@ -407,6 +423,56 @@ describe("Discard deletes the real block, never the optimistic id", () => {
     expect(server.entry).toBeNull();
     await wait(300);
     expect(tab.runtime().shellData?.activeEntry ?? null).toBeNull();
+  });
+
+  it("confirms the same Discard when the first reply is lost after commit", async () => {
+    server.entry = entry({ id: "original", description: "Discard this" });
+    const tab = await openTab();
+    server.dropDiscardReply = true;
+    await act(async () => {
+      expect(await tab.runtime().deleteActiveTimer()).toEqual({ ok: true });
+    });
+    expect(server.deletes).toEqual(["/api/time-entries/original", "/api/time-entries/original"]);
+    expect(tab.runtime().shellData?.activeEntry).toBeNull();
+    expect(tab.runtime().timerError).toBeNull();
+  });
+
+  it("releases a stalled Discard after ten seconds and retries the exact block", async () => {
+    server.entry = entry({ id: "original" });
+    const tab = await openTab();
+    server.stallDiscardReply = true;
+    vi.useFakeTimers();
+    try {
+      let discarded!: ReturnType<Runtime["deleteActiveTimer"]>;
+      act(() => { discarded = tab.runtime().deleteActiveTimer(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+      expect(server.deletes).toEqual(["/api/time-entries/original"]);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(await discarded).toEqual({ ok: true });
+      expect(server.deletes).toEqual(["/api/time-entries/original", "/api/time-entries/original"]);
+      expect(tab.runtime().isTimerBusy).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a replacement block and its draft when the original Discard is refused", async () => {
+    server.entry = entry({ id: "original", description: "Discard this" });
+    const tab = await openTab();
+    server.holdNext = "discard";
+    server.refuseDiscard = true;
+    let discarded!: ReturnType<Runtime["deleteActiveTimer"]>;
+    act(() => { discarded = tab.runtime().deleteActiveTimer(); });
+    await waitFor(() => expect(server.release).not.toBeNull());
+    server.entry = entry({ id: "newer", description: "Recording elsewhere" });
+    await tab.refresh();
+    await waitFor(() => expect(tab.runtime().shellData?.activeEntry?.id).toBe("newer"));
+    await tab.clearAndType("Newer draft");
+    await act(async () => { server.release!(); await discarded; });
+    expect(tab.runtime().shellData?.activeEntry?.id).toBe("newer");
+    expect(tab.input.value).toBe("Newer draft");
+    expect(tab.runtime().timerError).toBe("Discard refused.");
+    expect(server.deletes).toEqual(["/api/time-entries/original"]);
   });
 });
 

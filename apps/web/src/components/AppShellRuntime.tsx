@@ -14,6 +14,7 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import { joinSplitTimeEntries, newBlockCommandId, splitRunningTimeEntry } from "@/lib/time-entry-split";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import { webTimerStatePollDelay } from "@/lib/timer-state-poll";
+import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
 import {
   applyPendingTimerDetails,
   clearPendingTimerDetails,
@@ -104,7 +105,7 @@ type RuntimeContext = {
   loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
   /** onCommit sees the exact reconciled snapshot just before the runtime publishes it. */
-  refresh: (options?: { force?: boolean; onCommit?: (snapshot: BootstrapData) => void }) => Promise<BootstrapData | null>;
+  refresh: (options?: { force?: boolean; onCommit?: (snapshot: BootstrapData) => void; signal?: AbortSignal }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
@@ -432,13 +433,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!timerDraftsEqual(reconciled.draft, draftRef.current)) setTimerDraft(reconciled.draft);
   }, [data?.activeEntry, setTimerDraft, setTimerDraftBase]);
 
-  const refresh = useCallback<RuntimeContext["refresh"]>(async ({ force = false, onCommit } = {}) => {
+  const refresh = useCallback<RuntimeContext["refresh"]>(async ({ force = false, onCommit, signal } = {}) => {
     if (!force && mutationGateRef.current.isActive()) return dataRef.current;
     const requestId = ++refreshRequestRef.current;
     const date = selectedDateRef.current;
     const generation = workspaceGenerationRef.current;
     try {
-      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store", ...(signal ? { signal } : {}) });
       if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
       // A newer load (or a mutation's own data) may have landed while this body was read, or the
@@ -446,7 +447,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (
         requestId !== refreshRequestRef.current ||
         date !== selectedDateRef.current ||
-        generation !== workspaceGenerationRef.current
+        generation !== workspaceGenerationRef.current || signal?.aborted
       ) return dataRef.current;
       commitData(payload, "canonical", onCommit);
       return payload;
@@ -1285,21 +1286,39 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [stopTimerNow, trackTimerAction]);
 
   const deleteActiveTimerUntracked = useCallback(async (): Promise<MutationOutcome> => {
-    const requested = dataRef.current?.activeEntry;
-    if (!requested) return { ok: false, error: "There is no running block to delete." };
+    const original = dataRef.current;
+    const requested = original?.activeEntry;
+    if (!original || !requested) return { ok: false, error: "There is no running block to delete." };
+    const generation = workspaceGenerationRef.current;
+    const sameOwner = () => generation === workspaceGenerationRef.current &&
+      dataRef.current?.workspace.id === original.workspace.id && dataRef.current?.user.id === original.user.id;
+    const changedOwner = "The account or workspace changed. Check the current block before trying again.";
     // As Stop: a block whose Start is still in flight waits behind it, then the real block (the id
     // its POST returned) is deleted; an optimistic id is never sent. A rejected Start leaves
     // nothing to delete.
     if (!serverEntryId(requested.id)) {
       await mutationGateRef.current.whenIdle();
-      if (dataRef.current?.activeEntry?.id !== requested.id) {
-        return { ok: false, error: "That block did not start, so there was nothing to delete." };
-      }
     }
-    const snapshot = dataRef.current!;
-    const targetId = serverEntryId(snapshot.activeEntry!.id);
+    if (!sameOwner()) return { ok: false, error: changedOwner };
+    const snapshot = dataRef.current;
+    const active = snapshot?.activeEntry;
+    if (!snapshot || active?.id !== requested.id) {
+      return { ok: false, error: "That block is no longer running." };
+    }
+    const targetId = serverEntryId(active.id);
     if (!targetId) return { ok: false, error: "The block is still starting." };
     const draftSnapshot = draftRef.current;
+    const before = timerStateRef.current;
+    const owner = pendingOwner(snapshot).owner;
+    const restoreIfStillCurrent = () => {
+      const current = dataRef.current;
+      if (current && !current.activeEntry && timerStateRef.current === before) {
+        rollbackDraftRef.current = { draft: draftSnapshot, entryId: active.id };
+        commitData(applyServerTimerBlocks(current, [active]), "optimistic");
+        setTimerDraft(draftSnapshot);
+      }
+    };
+    let deliveryUnconfirmed = false;
     const result = await mutationGateRef.current.run(async () => {
       setIsTimerBusy(true);
       setTimerError(null);
@@ -1307,15 +1326,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       commitData(applyOptimisticTimerDelete(snapshot), "optimistic");
       setTimerDraft(timerDraftForEntry(null));
       try {
-        const response = await clientFetch(`/api/time-entries/${targetId}`, {
-          method: "DELETE"
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to delete the block: ${response.status}`));
-        clearPendingTimerDetails(pendingOwner(snapshot).owner, targetId);
+        const receipt = await sendWebTimerCommand(`/api/time-entries/${targetId}`, {
+          method: "DELETE",
+          headers: { [WEB_TIMER_DISCARD_OWNER_HEADER]: `${owner.userId}:${owner.workspaceId}` }
+        }, sameOwner, "discard");
+        if (!sameOwner()) return { ok: false, error: changedOwner } as const;
+        if (!receipt) {
+          deliveryUnconfirmed = true;
+          throw new Error("Dayframe couldn’t confirm the discard. Check what’s recording before trying again.");
+        }
+        if (receipt.error) throw new Error(receipt.error);
+        const current = dataRef.current!;
+        // If a date load brought back the target, remove only its ids. Keep any replacement timer.
+        commitData(applyServerTimerBlocks(current, [], [active.id, targetId]), "optimistic");
+        clearPendingTimerDetails(owner, targetId);
         return { ok: true } as const;
       } catch (error) {
-        commitData(snapshot, "optimistic");
-        setTimerDraft(draftSnapshot);
+        if (!sameOwner()) return { ok: false, error: changedOwner } as const;
+        if (!deliveryUnconfirmed) restoreIfStillCurrent();
         const message = errorMessage(error, "Unable to delete the running block.");
         setTimerError(message);
         return { ok: false, error: message } as const;
@@ -1323,8 +1351,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
-    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
-      await refresh({ force: true });
+    if (result.ran && (result.value.ok || deliveryUnconfirmed) && sameOwner() && !mutationGateRef.current.isActive()) {
+      // An unconfirmed write may already have removed the block. Prefer the refreshed view and
+      // restore the last-known block only if the refresh itself also fails.
+      if (deliveryUnconfirmed && !dataRef.current?.activeEntry && timerStateRef.current === before) {
+        rollbackDraftRef.current = { draft: draftSnapshot, entryId: targetId };
+      }
+      await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+      if (deliveryUnconfirmed && sameOwner() && !mutationGateRef.current.isActive()) restoreIfStillCurrent();
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
@@ -1987,25 +2021,25 @@ function withCurrentSharedBootstrap(
   };
 }
 
+async function runTimerRequestWithDeadline<T>(send: (signal: AbortSignal) => Promise<T>, limitMs: number) {
+  const controller = new AbortController();
+  const deadline = window.setTimeout(() => controller.abort(), limitMs);
+  try {
+    return await send(controller.signal);
+  } finally {
+    window.clearTimeout(deadline);
+  }
+}
+
 /** Each attempt sends the same command. A lost reply can follow a commit. */
 async function deliverWebTimerWrite<T>(send: (signal: AbortSignal) => Promise<T | null>, sameOwner: () => boolean) {
-  const sendAttempt = async () => {
-    const controller = new AbortController();
-    const deadline = window.setTimeout(() => controller.abort(), TIMER_WRITE_ATTEMPT_LIMIT_MS);
-    try {
-      return await send(controller.signal);
-    } catch {
-      return null;
-    } finally {
-      window.clearTimeout(deadline);
-    }
-  };
+  const sendAttempt = () => runTimerRequestWithDeadline(send, TIMER_WRITE_ATTEMPT_LIMIT_MS).catch(() => null);
   if (!sameOwner()) return null;
   const first = await sendAttempt();
   return first ?? (sameOwner() ? sendAttempt() : null);
 }
 
-function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop") {
+function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop" | "discard") {
   return deliverWebTimerWrite(async (signal) => {
     const response = await clientFetch(path, { ...request, signal });
     if (response.status >= 500) return null;
