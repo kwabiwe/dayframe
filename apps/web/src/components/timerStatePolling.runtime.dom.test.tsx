@@ -4,6 +4,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { StrictMode, useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER } from "@dayframe/shared";
 
 // Guard for the web's `/api/timer-state` cadence (30 Oct 2026, `.codex/reference/performance.md`): 10 s
 // while visible and focused, 60 s while visible but not focused, none while hidden; one immediate poll
@@ -30,6 +31,8 @@ const server = vi.hoisted(() => ({
   stallStartAttempts: 0,
   stallStopAttempts: 0,
   stopBodies: [] as string[],
+  stallStopDetailsAttempts: 0,
+  stopDetailsRequests: [] as Array<{ body: string; commandId: string | null }>,
   heldPosts: [] as Array<() => void>,
   /** The next bootstrap waits to be released (it reads the server when released). */
   holdNextBootstrap: false,
@@ -102,7 +105,16 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(200, { timeEntryId: server.activeEntry.id });
     }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
-      server.activeEntry = null;
+      server.stopDetailsRequests.push({
+        body: String(init?.body),
+        commandId: new Headers(init?.headers).get(TIME_ENTRY_CLIENT_COMMAND_ID_HEADER)
+      });
+      if (server.stallStopDetailsAttempts > 0) {
+        server.stallStopDetailsAttempts -= 1;
+        await new Promise<never>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
       return reply(200, { ok: true });
     }
     if (method === "POST" && url === "/api/events") {
@@ -149,6 +161,8 @@ beforeEach(() => {
   server.stallStartAttempts = 0;
   server.stallStopAttempts = 0;
   server.stopBodies = [];
+  server.stallStopDetailsAttempts = 0;
+  server.stopDetailsRequests = [];
   server.heldPosts = [];
   server.holdNextBootstrap = false;
   server.releaseBootstrap = null;
@@ -353,6 +367,34 @@ describe("web timer-state polling cadence", () => {
       clientEventId: "web-timer-stop:phone-1", rawPayload: { stopScope: "entry", targetEntryId: "phone-1" }
     });
     expect(shownId()).toBeNull();
+  });
+
+  it.each([1, 2])("bounds the detail save before Stop when %s delivery attempt(s) stall", async (attempts) => {
+    phoneStart();
+    await mount();
+    server.stallStopDetailsAttempts = attempts;
+    let result: Awaited<ReturnType<NonNullable<typeof probe.runtime>["stopTimer"]>> | undefined;
+    await act(async () => {
+      probe.runtime!.setTimerDraft((current) => ({ ...current, description: "Unsaved details" }));
+    });
+    await act(async () => {
+      void probe.runtime!.stopTimer().then((outcome) => { result = outcome; });
+    });
+    expect(server.stopDetailsRequests).toHaveLength(1);
+    await advance(attempts * 10_000 + 10);
+
+    expect(server.stopDetailsRequests).toHaveLength(2);
+    expect(server.stopDetailsRequests[1]).toEqual(server.stopDetailsRequests[0]);
+    expect(server.stopDetailsRequests[0]?.commandId).toBeTruthy();
+    if (attempts === 1) {
+      expect(result).toEqual({ ok: true });
+      expect(server.stopBodies).toHaveLength(1);
+    } else {
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining("couldn’t confirm") });
+      expect(server.stopBodies).toHaveLength(0);
+      expect(shownId()).toBe("phone-1");
+      expect(probe.runtime?.timerDraft.description).toBe("Unsaved details");
+    }
   });
 
   it("queued actions confirm once, after the last one's own reload, and no poll supersedes that reload (Codex r1 on #637)", async () => {

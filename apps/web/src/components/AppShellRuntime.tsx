@@ -770,7 +770,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const sendDetailsPatch = useCallback(async (
     targetId: string,
     body: Record<string, unknown>,
-    onSent?: (keepalive: boolean) => void
+    onSent?: (keepalive: boolean) => void,
+    delivery?: { signal: AbortSignal; commandId: string }
   ) => {
     const text = JSON.stringify(body);
     const bytes = new TextEncoder().encode(text).length;
@@ -781,7 +782,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       return await clientFetch(`/api/time-entries/${targetId}`, {
         method: "PATCH",
         ...(keepalive ? { keepalive: true } : {}),
-        headers: { "Content-Type": "application/json" },
+        signal: delivery?.signal,
+        headers: {
+          "Content-Type": "application/json",
+          ...(delivery && { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: delivery.commandId })
+        },
         body: text
       });
     } finally {
@@ -1101,6 +1106,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
       return { ...body, expectedDetails };
     };
+    const saveStopDetails = async (expected: TimerDraft, version: string | undefined) => {
+      const body = withVersion(detailsBody(expected), version);
+      const commandId = newBlockCommandId("stop-details");
+      const result = await deliverWebTimerWrite(async (signal) => {
+        const response = await sendDetailsPatch(targetId, body, undefined, { signal, commandId });
+        if (response.status >= 500) return null;
+        if (response.status === 409) {
+          const conflict = await response.json().catch(() => null) as { entry?: TimeEntryRow } | null;
+          return signal.aborted ? null : { conflict: true, entry: conflict?.entry };
+        }
+        if (response.ok) return { conflict: false };
+        const error = await responseError(response, `Unable to save the block details: ${response.status}`);
+        return signal.aborted ? null : { conflict: false, error };
+      }, sameOwner);
+      if (!result) throw new Error("Dayframe couldn’t confirm the block details. Check the details and try Stop again.");
+      if (result.error) throw new Error(result.error);
+      return result;
+    };
     let detailsConflict = false;
     let deliveryUnconfirmed = false;
     const stop = async () => {
@@ -1112,21 +1135,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       try {
         if (fields.length) {
           ++detailsWriteSeqRef.current;
-          let updateResponse = await sendDetailsPatch(targetId, withVersion(detailsBody(base), versionOf(activeEntry)));
-          if (updateResponse.status === 409) {
-            const current = (await updateResponse.json().catch(() => null) as { entry?: TimeEntryRow } | null)?.entry;
+          let update = await saveStopDetails(base, versionOf(activeEntry));
+          if (update.conflict) {
+            const current = update.entry;
             // Only this tab's own text is there (the hung save landed first, or only the version
             // moved): once more at the new version. Anything else was changed elsewhere.
             const own = current && [base, savedBase].find((known) => detailsHold(current, known, fields));
-            updateResponse = current && own
-              ? await sendDetailsPatch(targetId, withVersion(detailsBody(timerDraftForEntry(current)), entryVersion(current)))
-              : updateResponse;
+            if (current && own) {
+              update = await saveStopDetails(timerDraftForEntry(current), entryVersion(current));
+            }
           }
           // Changed elsewhere since this edit's base: the block stops with the other change.
-          if (updateResponse.status === 409) detailsConflict = true;
-          else if (!updateResponse.ok) {
-            throw new Error(await responseError(updateResponse, `Unable to save the block details: ${updateResponse.status}`));
-          }
+          detailsConflict = update.conflict;
         }
         if (!sameOwner()) return { ok: false, error: changedOwner } as const;
         const receipt = await sendWebTimerCommand("/api/events", {
@@ -1868,27 +1888,34 @@ function withCurrentSharedBootstrap(
   };
 }
 
-/** The command already carries its receipt ID and owner. A lost reply can follow a commit. */
-async function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop") {
+/** Each attempt sends the same command. A lost reply can follow a commit. */
+async function deliverWebTimerWrite<T>(send: (signal: AbortSignal) => Promise<T | null>, sameOwner: () => boolean) {
   const sendAttempt = async () => {
     const controller = new AbortController();
     const deadline = window.setTimeout(() => controller.abort(), TIMER_WRITE_ATTEMPT_LIMIT_MS);
     try {
-      const response = await clientFetch(path, { ...request, signal: controller.signal });
-      if (response.status >= 500) return null;
-      if (!response.ok) {
-        return { error: await responseError(response, `Unable to ${action} the block: ${response.status}`) };
-      }
-      const result = action === "start" ? await response.json() as { timeEntryId?: unknown } | null : null;
-      return { serverId: typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined };
+      return await send(controller.signal);
     } catch {
       return null;
     } finally {
       window.clearTimeout(deadline);
     }
   };
+  if (!sameOwner()) return null;
   const first = await sendAttempt();
   return first ?? (sameOwner() ? sendAttempt() : null);
+}
+
+function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop") {
+  return deliverWebTimerWrite(async (signal) => {
+    const response = await clientFetch(path, { ...request, signal });
+    if (response.status >= 500) return null;
+    if (!response.ok) {
+      return { error: await responseError(response, `Unable to ${action} the block: ${response.status}`) };
+    }
+    const result = action === "start" ? await response.json() as { timeEntryId?: unknown } | null : null;
+    return { serverId: typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined };
+  }, sameOwner);
 }
 
 async function responseError(response: Response, fallback: string) {
