@@ -15,7 +15,7 @@ import { joinSplitTimeEntries, newBlockCommandId, splitRunningTimeEntry } from "
 import { onBeforeSessionChange } from "@/lib/session-change";
 import { webTimerStatePollDelay } from "@/lib/timer-state-poll";
 import { WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
-import { deliverWebTimerWrite, runTimerRequestWithDeadline } from "@/lib/web-timer-requests";
+import { deliverWebTimerWrite, runRequestWithDeadline } from "@/lib/web-timer-requests";
 import {
   applyPendingTimerDetails,
   clearPendingTimerDetails,
@@ -167,6 +167,7 @@ export const DATE_DATA_CACHE_LIMIT = 8;
 /** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
 export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 const TIMER_POLL_READ_LIMIT_MS = 15_000;
+const CALENDAR_PERIOD_READ_LIMIT_MS = 15_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -510,9 +511,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     setIsDateLoading(true);
     setDateLoadError(null);
     try {
-      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Unable to load period: ${response.status}`);
-      const payload = (await response.json()) as BootstrapData;
+      const payload = await runRequestWithDeadline(async (signal) => {
+        const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store", signal });
+        if (!response.ok) throw new Error(`Unable to load period: ${response.status}`);
+        return (await response.json()) as BootstrapData;
+      }, CALENDAR_PERIOD_READ_LIMIT_MS);
       if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
         throw new Error("The period response did not match the requested date.");
       }
@@ -1357,7 +1360,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (deliveryUnconfirmed && !dataRef.current?.activeEntry && timerStateRef.current === before) {
         rollbackDraftRef.current = { draft: draftSnapshot, entryId: targetId };
       }
-      await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+      await runRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
       if (deliveryUnconfirmed && sameOwner() && !mutationGateRef.current.isActive()) restoreIfStillCurrent();
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
@@ -1436,7 +1439,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         if (!outcome.ok) {
           setTimerError(outcome.error);
-          if (outcome.changed) await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+          if (outcome.changed) await runRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
           return outcome;
         }
         // Whether the second part runs is read from the blocks as the server has them now: one that had stopped
@@ -1456,7 +1459,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (shown) commitData(applyServerTimerBlocks(shown, outcome.entries, gone), "optimistic");
         // Still inside the gate: a Stop pressed meanwhile waits for this and then stops the running second
         // part, never the first part this split just ended.
-        await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+        await runRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
         if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         if (!newEntryId) return { ok: false, error: "This block was already split and put back together." };
         return { ok: true, entryId: targetId, newEntryId, running };
@@ -1514,7 +1517,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
         // As the split: the day is loaded again inside the gate, so a Stop behind it targets the joined block.
         if (owner.isCurrent() && (outcome.ok || outcome.changed)) {
-          await runTimerRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
+          await runRequestWithDeadline((signal) => refresh({ force: true, signal }), TIMER_POLL_READ_LIMIT_MS);
         }
         if (!owner.isCurrent()) return { ok: false, error: changedOwner };
         return outcome.ok ? outcome : { ok: false, error: outcome.error };

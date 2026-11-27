@@ -26,6 +26,7 @@ const server = vi.hoisted(() => ({
   /** A bootstrap for this date is read on arrival and answered only when released. */
   holdBootstrapDate: null as string | null,
   releaseBootstrap: null as (() => void) | null,
+  holdBootstrapBodyDate: null as string | null,
   /** How the held bootstrap answers once released: normally, with a 500, or by rejecting. */
   heldBootstrapOutcome: "ok" as "ok" | "500" | "reject",
   holdDelete: false,
@@ -44,6 +45,12 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (url.startsWith("/api/bootstrap")) {
       const date = new URL(url, "http://dayframe.test").searchParams.get("date") ?? "2026-08-17";
       const body = bootstrap(date, server.workspace, server.revision);
+      if (server.holdBootstrapBodyDate === date) {
+        server.holdBootstrapBodyDate = null;
+        return { ok: true, status: 200, json: () => new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }) };
+      }
       if (server.holdBootstrapDate === date) {
         server.holdBootstrapDate = null;
         await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
@@ -76,6 +83,7 @@ beforeEach(() => {
   server.held = [];
   server.holdBootstrapDate = null;
   server.releaseBootstrap = null;
+  server.holdBootstrapBodyDate = null;
   server.heldBootstrapOutcome = "ok";
   server.holdDelete = false;
   server.finishDelete = null;
@@ -156,6 +164,28 @@ const shown = () => screen.getByTestId("shown").textContent;
 const bootstrapRequests = () => server.requests.filter((request) => request.startsWith("GET /api/bootstrap"));
 
 describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
+  it("releases Calendar navigation after a stalled period response and keeps the original view", async () => {
+    vi.useFakeTimers();
+    const view = render(tree());
+    await settle();
+    const initial = shown();
+    server.holdBootstrapBodyDate = "2026-08-10";
+    let outcome: Awaited<ReturnType<NonNullable<typeof probe.runtime>["loadDate"]>> | null = null;
+    act(() => {
+      void probe.runtime!.loadDate("2026-08-10").then((result) => { outcome = result; });
+    });
+    expect(probe.runtime!.isDateLoading).toBe(true);
+    await settle(15_000);
+
+    expect(outcome).toMatchObject({ ok: false });
+    expect(probe.runtime!.isDateLoading).toBe(false);
+    expect(probe.runtime!.dateLoadError).toMatch(/couldn’t load that period/i);
+    expect(shown()).toBe(initial);
+    await navigate(view, "2026-08-10");
+    expect(probe.runtime!.dateLoadError).toBeNull();
+    expect(shown()).toBe("workspace-A@2026-08-10#r1");
+  });
+
   it("reports the reconciled shell snapshot for the refresh while End it projects a display copy", async () => {
     vi.useFakeTimers();
     page = "page";
