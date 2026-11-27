@@ -173,6 +173,28 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("shows seconds on the running row without changing finished durations", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    const live = { ...data.activeEntry!, startedAt: new Date(NOW.getTime() - 29_000).toISOString() };
+    data.activeEntry = live;
+    data.entries = data.entries.map((item) => item.id === live.id ? live : item);
+
+    const { container, root } = await mount(data);
+    try {
+      const running = container.querySelector(".df-erow.is-live .df-erow-main");
+      const duration = running?.querySelector(".df-erow-dur");
+      expect(duration?.textContent).toBe("0:00:29");
+      expect(running?.getAttribute("aria-label")).toContain("elapsed 0:00:29");
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(duration?.textContent).toBe("0:00:30");
+      expect(container.querySelector(".df-erow:not(.is-live) .df-erow-dur")?.textContent).toBe("1h");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   it("shows an overnight block's whole interval and duration", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);

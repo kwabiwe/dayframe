@@ -21,7 +21,7 @@ import { blockStyle } from "@/lib/block-style";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
 import { dedupeDashboardEntries } from "@/lib/dashboard-intelligence";
 import { timeEntryTitle } from "@/lib/display";
-import { formatDuration, formatTime } from "@/lib/format";
+import { formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { useClockFormat } from "@/components/ClockFormat";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
@@ -860,6 +860,8 @@ function TodayBlockRow({
   const end = entry.stoppedAt ? formatTime(entry.stoppedAt, clock) : "now";
   // A row is the whole block: its times and duration include any part before midnight.
   const elapsedSeconds = durationMs / 1000;
+  const durationLabel = live ? formatClockDuration(elapsedSeconds) : formatDuration(elapsedSeconds);
+  const accessibleDuration = live ? `elapsed ${durationLabel}` : spokenDuration(elapsedSeconds);
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -873,7 +875,7 @@ function TodayBlockRow({
     <li className={`df-erow${live ? " is-live" : ""}${isLeaving ? " is-leaving" : ""}`}>
       <button
         // Everything the row shows, in its order: title, activity · #tags, times, duration (WUI-034).
-        aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : ""}, ${start} to ${live ? "now" : end}, ${spokenDuration(elapsedSeconds)}. Edit${live ? "" : "; Delete or Backspace deletes"}.`}
+        aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : ""}, ${start} to ${live ? "now" : end}, ${accessibleDuration}. Edit${live ? "" : "; Delete or Backspace deletes"}.`}
         className="df-erow-main"
         onClick={onEdit}
         onKeyDown={onKeyDown}
@@ -894,7 +896,7 @@ function TodayBlockRow({
           <span>{activity}{tags ? ` · ${tags}` : ""}</span>
         </span>
         <span className="df-erow-when">{start}–{end}</span>
-        <span className="df-erow-dur">{formatDuration(elapsedSeconds)}</span>
+        <span className="df-erow-dur">{durationLabel}</span>
       </button>
       <span className="df-erow-acts">
         {!live ? (
