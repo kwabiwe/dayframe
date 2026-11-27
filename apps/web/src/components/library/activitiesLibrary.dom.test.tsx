@@ -106,7 +106,7 @@ describe("Library › Activities", () => {
     const user = userEvent.setup();
     answer = (call) => call.method === "PATCH" ? new Response(JSON.stringify({ error: "An activity with that name already exists." }), { status: 409 }) : undefined;
     mount([activity(ID(1), "Reading")]);
-    await user.click(await screen.findByRole("button", { name: "Edit Reading" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Reading / }));
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("radio", { name: "Music" }));
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
@@ -118,7 +118,7 @@ describe("Library › Activities", () => {
   it("shows Counts toward goal from the activity and saves the switch with the other fields (UIA-043)", async () => {
     const user = userEvent.setup();
     mount([activity(ID(1), "Sleep", { countsTowardGoal: false }), activity(ID(2), "Reading")]);
-    await user.click(await screen.findByRole("button", { name: "Edit Sleep" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Sleep / }));
     const dialog = screen.getByRole("dialog");
     const toggle = within(dialog).getByRole("switch", { name: /Counts toward goal/ }) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
@@ -164,7 +164,7 @@ describe("Library › Activities", () => {
   it("archives from the editor with Undo, which restores and re-pins", async () => {
     const user = userEvent.setup();
     mount([activity(ID(1), "Reading", { isPinned: true })]);
-    await user.click(await screen.findByRole("button", { name: "Edit Reading" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Reading / }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(changes()[0]).toEqual({ url: `/api/categories?id=${ID(1)}`, method: "DELETE", body: null }));
     const toast = await screen.findByText("Reading archived. Its history stays.");
@@ -186,7 +186,7 @@ describe("Library › Activities", () => {
       ? new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })); })
       : undefined;
     mount([activity(ID(1), "Reading"), activity(ID(2), "Piano")]);
-    await user.click(await screen.findByRole("button", { name: "Edit Reading" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Reading / }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
     const toast = (await screen.findByText("Reading archived. Its history stays.")).closest(".df-toast") as HTMLElement;
     await user.click(screen.getByRole("button", { name: "Pin Piano to quick start" }));
@@ -204,7 +204,7 @@ describe("Library › Activities", () => {
       ? new Response(JSON.stringify({ error: "Quick start holds 6 activities. Unpin one first." }), { status: 409 })
       : undefined;
     mount([activity(ID(1), "Reading", { isPinned: true })]);
-    await user.click(await screen.findByRole("button", { name: "Edit Reading" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Reading / }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
     const toast = (await screen.findByText("Reading archived. Its history stays.")).closest(".df-toast") as HTMLElement;
     const before = bootstrapReads;
@@ -232,12 +232,12 @@ describe("Library › Activities", () => {
     const { container } = mount([activity(ID(1), "Zither practice")]);
     const groupOf = () => container.querySelector(`#category-${ID(1)}`)?.closest("section")?.querySelector("h2")?.firstChild?.textContent;
     expect(groupOf()).toBe("Your own");
-    await user.click(await screen.findByRole("button", { name: "Edit Zither practice" }));
+    await user.click(await screen.findByRole("button", { name: /^Edit Zither practice / }));
     await user.click(within(screen.getByRole("dialog")).getByRole("radio", { name: "Music" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(groupOf()).toBe("Free time");
-    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Zither practice"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Edit Zither practice / })));
   });
 
   it("keeps each row reachable by its activity link with separate Edit and Pin controls", async () => {
@@ -248,7 +248,7 @@ describe("Library › Activities", () => {
       : undefined;
     const { container } = mount([activity(ID(1), "Reading")]);
     const row = container.querySelector<HTMLElement>(`#category-${ID(1)}`)!;
-    const edit = within(row).getByRole("button", { name: "Edit Reading", description: "Not used in the last 7 days" }) as HTMLButtonElement;
+    const edit = within(row).getByRole("button", { name: "Edit Reading Not used in the last 7 days" }) as HTMLButtonElement;
     const pin = within(row).getByRole("button", { name: "Pin Reading to quick start" });
     expect(edit.parentElement).toBe(pin.parentElement);
     expect(pin.querySelector("svg")?.getAttribute("fill")).toBe("none");
@@ -289,7 +289,7 @@ describe("Library › Activities", () => {
     const restoreButton = within(row as HTMLElement).getByRole("button", { name: "Restore" });
     restoreButton.focus();
     await user.click(restoreButton);
-    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Old hobby"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Edit Old hobby / })));
   });
 
   it("lists archived activities with Restore", async () => {

@@ -352,22 +352,20 @@ function ActivityRow({
   weekSeconds: number;
 }) {
   const glyph = resolveActivityIcon({ icon: activity.icon ?? null, name: activity.name }).glyph;
-  const timeId = `category-time-${activity.id}`;
   return (
     <li aria-label={activity.name} className="df-lrow" id={`category-${activity.id}`}>
       <button
-        aria-describedby={timeId}
-        aria-label={`Edit ${activity.name}`}
         className="df-lrow-edit"
         disabled={busy}
         onClick={onEdit}
         type="button"
       >
+        <span className="sr-only">Edit</span>
         <span className="df-lrow-tile df-block" style={blockStyle(activity.color, activity.name)}>
           <DayframeIcon glyph={glyph} size={16} />
         </span>
         <span className="df-lrow-name">{activity.name}</span>
-        <span className="df-lrow-time df-tnum" id={timeId}>{formatActivityWeek(weekSeconds)}</span>
+        <span className="df-lrow-time df-tnum">{formatActivityWeek(weekSeconds)}</span>
       </button>
       <button
         aria-label={activity.isPinned ? `Unpin ${activity.name} from quick start` : `Pin ${activity.name} to quick start`}
