@@ -28,6 +28,9 @@ const server = {
   /** Stop events: the block each one targeted. */
   stops: [] as string[],
   rejectPatches: false,
+  losePatchReplies: 0,
+  afterLostPatch: null as (() => void) | null,
+  patchReceipts: new Set<string>(),
   rejectStart: false,
   /** The next PATCH or Start waits (the request is recorded) until `release()`. */
   holdNext: null as "patch" | "start" | "bootstrap" | null,
@@ -112,7 +115,17 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       const which = target();
       if (!which) return reply(false, { error: "Not found" });
       const current = server[which]!;
-      if (server.rejectPatches) return reply(false, { error: "Rejected" });
+      if (server.rejectPatches) return { ...reply(false, { error: "Rejected" }), status: 422 };
+      const commandId = new Headers(init?.headers).get("X-Dayframe-Client-Command-Id");
+      const sendPatchReply = (result: object) => {
+        if (server.losePatchReplies === 0) return reply(true, result);
+        server.losePatchReplies -= 1;
+        server.afterLostPatch?.();
+        return { ...reply(true, {}), json: async () => { throw new TypeError("Lost the response body"); } };
+      };
+      if (commandId && server.patchReceipts.has(commandId)) {
+        return sendPatchReply({ updatedAt: current.updatedAt, replayed: true, entry: current });
+      }
       // As the server: a version written since, or a detail changed since, is refused.
       if ((expectedUpdatedAt && Date.parse(expectedUpdatedAt) !== Date.parse(current.updatedAt))
         || (expectedDetails && detailsChanged(current, expectedDetails))) {
@@ -120,7 +133,8 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       }
       const updatedAt = new Date(Date.parse(current.updatedAt) + 60_000).toISOString();
       server[which] = { ...current, ...sent, updatedAt } as TimeEntryRow;
-      return reply(true, { updatedAt });
+      if (commandId) server.patchReceipts.add(commandId);
+      return sendPatchReply({ updatedAt });
     }
     if (method === "POST" && url === "/api/time-entries") {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -190,6 +204,9 @@ beforeEach(() => {
   server.rejectStart = false;
   server.tags = [];
   server.rejectPatches = false;
+  server.losePatchReplies = 0;
+  server.afterLostPatch = null;
+  server.patchReceipts.clear();
   server.dead = false;
   server.loseStartReply = false;
   server.startReceipts.clear();
@@ -274,6 +291,21 @@ describe("Codex r5: the saved description can never lose its @words", () => {
     server.rejectPatches = false;
     await wait(1_200);
     expect(descriptions()).toEqual(["@writing Discuss @writing @focus"]);
+  });
+
+  it("a rejected tag-only autosave restores the saved tags and leaves the description intact", async () => {
+    const { input } = await renderShell(entry({ description: "Discuss @writing", tagNames: ["keep"] }, ["keep", "urgent"]));
+    server.rejectPatches = true;
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} #urgent{Enter}");
+    expect(screen.getByRole("button", { name: "#urgent, remove tag" })).not.toBeNull();
+    await screen.findByText("Block details were not saved. Your previous values were restored.");
+    expect(server.sent[0]).toMatchObject({ tagNames: ["keep", "urgent"] });
+    expect(server.sent[0]).not.toHaveProperty("description");
+    expect(screen.getByRole("button", { name: "#keep, remove tag" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "#urgent, remove tag" })).toBeNull();
+    expect(input.value).toBe("Discuss @writing");
   });
 
   it("undo restores the saved text and it is saved as is", async () => {
@@ -878,16 +910,55 @@ describe("Stop and leaving the page never lose a typed description (stability au
   };
   const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
 
+  it("recovers the same autosave receipt after the server commits and the response is lost", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    server.losePatchReplies = 1;
+    server.afterLostPatch = () => {
+      server.entry = { ...server.entry!, categoryId: "write", categoryName: "Writing", updatedAt: "2026-08-17T05:30:00.000Z" };
+    };
+    await user.click(input);
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(2), { timeout: 2_000 });
+
+    const commandId = (init: RequestInit) => new Headers(init.headers).get("X-Dayframe-Client-Command-Id");
+    expect(commandId(server.patchInits[0]!)).toBeTruthy();
+    expect(commandId(server.patchInits[1]!)).toBe(commandId(server.patchInits[0]!));
+    expect(server.sent[1]).toEqual(server.sent[0]);
+    expect(server.patchReceipts.size).toBe(1);
+    expect(input.value).toBe("Fix bug more");
+    await screen.findByRole("button", { name: "Activity: Writing" });
+    expect(server.entry?.updatedAt).toBe("2026-08-17T05:30:00.000Z");
+  });
+
+  it("keeps unconfirmed text after both autosave replies are lost, then saves later typing on Stop", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    server.losePatchReplies = 2;
+    await user.click(input);
+    await user.keyboard("{End} more");
+    await screen.findByText("Dayframe couldn’t confirm the block details. Your edits are still here.", {}, { timeout: 2_000 });
+    expect(input.value).toBe("Fix bug more");
+    await wait(800);
+    expect(server.patches).toHaveLength(2);
+
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.completed?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(server.stops).toEqual(["active"]);
+  });
+
   it("keeps typing made after an autosave left when that save fails", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
     await user.click(input);
     server.holdNext = "patch";
-    server.dropHeld = true;
     await user.keyboard("{End} more");
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
     await user.keyboard(" later");
+    server.rejectPatches = true;
     await act(async () => { server.release?.(); });
+    server.rejectPatches = false;
 
     expect(input.value).toBe("Fix bug more later");
     await screen.findByText("Block details were not saved. Your newer edits are still here.");
@@ -903,12 +974,12 @@ describe("Stop and leaving the page never lose a typed description (stability au
     const user = userEvent.setup();
     await user.click(input);
     server.holdNext = "patch";
-    server.dropHeld = true;
     await user.keyboard("{End} more");
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
     server.entry = { ...server.entry!, categoryId: "write", categoryName: "Writing", updatedAt: "2026-08-17T05:30:00.000Z" };
     await refresh();
     expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    server.rejectPatches = true;
     await act(async () => { server.release?.(); });
 
     expect(input.value).toBe("Fix bug");
@@ -1394,6 +1465,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
     await user.keyboard(" later");
     act(() => { window.dispatchEvent(new Event("pagehide")); });
+    server.dead = true;
     await act(async () => { server.release?.(); });
     expect(server.entry?.description).toBe("Fix bug");
     const reopened = await reopen(unmount);

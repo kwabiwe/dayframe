@@ -18,7 +18,10 @@ const FIRST = "80000000-0000-4000-8000-000000000001";
 const SECOND = "80000000-0000-4000-8000-000000000002";
 const SPLIT_AT = Date.parse("2026-08-17T04:30:00.000Z");
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  window.sessionStorage.clear();
+});
 
 describe("AppShellRuntime split of the running block", () => {
   beforeEach(() => vi.resetAllMocks());

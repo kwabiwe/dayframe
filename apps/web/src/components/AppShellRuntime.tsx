@@ -294,6 +294,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     keepalive: boolean;
     version: string | undefined;
   } | null>(null);
+  const unconfirmedDetailsRef = useRef<{ entryId: string; draft: TimerDraft; submittedBase: TimerDraft } | null>(null);
 
   // The pending-details store's owner and session token (lib/timer-draft-store.ts).
   const pendingStoreSessionRef = useRef<{ owner: string; generation: number } | null>(null);
@@ -324,7 +325,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const base = baseFor(entry);
     const draft = draftRef.current;
     const inFlight = detailsInFlightRef.current;
-    const bases = inFlight?.entryId === entry.id ? [base, inFlight.base] : [base];
+    const bases = [base];
+    if (inFlight?.entryId === entry.id) bases.push(inFlight.base);
+    const unconfirmed = unconfirmedDetailsRef.current;
+    if (unconfirmed?.entryId === entryId) bases.push(unconfirmed.submittedBase);
     if (!bases.some((copy) => timerDraftEditedFields(draft, copy).length > 0)) return;
     const { owner, generation } = pendingOwner(snapshot);
     writePendingTimerDetails(owner, { entryId, draft, bases, savedAt: Date.now() }, generation);
@@ -816,6 +820,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const patch = timerDetailsPatch(draft, base);
     if (!patch) return { ok: true };
     const draftAtSend = draftRef.current;
+    const { owner, generation } = pendingOwner(snapshot);
+    const workspaceGeneration = workspaceGenerationRef.current;
+    const previousUnconfirmed = unconfirmedDetailsRef.current?.entryId === targetId
+      ? unconfirmedDetailsRef.current
+      : null;
     setIsTimerBusy(true);
     setTimerError(null);
     refreshRequestRef.current += 1;
@@ -826,60 +835,111 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     commitData(optimistic, "optimistic");
     // What is being saved is now the base, so an edit made while the save is pending (even one
     // back to the previous text) is newer and survives its acknowledgement (Codex r7).
-    setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), activeEntry.id);
+    const submittedBase = timerDraftBaseAfterSave(base, draft, patch.fields);
+    setTimerDraftBase(submittedBase, activeEntry.id);
     const version = options.closing ? undefined : versionOf(activeEntry);
     const inFlight = { entryId: activeEntry.id, base, fields: patch.fields, keepalive: false, version };
     detailsInFlightRef.current = inFlight;
     // A save that settles after a Stop went ahead without it (`stopTimer`'s deadline) leaves the
     // stopped block alone: no rollback brings it back and its notice is the Stop's.
-    const stillShown = () => dataRef.current?.activeEntry?.id === activeEntry.id;
+    const currentWrite = () => {
+      const shownId = dataRef.current?.activeEntry?.id;
+      return (shownId === activeEntry.id || shownId === targetId) && writeSeq === detailsWriteSeqRef.current
+        && dataRef.current?.user.id === owner.userId && dataRef.current?.workspace.id === owner.workspaceId
+        && generation === pendingTimerDetailsGeneration() && workspaceGeneration === workspaceGenerationRef.current;
+    };
     const settle = (conflict: boolean, error: string | null) => {
       detailsOutcomeRef.current = { seq: detailsOutcomeRef.current.seq + 1, entryId: activeEntry.id, conflict, error };
     };
+    const send = (details: Record<string, unknown>, expectedVersion: string | undefined) => {
+      const body = withVersion(details, expectedVersion);
+      const onSent = (keepalive: boolean) => { inFlight.keepalive = keepalive; };
+      if (options.closing) return sendDetailsPatch(targetId, body, onSent).then(readTimerDetailsReply);
+      const commandId = newBlockCommandId("autosave-details");
+      return deliverWebTimerWrite(async (signal) => {
+        const response = await sendDetailsPatch(targetId, body, onSent, { signal, commandId });
+        if (response.status >= 500) return null;
+        const reply = await readTimerDetailsReply(response);
+        return signal.aborted ? null : reply;
+      }, currentWrite);
+    };
     try {
-      let response = await sendDetailsPatch(targetId, withVersion(patch.body, version), (keepalive) => {
-        inFlight.keepalive = keepalive;
-      });
-      let conflict: { entry?: TimeEntryRow } | null = null;
-      if (response.status === 409) {
-        conflict = await response.json().catch(() => null) as { entry?: TimeEntryRow } | null;
-        const current = conflict?.entry;
-        if (current && writeSeq === detailsWriteSeqRef.current && stillShown()
-          && detailsHold(current, base, patch.fields) && entryVersion(current) !== version) {
-          response = await sendDetailsPatch(targetId, withVersion(patch.body, entryVersion(current)));
-          conflict = response.status === 409
-            ? await response.json().catch(() => null) as { entry?: TimeEntryRow } | null
-            : null;
+      let result = await send(patch.body, version);
+      if (result?.kind === "conflict" && result.entry && currentWrite()) {
+        const current = result.entry;
+        const currentVersion = entryVersion(current);
+        if (!current.stoppedAt && currentVersion !== version && (
+          detailsHold(current, base, patch.fields) ||
+          (previousUnconfirmed && detailsHold(current, previousUnconfirmed.submittedBase, patch.fields))
+        )) {
+          // A prior unconfirmed command may have committed. Rebase only on the values this tab sent.
+          const currentBase = timerDraftForEntry(current);
+          const retryPatch = timerDetailsPatch(pickTimerDraftFields(draft, currentBase, patch.fields), currentBase);
+          result = retryPatch
+            ? await send(retryPatch.body, currentVersion)
+            : { kind: "saved", updatedAt: current.updatedAt, replayed: true, entry: current };
         }
       }
-      if (response.status === 409) {
+      if (!result) {
+        const current = dataRef.current;
+        const shown = current?.activeEntry;
+        if (current && shown && currentWrite()) {
+          const kept = draftRef.current;
+          const restored = shown === optimistic.activeEntry ? activeEntry : shown;
+          const reconciled = reconcileTimerDraftWithBase(false, kept, base, timerDraftForEntry(restored));
+          unconfirmedDetailsRef.current = { entryId: targetId, draft: reconciled.draft, submittedBase };
+          writePendingTimerDetails(owner, {
+            entryId: targetId,
+            draft: reconciled.draft,
+            bases: [base, submittedBase],
+            savedAt: Date.now()
+          }, generation);
+          if (restored !== shown) commitData(applyServerActiveEntry(current, shown.id, restored), "optimistic");
+          setTimerDraftBase(reconciled.base, shown.id);
+          setTimerDraft(reconciled.draft);
+          setTimerError(DETAILS_UNCONFIRMED_MESSAGE);
+        }
+        settle(false, DETAILS_UNCONFIRMED_MESSAGE);
+        return { ok: false, error: DETAILS_UNCONFIRMED_MESSAGE } as const;
+      }
+      if (result.kind === "conflict") {
         settle(true, DETAILS_CONFLICT_MESSAGE);
-        if (!stillShown() || writeSeq !== detailsWriteSeqRef.current) return { ok: false, error: DETAILS_CONFLICT_MESSAGE } as const;
-        if (!adoptServerDetails(activeEntry.id, conflict?.entry)) {
-          commitData(snapshot, "optimistic");
-          setTimerDraftBase(timerDraftForEntry(snapshot.activeEntry), activeEntry.id);
-          setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
+        const current = dataRef.current;
+        const shown = current?.activeEntry;
+        if (!current || !shown || !currentWrite()) return { ok: false, error: DETAILS_CONFLICT_MESSAGE } as const;
+        if (previousUnconfirmed && unconfirmedDetailsRef.current === previousUnconfirmed) {
+          clearPendingTimerDetails(owner, targetId, previousUnconfirmed.draft);
+          unconfirmedDetailsRef.current = null;
+        }
+        if (!adoptServerDetails(shown.id, result.entry)) {
+          const restored = shown === optimistic.activeEntry ? activeEntry : shown;
+          commitData(applyServerActiveEntry(current, shown.id, restored), "optimistic");
+          setTimerDraftBase(timerDraftForEntry(restored), shown.id);
+          setTimerDraft(timerDraftForEntry(restored));
         }
         setTimerError(DETAILS_CONFLICT_MESSAGE);
         return { ok: false, error: DETAILS_CONFLICT_MESSAGE } as const;
       }
-      if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
-      const result = (await response.json()) as { updatedAt?: string };
-      const savedVersion = serverVersion(result.updatedAt);
-      if (savedVersion && isOptimisticTimerId(activeEntry.id)) handoffVersionsRef.current.set(activeEntry.id, savedVersion);
-      if (result.updatedAt && dataRef.current) {
-        commitData(
-          applyAuthoritativeActiveEntryVersion(dataRef.current, activeEntry.id, result.updatedAt),
-          "canonical"
-        );
+      if (result.kind === "refused") throw new Error(DETAILS_FAILED_MESSAGE);
+      const current = dataRef.current;
+      const shown = current?.activeEntry;
+      if (current && shown && currentWrite()) {
+        const savedVersion = serverVersion(result.entry?.updatedAt ?? result.updatedAt);
+        if (savedVersion && isOptimisticTimerId(shown.id)) handoffVersionsRef.current.set(shown.id, savedVersion);
+        if (result.replayed) {
+          if (result.entry?.id === targetId) commitData(applyServerActiveEntry(current, shown.id, result.entry), "canonical");
+        } else if (result.updatedAt) {
+          commitData(applyAuthoritativeActiveEntryVersion(current, shown.id, result.updatedAt), "canonical");
+        }
+        if (unconfirmedDetailsRef.current?.entryId === targetId) unconfirmedDetailsRef.current = null;
+        clearPendingTimerDetails(owner, targetId, draft);
       }
       settle(false, null);
-      clearPendingTimerDetails(pendingOwner(dataRef.current ?? snapshot).owner, targetId, draft);
       return { ok: true } as const;
     } catch {
       const current = dataRef.current;
       const shown = current?.activeEntry;
-      if (!current || shown?.id !== activeEntry.id || writeSeq !== detailsWriteSeqRef.current) {
+      if (!current || !shown || !currentWrite()) {
         settle(false, DETAILS_FAILED_MESSAGE);
         return { ok: false, error: DETAILS_FAILED_MESSAGE } as const;
       }
@@ -1155,8 +1215,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             const current = update.entry;
             // Only this tab's own text is there (the hung save landed first, or only the version
             // moved): once more at the new version. Anything else was changed elsewhere.
-            const own = current && [base, savedBase].find((known) => detailsHold(current, known, fields));
-            if (current && own) {
+            const unconfirmed = unconfirmedDetailsRef.current;
+            const own = current && (detailsHold(current, base, fields) || detailsHold(current, savedBase, fields)
+              || (unconfirmed?.entryId === targetId && detailsHold(current, unconfirmed.submittedBase, fields)));
+            if (current && !current.stoppedAt && own) {
               update = await saveStopDetails(timerDraftForEntry(current), entryVersion(current));
             }
           }
@@ -1186,6 +1248,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           throw new Error("Dayframe couldn’t confirm the stop. Check what’s recording before trying again.");
         }
         if (receipt.error) throw new Error(receipt.error);
+        if (unconfirmedDetailsRef.current?.entryId === targetId) unconfirmedDetailsRef.current = null;
         clearPendingTimerDetails(pendingOwner(snapshot).owner, targetId);
         if (detailsConflict || carried?.conflict) setTimerError(DETAILS_CONFLICT_STOP_MESSAGE);
         else if (carried) setTimerError(DETAILS_FAILED_STOP_MESSAGE);
@@ -1409,7 +1472,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     // A block whose Start is still in flight keeps its edits in the draft; the Start saves them to
     // the real block as soon as the server accepts it.
-    if (!serverEntryId(snapshot.activeEntry.id)) return { ok: false, error: "The block is still starting." };
+    const entryId = serverEntryId(snapshot.activeEntry.id);
+    if (!entryId) return { ok: false, error: "The block is still starting." };
+    const unconfirmed = unconfirmedDetailsRef.current;
+    if (!options.closing && unconfirmed?.entryId === entryId && timerDraftsEqual(unconfirmed.draft, draft)) {
+      // A render after two uncertain replies must not start an endless autosave loop.
+      return { ok: false, error: DETAILS_UNCONFIRMED_MESSAGE };
+    }
     const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft, undefined, options));
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
@@ -1443,14 +1512,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const draft = draftRef.current;
       const patch = timerDetailsPatch(draft, base);
       const inFlight = detailsInFlightRef.current?.entryId === entry.id ? detailsInFlightRef.current : null;
-      const keep = (patch && (inFlight || !fitsKeepalive(JSON.stringify(patch.body))))
+      const unconfirmed = unconfirmedDetailsRef.current?.entryId === targetId ? unconfirmedDetailsRef.current : null;
+      const keep = (patch && (inFlight || unconfirmed || !fitsKeepalive(JSON.stringify(patch.body))))
         || (inFlight && !inFlight.keepalive);
       if (keep) {
         const { owner, generation } = pendingOwner(snapshot);
+        const bases = [base];
+        if (inFlight) bases.push(inFlight.base);
+        if (unconfirmed) bases.push(unconfirmed.submittedBase);
         writePendingTimerDetails(owner, {
           entryId: targetId,
           draft,
-          bases: inFlight ? [base, inFlight.base] : [base],
+          bases,
           savedAt: Date.now()
         }, generation);
       }
@@ -1822,6 +1895,16 @@ function withVersion(body: Record<string, unknown>, version: string | undefined)
   return version ? { ...body, expectedUpdatedAt: version } : body;
 }
 
+async function readTimerDetailsReply(response: Response) {
+  if (response.status === 409) {
+    const conflict = await response.json().catch(() => null) as { entry?: TimeEntryRow } | null;
+    return { kind: "conflict" as const, entry: conflict?.entry };
+  }
+  if (!response.ok) return { kind: "refused" as const };
+  const result = await response.json() as { updatedAt?: string | null; replayed?: boolean; entry?: TimeEntryRow | null };
+  return { kind: "saved" as const, updatedAt: result.updatedAt, replayed: result.replayed, entry: result.entry };
+}
+
 /** Whether `entry` still holds `base` for `fields` (a 409 then came from its version alone). */
 function detailsHold(entry: TimeEntryRow, base: TimerDraft, fields: TimerDetailField[]) {
   const stored = timerDraftForEntry(entry);
@@ -1831,6 +1914,7 @@ const DETAILS_CONFLICT_MESSAGE = "This block was changed in another window or de
 const DETAILS_CONFLICT_SWITCH_MESSAGE = "Switched. The block you left was changed in another window or device, so your edit to it was not saved.";
 const DETAILS_CONFLICT_STOP_MESSAGE = "Stopped. This block was changed in another window or device, so it kept those details.";
 const DETAILS_FAILED_MESSAGE = "Block details were not saved. Your previous values were restored.";
+const DETAILS_UNCONFIRMED_MESSAGE = "Dayframe couldn’t confirm the block details. Your edits are still here.";
 const DETAILS_FAILED_STOP_MESSAGE = "Stopped. Its latest details could not be saved, so it kept its previous details.";
 /** How long a Stop waits for a save already in flight before it goes ahead and carries the edits itself. */
 export const STOP_WAIT_DEADLINE_MS = 3_000;

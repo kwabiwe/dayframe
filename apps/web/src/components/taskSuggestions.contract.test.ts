@@ -6,10 +6,6 @@ const timerSource = readFileSync(
   fileURLToPath(new URL("./PersistentTimerBar.tsx", import.meta.url)),
   "utf8"
 );
-const runtimeSource = readFileSync(
-  fileURLToPath(new URL("./AppShellRuntime.tsx", import.meta.url)),
-  "utf8"
-);
 
 describe("web task suggestion interaction", () => {
   it("opens compact suggestions from the task field, not the Play submission", () => {
@@ -33,12 +29,9 @@ describe("web task suggestion interaction", () => {
     expect(descriptionInput).toContain('event.key === "Escape"');
   });
 
-  it("syncs tag-only changes and restores clean description plus persisted tag state after failure", () => {
+  it("autosaves selected tags separately from the description", () => {
     // Tags count as edited by normalized name (timerDetailEquivalent), and only an edit autosaves.
     expect(timerSource).toContain("if (!active || !timerDraftEdited) return undefined;");
-    expect(runtimeSource).toContain(
-      "setTimerDraft(timerDraftForEntry(snapshot.activeEntry))"
-    );
     expect(timerSource).toContain("onSelectedTagNamesChange");
     expect(timerSource).not.toContain("descriptionWithTagTokens");
   });
