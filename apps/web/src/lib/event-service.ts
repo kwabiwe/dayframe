@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { lockUserTimerState } from "./timer-owner-lock";
 import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
 import { reconcileTimerTripClashes, timerTripChecksEnabled } from "./location/timer-trip-clash-service";
 import {
@@ -1256,13 +1257,6 @@ function timerStopScope(event: {
     return { mode: "ignored_unscoped" };
   }
   return { mode: "current" };
-}
-
-async function lockUserTimerState(client: pg.PoolClient, session: RequestSession) {
-  await client.query(
-    "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
-    [session.workspaceId, session.userId]
-  );
 }
 
 // Health sleep and workout entries may overlap tracked blocks: Shortcut Stops and late Starts never end
