@@ -19,6 +19,7 @@ import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { useLocalDayStartMs } from "@/components/useCalendarClock";
+import { TimelineDeleteFallbackNotice, TimelineDeleteUndoProvider } from "@/components/useTimelineDeleteUndo";
 import { askingChecks, clashBlocksFrom } from "@/lib/calendar-checks";
 import { calendarNavigationGeneration } from "@/lib/calendar-today-request";
 import { CheckDecisionsProvider, useEndedBlocks, useProjectedReviewItems } from "@/components/location/ListChecks";
@@ -111,7 +112,9 @@ export function CheckDecisionsHost({ children }: { children: ReactNode }) {
     <CheckDecisionsProvider blocks={blocks} categories={canonical?.categories ?? NO_CATEGORIES} owner={owner} refresh={refreshShell}
       reviewItems={reviewItems}>
       <EndedBlocksToTimer />
-      {children}
+      <TimelineDeleteUndoProvider onSynced={refreshShell} owner={owner}>
+        {children}
+      </TimelineDeleteUndoProvider>
     </CheckDecisionsProvider>
   );
 }
@@ -398,6 +401,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
       </div>
 
       <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} />
+      {pathname === "/" || isTimeline ? null : <TimelineDeleteFallbackNotice />}
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

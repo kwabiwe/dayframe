@@ -174,14 +174,14 @@ export class TimelineDeleteUndoController {
     if (changed) this.emit();
   }
 
-  dispose() {
+  dispose(commitPending = true) {
     if (this.disposed) return;
     const pending = this.pending;
     this.clearTimer();
     this.clearNoticeTimer();
     this.pending = null;
     this.disposed = true;
-    if (pending && !this.active.has(pending.token)) {
+    if (commitPending && pending && !this.active.has(pending.token)) {
       this.active.set(pending.token, { transaction: pending, status: "committing" });
       this.runCommit(pending, { keepalive: true });
     }

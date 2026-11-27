@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
-import { useCallback, useLayoutEffect } from "react";
+import { StrictMode, useCallback, useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData } from "@/lib/queries";
+import { beforeSessionChange } from "@/lib/session-change";
 
 // Stability audit 22 Oct 2026 (WEB-UI-3/4/5/6): the web Calendar's data owner across period
 // changes and workspace switches. These drive the real AppShellRuntimeProvider. A period change is
@@ -26,7 +27,9 @@ const server = vi.hoisted(() => ({
   holdBootstrapDate: null as string | null,
   releaseBootstrap: null as (() => void) | null,
   /** How the held bootstrap answers once released: normally, with a 500, or by rejecting. */
-  heldBootstrapOutcome: "ok" as "ok" | "500" | "reject"
+  heldBootstrapOutcome: "ok" as "ok" | "500" | "reject",
+  holdDelete: false,
+  finishDelete: null as null | ((ok: boolean) => void)
 }));
 
 vi.mock("@/lib/client-auth-fetch", () => ({
@@ -49,13 +52,16 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       }
       return { ok: true, status: 200, json: async () => body };
     }
-    if (method === "DELETE") return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    if (method === "DELETE") {
+      const ok = server.holdDelete ? await new Promise<boolean>((resolve) => { server.finishDelete = resolve; }) : true;
+      return { ok, status: ok ? 200 : 409, json: async () => ({ error: "The block could not be deleted." }) };
+    }
     return { ok: false, status: 404, json: async () => ({}) };
   })
 }));
 
 const { AppShellRuntimeProvider, useAppShellRuntime, useRuntimePageData } = await import("./AppShellRuntime");
-const { useTimelineDeleteUndo } = await import("./useTimelineDeleteUndo");
+const { TimelineDeleteUndoProvider, useTimelineDeleteUndo } = await import("./useTimelineDeleteUndo");
 
 const ENTRY_IDS: ReadonlySet<string> = new Set(["block-1"]);
 // What the harness rendered: the runtime it saw, and every distinct value it showed.
@@ -71,6 +77,8 @@ beforeEach(() => {
   server.holdBootstrapDate = null;
   server.releaseBootstrap = null;
   server.heldBootstrapOutcome = "ok";
+  server.holdDelete = false;
+  server.finishDelete = null;
   page = "shell";
   probe.runtime = null;
   probe.shown = [];
@@ -98,6 +106,18 @@ function Harness() {
     <button onClick={() => requestDelete({ entries: [{ id: "block-1" } as never], label: "Block" })}>Delete</button>
     <output data-testid="shown">{shown}</output>
   </>;
+}
+
+function DeleteRoute({ name, onSynced }: { name: string; onSynced: (ids: readonly string[]) => Promise<void> }) {
+  const { requestDelete, undoPendingDelete, error, hiddenEntryIds, pendingNotice } = useTimelineDeleteUndo({
+    entryIds: ENTRY_IDS, onSynced
+  });
+  return <section aria-label={name}>
+    {!hiddenEntryIds.has("block-1") ? <span>Test block</span> : null}
+    <button onClick={() => requestDelete({ entries: [{ id: "block-1" } as never], label: "Test block deleted" })}>Delete</button>
+    {pendingNotice && !pendingNotice.isExiting ? <button onClick={undoPendingDelete}>Undo</button> : null}
+    {error ? <p role="alert">{error}</p> : null}
+  </section>;
 }
 
 // The Calendar page as the app renders it: its server props (drawn at page load, for the first
@@ -185,6 +205,79 @@ describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5_500); });
     expect(latest).toHaveBeenCalledTimes(1);
     expect(first).not.toHaveBeenCalled();
+  });
+
+  it("keeps Delete Undo after navigation and reports a later server refusal on the destination", async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn(async () => undefined);
+    const route = (name: string) => <StrictMode>
+      <TimelineDeleteUndoProvider owner="workspace-A:user" onSynced={sync}>
+        <DeleteRoute key={name} name={name} onSynced={sync} />
+      </TimelineDeleteUndoProvider>
+    </StrictMode>;
+    const view = render(route("Today"));
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    view.rerender(route("Calendar"));
+    expect(screen.queryByText("Test block")).toBeNull();
+    act(() => screen.getByRole("button", { name: "Undo" }).click());
+    await settle(5_500);
+    expect(server.requests).toEqual([]);
+    expect(screen.getByText("Test block")).toBeTruthy();
+
+    server.holdDelete = true;
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    await settle(5_500);
+    view.rerender(route("Today"));
+    expect(screen.queryByText("Test block")).toBeNull();
+    expect(server.requests).toEqual(["DELETE /api/time-entries/block-1"]);
+    await act(async () => server.finishDelete?.(false));
+    expect(screen.getByText("Test block")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe("The block could not be deleted.");
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it("routes a successful delete to the destination refresh and ignores replies after an owner change", async () => {
+    vi.useFakeTimers();
+    server.holdDelete = true;
+    const today = vi.fn(async () => undefined);
+    const calendar = vi.fn(async () => undefined);
+    const route = (owner: string, name: string, sync: typeof today) => <TimelineDeleteUndoProvider owner={owner} onSynced={today}>
+      <DeleteRoute key={name} name={name} onSynced={sync} />
+    </TimelineDeleteUndoProvider>;
+    const view = render(route("workspace-A:user", "Today", today));
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    await settle(5_500);
+    view.rerender(route("workspace-A:user", "Calendar", calendar));
+    await act(async () => server.finishDelete?.(true));
+    expect(today).not.toHaveBeenCalled();
+    expect(calendar).toHaveBeenCalledExactlyOnceWith(["block-1"]);
+
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    await settle(5_500);
+    view.rerender(route("workspace-B:user", "Today", today));
+    await act(async () => server.finishDelete?.(false));
+    expect(screen.getByText("Test block")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sends a pending delete once before an explicit workspace switch and drops unbound pending work", async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn(async () => undefined);
+    const route = (owner: string) => <TimelineDeleteUndoProvider owner={owner} onSynced={sync}>
+      <DeleteRoute name="Today" onSynced={sync} />
+    </TimelineDeleteUndoProvider>;
+    const view = render(route("workspace-A:user"));
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    await act(async () => beforeSessionChange("workspace"));
+    view.rerender(route("workspace-B:user"));
+    await settle(5_500);
+    expect(server.requests).toEqual(["DELETE /api/time-entries/block-1"]);
+
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    view.rerender(route("workspace-A:user"));
+    await settle(5_500);
+    expect(server.requests).toEqual(["DELETE /api/time-entries/block-1"]);
+    expect(screen.getByText("Test block")).toBeTruthy();
   });
 
   it("a period change while a timer-state poll is in flight keeps the 10 s focused poll going (WEB-UI-4)", async () => {

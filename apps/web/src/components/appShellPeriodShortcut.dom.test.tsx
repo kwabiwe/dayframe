@@ -36,6 +36,7 @@ vi.mock("@/components/location/useClashesBeyondCap", () => ({ useClashesBeyondCa
 vi.mock("@/components/location/ListChecks", () => ({
   CheckDecisionsProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useEndedBlocks: () => new Map(),
+  useReportDeletedBlocks: () => undefined,
   useProjectedReviewItems: (items: unknown) => items
 }));
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: vi.fn(async () => ({ ok: false, json: async () => ({}) })) }));

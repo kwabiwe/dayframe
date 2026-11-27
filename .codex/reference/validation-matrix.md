@@ -286,6 +286,11 @@ Required checks:
 - The Today live block swipes left only, on the UI thread: it tilts and rubber-bands past 90 points, arms with one selection haptic, springs home on release and opens the Switch sheet only when armed; a touch starting on Add past time or Stop never swipes; a card re-grabbed while it springs home continues from where it is; a system-cancelled swipe opens nothing; vertical scrolling still works. The Switch sheet lists up to six recent blocks taken when it opens, picks once, starts the pick through the normal Start path and closes on logout; Reduce Motion removes the tilt; VoiceOver uses the block's "Switch" action.
 - Today row delete begins immediately without a confirmation surface and opens the five-second inverse-colour Undo bean. Verify animated row/group removal and surrounding list reflow, Undo entrance/exit, expiry, rapid replacement, exact restoration, rollback on failure, individual rows, directly deletable blank uncategorized entries, expanded grouped children, and collapsed-group safety. Confirm the swipe fill uses `danger` with `onDanger` icon/text, and the bean uses the documented inverse surface with a coral action, in light and dark themes.
 
+### Web Delete Undo across navigation
+
+- In Today and Calendar, delete a disposable block and navigate within five seconds. The destination keeps that block hidden and can Undo without a write. With Undo expired, interrupt the reply to one delete and verify the exact block stays hidden across navigation. Release a successful reply and verify the destination refreshes. Release a server refusal and verify the block returns and the destination announces the error. Repeat at desktop and phone widths, including Reduce Motion.
+- Check rapid replacement, late responses after switching workspace, and leaving for a page without a block list. A confirmed session change dispatches the held delete before changing sessions. Old results must never alter or announce in the new workspace. Keep the full-page `pagehide` delivery check separate from in-app navigation.
+
 ## Location Learning And Places
 
 Required checks when changing background location sampling, learned places, or detected-stay Review behavior:
