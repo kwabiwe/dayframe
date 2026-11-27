@@ -4,7 +4,7 @@ export type ShellIdentity = { userName: string; workspaceName: string };
 // an empty placeholder, never an invented name or workspace that changes on load.
 export function ShellProfileInitials({ identity }: { identity: ShellIdentity | null }) {
   if (!identity) return <span aria-busy="true" className="swiss-profile-placeholder-avatar" />;
-  return <span>{initials(identity.userName)}</span>;
+  return <span aria-hidden="true">{initials(identity.userName)}</span>;
 }
 
 export function ShellProfileIdentity({ identity }: { identity: ShellIdentity | null }) {

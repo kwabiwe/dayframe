@@ -45,8 +45,9 @@ describe("accessible names (WUI-034, WUI-044)", () => {
     expect(source("components/InlineTagInput.tsx")).toContain("aria-label={`#${tagName}, remove tag`}");
     expect(source("components/today/TodayView.tsx")).toContain("aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : \"\"}, ${start} to");
     const shell = source("components/AppShell.tsx");
-    expect(shell).toContain("`${shellIdentity.userName}, ${shellIdentity.workspaceName}: profile and settings`");
-    expect(shell.match(/aria-label=\{profileLabel\}/g)).toHaveLength(2);
+    expect(shell).toContain("`${initials(shellIdentity.userName)}: profile and settings for ${shellIdentity.userName}`");
+    expect(shell).toContain('<span className="sr-only">Profile and settings</span>');
+    expect(shell).toContain("aria-label={mobileProfileLabel}");
     expect(source("components/SettingsForms.tsx")).toContain('aria-label="Workspace"');
   });
 });

@@ -800,7 +800,6 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
               aria-haspopup="dialog"
               className="df-cmd-clock"
               type="button"
-              aria-label={`Edit start date and time. Started ${formatTime(active.startedAt, clock)}. Elapsed ${formatClockDuration(durationSeconds)}`}
               onClick={() => {
                 if (startEditorOpen) setStartEditorOpen(false);
                 else openStartEditor();
@@ -808,8 +807,9 @@ export function PersistentTimerBar({ workspaceMode = false, onToday = false }: {
               ref={startEditorTriggerRef}
             >
               {/* "since 07:36" sits in a fixed slot left of the digits, on their baseline (UI review round 2). */}
-              <small className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small>
+              <small aria-hidden="true" className="df-cmd-slot">since {formatTime(active.startedAt, clock)}</small>
               <Odometer value={formatClockDuration(durationSeconds)} />
+              <span className="sr-only">since {formatTime(active.startedAt, clock)} {formatClockDuration(durationSeconds)} elapsed. Edit start date and time</span>
             </button>
           ) : (
             // UI review round 2 (owner 30 Oct 2026): one line in every state. "From 07:51" is a small text button in the

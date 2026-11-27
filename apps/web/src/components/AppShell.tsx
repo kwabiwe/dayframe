@@ -140,9 +140,9 @@ function AppShellContent({ children }: { children: ReactNode }) {
     toggleTimer
   } = useAppShellRuntime();
   const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
-  // The account button's name starts with what it shows: the name and the workspace (WUI-044).
-  const profileLabel = shellIdentity
-    ? `${shellIdentity.userName}, ${shellIdentity.workspaceName}: profile and settings`
+  // The phone button only shows initials, unlike the full desktop account label.
+  const mobileProfileLabel = shellIdentity
+    ? `${initials(shellIdentity.userName)}: profile and settings for ${shellIdentity.userName}`
     : "Profile and settings";
   const [overlay, setOverlay] = useState<Overlay>(null);
   const goToPending = useRef(false);
@@ -354,11 +354,12 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="df-profile"
-            aria-label={profileLabel}
+            aria-label={shellIdentity ? undefined : "Profile and settings"}
             data-profile-trigger="" onClick={() => setOverlay("profile")}
           >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
+            <span className="sr-only">Profile and settings</span>
           </button>
         </div>
       </aside>
@@ -372,7 +373,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label={profileLabel} data-profile-trigger="" onClick={() => setOverlay("profile")}>
+          <button type="button" className="df-mtop-avatar" aria-label={mobileProfileLabel} data-profile-trigger="" onClick={() => setOverlay("profile")}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>

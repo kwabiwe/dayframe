@@ -520,7 +520,7 @@ export function DataPrivacySettings() {
           <div className="df-export">
             <a className="df-rbtn df-rbtn--sm" href="/api/export?kind=workspace_json" download>Export</a>
             <details className="df-export-more">
-              <summary className="df-rbtn df-rbtn--sm df-rbtn--ghost" aria-label="More export formats">More formats</summary>
+              <summary className="df-rbtn df-rbtn--sm df-rbtn--ghost">More formats</summary>
               <div className="df-export-menu">
                 <a href="/api/export?kind=time_entries_csv" download>Blocks as a spreadsheet (CSV)</a>
                 <a href="/api/export?kind=activity_events_json" download>Activity history (JSON)</a>

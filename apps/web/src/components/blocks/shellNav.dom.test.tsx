@@ -37,7 +37,7 @@ describe("Blocks sidebar navigation", () => {
   it("badges Calendar with the things to check, and says so (location v4 step 14)", () => {
     setReducedMotion(false);
     render(<ShellSidebarNav activeId="today" checkCount={3} />);
-    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check in the last 7 days" });
+    const calendar = screen.getByRole("link", { name: "Calendar", description: "3 to check in the last 7 days" });
     expect(calendar.querySelector(".df-nav-count")?.textContent).toBe("3");
     expect(calendar.getAttribute("href")).toBe("/timeline");
   });
@@ -45,10 +45,10 @@ describe("Blocks sidebar navigation", () => {
   it("opens Calendar on today with the badge showing: no oldest day, no date= (owner bug, 29 Oct 2026)", () => {
     setReducedMotion(false);
     render(<ShellSidebarNav activeId="today" checkCount={2} />);
-    const sidebar = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days" }).getAttribute("href");
+    const sidebar = screen.getByRole("link", { name: "Calendar", description: "2 to check in the last 7 days" }).getAttribute("href");
     cleanup();
     render(<ShellTabBar activeId="calendar" checkCount={2} />);
-    const tab = screen.getByRole("link", { name: "Calendar, 2 to check in the last 7 days" }).getAttribute("href");
+    const tab = screen.getByRole("link", { name: "Calendar", description: "2 to check in the last 7 days" }).getAttribute("href");
     // A bare /timeline: the page opens today (timelineStateFromSearchParams) and nothing of an earlier visit carries over.
     for (const href of [sidebar, tab]) {
       expect(href).toBe("/timeline");

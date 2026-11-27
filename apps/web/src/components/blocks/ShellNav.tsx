@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLayoutEffect, useRef } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
 import { requestCalendarToday } from "@/lib/calendar-today-request";
@@ -11,10 +11,6 @@ import { SHELL_SECTIONS, type ShellSectionId } from "@/lib/shell-nav";
  * The badge is a count only (owner, 29 Oct 2026): Calendar always opens on today, badge or not, with no `date=` carried
  * over. The "N to check" chip in Calendar › List, and a link to one "?", step to a question's day.
  */
-function checkLabel(count: number) {
-  return `Calendar, ${count} to check in the last 7 days`;
-}
-
 /**
  * The sidebar's four sections with one sliding neutral thumb. The thumb is the only animated
  * element: its first placement is still, later moves use the `snap` spring as a CSS transition
@@ -29,6 +25,7 @@ export function ShellSidebarNav({ activeId, checkCount = 0 }: {
   const navRef = useRef<HTMLElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
   const placedRef = useRef(false);
+  const checkDescriptionId = useId();
 
   useLayoutEffect(() => {
     const thumb = thumbRef.current;
@@ -71,6 +68,7 @@ export function ShellSidebarNav({ activeId, checkCount = 0 }: {
   return (
     <nav ref={navRef} className="df-nav" aria-label="Main navigation">
       <span ref={thumbRef} className="df-nav-thumb" aria-hidden="true" />
+      {checkCount > 0 ? <span id={checkDescriptionId} hidden>{checkCount} to check in the last 7 days</span> : null}
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
         const count = section.id === "calendar" ? checkCount : 0;
@@ -81,7 +79,7 @@ export function ShellSidebarNav({ activeId, checkCount = 0 }: {
             onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? checkLabel(count) : undefined}
+            aria-describedby={count > 0 ? checkDescriptionId : undefined}
           >
             <DayframeIcon glyph={section.glyph} size={19} />
             <span>{section.label}</span>
@@ -97,8 +95,10 @@ export function ShellSidebarNav({ activeId, checkCount = 0 }: {
 export function ShellTabBar({ activeId, checkCount = 0 }: {
   activeId: ShellSectionId | null; checkCount?: number;
 }) {
+  const checkDescriptionId = useId();
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
+      {checkCount > 0 ? <span id={checkDescriptionId} hidden>{checkCount} to check in the last 7 days</span> : null}
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
         const count = section.id === "calendar" ? checkCount : 0;
@@ -108,7 +108,7 @@ export function ShellTabBar({ activeId, checkCount = 0 }: {
             href={section.href}
             onClick={section.id === "calendar" ? requestCalendarToday : undefined}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? checkLabel(count) : undefined}
+            aria-describedby={count > 0 ? checkDescriptionId : undefined}
           >
             <span className="df-tab-icon">
               <DayframeIcon glyph={section.glyph} size={22} />

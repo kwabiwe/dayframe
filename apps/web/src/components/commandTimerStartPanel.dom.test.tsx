@@ -46,7 +46,7 @@ describe("command timer start panel", () => {
     runtime = runtimeFixture({ runningSince: new Date(now - 30 * MINUTE), lastStop: stoppedAt });
     render(<PersistentTimerBar />);
 
-    await userEvent.click(screen.getByRole("button", { name: /^Edit start date and time/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^since .+ elapsed\. Edit start date and time$/i }));
     const panel = screen.getByRole("dialog", { name: "Start date and time" });
     expect(panel.classList.contains("is-open")).toBe(true);
     expect(panel.querySelector(".df-flist-head")?.textContent).toBe("Start date and time");
@@ -67,7 +67,7 @@ describe("command timer start panel", () => {
     const now = new Date();
     runtime = runtimeFixture({ runningSince: new Date(now.getTime() - 30 * MINUTE) });
     render(<PersistentTimerBar />);
-    await userEvent.click(screen.getByRole("button", { name: /^Edit start date and time/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Edit start date and time$/ }));
     const time = screen.getByLabelText("Time") as HTMLInputElement;
     await userEvent.clear(time);
     await userEvent.type(time, "000");
@@ -99,7 +99,7 @@ describe("command timer start panel", () => {
   it("closes an open date picker on Escape before the panel, and a pick keeps the panel open", async () => {
     runtime = runtimeFixture({ runningSince: new Date(Date.now() - 30 * MINUTE) });
     render(<PersistentTimerBar />);
-    await userEvent.click(screen.getByRole("button", { name: /^Edit start date and time/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Edit start date and time$/ }));
     const panel = screen.getByRole("dialog", { name: "Start date and time" });
     const trigger = panel.querySelector<HTMLButtonElement>(".df-start-date-trigger")!;
 

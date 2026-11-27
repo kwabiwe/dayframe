@@ -81,7 +81,7 @@ describe("web Settings contracts", () => {
 
   it("offers one Export with the other files in a small menu (UIA-312)", () => {
     expect(settingsFormsSource).toContain('href="/api/export?kind=workspace_json" download>Export</a>');
-    expect(settingsFormsSource).toContain('aria-label="More export formats"');
+    expect(settingsFormsSource).toMatch(/<summary [^>]*>More formats<\/summary>/);
     expect(settingsFormsSource).toContain("/api/export?kind=time_entries_csv");
     expect(settingsFormsSource).toContain("/api/export?kind=activity_events_json");
   });
