@@ -242,6 +242,7 @@ import {
   subscribeDeliveredTimeEntryDeletes,
   subscribeTimeEntryOutbox,
   synchroniseTimeEntryCommands,
+  undoHeldTimeEntryDeletes,
   undoHeldTimeEntryUpdate
 } from "@/lib/timeEntryOutbox";
 import {
@@ -3886,13 +3887,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onRestore: ({ entries, snapshot, token }) => {
           const commandIds = deletionCommandIds.current.get(token) ?? [];
           deletionCommandIds.current.delete(token);
-          void removeTimeEntryCommands(commandIds).catch(() => undefined);
-          updateDashboardData((current) => restoreDeletedTimeEntriesSafely(
-            current,
-            snapshot,
-            entries.map((entry) => entry.id),
-            optimisticTimerIds.current
-          ));
+          if (!snapshot) return;
+          const owner = timerStopOwner(snapshot);
+          const session = todayNoticeOwner();
+          if (session.userId !== owner.userId || session.workspaceId !== owner.workspaceId) return;
+          const isCurrent = () => todayNoticeOwnerStill(session);
+          const reportFailure = () => {
+            if (isCurrent()) showTodayNotice("Dayframe couldn't undo the deletion.", null);
+          };
+          void undoHeldTimeEntryDeletes(owner, commandIds, isCurrent).then((undone) => {
+            if (!isCurrent()) return;
+            if (!undone) {
+              reportFailure();
+              return;
+            }
+            const entryIds = entries.map((entry) => entry.id);
+            updateDashboardData((current) => restoreDeletedTimeEntriesSafely(
+              current, snapshot, entryIds, optimisticTimerIds.current
+            ));
+            playHaptic("undoRestore");
+            setRowLanding(nextLandingRequest(entryIds));
+            AccessibilityInfo.announceForAccessibility(entries.length > 1 ? "Blocks restored." : "Block restored.");
+          }).catch(reportFailure);
         },
         // The delete already reached the server (it can't while held; belt and braces): no ghost.
         onRestoreRefused: ({ entries }) => {
@@ -3927,13 +3943,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function undoDeletion() {
     if (!pendingDeletion || pendingDeletion.phase !== "active") return;
-    if (getDeletionCoordinator().undo(pendingDeletion.token)) {
-      playHaptic("undoRestore");
-      setRowLanding(nextLandingRequest(pendingDeletion.entries.map((entry) => entry.id)));
-      AccessibilityInfo.announceForAccessibility(
-        pendingDeletion.entries.length > 1 ? "Blocks restored." : "Block restored."
-      );
-    }
+    getDeletionCoordinator().undo(pendingDeletion.token);
   }
 
   async function prepareSheetDeletion(

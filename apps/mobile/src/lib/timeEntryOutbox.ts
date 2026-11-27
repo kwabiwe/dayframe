@@ -321,6 +321,28 @@ export function wereTimeEntryCommandsDispatched(clientCommandIds: readonly strin
   return clientCommandIds.some((id) => dispatchedCommandIds.has(id));
 }
 
+export async function undoHeldTimeEntryDeletes(
+  owner: MobileAccountOwner,
+  clientCommandIds: readonly string[],
+  isStillCurrent: () => boolean
+) {
+  const ids = new Set(clientCommandIds);
+  if (ids.size === 0) return false;
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    const deletes = all.filter((command) => ids.has(command.clientCommandId));
+    const now = new Date();
+    if (deletes.length !== ids.size || deletes.some((command) =>
+      command.operation !== "delete" || !mobileAccountOwnersEqual(command, owner) ||
+      !heldCommands.has(command.clientCommandId) || !isHeld(command, now)
+    ) || wereTimeEntryCommandsDispatched(clientCommandIds) || !isStillCurrent()) return false;
+
+    await writeAllCommands(all.filter((command) => !ids.has(command.clientCommandId)));
+    for (const id of ids) dropHold(id);
+    return true;
+  });
+}
+
 export async function undoHeldTimeEntrySplit(
   owner: MobileAccountOwner,
   clientCommandId: string,
@@ -893,7 +915,7 @@ async function runTimeEntryCommandDrain(input: {
     if (!input.signal && input.isForeground?.() === false) {
       return currentOutboxResult(input.owner, deliveredCount, true, "foreground_required");
     }
-    if (original.split || original.expectedUpdatedAt) {
+    if (original.operation === "delete" || original.split || original.expectedUpdatedAt) {
       // Undo and dispatch claim the same durable command under the outbox lock.
       const dispatchable = await withMutation(async () => {
         const latest = (await readAllCommands()).find((command) => command.clientCommandId === original.clientCommandId);

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => new Map<string, string>());
 // Lets a test hold the outbox's storage write open, as a slow write during sign-out would be.
-const writeGate = vi.hoisted(() => ({ next: null as Promise<void> | null, skip: 0 }));
+const writeGate = vi.hoisted(() => ({ next: null as Promise<void> | null, skip: 0, fail: false }));
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
@@ -15,6 +15,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
       storage.delete(key);
     }),
     setItem: vi.fn(async (key: string, value: string) => {
+      if (key === "dayframe.timeEntryOutbox.v1" && writeGate.fail) {
+        writeGate.fail = false;
+        throw new Error("Storage write failed");
+      }
       let gate = key === "dayframe.timeEntryOutbox.v1" ? writeGate.next : null;
       if (gate && writeGate.skip > 0) {
         writeGate.skip -= 1;
@@ -55,6 +59,7 @@ describe("undoable delete hold covers the whole Undo window", () => {
     outbox.__resetTimeEntryOutboxForTests();
     writeGate.next = null;
     writeGate.skip = 0;
+    writeGate.fail = false;
     await account.activateMobileAccount(OWNER);
     deletes = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -82,6 +87,7 @@ describe("undoable delete hold covers the whole Undo window", () => {
   function harness() {
     const commandIds = new Map<number, string[]>();
     const restored: number[] = [];
+    const failed: number[] = [];
     const refused: number[] = [];
     const lapsed: string[] = [];
     const lease = hold.createUndoHoldLease((clientCommandId) => {
@@ -100,8 +106,9 @@ describe("undoable delete hold covers the whole Undo window", () => {
       },
       onPendingChange: () => undefined,
       onRestore: ({ token }) => {
-        restored.push(token);
-        void outbox.removeTimeEntryCommands(commandIds.get(token) ?? []);
+        void outbox.undoHeldTimeEntryDeletes(OWNER, commandIds.get(token) ?? [], () => !lease.ended)
+          .then((undone) => (undone ? restored : failed).push(token))
+          .catch(() => failed.push(token));
       },
       onRestoreRefused: ({ token }) => {
         refused.push(token);
@@ -122,6 +129,7 @@ describe("undoable delete hold covers the whole Undo window", () => {
       lapsed,
       refused,
       restored,
+      failed,
       // Sign-out (transitionToSignedOut) and provider teardown (unmount) both do this.
       teardown() {
         coordinator.dispose();
@@ -168,6 +176,26 @@ describe("undoable delete hold covers the whole Undo window", () => {
 
   it("fast sheet exit (400 ms): a sync inside the Undo window is deferred and Undo restores", async () => {
     expect(await sheetScenario(400, 4_600)).toEqual({ deletes: 0, pendingAfter: 0, undoAccepted: true });
+  });
+
+  it("keeps a failed Undo in the durable Delete queue without restoring the row", async () => {
+    const h = harness();
+    const { token, command } = await h.prepare("entry-a");
+    expect(h.coordinator.activate(token)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    writeGate.fail = true;
+
+    expect(h.coordinator.undo(token)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.restored).toEqual([]);
+    expect(h.failed).toEqual([token]);
+    await expect(outbox.readPendingTimeEntryCommands(OWNER)).resolves.toMatchObject([command]);
+    expect(deletes).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(DELETION_UNDO_MS + 1_001 + outbox.HOLD_LAPSE_MARGIN_MS);
+    await sync();
+    expect(deletes).toHaveLength(1);
   });
 
   it("slow sheet exit (2 s): a sync 6.1 s after the delete was written cannot delete before Undo", async () => {
