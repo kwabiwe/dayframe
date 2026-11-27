@@ -1,6 +1,6 @@
 import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent, TimeEntryValidationError, TimerMutationBusyError, TimerReplacementWindowError, TimerStopBeforeStartError } from "@/lib/event-service";
@@ -10,6 +10,8 @@ import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
 import { wantsReviewCardCount } from "@/lib/review-card-count";
 import { reconcileHealthCoveredMoveCardsNow } from "@/lib/location/health-coverage";
 
+const WebStopOwnerSchema = z.object({ userId: z.uuid(), workspaceId: z.uuid() });
+
 export async function POST(request: Request) {
   const deadlineAt = Date.now() + 8_000;
   try {
@@ -18,6 +20,16 @@ export async function POST(request: Request) {
       requiredScopes: ["events:write"]
     });
     const body = await request.json();
+    if (body?.webStopOwner !== undefined) {
+      const owner = WebStopOwnerSchema.parse(body.webStopOwner);
+      if (body.type !== "timer_stop" || body.source !== "manual_app" || body.rawPayload?.stopScope !== "entry" ||
+          !z.uuid().safeParse(body.rawPayload.targetEntryId).success) {
+        return NextResponse.json({ error: "A web Stop must target a specific block." }, { status: 400 });
+      }
+      if (owner.userId !== session.userId || owner.workspaceId !== session.workspaceId) {
+        return NextResponse.json({ error: "The account or workspace changed. Check the current block before trying again." }, { status: 409 });
+      }
+    }
     const result = await processActivityEvent(body, session, { signal: request.signal, deadlineAt });
     // Health walks win (PRD D19): a newly imported workout retires the location Move cards it covers.
     if (body?.type === "health_workout_import" && !result.duplicate) {

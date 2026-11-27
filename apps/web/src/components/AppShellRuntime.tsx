@@ -165,7 +165,7 @@ export const DATE_DATA_CACHE_LIMIT = 8;
 /** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
 export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
 const TIMER_POLL_READ_LIMIT_MS = 15_000;
-const TIMER_START_ATTEMPT_LIMIT_MS = 10_000;
+const TIMER_WRITE_ATTEMPT_LIMIT_MS = 10_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -966,27 +966,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             startCommand: { userId: original.user.id, workspaceId: original.workspace.id, activeEntryId }
           })
         };
-        const sendAttempt = async () => {
-          const controller = new AbortController();
-          const deadline = window.setTimeout(() => controller.abort(), TIMER_START_ATTEMPT_LIMIT_MS);
-          try {
-            const response = await clientFetch("/api/time-entries", { ...request, signal: controller.signal });
-            if (response.status >= 500) return null;
-            if (!response.ok) {
-              return { error: await responseError(response, `Unable to start the block: ${response.status}`) };
-            }
-            const result = await response.json() as { timeEntryId?: unknown } | null;
-            return { serverId: typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined };
-          } catch {
-            return null;
-          } finally {
-            window.clearTimeout(deadline);
-          }
-        };
-        // A lost reply can follow a committed Start. Retry the original command once so the server
-        // can return its receipt. A definite refusal remains a refusal.
-        const first = await sendAttempt();
-        const receipt = first ?? (sameOwner() ? await sendAttempt() : null);
+        const receipt = await sendWebTimerCommand("/api/time-entries", request, sameOwner, "start");
         if (!sameOwner()) throw new Error(changedOwner);
         if (!receipt) {
           deliveryUnconfirmed = true;
@@ -1029,8 +1009,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [startTimer]);
 
   const stopTimerNow = useCallback(async (input: TimerDraftInput): Promise<MutationOutcome> => {
-    const requested = dataRef.current?.activeEntry;
-    if (!requested) return { ok: false, error: "There is no running block to stop." };
+    const original = dataRef.current;
+    const requested = original?.activeEntry;
+    if (!original || !requested) return { ok: false, error: "There is no running block to stop." };
+    const generation = workspaceGenerationRef.current;
+    const sameOwner = () => generation === workspaceGenerationRef.current &&
+      dataRef.current?.workspace.id === original.workspace.id && dataRef.current?.user.id === original.user.id;
+    const changedOwner = "The account or workspace changed. Check the current block before trying again.";
     const gate = mutationGateRef.current;
     const outcomeSeq = detailsOutcomeRef.current.seq;
     // Stop is never turned away by a mutation already in the gate (stability audit WEB-UI-10): it
@@ -1080,6 +1065,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           : { ok: false, error: "There is no running block to stop." };
       }
     }
+    if (!sameOwner()) return { ok: false, error: changedOwner };
     // A details save this Stop waited for and that was refused or failed: its notice is carried
     // into the Stop's own (which otherwise clears it), so the lost edit is never silent.
     const earlier = detailsOutcomeRef.current;
@@ -1116,6 +1102,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       return { ...body, expectedDetails };
     };
     let detailsConflict = false;
+    let deliveryUnconfirmed = false;
     const stop = async () => {
       setIsTimerBusy(true);
       setTimerError(null);
@@ -1141,7 +1128,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             throw new Error(await responseError(updateResponse, `Unable to save the block details: ${updateResponse.status}`));
           }
         }
-        const response = await clientFetch("/api/events", {
+        if (!sameOwner()) return { ok: false, error: changedOwner } as const;
+        const receipt = await sendWebTimerCommand("/api/events", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1149,19 +1137,26 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             type: "timer_stop",
             // The event service supplies its clock when occurredAt is omitted.
             clientEventId: `web-timer-stop:${targetId}`,
+            webStopOwner: { userId: original.user.id, workspaceId: original.workspace.id },
             rawPayload: {
               origin: "web_timer",
               stopScope: "entry",
               targetEntryId: targetId
             }
           })
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to stop the block: ${response.status}`));
+        }, sameOwner, "stop");
+        if (!sameOwner()) return { ok: false, error: changedOwner } as const;
+        if (!receipt) {
+          deliveryUnconfirmed = true;
+          throw new Error("Dayframe couldn’t confirm the stop. Check what’s recording before trying again.");
+        }
+        if (receipt.error) throw new Error(receipt.error);
         clearPendingTimerDetails(pendingOwner(snapshot).owner, targetId);
         if (detailsConflict || carried?.conflict) setTimerError(DETAILS_CONFLICT_STOP_MESSAGE);
         else if (carried) setTimerError(DETAILS_FAILED_STOP_MESSAGE);
         return { ok: true } as const;
       } catch (error) {
+        if (!sameOwner()) return { ok: false, error: changedOwner } as const;
         // The block comes back with the edits it had (the rollback draft), not its saved details.
         rollbackDraftRef.current = { draft: draftSnapshot, entryId: activeEntry.id };
         commitData(snapshot, "optimistic");
@@ -1174,7 +1169,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
     };
     const result = bypassed ? { ran: true as const, value: await stop() } : await gate.run(stop);
-    if (result.ran && result.value.ok && !gate.isActive()) {
+    if (result.ran && (result.value.ok || deliveryUnconfirmed) && sameOwner() && !gate.isActive()) {
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
@@ -1871,6 +1866,29 @@ function withCurrentSharedBootstrap(
     taskSuggestions: current.taskSuggestions,
     taskSuggestionCandidates: current.taskSuggestionCandidates
   };
+}
+
+/** The command already carries its receipt ID and owner. A lost reply can follow a commit. */
+async function sendWebTimerCommand(path: string, request: RequestInit, sameOwner: () => boolean, action: "start" | "stop") {
+  const sendAttempt = async () => {
+    const controller = new AbortController();
+    const deadline = window.setTimeout(() => controller.abort(), TIMER_WRITE_ATTEMPT_LIMIT_MS);
+    try {
+      const response = await clientFetch(path, { ...request, signal: controller.signal });
+      if (response.status >= 500) return null;
+      if (!response.ok) {
+        return { error: await responseError(response, `Unable to ${action} the block: ${response.status}`) };
+      }
+      const result = action === "start" ? await response.json() as { timeEntryId?: unknown } | null : null;
+      return { serverId: typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined };
+    } catch {
+      return null;
+    } finally {
+      window.clearTimeout(deadline);
+    }
+  };
+  const first = await sendAttempt();
+  return first ?? (sameOwner() ? sendAttempt() : null);
 }
 
 async function responseError(response: Response, fallback: string) {

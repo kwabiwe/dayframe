@@ -470,6 +470,7 @@ function bootstrap(activeEntry: TimeEntryRow | null, entries = activeEntry ? [ac
       weekStart: "2026-08-17T00:00:00.000Z",
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace", name: "Dayframe" }
   } as unknown as BootstrapData;
 }

@@ -28,6 +28,8 @@ const server = vi.hoisted(() => ({
   /** Start POSTs wait to be released, one at a time. */
   holdPosts: false,
   stallStartAttempts: 0,
+  stallStopAttempts: 0,
+  stopBodies: [] as string[],
   heldPosts: [] as Array<() => void>,
   /** The next bootstrap waits to be released (it reads the server when released). */
   holdNextBootstrap: false,
@@ -104,6 +106,13 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(200, { ok: true });
     }
     if (method === "POST" && url === "/api/events") {
+      server.stopBodies.push(String(init?.body));
+      if (server.stallStopAttempts > 0) {
+        server.stallStopAttempts -= 1;
+        await new Promise<never>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
       server.activeEntry = null;
       return reply(200, { ok: true, results: [] });
     }
@@ -138,6 +147,8 @@ beforeEach(() => {
   server.maxInFlight = 0;
   server.holdPosts = false;
   server.stallStartAttempts = 0;
+  server.stallStopAttempts = 0;
+  server.stopBodies = [];
   server.heldPosts = [];
   server.holdNextBootstrap = false;
   server.releaseBootstrap = null;
@@ -320,6 +331,28 @@ describe("web timer-state polling cadence", () => {
     expect(server.requests.filter(({ request }) => request === "POST /api/time-entries")).toHaveLength(1);
     expect(probe.runtime!.shellData?.workspace.id).toBe("workspace-2");
     expect(shownId()).toBe("phone-1");
+  });
+
+  it("settles an exact Stop after a stalled delivery and sends the same event", async () => {
+    phoneStart();
+    await mount();
+    expect(shownId()).toBe("phone-1");
+    server.stallStopAttempts = 1;
+    let pending!: ReturnType<NonNullable<typeof probe.runtime>["stopTimer"]>;
+    let result: Awaited<typeof pending> | undefined;
+    await act(async () => {
+      pending = probe.runtime!.stopTimer();
+      void pending.then((outcome) => { result = outcome; });
+    });
+    await advance(10_010);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(server.stopBodies).toHaveLength(2);
+    expect(server.stopBodies[1]).toBe(server.stopBodies[0]);
+    expect(JSON.parse(server.stopBodies[1])).toMatchObject({
+      clientEventId: "web-timer-stop:phone-1", rawPayload: { stopScope: "entry", targetEntryId: "phone-1" }
+    });
+    expect(shownId()).toBeNull();
   });
 
   it("queued actions confirm once, after the last one's own reload, and no poll supersedes that reload (Codex r1 on #637)", async () => {

@@ -78,6 +78,22 @@ describe("POST /api/events", () => {
     expect(await stop.json()).toMatchObject({ code: "timer_stop_before_start" });
   });
 
+  it.each(["userId", "workspaceId"] as const)("refuses an exact web Stop after the %s changes", async (field) => {
+    const response = await POST(new Request("https://dayframe.test/api/events", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        source: "manual_app",
+        type: "timer_stop",
+        rawPayload: { stopScope: "entry", targetEntryId: "80000000-0000-4000-8000-000000000001" },
+        webStopOwner: {
+          userId: session.userId, workspaceId: session.workspaceId,
+          [field]: "88888888-8888-4888-8888-888888888888"
+        }
+      })
+    }));
+    expect(response.status).toBe(409);
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+  });
+
   it("retires location Move cards a newly imported Health workout covers, never for a duplicate (PRD D19)", async () => {
     const post = (body: object) => POST(new Request("https://dayframe.test/api/events", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
