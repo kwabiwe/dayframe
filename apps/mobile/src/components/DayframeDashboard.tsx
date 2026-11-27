@@ -1732,9 +1732,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const owner = await readActiveMobileAccount();
       return Boolean(owner && accountKey === mobileAccountKey(owner));
     };
-    void import("@/lib/reviewNudgeNative").then(({ installReviewNudgeForegroundHandler, subscribeReviewNudgeOpens }) => {
+    const isCurrentForgottenTimer = async (entryId: string) => {
+      const before = latestData.current;
+      if (cancelled || !before || before.activeEntry?.id !== entryId) return false;
+      const owner = timerStopOwner(before);
+      const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+      const current = latestData.current;
+      return !cancelled && session.status === "authenticated" && isAuthenticatedSessionSnapshotCurrent(session.snapshot) &&
+        current?.activeEntry?.id === entryId && sameTimerStopOwner(timerStopOwner(current), owner);
+    };
+    void import("@/lib/reviewNudgeNative").then(({ installDayframeForegroundNotificationHandler, subscribeReviewNudgeOpens }) => {
       if (cancelled) return;
-      installReviewNudgeForegroundHandler(isCurrentAccount);
+      installDayframeForegroundNotificationHandler({ isCurrentAccount, isCurrentForgottenTimer });
       unsubscribe = subscribeReviewNudgeOpens((accountKey) => {
         void isCurrentAccount(accountKey).then((current) => {
           // "N things to check" opens Calendar › List on the latest day with one, at its first "?" (location v4 step 14).

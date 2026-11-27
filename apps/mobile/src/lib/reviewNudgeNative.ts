@@ -1,6 +1,7 @@
 // The only file that talks to expo-notifications for the evening Review reminder, so the
 // planner and store stay testable without the native module.
 import * as Notifications from "expo-notifications";
+import { forgottenTimerEntryId } from "./forgottenTimer";
 
 export const REVIEW_NUDGE_NOTIFICATION_ID = "dayframe-review-nudge";
 
@@ -51,17 +52,21 @@ export function subscribeReviewNudgeOpens(onOpen: (accountKey: string | null) =>
   return () => subscription.remove();
 }
 
-/**
- * Shows the reminder even while Dayframe is open (iOS otherwise drops it), but only when it
- * belongs to the signed-in account. The only other notification, the tracking-stopped notice
- * (`trackingNotice.ts`), is posted while iOS ends Dayframe, so it never reaches this handler.
- */
-export function installReviewNudgeForegroundHandler(isCurrentAccount: (accountKey: string | null) => Promise<boolean>) {
+/** One iOS foreground handler for the Review and forgotten-timer alerts. */
+export function installDayframeForegroundNotificationHandler({ isCurrentAccount, isCurrentForgottenTimer }: {
+  isCurrentAccount: (accountKey: string | null) => Promise<boolean>;
+  isCurrentForgottenTimer: (entryId: string) => Promise<boolean>;
+}) {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
-      const data = notification.request.content.data as { kind?: unknown; accountKey?: unknown } | undefined;
-      const show = data?.kind === "review-nudge" &&
-        await isCurrentAccount(typeof data.accountKey === "string" ? data.accountKey : null).catch(() => false);
+      const data = notification.request.content.data;
+      let show = false;
+      if (data?.kind === "review-nudge") {
+        show = await isCurrentAccount(typeof data.accountKey === "string" ? data.accountKey : null).catch(() => false);
+      } else {
+        const entryId = forgottenTimerEntryId(notification);
+        if (entryId !== null) show = await isCurrentForgottenTimer(entryId).catch(() => false);
+      }
       return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
     }
   });

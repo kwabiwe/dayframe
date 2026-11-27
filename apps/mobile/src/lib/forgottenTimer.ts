@@ -1,10 +1,21 @@
 import { NativeModules } from "react-native";
+import type { Notification } from "expo-notifications";
 import { DAYFRAME_API_BASE } from "./config";
 import type { MobileAccountOwner } from "./mobileAccount";
 import { mobileJsonRequest, StaleMobileSessionResponseError } from "./mobile-network";
 import { isAuthenticatedSessionSnapshotCurrent, readOwnedAuthenticatedSessionSnapshot } from "./secure-session";
 
 export const FORGOTTEN_TIMER_AGE_MS = 8 * 60 * 60 * 1000;
+
+export function forgottenTimerEntryId(notification: Notification) {
+  const { trigger, content } = notification.request;
+  // Expo exposes the outer APNs fields on the push trigger. The content data for a
+  // remote notification is populated only from the optional APNs `body` object.
+  const data = trigger && "type" in trigger && trigger.type === "push"
+    ? trigger.payload ?? content.data
+    : content.data;
+  return data?.kind === "forgotten-timer" && typeof data.entryId === "string" ? data.entryId : null;
+}
 
 async function request(owner: MobileAccountOwner, path: string, method: string, body?: unknown, signal?: AbortSignal) {
   const session = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -66,9 +77,10 @@ export async function subscribeForgottenTimerOpens(onOpen: (entryId: string) => 
   const notifications = await import("expo-notifications");
   let live = true;
   const handle = (response: import("expo-notifications").NotificationResponse | null) => {
-    const data = response?.notification.request.content.data;
-    if (!live || data?.kind !== "forgotten-timer" || typeof data.entryId !== "string") return;
-    onOpen(data.entryId);
+    if (!live || !response) return;
+    const entryId = forgottenTimerEntryId(response.notification);
+    if (entryId === null) return;
+    onOpen(entryId);
     void notifications.clearLastNotificationResponseAsync().catch(() => undefined);
   };
   const subscription = notifications.addNotificationResponseReceivedListener(handle);

@@ -27,7 +27,10 @@ describe("forgotten timer notification opens", () => {
   });
 
   it("reads a cold open from the native response and consumes it for the exact entry", async () => {
-    const reminder = response({ kind: "forgotten-timer", entryId: "overdue-entry" });
+    const reminder = { notification: { request: {
+      content: { data: null },
+      trigger: { type: "push", payload: { kind: "forgotten-timer", entryId: "overdue-entry" } }
+    } } };
     notifications.getLastNotificationResponseAsync.mockResolvedValueOnce(reminder);
     const onOpen = vi.fn();
     const stop = await subscribeForgottenTimerOpens(onOpen);

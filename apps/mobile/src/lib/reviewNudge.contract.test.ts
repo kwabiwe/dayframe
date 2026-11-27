@@ -45,7 +45,7 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
   });
 
   it("shows the reminder while Dayframe is open, only for the signed-in account", () => {
-    expect(dashboard).toContain("installReviewNudgeForegroundHandler(isCurrentAccount)");
+    expect(dashboard).toContain("installDayframeForegroundNotificationHandler({ isCurrentAccount, isCurrentForgottenTimer })");
     expect(nativeSource).toContain("Notifications.setNotificationHandler");
   });
 
