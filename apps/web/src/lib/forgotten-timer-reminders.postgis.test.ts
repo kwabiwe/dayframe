@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { pool } from "./db";
+import { hashSessionToken } from "./auth/local";
+import { processActivityEvent } from "./event-service";
+import {
+  isForgottenTimerDeviceRegistered, registerForgottenTimerDevice, unregisterForgottenTimerDevice
+} from "./forgotten-timer-devices";
 import { dispatchOverdueTimerReminder, keepOverdueTimerRunning } from "./forgotten-timer-reminders";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -71,6 +76,42 @@ describe.runIf(process.env.DAYFRAME_RUN_FORGOTTEN_TIMER_DB_TEST === "1" && Boole
       expect(send).not.toHaveBeenCalled();
       const active = await pool.query("select id from time_entries where id = $1 and stopped_at is null", [current]);
       expect(active.rowCount).toBe(1);
+    });
+
+    it("ends an overdue running block without letting a stale reminder shorten it after it has stopped", async () => {
+      const id = await runningTimer(500);
+      const session = { ...owner, authMode: "dev" as const, scopes: [] };
+      const stop = (occurredAt: Date) => processActivityEvent({
+        type: "timer_stop", source: "manual_app", clientEventId: randomUUID(), occurredAt,
+        rawPayload: { stopScope: "entry", targetEntryId: id }
+      }, session, { overdueRunningStopOnly: true });
+      const picked = new Date(Date.now() - 60 * 60 * 1000);
+      await expect(stop(picked)).resolves.toMatchObject({ stopOutcome: "stopped" });
+      const replacement = await runningTimer(0);
+      await expect(stop(new Date(picked.getTime() - 60_000))).resolves.toMatchObject({ stopOutcome: "superseded" });
+      const { rows } = await pool.query("select id, stopped_at from time_entries where id = any($1::uuid[])", [
+        [id, replacement]
+      ]);
+      expect(rows.find((row) => row.id === id)?.stopped_at).toEqual(picked);
+      expect(rows.find((row) => row.id === replacement)?.stopped_at).toBeNull();
+    });
+
+    it("binds the opted-in device to the exact session and rejects revoked sessions", async () => {
+      const token = randomUUID();
+      const hashedToken = hashSessionToken(token);
+      const session = { ...owner, authMode: "provider" as const, scopes: [] };
+      const device = { environment: "development" as const, token: "a".repeat(64) };
+      await pool.query(`insert into auth_sessions (workspace_id, user_id, token_hash, expires_at)
+        values ($1, $2, $3, statement_timestamp() + interval '1 hour')`, [
+        owner.workspaceId, owner.userId, hashedToken
+      ]);
+      await expect(registerForgottenTimerDevice(session, token, device)).resolves.toBe(true);
+      await expect(isForgottenTimerDeviceRegistered(session, token)).resolves.toBe(true);
+      await unregisterForgottenTimerDevice(session, randomUUID());
+      await expect(isForgottenTimerDeviceRegistered(session, token)).resolves.toBe(true);
+      await pool.query("update auth_sessions set revoked_at = statement_timestamp() where token_hash = $1", [hashedToken]);
+      await expect(isForgottenTimerDeviceRegistered(session, token)).resolves.toBe(false);
+      await expect(registerForgottenTimerDevice(session, token, device)).resolves.toBe(false);
     });
   }
 );

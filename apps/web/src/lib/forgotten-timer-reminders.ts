@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import { pool } from "./db";
+import { pool, query } from "./db";
 import type { RequestSession } from "./session";
 import { lockUserTimerState } from "./timer-owner-lock";
 
@@ -22,6 +22,16 @@ const overdueLatestTimer = `
         and (newer.started_at, newer.id) > (e.started_at, e.id)
     )
 `;
+
+export async function isForgottenTimerResponseAvailable(owner: Owner, entryId: string) {
+  const result = await query(
+    `select 1 from (${overdueLatestTimer}) eligible
+     left join dayframe_sync.forgotten_timer_reminders r on r.entry_id = eligible.id
+     where r.kept_at is null`,
+    [owner.workspaceId, owner.userId, entryId]
+  );
+  return result.rowCount === 1;
+}
 
 /** Share the owner lock with timer Start, Stop and Switch. */
 async function withTimerOwner<T>(owner: Owner, action: (client: PoolClient) => Promise<T>) {
@@ -64,7 +74,8 @@ export async function keepOverdueTimerRunning(owner: Owner, entryId: string) {
 export async function dispatchOverdueTimerReminder<T>(
   owner: Owner,
   entryId: string,
-  initiate: () => Promise<T>
+  initiate: () => Promise<T>,
+  validateRecipient?: (client: PoolClient) => Promise<boolean>
 ): Promise<T | null> {
   const claimed = await withTimerOwner(owner, async (client) => {
     const result = await client.query(
@@ -85,6 +96,7 @@ export async function dispatchOverdueTimerReminder<T>(
       [owner.workspaceId, owner.userId, entryId]
     );
     if (pending.rowCount !== 1) return null;
+    if (validateRecipient && !await validateRecipient(client)) return null;
     const delivery = initiate();
     // The provider can fail before the database transaction releases the owner lock.
     void delivery.catch(() => {});

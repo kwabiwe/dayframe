@@ -524,10 +524,10 @@ function healthSchemaReadinessError(
 export async function processActivityEvent(
   rawInput: unknown,
   session: RequestSession = getDevSession(),
-  options: SyncTransactionOptions & { expectedRunningEntryId?: string | null } = {}
+  options: SyncTransactionOptions & { expectedRunningEntryId?: string | null; overdueRunningStopOnly?: boolean } = {}
 ) {
   if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
-    return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId);
+    return processActivityEventWithClient(rawInput, session, undefined, options.expectedRunningEntryId, options.overdueRunningStopOnly);
   }
   const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
   try {
@@ -550,7 +550,8 @@ async function processActivityEventWithClient(
   rawInput: unknown,
   session: RequestSession,
   boundedClient?: pg.PoolClient,
-  expectedRunningEntryId?: string | null
+  expectedRunningEntryId?: string | null,
+  overdueRunningStopOnly = false
 ): Promise<{
   eventId: string;
   candidate: CandidateActivity;
@@ -841,13 +842,16 @@ async function processActivityEventWithClient(
       const stopResult = stopScope.mode === "running_at"
         ? await stopBlocksRunningAt(client, parsed)
         : stopScope.mode === "entry"
-        ? await stopEntryAt(client, parsed, stopScope.targetEntryId)
+        ? await stopEntryAt(client, parsed, stopScope.targetEntryId, overdueRunningStopOnly)
         : await stopCurrentTimerAt(client, parsed);
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
       }
       timeEntryId = stopResult.rows[0]?.id;
       stopOutcome = timeEntryId ? "stopped" : "superseded";
+      if (timeEntryId && overdueRunningStopOnly) {
+        await recordTimeEntryEdits(client, [timeEntryId], session, [timeEntryId]);
+      }
       // A Stop that ended a block before the trip it ran into (one queued offline) settles its "?" (design §7).
       if (stopResult.rows.length) {
         await reconcileTimerTripClashes(client, session, { entryIds: stopResult.rows.map((row) => row.id) });
@@ -1386,21 +1390,25 @@ async function blocksATimerMayEnd(
 async function stopEntryAt(
   client: pg.PoolClient,
   event: { occurredAt: string | Date; workspaceId: string; userId: string },
-  targetEntryId: string
+  targetEntryId: string,
+  overdueRunningStopOnly = false
 ) {
   // Lock first, read provenance after (Codex r4 on #531). Under READ COMMITTED a statement that waits for
   // the row lock returns the row as the blocker committed it, but its subqueries keep the snapshot taken
   // before the wait, so they would miss the audit row that a concurrent end edit inserted.
-  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; health: boolean }>(
+  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; health: boolean; overdue: boolean }>(
     `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
-            te.source in ('health_sleep', 'health_workout') as "health"
+            te.source in ('health_sleep', 'health_workout') as "health",
+            te.started_at <= statement_timestamp() - interval '8 hours' as "overdue"
      from time_entries te
      where te.workspace_id = $1 and te.user_id = $2 and te.id = $3
      for update of te`,
     [event.workspaceId, event.userId, targetEntryId]
   );
   const block = target.rows[0];
-  if (!block) return { rows: [] as Array<{ id: string }> };
+  if (!block || (overdueRunningStopOnly && (block.stoppedAt !== null || !block.overdue))) {
+    return { rows: [] as Array<{ id: string }> };
+  }
   const startedMs = new Date(block.startedAt).getTime();
   const stopMs = new Date(event.occurredAt).getTime();
   if (block.stoppedAt === null) {
@@ -1421,12 +1429,13 @@ async function stopEntryAt(
   }
   return client.query<{ id: string }>(
     `update time_entries
-     set stopped_at = $1, updated_at = now()
+     set stopped_at = $1, updated_at = now(),
+         user_edited_at = case when $5::boolean then now() else user_edited_at end
      where workspace_id = $2
        and user_id = $3
        and id = $4
      returning id`,
-    [event.occurredAt, event.workspaceId, event.userId, targetEntryId]
+    [event.occurredAt, event.workspaceId, event.userId, targetEntryId, overdueRunningStopOnly]
   );
 }
 

@@ -630,6 +630,33 @@ type ApnsResponse = {
   apnsId: string | null;
 };
 
+export function prepareForgottenTimerAlert(input: {
+  token: string;
+  environment: "development" | "production";
+  entryId: string;
+}) {
+  const { config } = apnsConfiguration();
+  if (!config) return null;
+  const authorization = apnsAuthorization(config);
+  const host = input.environment === "development" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  return () => sendApnsRequest(host, input.token, {
+    authorization,
+    "apns-topic": config.bundleId,
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-expiration": "0",
+    "apns-collapse-id": input.entryId,
+    "content-type": "application/json"
+  }, JSON.stringify({
+    aps: {
+      alert: { title: "Dayframe", body: "A block has been running for eight hours." },
+      sound: "default"
+    },
+    kind: "forgotten-timer",
+    entryId: input.entryId
+  }));
+}
+
 function sendApnsRequest(
   host: string,
   token: string,
