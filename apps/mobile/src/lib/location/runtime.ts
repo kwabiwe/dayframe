@@ -110,7 +110,9 @@ async function bindOwnerUnsafe(owner: MobileAccountOwner, revision: number, expl
     // a later authorised opt-in may enable it; bootstrap is not consent.
     const enabled = (previous.enabled || explicitEnable) && await geofence.getLocationLearningEnabled();
     if (!capture.context || !ownerIsCurrent(owner, revision)) return false;
-    const configured = await configureLocationAccount(capture.context, undefined, enabled, revision, isLocationCaptureAdmissionSuspended());
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || capture.context.timeZone;
+    const configured = await configureLocationAccount({ ...capture.context, timeZone },
+      undefined, enabled, revision, isLocationCaptureAdmissionSuspended());
     if (configured && !enabled && ownerIsCurrent(owner, revision)) await stopCaptureSourcesUnsafe(key);
     return Boolean(configured);
   }
@@ -307,6 +309,15 @@ export function syncLocationIntelligenceOnForeground(options: LocationSyncOption
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
     const capture = await captureLocationOwnership();
+    if (capture.context && isLocationCaptureSnapshotCurrent(capture)) {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (timeZone && timeZone !== capture.context.timeZone) {
+        await bindLocationCaptureOwner(capture.context, capture.revision).catch(recordLocationStoreError);
+        if (capture.revision !== locationCaptureRevision()) {
+          return { synced: false, reason: "session_changed" as const, outcome: "cancelled" as const };
+        }
+      }
+    }
     if (await locationSyncAllowed(capture)) await drainNativeLocationSignalsInBatches();
     return syncLocationEvidence({ foregroundReplay: true, ...options });
   });

@@ -178,6 +178,51 @@ function visit(id: string, arrival: number, departure: number) {
 }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
+describe("Location capture after a device time-zone change", () => {
+  it("uses the new zone without rewriting queued evidence or losing an in-flight reading", async () => {
+    const original = Intl.DateTimeFormat.prototype.resolvedOptions;
+    let timeZone = "Europe/London";
+    const options = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (this: Intl.DateTimeFormat) {
+      return { ...original.call(this), timeZone };
+    });
+    try {
+      await signIn();
+      const before = await store.captureLocationOwnership();
+      await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+      const queued = rows()[0];
+
+      vi.setSystemTime(T0 + 60_000);
+      timeZone = "America/New_York";
+      await runtime.syncLocationIntelligenceOnForeground();
+      const after = await store.captureLocationOwnership();
+      expect(after.context?.timeZone).toBe(timeZone);
+      expect(after.binding?.id).toBe(before.binding?.id);
+      expect(await store.persistLocationEvidence([
+        store.evidenceFromExpoLocation(fix(T0 + 2_000), before.context!)
+      ], before)).toMatchObject({ insertedCount: 1, rejectedCount: 0 });
+      await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+
+      const originalBatch = (await store.prepareLocationUploadBatch(A))!;
+      expect(JSON.parse(originalBatch.body_json)).toMatchObject({
+        timeZone: "Europe/London",
+        evidence: [
+          { clientEvidenceId: queued.id, occurredAt: queued.t, timeZone: "Europe/London" },
+          { occurredAt: new Date(T0 + 2_000).toISOString(), timeZone: "Europe/London" }
+        ]
+      });
+      const newBatch = (await store.prepareLocationUploadBatch(A, { excludeBatchIds: [originalBatch.client_batch_id] }))!;
+      expect(JSON.parse(newBatch.body_json)).toMatchObject({
+        timeZone,
+        evidence: [{ occurredAt: new Date(T0 + 61_000).toISOString(), timeZone }]
+      });
+      expect((await store.prepareLocationUploadBatch(A, { excludeBatchIds: [newBatch.client_batch_id] }))?.body_json)
+        .toBe(originalBatch.body_json);
+    } finally {
+      options.mockRestore();
+    }
+  });
+});
+
 describe("Location capture ownership — real SQLite and lifecycle", () => {
   it("S1 explicit logout stops all sources and never adopts signed-out Expo/native observations", async () => {
     await signIn();

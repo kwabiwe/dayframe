@@ -737,7 +737,8 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
       if (!isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
       if (!Number.isFinite(Date.parse(item.occurredAt))) { reject("invalid_timestamp"); continue; }
       if (Date.parse(item.occurredAt) < Date.parse(binding!.boundAt)) { reject("before_binding"); continue; }
-      if (item.deviceId !== context.deviceId || item.timeZone !== context.timeZone) { reject("source_mismatch"); continue; }
+      // A foreground time-zone refresh can race an already-admitted capture without replacing its binding.
+      if (item.deviceId !== context.deviceId || item.timeZone !== snapshot.context!.timeZone) { reject("source_mismatch"); continue; }
       if ((item.savedPlaceId || item.kind === "geofence_enter" || item.kind === "geofence_exit") &&
         !context.savedPlaces.some(place => place.id === item.savedPlaceId)) { reject("foreign_place"); continue; }
       const evidence = sanitiseEvidence(item);
@@ -955,12 +956,14 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
   // the motion schema refuses such a batch whole, and must never take location
   // readings with it.
   const motionBatch = parsed[0].kind === "motion_activity";
-  const evidence = parsed.filter((item) => (item.kind === "motion_activity") === motionBatch);
+  const timeZone = parsed[0].timeZone;
+  // The server requires one time zone per batch. Travel can leave unsent evidence from two zones.
+  const evidence = parsed.filter((item) => item.timeZone === timeZone && (item.kind === "motion_activity") === motionBatch);
   const body = LocationEvidenceBatchRequestSchema.parse({
     clientBatchId,
     deviceId: current.context.deviceId,
     algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-    timeZone: current.context.timeZone,
+    timeZone,
     rolloutMode: await getLocationRolloutMode(),
     semanticModeAcknowledgedAt: (await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)) || undefined,
     evidence
