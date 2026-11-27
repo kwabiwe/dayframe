@@ -163,6 +163,7 @@ export const BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS = 10_000;
 export const DATE_DATA_CACHE_LIMIT = 8;
 /** How long a timer action of the user's holds the timer-state poll's answers off at most (a stalled reload). */
 export const TIMER_ACTION_SETTLE_LIMIT_MS = 30_000;
+const TIMER_POLL_READ_LIMIT_MS = 15_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -455,13 +456,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
    * when it committed, so the poll keeps its old fingerprint otherwise and the next poll retries
    * (Codex r3 on #637).
    */
-  const reconcileFromPoll = useCallback(async (stale: () => boolean = () => false): Promise<boolean> => {
+  const reconcileFromPoll = useCallback(async (stale: () => boolean, signal: AbortSignal): Promise<boolean> => {
     if (mutationGateRef.current.isActive()) return false;
     const baseline = refreshRequestRef.current;
     const date = selectedDateRef.current;
     const generation = workspaceGenerationRef.current;
     try {
-      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store", signal });
       if (!response.ok) return false;
       const payload = (await response.json()) as BootstrapData;
       if (
@@ -471,7 +472,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         mutationGateRef.current.isActive() ||
         // The poll that asked is stale (an account or workspace change since, or its chain is gone):
         // nothing from the session left is committed (Codex r4 on #637).
-        stale()
+        stale() || signal.aborted
       ) return false;
       // Succeeded: now it supersedes the loads still in flight (they started before it).
       refreshRequestRef.current += 1;
@@ -578,7 +579,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // drops the answer in flight and the backoff.
   useEffect(() => {
     let cancelled = false;
-    let inFlight = false;
+    let inFlight: AbortController | null = null;
     let epoch = 0;
     let timeout: number | null = null;
     let consecutiveFailures = 0;
@@ -605,30 +606,35 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
     const poll = async () => {
       if (cancelled || hidden() || inFlight) return;
-      inFlight = true;
+      const request = new AbortController();
+      inFlight = request;
+      // Bound the complete read: response headers, body, and any follow-up reconciliation read.
+      const deadline = window.setTimeout(() => request.abort(), TIMER_POLL_READ_LIMIT_MS);
       const pollEpoch = epoch;
       const generation = workspaceGenerationRef.current;
       const stale = () => cancelled || pollEpoch !== epoch || generation !== workspaceGenerationRef.current;
       try {
-        const response = await clientFetch("/api/timer-state", { cache: "no-store" });
+        const response = await clientFetch("/api/timer-state", { cache: "no-store", signal: request.signal });
         if (stale()) return;
         if (!response.ok) throw new Error(`Unable to check the recording state: ${response.status}`);
         const next = (await response.json()) as TimerStateFingerprint;
         if (stale()) return;
-        consecutiveFailures = 0;
         // An action of the user's is still settling: its own reload has the newest state, and the
         // poll that follows it confirms. The answer is set aside so it never supersedes that reload.
-        if (hasCurrentTimerAction()) return;
-        // A changed fingerprint is kept only once its reload has committed (which records the
-        // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
-        const needsRefresh = timerStateChanged(timerStateRef.current, next) ||
-          completedEntriesChanged(dataRef.current?.completedEntryRevision, next.completedEntryRevision);
-        if (needsRefresh) await reconcileFromPoll(stale);
-        else timerStateRef.current = next;
+        if (!request.signal.aborted && !hasCurrentTimerAction()) {
+          // A changed fingerprint is kept only once its reload has committed (which records the
+          // loaded copy's); a failed or overtaken reload leaves the old one, so the next poll retries.
+          const needsRefresh = timerStateChanged(timerStateRef.current, next) ||
+            completedEntriesChanged(dataRef.current?.completedEntryRevision, next.completedEntryRevision);
+          if (needsRefresh) await reconcileFromPoll(stale, request.signal);
+          else timerStateRef.current = next;
+        }
+        if (!stale()) consecutiveFailures = request.signal.aborted ? consecutiveFailures + 1 : 0;
       } catch {
         if (!stale()) consecutiveFailures += 1;
       } finally {
-        inFlight = false;
+        window.clearTimeout(deadline);
+        inFlight = null;
         scheduleNext();
       }
     };
@@ -655,6 +661,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
+      inFlight?.abort();
       if (pollTimerStateNowRef.current === pollSoon) pollTimerStateNowRef.current = null;
       clear();
       unregister();

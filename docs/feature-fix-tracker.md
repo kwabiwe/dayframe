@@ -367,7 +367,7 @@ PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f367
   2. "Travelling since…": moved to the location v4 step 5 row above.
 - Stability follow-ups parked 23 Oct 2026 (orchestrator; Trello card 246, evidence in the local stability audit folder):
   1. A partial index on `audit_log` (workspace, entry, action) for the person-set-end, Shortcut provenance and edit-resend lookups (#531, #538, #553). Needs a migration (local and Supabase) and owner approval; each lookup scans one block's rows under its row lock, which is fine at today's size.
-  2. WEB-UI-11, client request deadlines: needs an uncertain-outcome design (fence the abandoned write, cover body reads, force reconciliation on timeout, a Start client id). A plain 15 s deadline broke #539's guarantees.
+  2. WEB-UI-11, client request deadlines: the web timer poll and its follow-up read now back off and recover after a 15-second stall. Mutation deadlines still need uncertain-outcome handling and a stable Start command ID. A plain write deadline broke #539's guarantees.
   3. The audit's lower-priority list: local schema lacks four hosted indexes, unknown-arrival Visits are dropped, the Live Activity stays up after sign-out, a new URLSession per Shortcut call, and the slow outing-aware Review count. #657 added workspace-scoped reference checks. Split now takes the timer lock.
 - Live Activity reliability: Stop and Switch on the Lock Screen work without opening the app, and the Live Activity catches up quickly when the timer changes on the web.
 - Owner-only write RLS on `activity_events` and `time_entries`, matching the location tables (owner-approved 12 Oct; its own PR with a `supabase/migrations` file, applied to staging and production only after the owner says so).

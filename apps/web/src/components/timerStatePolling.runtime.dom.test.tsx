@@ -20,6 +20,8 @@ const server = vi.hoisted(() => ({
   /** The fingerprint the next timer-state answers carry, when it differs from the stored block. */
   fingerprintOverride: null as { activeEntryId: string | null; updatedAt: string | null } | null,
   holdTimerState: false,
+  stallNextReadAt: null as "timer headers" | "timer body" | "bootstrap body" | null,
+  abortedReads: 0,
   held: [] as Array<() => void>,
   inFlight: 0,
   maxInFlight: 0,
@@ -41,17 +43,33 @@ vi.mock("@/lib/client-auth-fetch", () => ({
   clientFetch: vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     server.requests.push({ at: Date.now(), request: `${method} ${url}` });
-    const reply = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body });
+    const stall = async (phase: typeof server.stallNextReadAt) => {
+      if (!phase || server.stallNextReadAt !== phase) return;
+      server.stallNextReadAt = null;
+      await new Promise<never>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          server.abortedReads += 1;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    };
+    const reply = (status: number, body: unknown, phase?: "timer body" | "bootstrap body") => ({
+      ok: status < 300, status, json: async () => {
+        if (phase) await stall(phase);
+        return body;
+      }
+    });
     if (url === "/api/timer-state") {
       server.inFlight += 1;
       server.maxInFlight = Math.max(server.maxInFlight, server.inFlight);
       try {
+        await stall("timer headers");
         if (server.holdTimerState) await new Promise<void>((resolve) => server.held.push(resolve));
         const fingerprint = server.fingerprintOverride
           ?? { activeEntryId: server.activeEntry?.id ?? null, updatedAt: server.activeEntry?.updatedAt ?? null };
         return reply(server.timerStateStatus, {
           ...fingerprint, completedEntryRevision: server.completedRevision, serverNow: new Date().toISOString()
-        });
+        }, "timer body");
       } finally {
         server.inFlight -= 1;
       }
@@ -65,7 +83,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(200, {
         ...bootstrap(server.activeEntry, server.workspace),
         completedEntryRevision: server.bootstrapRevision ?? server.completedRevision
-      });
+      }, "bootstrap body");
     }
     if (method === "POST" && url === "/api/time-entries") {
       if (server.holdPosts) await new Promise<void>((resolve) => server.heldPosts.push(resolve));
@@ -106,6 +124,8 @@ beforeEach(() => {
   server.activeEntry = null;
   server.fingerprintOverride = null;
   server.holdTimerState = false;
+  server.stallNextReadAt = null;
+  server.abortedReads = 0;
   server.held = [];
   server.inFlight = 0;
   server.maxInFlight = 0;
@@ -446,6 +466,26 @@ describe("web timer-state polling cadence", () => {
     await advance(10_000);
     expect(polls().length).toBe(afterSuccess + 1); // back to 10 s
   });
+
+  it.each(["timer headers", "timer body", "bootstrap body"] as const)(
+    "bounds a stalled read at %s and picks up the other device's timer",
+    async (phase) => {
+      await mount();
+      phoneStart();
+      server.stallNextReadAt = phase;
+      await advance(10_000);
+      expect(server.stallNextReadAt).toBeNull();
+      expect(shownId()).toBeNull();
+      await advance(15_000);
+      expect(server.abortedReads).toBe(1);
+      expect(polls()).toHaveLength(2);
+      await advance(20_000);
+      expect(polls()).toHaveLength(3);
+      expect(shownId()).toBe("phone-1");
+      await advance(10_000);
+      expect(polls()).toHaveLength(4);
+    }
+  );
 
   it("runs one chain across rerenders and StrictMode, and none after unmount", async () => {
     const strict = () => <StrictMode>{tree()}</StrictMode>;
