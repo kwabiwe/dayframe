@@ -7,6 +7,7 @@ import { ReportsOverview } from "@/components/ReportsOverview";
 import { ReportsBlocksPanel } from "@/components/reports/ReportsBlocksPanel";
 import { ReportsGettingAround, ReportsNotLogged } from "@/components/reports/ReportsGettingAround";
 import { ReportsTop } from "@/components/reports/ReportsTop";
+import { WeeklyWrapped } from "@/components/reports/WeeklyWrapped";
 import { springLinearEasing } from "@/lib/blocks-motion";
 import { formatDuration } from "@/lib/format";
 import { buildReportCategoryAllocation } from "@/lib/report-calculations";
@@ -94,6 +95,8 @@ export default async function ReportsPage({
         </div>
       </div>
       <ReportsTop dailyGoalMinutes={user.dailyGoalMinutes} report={report} />
+      {report.dailyByActivity.length === 7 && (preset === "this-week" || preset === "last-week")
+        ? <WeeklyWrapped report={report} /> : null}
       <ReportsNotLogged day={report.notLoggedDay} seconds={report.notLoggedSeconds} />
       <ReportsBlocksPanel
         blocks={reportBlocksModel(report, formatDuration)}

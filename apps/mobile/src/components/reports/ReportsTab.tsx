@@ -60,6 +60,7 @@ import {
 import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
+import { WeeklyWrapped } from "./WeeklyWrapped";
 import { ReportDonutCard } from "./ReportsDonut";
 import { ReportGettingAround, ReportNotLogged } from "./ReportGettingAround";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
@@ -819,6 +820,17 @@ function ReportsTabView({
             spokenTotal={spokenReportDuration(heroSeconds)}
             theme={theme}
             total={compactDuration(heroSeconds)}
+          />
+        ) : null}
+        {report && choice === "week" && days.length === 7 ? (
+          <WeeklyWrapped
+            key={range.buckets[0].key}
+            activities={report.allCategorySegments}
+            days={days}
+            range={range}
+            reduceMotion={reduceMotion}
+            theme={theme}
+            todayKey={todayKey}
           />
         ) : null}
         {report && summary?.notLoggedSeconds ? (
