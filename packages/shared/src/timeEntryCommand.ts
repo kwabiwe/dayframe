@@ -8,5 +8,6 @@ import { z } from "zod";
  * without it (web, older iPhone builds) behaves exactly as before.
  */
 export const TIME_ENTRY_CLIENT_COMMAND_ID_HEADER = "X-Dayframe-Client-Command-Id";
+export const TIME_ENTRY_CACHE_RECEIPT_HEADER = "X-Dayframe-Time-Entry-Receipt";
 
 export const TimeEntryClientCommandIdSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9:._-]+$/);

@@ -773,7 +773,9 @@ describe("mobile API client", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ code: "timer_busy", error: "Timer is busy" }, 503))
-      .mockResolvedValueOnce(jsonResponse({ eventId: "event-stop", duplicate: true }, 200));
+      .mockResolvedValueOnce(jsonResponse({ eventId: "event-stop", duplicate: true,
+        timerCacheEntry: { ...timerRecoveryEntry(TIMER_TARGET_A), stoppedAt: pending.occurredAt }
+      }, 200));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(deliverPendingTimerStop(pending, TIMER_STOP_OWNER)).resolves.toMatchObject({
@@ -1889,6 +1891,81 @@ describe("mobile API client", () => {
     expect((await readQueue())[0].failureKind).toBeUndefined();
   });
 
+  it.each(["start", "stop", "edit", "delete"] as const)("does not lose an acknowledged %s when the refreshed bootstrap never arrives", async (action) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T11:00:00.000Z"));
+    storeBoundSession("session-token");
+    const owner = TIMER_STOP_OWNER;
+    const { readDurableLocalWork } = await import("./durableLocalWork");
+    const outbox = await import("./timeEntryOutbox");
+    const eventAt = "2026-08-22T11:00:00.000Z";
+    const completed = { ...timerRecoveryEntry(TIMER_TARGET_A), stoppedAt: "2026-08-22T10:30:00.000Z" };
+    const cached = action === "start" ? timerRecoveryBootstrap() : action === "stop"
+      ? timerRecoveryBootstrap(timerRecoveryEntry(TIMER_TARGET_A))
+      : { ...timerRecoveryBootstrap(), entries: [completed] };
+
+    const api = vi.fn(async () => jsonResponse({ ok: true, eventId: "receipt", timeEntryId: TIMER_TARGET_A }, 201));
+    vi.stubGlobal("fetch", api);
+    if (action === "start") {
+      await enqueueEvent({ localId: "optimistic-active-timer:cached-launch", source: "mobile_app", type: "timer_start" });
+      expect((await syncQueue({ eventScope: "timer_mutations" })).syncedCount).toBe(1);
+    } else if (action === "stop") {
+      const stop = await getOrCreatePendingStop({ owner, target: { targetEntryId: TIMER_TARGET_A }, occurredAt: eventAt });
+      expect((await deliverPendingTimerStop(stop, owner)).status).toBe("delivered");
+    } else {
+      if (action === "edit") {
+        await outbox.enqueueTimeEntryUpdate({ owner, target: { targetEntryId: TIMER_TARGET_A }, patch: { description: "Saved edit" } });
+      } else {
+        await outbox.enqueueTimeEntryDelete({ owner, target: { targetEntryId: TIMER_TARGET_A } });
+      }
+      expect((await outbox.synchroniseTimeEntryCommands({ owner, correlations: new Map(), force: true })).deliveredCount).toBe(1);
+    }
+
+    outbox.__resetTimeEntryOutboxForTests();
+    const relaunched = projectDurableLocalWork(cached, await readDurableLocalWork(owner));
+    if (action === "start") expect(relaunched.activeEntry?.id).toBe(TIMER_TARGET_A);
+    if (action === "stop") {
+      expect(relaunched.activeEntry).toBeNull();
+      expect(relaunched.entries[0]?.stoppedAt).toBe(eventAt);
+    }
+    if (action === "edit") expect(relaunched.entries[0]?.description).toBe("Saved edit");
+    if (action === "delete") expect(relaunched.entries).toEqual([]);
+
+    // Once a read starts after the acknowledgement, a later server decision wins in every case.
+    const laterEntry = { ...completed, description: "Edited on web" };
+    const authoritative = { ...timerRecoveryBootstrap(), entries: action === "start" ? [] : [laterEntry] };
+    api.mockResolvedValueOnce(jsonResponse(authoritative));
+    const fresh = await fetchBootstrap();
+    expect(projectDurableLocalWork(fresh, await readDurableLocalWork(owner))).toEqual(fresh);
+
+    const other = { ...cached, user: { ...cached.user, id: ACCOUNT_B_OWNER.userId },
+      workspace: { ...cached.workspace, id: ACCOUNT_B_OWNER.workspaceId } };
+    expect(projectDurableLocalWork(other, await readDurableLocalWork(owner))).toEqual(other);
+  });
+
+  it("projects a completed receipt into a Bootstrap request that was already in flight", async () => {
+    vi.useFakeTimers();
+    storeBoundSession("session-token");
+    const { readDurableLocalWork } = await import("./durableLocalWork");
+    const cached = timerRecoveryBootstrap(timerRecoveryEntry(TIMER_TARGET_A));
+    const pendingRead = deferred<Response>();
+    const stop = await getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { targetEntryId: TIMER_TARGET_A } });
+    const canonical = { ...cached.activeEntry!, stoppedAt: stop.occurredAt, updatedAt: stop.occurredAt };
+    const fetch = vi.fn()
+      .mockReturnValueOnce(pendingRead.promise)
+      .mockResolvedValueOnce(jsonResponse({ ok: true, stopOutcome: "stopped", timerCacheEntry: canonical }));
+    vi.stubGlobal("fetch", fetch);
+    const waiting = fetchBootstrap();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect((await deliverPendingTimerStop(stop, TIMER_STOP_OWNER)).status).toBe("delivered");
+    pendingRead.resolve(jsonResponse(cached));
+
+    const stale = await waiting;
+    const shown = projectDurableLocalWork(stale, await readDurableLocalWork(TIMER_STOP_OWNER));
+    expect(shown.activeEntry).toBeNull();
+    expect(shown.entries).toEqual([canonical]);
+  });
+
   it("converges an offline timer Start from local projection to one canonical server entry", async () => {
     storeBoundSession("session-token");
     const localId = "optimistic-active-timer:offline-1";
@@ -2787,7 +2864,7 @@ describe("mobile API client", () => {
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ eventId: "event-1", duplicate: true }, 200))
+      .mockResolvedValueOnce(jsonResponse({ eventId: "event-1", duplicate: true, timerCacheEntry: null }, 200))
       .mockResolvedValueOnce(jsonResponse({ error: "Server error" }, 500));
     vi.stubGlobal("fetch", fetchMock);
 

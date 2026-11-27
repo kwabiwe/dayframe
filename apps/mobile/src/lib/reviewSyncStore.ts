@@ -1,5 +1,6 @@
 import { CALENDAR_BLOCK_LOG_ACTIONS, calendarReviewLog, calendarReviewLogTitle, type CalendarReviewLog, type CalendarReviewHandover } from "./calendarReviewLog";
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
+import { markTimerCacheSnapshotPersisted } from "./timerCacheAcknowledgements";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
 import { REVIEW_EFFECTS_V5_SQL, REVIEW_OBSERVATION_V8_SQL,
@@ -1345,8 +1346,12 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, reques
        on conflict(account_key) do update set
          snapshot_json = excluded.snapshot_json,
          cached_at = excluded.cached_at
-       where excluded.cached_at > dashboard_snapshot_cache.cached_at`,
-      account.account_key, snapshot, cachedAt
+       where excluded.cached_at > dashboard_snapshot_cache.cached_at
+         and ? >=
+           case when json_valid(dashboard_snapshot_cache.snapshot_json) then
+             coalesce(json_extract(dashboard_snapshot_cache.snapshot_json, '$.timerCacheAcknowledgementRevision'), 0)
+             else 0 end`,
+      account.account_key, snapshot, cachedAt, bootstrap.timerCacheAcknowledgementRevision ?? 0
     );
     if (!written.changes) return;
     const backendId = bootstrap.serverBuild?.backendId ?? DAYFRAME_BACKEND_ID;
@@ -1361,6 +1366,10 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap, reques
     }
     wrote = true;
   }));
+  if (wrote && bootstrap.timerCacheAcknowledgementRevision) {
+    await markTimerCacheSnapshotPersisted({ userId: account.user_id, workspaceId: account.workspace_id }, bootstrap.timerCacheAcknowledgementRevision)
+      .catch(() => undefined);
+  }
   return wrote;
 }
 

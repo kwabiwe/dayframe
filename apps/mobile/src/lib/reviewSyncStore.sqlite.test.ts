@@ -81,6 +81,18 @@ beforeEach(async () => {
 afterEach(() => { db.close(); rmSync(directory, { recursive: true, force: true }); });
 
 describe("Review real SQLite transactions", () => {
+  it("retains the saved snapshot that covers more block acknowledgements across relaunch", async () => {
+    const data = bootstrap();
+    const timerCacheAcknowledgementRevision = 2;
+    const now = Date.now();
+    expect(await store.cacheDashboardBootstrap({ ...data, timerCacheAcknowledgementRevision }, now)).toBe(true);
+    expect(await store.cacheDashboardBootstrap({ ...data, timerCacheAcknowledgementRevision: 1, entries: [] }, now + 1)).toBe(false);
+    await reopen();
+    const saved = await store.loadCachedDashboardBootstrap();
+    expect(saved?.bootstrap.timerCacheAcknowledgementRevision).toBe(timerCacheAcknowledgementRevision);
+    expect(saved?.bootstrap.entries).toEqual(data.entries);
+  });
+
   it("exposes only bounded safe presentation diagnostics for the active account and backend", async () => {
     const data = bootstrap();
     const owner = { backendId: "dayframe-staging", workspaceId: data.workspace.id, userId: data.user.id };

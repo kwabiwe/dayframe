@@ -345,6 +345,35 @@ describe("durable time-entry outbox", () => {
     expect(await outbox.readPendingTimeEntryCommands(OWNER_B)).toEqual([]);
   });
 
+  it("keeps a delivered Edit in the retry queue if its cache acknowledgement cannot be written", async () => {
+    const command = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A, target: { targetEntryId: "entry-a" }, patch: { description: "Edited" }
+    });
+    const fetch = vi.fn<(_input: RequestInfo | URL, _init?: RequestInit) => Promise<Response>>(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    const write = vi.mocked(AsyncStorage.setItem);
+    const originalWrite = write.getMockImplementation()!;
+    write.mockImplementation(async (key, value) => {
+      if (key.startsWith("dayframe.timerCacheAcknowledgements.v1:")) throw new Error("Storage unavailable");
+      return originalWrite(key, value);
+    });
+    const request = { owner: OWNER_A, correlations: new Map<string, string>(), force: true };
+    try {
+      expect(await outbox.synchroniseTimeEntryCommands(request)).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+    } finally {
+      write.mockImplementation(originalWrite);
+    }
+
+    expect(await outbox.readPendingTimeEntryCommands(OWNER_A)).toEqual([
+      expect.objectContaining({ clientCommandId: command.clientCommandId })
+    ]);
+    expect(await outbox.synchroniseTimeEntryCommands(request)).toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][0]).toBe(fetch.mock.calls[0][0]);
+    expect(fetch.mock.calls[1][1]?.headers).toEqual(fetch.mock.calls[0][1]?.headers);
+    expect(fetch.mock.calls[1][1]?.body).toBe(fetch.mock.calls[0][1]?.body);
+  });
+
   it("reserves finite execution only after an immediately deliverable Edit is durable", async () => {
     let finishDurableWrite!: () => void;
     const durableWrite = new Promise<void>((resolve) => {

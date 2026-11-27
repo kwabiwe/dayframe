@@ -10,6 +10,7 @@ import {
 import { readPendingNativeEntryStops } from "./shortcuts";
 import type { MobileAccountOwner } from "./mobileAccount";
 import { readPendingTimeEntryCommands } from "./timeEntryOutbox";
+import { readTimerCacheAcknowledgements } from "./timerCacheAcknowledgements";
 import {
   pendingTimerStopsForOwner,
   readPendingTimerStops
@@ -26,9 +27,12 @@ export async function readDurableLocalWork(
     readPendingTimerStops().then((stops) => pendingTimerStopsForOwner(stops, owner)),
     readTimerEntryIdCorrelations(owner)
   ]);
+  // Delivery writes the receipt before removing the command. Read receipts last so a concurrent
+  // handover cannot leave the projection with neither copy.
+  const timerAcknowledgements = await readTimerCacheAcknowledgements(owner).catch(() => []);
   const queuedIds = new Set(queued.map((event) => event.localId));
   const activityEvents = [...queued, ...nativeStops.filter((event) => !queuedIds.has(event.localId))];
-  return { owner, activityEvents, timeEntryCommands, timerStops, correlations };
+  return { owner, activityEvents, timeEntryCommands, timerStops, correlations, timerAcknowledgements };
 }
 
 export async function projectBootstrapWithDurableLocalWork(

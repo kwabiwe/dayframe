@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   completedEntryCopyId,
   completedEntryCopySeed,
+  TIME_ENTRY_CACHE_RECEIPT_HEADER,
   TIME_ENTRY_CLIENT_COMMAND_ID_HEADER,
   TimeEntryClientCommandIdSchema,
   type CompletedEntryCopyAction
@@ -24,6 +25,7 @@ import {
 } from "./mobileAccount";
 import type { TimeEntryUpdatePatch } from "./api";
 import { OPTIMISTIC_RUNNING_SPLIT_ID_PREFIX } from "./runningSplitIdentity";
+import { acknowledgeTimerCacheEffect, timerCacheEntryEffect } from "./timerCacheAcknowledgements";
 import {
   hasTimerBackgroundExecutionReservation,
   reserveTimerBackgroundExecution,
@@ -906,6 +908,7 @@ async function runTimeEntryCommandDrain(input: {
     }
     const isCurrent = async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) &&
       mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner);
+    let serverAcceptedChange = false;
     try {
       const copy = original.copy;
       const split = original.split;
@@ -933,7 +936,8 @@ async function runTimeEntryCommandDrain(input: {
             // as delivered instead of applying it again over a newer change (item 17).
             ...(TimeEntryClientCommandIdSchema.safeParse(original.clientCommandId).success
               ? { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: original.clientCommandId }
-              : {})
+              : {}),
+            ...(original.operation === "update" ? { [TIME_ENTRY_CACHE_RECEIPT_HEADER]: "1" } : {})
           },
           ...(body ? { body: JSON.stringify(body) } : {}),
           signal: input.signal
@@ -944,7 +948,7 @@ async function runTimeEntryCommandDrain(input: {
         },
         async (response) => {
           if (response.ok) {
-            const receipt = copy || split ? await response.json().catch(() => null) : null;
+            const receipt = copy || split || original.operation === "update" ? await response.json().catch(() => null) : null;
             return { response, receipt, failureMessage: null };
           }
           const needsMessage = response.status !== 401 && response.status !== 403 &&
@@ -1020,6 +1024,18 @@ async function runTimeEntryCommandDrain(input: {
         }
       }
       if (response.ok || (original.operation === "delete" && response.status === 404)) {
+        serverAcceptedChange = true;
+        if (original.operation === "delete") {
+          await acknowledgeTimerCacheEffect(input.owner, original.clientCommandId, { kind: "delete", entryId: targetEntryId });
+        } else if (original.operation === "update") {
+          const returned = timerCacheEntryEffect(targetEntryId, receipt?.entry);
+          const effect = returned ?? (receipt?.replayed === true
+            ? await (await import("./api")).fetchTimerCacheEntryEffect(targetEntryId, input.owner, input.signal)
+            : { kind: "edit" as const, entryId: targetEntryId, patch: original.patch ?? {},
+                expectedUpdatedAt: original.expectedUpdatedAt, updatedAt: validIso(receipt?.updatedAt) ?? undefined });
+          if (!await isCurrent()) return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
+          await acknowledgeTimerCacheEffect(input.owner, original.clientCommandId, effect);
+        }
         const removed = await removeDeliveredCommand(original.clientCommandId);
         if (removed) deliveredCount += 1;
         continue;
@@ -1040,7 +1056,7 @@ async function runTimeEntryCommandDrain(input: {
       }
     } catch (error) {
       if (!await isCurrent()) return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
-      const retryable = Boolean(original.split) || input.signal?.aborted ||
+      const retryable = serverAcceptedChange || Boolean(original.split) || input.signal?.aborted ||
         error instanceof MobileRequestTimeoutError ||
         isMobileTransportFailure(error);
       const message = error instanceof Error ? error.message : "Network request failed.";

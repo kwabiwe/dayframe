@@ -15,6 +15,7 @@ import {
   type TimelineItemEvidenceDto,
   REVIEW_COUNT_CARDS,
   REVIEW_COUNT_REQUEST_HEADER,
+  TIME_ENTRY_CACHE_RECEIPT_HEADER,
   type ActivityEventInput,
   type PlaceVisitStats,
   type ActivityEventType,
@@ -82,6 +83,7 @@ import {
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
 import { captureSyncDiagnosticScope, MAX_SYNC_DIAGNOSTIC_RECORDS, recordSyncDiagnostic, type SyncDiagnosticReason } from "./syncDiagnosticHistory";
+import { acknowledgeTimerCacheEffect, readTimerCacheRevision, timerCacheEntryEffect, type TimerCacheEffect } from "./timerCacheAcknowledgements";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -274,6 +276,8 @@ export type MobileOpenTrip = {
 };
 
 export type MobileBootstrap = {
+  /** Device-only watermark captured before the authenticated server read. */
+  timerCacheAcknowledgementRevision?: number;
   completedEntryRevision?: string;
   openTrip?: MobileOpenTrip | null;
   serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number;loggedVisitPlaceCorrections?:boolean;completedEntryCopy?:boolean;runningEntrySplit?:boolean};
@@ -642,6 +646,10 @@ async function fetchBootstrapNow(options: { date?: string; signal?: AbortSignal;
   if (sessionRead.status === "changed") {
     throw new StaleMobileSessionResponseError();
   }
+  const requestOwner = sessionRead.status === "authenticated" ? sessionRead.snapshot.owner : null;
+  const timerCacheAcknowledgementRevision = requestOwner
+    ? await readTimerCacheRevision(requestOwner).catch(() => 0)
+    : 0;
   const { response, body } = await mobileJsonRequest<MobileBootstrap | null>(
     `${DAYFRAME_API_BASE}/api/bootstrap${params}`,
     {
@@ -680,7 +688,7 @@ async function fetchBootstrapNow(options: { date?: string; signal?: AbortSignal;
     );
   }
   if (!body) throw new InvalidMobileAcknowledgementError();
-  const bootstrap = body;
+  const bootstrap = { ...body, timerCacheAcknowledgementRevision };
   if (bootstrap.user?.id && bootstrap.workspace?.id) {
     const owner = {
       userId: bootstrap.user.id,
@@ -1702,7 +1710,8 @@ async function syncQueueItems(
             "Content-Type": "application/json",
             Authorization: `Bearer ${sessionRead.snapshot.token}`,
             // The reply's Review count counts cards, an outing once (PR 12c).
-            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
+            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
+            ...(item.type === "timer_start" || item.type === "timer_stop" ? { [TIME_ENTRY_CACHE_RECEIPT_HEADER]: "1" } : {})
           },
           body: JSON.stringify(queuedEventRequestBody(item)),
           signal: locationTransfer?.signal ?? options.signal
@@ -1779,6 +1788,17 @@ async function syncQueueItems(
         if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
           throw new Error("The server didn't return the started block.");
         }
+        const entryId = payload.timeEntryId;
+        const returned = timerCacheEntryEffect(entryId, payload.timerCacheEntry);
+        const effect = returned ?? (payload.startOutcome === "recorded_completed" || payload.duplicate === true
+          ? await fetchTimerCacheEntryEffect(entryId, owner, options.signal)
+          : { kind: "start" as const, block: {
+              id: entryId, projectId: item.projectId ?? null, categoryId: item.categoryId ?? null,
+              description: item.description?.trim() || null, source: item.source,
+              startedAt: validIsoString(item.rawPayload?.startedAt) ?? item.occurredAt.toISOString(),
+              tagNames: Array.isArray(item.rawPayload?.tagNames) ? item.rawPayload.tagNames.filter((name): name is string => typeof name === "string") : []
+            } });
+        await acknowledgeTimerCacheEffect(owner, item.localId, effect);
         await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
         timerEntryIdCorrelations.push({
           localId: item.localId,
@@ -1790,7 +1810,11 @@ async function syncQueueItems(
       }
       if (item.type === "timer_stop" && item.rawPayload?.stopScope === "entry" &&
         typeof item.rawPayload.targetEntryId === "string") {
-        await settleRunningSplitSecondReceipt(owner, item.rawPayload.targetEntryId, options.signal);
+        const targetId = item.rawPayload.targetEntryId;
+        const returned = timerCacheEntryEffect(targetId, payload.timerCacheEntry);
+        const settled = await settleRunningSplitSecondReceipt(owner, targetId, options.signal, returned);
+        const effect = returned ?? settled ?? await stopCacheEffect(owner, targetId, item.occurredAt.toISOString(), payload, options.signal);
+        await acknowledgeTimerCacheEffect(owner, item.localId, effect);
       }
       if (item.source === "health_sleep" || item.source === "health_workout") {
         if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
@@ -2034,13 +2058,14 @@ export async function deliverPendingTimerStop(
   const isCurrent = async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) &&
     mobileAccountOwnersEqual(await readActiveMobileAccount(), owner);
   try {
-    const { response, failureMessage } = await mobileResponseWithTimeout(
+    const { response, failureMessage, payload } = await mobileResponseWithTimeout(
       `${DAYFRAME_API_BASE}/api/events`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionRead.snapshot.token}`
+          Authorization: `Bearer ${sessionRead.snapshot.token}`,
+          [TIME_ENTRY_CACHE_RECEIPT_HEADER]: "1"
         },
         body: JSON.stringify({
           source: "mobile_app",
@@ -2067,6 +2092,7 @@ export async function deliverPendingTimerStop(
       },
       async (response) => ({
         response,
+        payload: response.ok ? await response.json().catch(() => null) as Record<string, unknown> | null : null,
         failureMessage: response.ok || response.status === 401 || response.status === 403
           ? null
           : await errorMessage(response, "Couldn't sync the Stop")
@@ -2079,7 +2105,12 @@ export async function deliverPendingTimerStop(
       return { status: "session_changed", pendingStop };
     }
     if (response.ok) {
-      await settleRunningSplitSecondReceipt(owner, pendingStop.targetEntryId, signal);
+      const targetId = pendingStop.targetEntryId;
+      const returned = timerCacheEntryEffect(targetId, payload?.timerCacheEntry);
+      const settled = await settleRunningSplitSecondReceipt(owner, targetId, signal, returned);
+      const effect = returned ?? settled ?? await stopCacheEffect(owner, targetId, pendingStop.occurredAt, payload, signal);
+      if (!await isCurrent()) return { status: "session_changed", pendingStop };
+      await acknowledgeTimerCacheEffect(owner, pendingStop.clientEventId, effect);
       if (await removePendingTimerStop(pendingStop.clientEventId)) {
         recordSyncDiagnostic(diagnosticScope, { lane, event: "delivered", attempt, status: response.status }, pendingStop.clientEventId);
       }
@@ -2119,6 +2150,11 @@ export async function deliverPendingTimerStop(
       error: failure
     };
   }
+}
+
+async function stopCacheEffect(owner: MobileAccountOwner, entryId: string, stoppedAt: string, payload: Record<string, unknown> | null, signal?: AbortSignal): Promise<TimerCacheEffect> {
+  return payload?.stopOutcome === "superseded" || payload?.stopOutcome === "ignored_unscoped" || payload?.duplicate === true
+    ? fetchTimerCacheEntryEffect(entryId, owner, signal) : { kind: "stop", entryId, stoppedAt };
 }
 
 export type EntryLastStop = { id: string; stoppedAt: string };
@@ -2184,6 +2220,19 @@ export async function fetchOwnedTimeEntry(id: string, owner: MobileAccountOwner,
   return body;
 }
 
+/** Older servers omit the receipt row on a replay or when a timer did not end at this command's time. */
+export async function fetchTimerCacheEntryEffect(id: string, owner: MobileAccountOwner, signal?: AbortSignal): Promise<TimerCacheEffect> {
+  try {
+    const entry = await fetchOwnedTimeEntry(id, owner, signal);
+    const effect = timerCacheEntryEffect(id, entry);
+    if (!effect) throw new InvalidMobileAcknowledgementError();
+    return effect;
+  } catch (error) {
+    if (!(error instanceof MobileHttpResponseError) || error.statusCode !== 404) throw error;
+    return { kind: "delete", entryId: id };
+  }
+}
+
 /** Settle only the exact Split second block that was active when the user tapped Switch. */
 async function settleRunningSplitSwitchReceipt(owner: MobileAccountOwner, commandId: string, signal?: AbortSignal) {
   const { readPendingTimeEntryCommands } = await import("./timeEntryOutbox");
@@ -2193,18 +2242,24 @@ async function settleRunningSplitSwitchReceipt(owner: MobileAccountOwner, comman
 }
 
 /** Keep the canonical state for a retained Split receipt before dropping the operation that ended it. */
-async function settleRunningSplitSecondReceipt(owner: MobileAccountOwner, entryId: string, signal?: AbortSignal) {
+async function settleRunningSplitSecondReceipt(owner: MobileAccountOwner, entryId: string, signal?: AbortSignal, returned?: TimerCacheEffect): Promise<TimerCacheEffect | undefined> {
   const { hasRunningSplitReceiptForSecondEntry, recordRunningSplitSecondState } = await import("./timeEntryOutbox");
   if (!await hasRunningSplitReceiptForSecondEntry(owner, entryId)) return;
+  if (returned?.kind === "delete") {
+    await recordRunningSplitSecondState(owner, entryId, { removed: true });
+    return returned;
+  }
   try {
-    const entry = await fetchOwnedTimeEntry(entryId, owner, signal);
+    const entry = returned?.kind === "entry" ? returned.entry : await fetchOwnedTimeEntry(entryId, owner, signal);
     const updatedAt = validIsoString(entry.updatedAt);
     const stoppedAt = entry.stoppedAt === null ? null : validIsoString(entry.stoppedAt);
     if (!updatedAt || stoppedAt === undefined) throw new InvalidMobileAcknowledgementError();
     await recordRunningSplitSecondState(owner, entryId, { updatedAt, stoppedAt });
+    return timerCacheEntryEffect(entryId, entry) ?? (stoppedAt ? { kind: "stop", entryId, stoppedAt } : undefined);
   } catch (error) {
     if (!(error instanceof MobileHttpResponseError) || error.statusCode !== 404) throw error;
     await recordRunningSplitSecondState(owner, entryId, { removed: true });
+    return { kind: "delete", entryId };
   }
 }
 

@@ -1,12 +1,14 @@
 import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
+import { TIME_ENTRY_CACHE_RECEIPT_HEADER } from "@dayframe/shared";
 import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent, TimeEntryValidationError, TimerMutationBusyError, TimerReplacementWindowError, TimerStopBeforeStartError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { getTimeEntryById } from "@/lib/queries";
 import { wantsReviewCardCount } from "@/lib/review-card-count";
 import { reconcileHealthCoveredMoveCardsNow } from "@/lib/location/health-coverage";
 
@@ -37,8 +39,17 @@ export async function POST(request: Request) {
     }
     scheduleLiveActivityNotification(session);
     // The phone schedules its evening Review reminder from this count.
-    const reviewCount = await openReviewCountFor(session, { cards: wantsReviewCardCount(request) });
+    const receiptId = body?.type === "timer_start" ? result.timeEntryId
+      : body?.type === "timer_stop" && body.rawPayload?.stopScope === "entry" ? body.rawPayload.targetEntryId : undefined;
+    const timerCacheEntryRead = request.headers.get(TIME_ENTRY_CACHE_RECEIPT_HEADER) === "1" &&
+      session.scopes.includes("app:read") && typeof receiptId === "string" && z.uuid().safeParse(receiptId).success
+      ? getTimeEntryById(session, receiptId).catch(() => undefined)
+      : undefined;
+    const [reviewCount, timerCacheEntry] = await Promise.all([
+      openReviewCountFor(session, { cards: wantsReviewCardCount(request) }), timerCacheEntryRead
+    ]);
     return NextResponse.json(withReviewCount({ ...result,
+      ...(timerCacheEntry !== undefined ? { timerCacheEntry } : {}),
       ...(typeof body?.clientEventId === "string" ? { clientEventId: body.clientEventId } : {})
     }, reviewCount), { status: result.duplicate ? 200 : 201 });
   } catch (error) {

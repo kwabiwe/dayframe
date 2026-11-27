@@ -9,7 +9,7 @@ import {
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
+import { TagNameSchema, TIME_ENTRY_CACHE_RECEIPT_HEADER, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { getTimeEntryById } from "@/lib/queries";
 import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema, WEB_TIMER_DISCARD_OWNER_HEADER } from "@/lib/time-entry-details-precondition";
@@ -66,7 +66,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ ok: true, ...result, entry });
     }
     scheduleLiveActivityNotification(session);
-    return NextResponse.json({ ok: true, ...result });
+    const entry = request.headers.get(TIME_ENTRY_CACHE_RECEIPT_HEADER) === "1" && session.scopes.includes("app:read")
+      ? await getTimeEntryById(session, id).catch(() => undefined)
+      : undefined;
+    return NextResponse.json({ ok: true, ...result, ...(entry !== undefined ? { entry } : {}) });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isHomePlace, placeDisplayName, type PlaceRole } from "./placeRoles";
-export { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "./timeEntryCommand";
+export { TIME_ENTRY_CACHE_RECEIPT_HEADER, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "./timeEntryCommand";
 export {
   ReportSummaryRequestSchema, ReportSummarySchema, REPORT_MAX_RANGE_MS, REPORT_SOURCE_LABELS,
   REPORT_SOURCE_VALUES, REPORT_FACET_MAX, REPORT_DESCRIPTION_MAX, type ReportSource,

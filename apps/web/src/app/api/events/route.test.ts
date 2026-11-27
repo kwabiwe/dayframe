@@ -11,6 +11,7 @@ const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   processActivityEvent: vi.fn(),
+  getTimeEntryById: vi.fn(),
   scheduleLiveActivityNotification: vi.fn(),
   reconcileHealthCoveredMoveCardsNow: vi.fn()
 }));
@@ -26,6 +27,8 @@ vi.mock("@/lib/review-count", () => ({
 vi.mock("@/lib/ingest-auth", () => ({
   resolveRequestSession: mocks.resolveRequestSession
 }));
+
+vi.mock("@/lib/queries", () => ({ getTimeEntryById: mocks.getTimeEntryById }));
 
 vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
@@ -76,6 +79,26 @@ describe("POST /api/events", () => {
     const stop = await post({ type: "timer_stop", clientEventId: "stop-early" });
     expect(stop.status).toBe(422);
     expect(await stop.json()).toMatchObject({ code: "timer_stop_before_start" });
+  });
+
+  it("returns the owner-scoped entry for an opted-in Stop replay, and leaves write-only receipts unchanged", async () => {
+    const id = "80000000-0000-4000-8000-000000000001";
+    const entry = { id, stoppedAt: "2026-11-27T10:00:00.000Z" };
+    const post = () => POST(new Request("https://dayframe.test/api/events", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Dayframe-Time-Entry-Receipt": "1" },
+      body: JSON.stringify({ type: "timer_stop", clientEventId: "stop-1", rawPayload: { stopScope: "entry", targetEntryId: id } })
+    }));
+    mocks.processActivityEvent.mockResolvedValue({ eventId: "event-1", duplicate: true });
+    mocks.getTimeEntryById.mockResolvedValue(entry);
+
+    const response = await post();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ timerCacheEntry: entry });
+    expect(mocks.getTimeEntryById).toHaveBeenCalledWith(session, id);
+
+    mocks.resolveRequestSession.mockResolvedValueOnce({ ...session, scopes: ["events:write"] });
+    expect(await (await post()).json()).not.toHaveProperty("timerCacheEntry");
+    expect(mocks.getTimeEntryById).toHaveBeenCalledOnce();
   });
 
   it.each(["userId", "workspaceId"] as const)("refuses an exact web Stop after the %s changes", async (field) => {

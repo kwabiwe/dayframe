@@ -13,6 +13,7 @@ import { isPermanentlyFailedQueuedEvent } from "./queuePermanence";
 import { projectCompletedEntryCopy } from "./completedEntryCopyProjection";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
+import type { TimerCacheAcknowledgement, TimerCacheEffect } from "./timerCacheAcknowledgements";
 import {
   mobileTimeEntryById,
   optimisticDeleteTimeEntry,
@@ -27,6 +28,7 @@ export type DurableLocalWork = {
   timeEntryCommands: readonly PendingTimeEntryCommand[];
   timerStops: readonly PendingTimerStop[];
   correlations: ReadonlyMap<string, string>;
+  timerAcknowledgements?: readonly TimerCacheAcknowledgement[];
 };
 
 type ProjectionOperation =
@@ -34,14 +36,28 @@ type ProjectionOperation =
   | { kind: "edit"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "delete"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop }
-  | { kind: "queued_stop"; at: string; sequence: string; entryId: string };
+  | { kind: "queued_stop"; at: string; sequence: string; entryId: string; commandId: string };
 
 export function projectDurableLocalWork(
   serverBootstrap: MobileBootstrap,
   durableWork: DurableLocalWork
 ): MobileBootstrap {
-  let projected: MobileBootstrap = serverBootstrap;
-  const operations = projectionOperations(durableWork);
+  let projected = serverBootstrap;
+  const timerAcknowledgements = serverBootstrap.user && serverBootstrap.workspace && mobileAccountOwnersEqual(durableWork.owner, {
+    userId: serverBootstrap.user.id, workspaceId: serverBootstrap.workspace.id
+  }) ? durableWork.timerAcknowledgements ?? [] : [];
+  if (timerAcknowledgements.length > 0) {
+    const readRevision = serverBootstrap.timerCacheAcknowledgementRevision ?? 0;
+    for (const receipt of timerAcknowledgements) {
+      if (receipt.revision > readRevision) projected = projectAcknowledgedChange(projected, receipt.effect);
+    }
+  }
+  const acknowledgedIds = new Set(timerAcknowledgements.map((receipt) => receipt.commandId));
+  const operations = projectionOperations(durableWork).filter((operation) => {
+    if (operation.kind === "start") return !acknowledgedIds.has(operation.event.localId);
+    if (operation.kind === "edit" || operation.kind === "delete") return !acknowledgedIds.has(operation.command.clientCommandId);
+    return !acknowledgedIds.has(operation.kind === "queued_stop" ? operation.commandId : operation.stop.clientEventId);
+  });
   const resolveProjectedTimerId = projectionTimerIdLookup(durableWork);
 
   for (const operation of operations) {
@@ -131,6 +147,61 @@ export function projectDurableLocalWork(
   return projected;
 }
 
+function projectAcknowledgedChange(bootstrap: MobileBootstrap, effect: TimerCacheEffect): MobileBootstrap {
+  if (effect.kind === "delete") return optimisticDeleteTimeEntry(bootstrap, effect.entryId) ?? bootstrap;
+  if (effect.kind === "stop") {
+    const current = mobileTimeEntryById(bootstrap, effect.entryId);
+    // A stale delivery may target a block the cache already shows completed at the server's time.
+    if (!current || current.stoppedAt || Date.parse(current.startedAt) > Date.parse(effect.stoppedAt)) return bootstrap;
+    return projectTargetedStop(bootstrap, effect.entryId, effect.stoppedAt);
+  }
+  if (effect.kind === "edit") {
+    const current = mobileTimeEntryById(bootstrap, effect.entryId);
+    if (!current || (effect.updatedAt && current.updatedAt && Date.parse(current.updatedAt) >= Date.parse(effect.updatedAt)) ||
+      (effect.expectedUpdatedAt && current.updatedAt !== effect.expectedUpdatedAt)) return bootstrap;
+    return optimisticPatchTimeEntry(bootstrap, effect.entryId, effect.patch) ?? bootstrap;
+  }
+  if (effect.kind === "start") {
+    const { block } = effect;
+    if (mobileTimeEntryById(bootstrap, block.id) ||
+      (bootstrap.activeEntry && Date.parse(bootstrap.activeEntry.startedAt) >= Date.parse(block.startedAt))) return bootstrap;
+    const entry = queuedStartEntry(bootstrap, {
+      categoryId: block.categoryId, projectId: block.projectId, description: block.description,
+      source: block.source, occurredAt: new Date(block.startedAt), rawPayload: { tagNames: block.tagNames }
+    }, block.id);
+    return optimisticStartTimer(bootstrap, entry) ?? bootstrap;
+  }
+
+  const { entry } = effect;
+  const cached = mobileTimeEntryById(bootstrap, entry.id);
+  if (cached?.updatedAt && entry.updatedAt && Date.parse(cached.updatedAt) >= Date.parse(entry.updatedAt)) return bootstrap;
+  if (!entry.stoppedAt) {
+    if (bootstrap.activeEntry && bootstrap.activeEntry.id !== entry.id &&
+      Date.parse(bootstrap.activeEntry.startedAt) >= Date.parse(entry.startedAt)) return bootstrap;
+    return optimisticStartTimer(bootstrap, entry) ?? bootstrap;
+  }
+
+  const overlaps = (from: string, until: string) => Date.parse(entry.startedAt) < Date.parse(until) &&
+    Date.parse(entry.stoppedAt!) > Date.parse(from);
+  const range = bootstrap.dateRange;
+  const inDay = !range || overlaps(range.dayStart, range.dayEnd);
+  const inWeek = !range || overlaps(range.weekStart, range.weekEnd);
+  const update = (entries: MobileTimeEntry[], include: boolean) => {
+    if (entries.some((candidate) => candidate.id === entry.id)) {
+      return entries.map((candidate) => candidate.id === entry.id ? entry : candidate);
+    }
+    return include ? [entry, ...entries] : entries;
+  };
+  return {
+    ...bootstrap,
+    activeEntry: bootstrap.activeEntry?.id === entry.id ? null : bootstrap.activeEntry,
+    entries: update(bootstrap.entries, inDay),
+    dayEntries: bootstrap.dayEntries && update(bootstrap.dayEntries, inDay),
+    weekEntries: bootstrap.weekEntries && update(bootstrap.weekEntries, inWeek),
+    historyEntries: bootstrap.historyEntries && update(bootstrap.historyEntries, inWeek)
+  };
+}
+
 function projectionTimerIdLookup(work: DurableLocalWork) {
   // The receipt can reach disk ahead of the transport correlation. Use its exact second ID for
   // display immediately while keeping the transport map untouched.
@@ -197,6 +268,7 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
           kind: "queued_stop" as const,
           at: event.occurredAt.toISOString(),
           sequence: `2:${event.queuedAt}:${event.localId}`,
+          commandId: event.localId,
           entryId: event.rawPayload!.targetEntryId as string
         }]
       : []);
@@ -247,7 +319,10 @@ export function isWaitingLockScreenStop(event: QueuedEvent) {
 
 function queuedStartEntry(
   bootstrap: MobileBootstrap,
-  event: QueuedEvent,
+  event: {
+    categoryId?: string | null; projectId?: string | null; description?: string | null;
+    source: string; occurredAt: Date; rawPayload?: Record<string, unknown>;
+  },
   entryId: string
 ): MobileTimeEntry {
   const category = event.categoryId
