@@ -1427,15 +1427,15 @@ async function stopEntryAt(
     const mayEnd = await blocksATimerMayEnd(client, event, [{ id: targetEntryId, stoppedAt: block.stoppedAt }]);
     if (!mayEnd.length) return { rows: [] as Array<{ id: string }> };
   }
+  const chosenEnd = overdueRunningStopOnly ? ", user_edited_at = now()" : "";
   return client.query<{ id: string }>(
     `update time_entries
-     set stopped_at = $1, updated_at = now(),
-         user_edited_at = case when $5::boolean then now() else user_edited_at end
+     set stopped_at = $1, updated_at = now()${chosenEnd}
      where workspace_id = $2
        and user_id = $3
        and id = $4
      returning id`,
-    [event.occurredAt, event.workspaceId, event.userId, targetEntryId, overdueRunningStopOnly]
+    [event.occurredAt, event.workspaceId, event.userId, targetEntryId]
   );
 }
 
