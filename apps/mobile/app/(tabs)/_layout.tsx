@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { Platform } from "react-native";
+import { AccessibilityInfo, Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { DayframeDashboardProvider, useDashboardOpenCalendarToday } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
@@ -21,6 +21,9 @@ const PLAY_ORB_SLOT = playOrbSupported({
   Version: Platform.Version,
   isPad: Platform.OS === "ios" && Platform.isPad
 });
+// UIKit 27 renders this reserved item inside the bar even with the search role.
+const INLINE_PLAY_ORB_SLOT = PLAY_ORB_SLOT && Number.parseInt(String(Platform.Version), 10) >= 27;
+const BLANK_ORB_SLOT_ICON = require("../../assets/tab-icons/orb-slot.png");
 
 export default function DashboardTabsLayout() {
   return (
@@ -77,10 +80,8 @@ function DashboardTabs() {
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.reports.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
-        {/* The Play orb's slot (Blocks prototype): iOS draws a "search"-role item as its own circle at
-            the bar's trailing edge and moves the tabs left, which is the prototype's layout. The
-            Dashboard draws the coral orb over it. The item is disabled, so a tap never selects it;
-            its press (VoiceOver's double-tap) still reaches the orb's tap action. */}
+        {/* Reserve the coral orb's space using a disabled native item. When UIKit puts it inline,
+            hide its icon and title so only the coral control is visible. Keep its spoken label. */}
         <NativeTabs.Trigger
           // A system "search" item keeps its own title, so VoiceOver needs the label set here.
           accessibilityLabel={timerRunning ? "Stop recording" : "Start a block"}
@@ -89,13 +90,26 @@ function DashboardTabs() {
           // process: toggling a trigger's visibility re-keys the tab view and remounts every tab.
           hidden={!PLAY_ORB_SLOT}
           listeners={{
-            tabPress: () => requestPlayOrbTap()
+            tabPress: () => {
+              if (!INLINE_PLAY_ORB_SLOT) {
+                requestPlayOrbTap();
+                return;
+              }
+              void AccessibilityInfo.isScreenReaderEnabled().then((enabled) => {
+                if (enabled) requestPlayOrbTap();
+              }).catch(() => undefined);
+            }
           }}
           name={DAYFRAME_NATIVE_TABS.orb.route}
           role="search"
         >
-          <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.orb} renderingMode="template" />
-          <NativeTabs.Trigger.Label>{timerRunning ? "Stop recording" : "Start a block"}</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon
+            src={INLINE_PLAY_ORB_SLOT ? BLANK_ORB_SLOT_ICON : DAYFRAME_TAB_ICON_IMAGES.orb}
+            renderingMode="template"
+          />
+          <NativeTabs.Trigger.Label hidden={INLINE_PLAY_ORB_SLOT}>
+            {timerRunning ? "Stop recording" : "Start a block"}
+          </NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
       </NativeTabs>
     </>
