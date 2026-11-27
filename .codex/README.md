@@ -1,6 +1,6 @@
 # Codex Workflow Files
 
-This folder contains project-local context for the Codex workflow.
+Follow the development workflow in [AGENTS.md](../AGENTS.md). These prompts and references supply details for the work at hand.
 
 ## Folders
 

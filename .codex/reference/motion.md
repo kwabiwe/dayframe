@@ -112,9 +112,9 @@ Reduce Motion replaces every spring, drop-in, pop, rolling digit, flight, throw 
 - Do not use animation as the only explanation of what changed.
 - Check that Dynamic Type does not change measured geometry in a way that clips or snaps during a transition.
 
-## Validation And PR Evidence
+## Motion validation
 
-Every PR that adds or changes movement must include:
+For changes to movement, record the applicable checks with the targeted or batched validation:
 
 - the motion contract and chosen owner
 - comparison with the nearest existing Dayframe interaction pattern

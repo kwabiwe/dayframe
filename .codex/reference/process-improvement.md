@@ -21,7 +21,7 @@ Do not update docs for one-off trivia, temporary command output, or secrets.
 ## Where Lessons Go
 
 - `AGENTS.md`: short, high-value rules that should always be loaded.
-- `docs/documentation-governance.md`: canonical ownership and pre-PR documentation impact rules.
+- `docs/documentation-governance.md`: canonical documentation ownership.
 - `.codex/reference/*.md`: detailed guidance loaded only when relevant.
 - `docs/investigations/*.md`: active issue notes and evidence trails.
 - Tests: executable guardrails for regressions.
@@ -29,28 +29,13 @@ Do not update docs for one-off trivia, temporary command output, or secrets.
 
 If a lesson applies to many projects, promote it to a reusable agent skill or workflow proposal rather than burying it in Dayframe.
 
-## Retrospective Loop
+## Recurring regressions
 
-After each focused PR:
-
-1. Identify what failed or changed.
-2. Identify which check would have caught it earlier.
-3. Add that check to tests or `validation-matrix.md`.
-4. Add one concise note to the relevant reference doc if needed.
-5. Keep the investigation note current until the issue is closed.
-6. Run `npm run check:docs` and ensure the feature tracker no longer describes merged work as active.
-
-After every 3 to 5 Dayframe changes, do a short process review:
-
-- Which docs were useful?
-- Which docs were ignored or too vague?
-- Which manual checks should become tests?
-- Which old notes can be archived?
-- Which recurring lessons belong in `AGENTS.md`?
+When a failure exposes a gap in validation, add the smallest check that would have caught it. Update the canonical reference only when the lesson changes future work. Remove stale guidance when it becomes misleading.
 
 ## Merge Gate
 
-A PR is ready to merge only when all of these hold, read at merge time for the exact head being merged:
+When a PR is needed under `AGENTS.md`, verify these conditions against the exact head before merging:
 
 - `Validation gate` and `Workspace unit tests, typecheck and lint` are present and passing. Both run on every PR (no path filters; the gate uses `if: always()`), so a list without them means CI has not run, not that nothing failed. GitHub Actions does not run on a PR that conflicts with `main`, which leaves only the Vercel rows.
 - Every other check is `pass` or `skipping`. Path-based skips (PostGIS on mobile-only or docs-only PRs, iOS on web or docs PRs) are expected; anything `fail`, `pending` or `cancel` blocks the merge.

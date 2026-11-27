@@ -114,31 +114,13 @@ Build 139 came from `3cf432dd` and is also verified in `Internal Health Debug`. 
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
-## PR Success Lane
+## Development and release validation
 
-For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, the repository/PR lane means:
+Follow the delivery defaults in `AGENTS.md`. Fetch and commit from a current, clean checkout. Preserve the shared checkout and use a separate detached worktree when it is busy, stale, or pinned for a release. Direct updates to `main` must be fast-forwards. If a PR is needed for risk or protection, use [the exact-head merge gate](process-improvement.md#merge-gate). Run targeted checks per change and follow up on asynchronous CI while unrelated work continues.
 
-1. Fetch `origin`. Never check out, pull or fast-forward branches in the shared main checkout: other sessions build and release from it.
-2. Check repo status is clean.
-3. Check memory, tracker, GitHub PRs/issues, and latest TestFlight state.
-4. Confirm PR scope from `docs/feature-fix-tracker.md`.
-5. Create a focused branch from `origin/main` in its own git worktree, using the active Codex/client branch-prefix convention.
-6. Implement the change narrowly.
-7. Add or update regression tests for the changed behavior.
-8. Update `docs/feature-fix-tracker.md` in the PR. For a change to iPhone behaviour, add its device checks to the next-TestFlight staging checklist: one local list (outside Git) for the next build, not a per-build numbered one. The build that ships keeps that list as its record, and a new next list starts.
-9. Run validation:
-   - `npm run test`
-   - `npm run typecheck`
-   - `npm run lint`
-   - `npm run build`
-   - `npm run check:docs`
-   - `git diff --check`
-10. Commit, push, and open the PR with summary and validation notes.
-11. Wait for GitHub/Vercel checks; fix failures and rerun validation if needed.
-12. Merge to `main` with `gh pr merge` run from a folder outside any git checkout, then fetch `origin`. Run inside the shared checkout, `gh pr merge` fast-forwarded the shared `main` during a TestFlight archive.
-13. Update the tracker after merge if the merged PR number/status/build evidence changed.
+Batch full regressions, hosted staging smoke and signed iPhone QA on a pinned commit. Capture the relevant feature checks and any pending device requirements in one release checklist. Do the necessary staging, migration and rollback checks before any high-risk change reaches production. Keep the staging identity and disposable data isolated from production. Documentation-only changes use `npm run check:docs` and `git diff --check` when those documents change.
 
-If mobile/native/runtime configuration changed or TestFlight is an explicit success criterion, continue with the release lane:
+When preparing a TestFlight release, use the following checks and upload steps:
 
 1. Create a detached git worktree pinned to the release SHA (`git worktree add --detach <path> <sha>`) and build the staging app and the release archive there, never in the shared main checkout: the shared checkout moved mid-archive once (TestFlight 134).
 2. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Take it on a fresh launch of that build (force-quit, then launch), after the warm-up window: on 29 Oct 2026 a TestFlight 134 process that had been used for a while read +4.43 MiB a minute, a false fail, and a clean relaunch passed. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
@@ -154,8 +136,6 @@ If mobile/native/runtime configuration changed or TestFlight is an explicit succ
 12. Restore the repo iOS build number back to its default if it was changed only for upload.
 13. Record the release, then complete the storage cleanup below.
 14. Tell KB the exact build number, delivery UUID, verification state, what changed, and remaining free space.
-
-Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged (with `gh` run outside any checkout), and `origin` fetched.
 
 ## Storage cleanup after each release
 

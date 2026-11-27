@@ -580,22 +580,13 @@ Required checks:
 
 ## Release Validation
 
-For docs-only PRs:
+Use the targeted checks for the changed features. Batch full regression, staging and device checks on the same pinned release candidate. Use the [release procedure](release-and-testflight.md) for hosted verification and TestFlight.
 
-- Confirm the diff only changes docs/planning/reference files.
-- Run `npm run check:docs`.
-- Run `git diff --check`.
-- Open the PR, observe GitHub/Vercel checks, merge with `gh` run from a folder outside any git checkout, and fetch `origin`; never check out, pull or fast-forward in the shared main checkout.
+Before handing off a build for manual testing:
 
-Before telling KB to test an implementation PR:
-
-- Confirm branch and commit.
-- Confirm PR state.
-- Confirm the Vercel Preview is Ready, backed by staging, and promoted to the stable staging alias when hands-on testing is required.
-- Confirm relevant automated checks and hands-on staging checks passed before merge.
-- Confirm Vercel production deployment if server code changed.
-- Confirm TestFlight version/build if mobile code changed or if the user defined TestFlight as the success criterion.
-- For iPhone behaviour, confirm the PR's device checks are in the next-TestFlight staging checklist (one local list for the next build, outside Git).
+- Confirm the exact commit, test environment and build where applicable.
+- Confirm the relevant CI, staging and device evidence already collected. List pending checks and what they prove.
+- Confirm Vercel production deployment when reporting a server change as live.
 - Confirm API base URL.
 - Confirm migrations.
 - Build the staging app and the archive in a detached git worktree pinned to the release SHA, never in the shared main checkout.

@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Read `.codex-dayframe-qa/STATUS.md` in the main checkout first: the living status, git-ignored. After you merge a PR, ship a build or record an owner decision, update that file in the same session: rewrite stale lines, no diary.
+Read `.codex-dayframe-qa/STATUS.md` in the main checkout first: the living status, git-ignored. When a release ships, an owner decision changes the plan, or work needs a handoff, update that file in the same session: rewrite stale lines, no diary.
 
 ## Project Overview
 
@@ -11,6 +11,18 @@ Dayframe is a personal time-intelligence app. It combines fast manual task track
 The core invariant is **event-first tracking**: mobile/web/health/location signals become `activity_events` before they become `time_entries`. High-confidence explicit actions may create entries immediately. Ambiguous signals should become `review_items`.
 
 Use `docs/PRD.md` for product direction, `docs/architecture.md` for runtime/data ownership, and `docs/feature-fix-tracker.md` for current shipped/watch/decision state before deciding what is next. Use `docs/documentation-governance.md` to resolve conflicting guidance and `docs/vercel-supabase-hosting.md` for hosted auth/deployment context. Dated files under `docs/investigations/` are evidence/history, not current product or delivery state.
+
+## Development Workflow
+
+This is the default for Dayframe, including orchestrated work. It governs delivery cadence wherever a legacy prompt, plan, or checklist describes an older workflow.
+
+- Fetch `origin/main`, check for other work, and take the next reproducible bug, security issue, or broken flow from the roadmap and Trello. Keep approved product priorities and deferrals.
+- Work in small, independently working commits. Use direct fast-forward updates to `main` by default, without branches or PRs. Use an isolated checkout if the shared checkout is busy or stale. Use a branch and appropriate staging and rollback safeguards if the change risks data loss or a major regression, or if repository protection requires it. Preserve work in other checkouts and never force-push shared refs.
+- Use at most one focused code review per significant change. Resolve its findings and verify with targeted checks.
+- Run targeted tests for each change. Group full regression tests, staging builds and physical iPhone QA on a pinned candidate. Keep feature-specific, migration, security and release checks where they are needed to prevent damage or prove the result.
+- Let CI run asynchronously and continue independent work. Follow up on failed checks and resolve related failures before releasing or making a dependent change.
+- If Trello, a device, or another integration is unavailable, record the pending step and switch to the next independent item. Revisit when the dependency recovers. Keep pending acceptance visible and close Trello cards once their criteria are verified.
+- Keep notes to the evidence needed to resume work, verify a release, or preserve a changed invariant. Update the canonical docs when their guidance changes. Continue within the approved scope without asking for routine permission or reporting after each task. Escalate genuine product decisions and significant risk.
 
 ## Tech Stack
 
@@ -83,7 +95,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Treat health and precise location data as sensitive. Avoid logging raw payloads, do not send them to analytics, and preserve export/delete paths.
 - Do not add legacy third-party timer-brand wording, imports, scripts, docs, env vars, or hidden integration hooks. Dayframe stands on its own.
 - Any user-facing feature with navigation, presentation, gestures, layout changes, feedback, Undo, or other visible movement must follow `.codex/reference/motion.md`. Motion is part of the feature contract, not optional polish.
-- Anything that runs often (clocks and per-second state, looping animation, background capture, per-sample or per-pass storage work, sync and recovery passes, bootstrap or network frequency) must stay within `.codex/reference/performance.md`'s budgets: Today in front ≤ 10 % of a core on the iPhone 17, background near idle, memory slope ≤ 2 MB per minute, no per-frame Reanimated commits for looping motion, no unbounded journal reads. Fill the PR template's "Performance impact" section, and take the release-gate reading before every TestFlight upload.
+- Anything that runs often (clocks and per-second state, looping animation, background capture, per-sample or per-pass storage work, sync and recovery passes, bootstrap or network frequency) must stay within `.codex/reference/performance.md`'s budgets: Today in front ≤ 10 % of a core on the iPhone 17, background near idle, memory slope ≤ 2 MB per minute, no per-frame Reanimated commits for looping motion, no unbounded journal reads. Record affected budgets and evidence for performance-sensitive changes, and take the release-gate reading before every TestFlight upload.
 
 ## Web Patterns
 
@@ -147,33 +159,22 @@ npm run export:workspace -- ./dayframe-backup.json
 
 ## Validation Expectations
 
-- Always run the narrowest relevant checks after changes; for broad changes run:
-
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
-npm run check:docs
-```
-
-- For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
-- For Swift/SwiftUI native-view changes, reinstall CocoaPods/autolinked modules as needed, run a full native iOS build, and validate multi-touch or background behaviour on a physical iPhone when the simulator cannot reproduce it.
+- Run the narrowest checks that prove each change. Run mobile typecheck for mobile changes and include relevant simulator/native builds in the next validation batch.
+- For Swift/SwiftUI native-view changes, reinstall CocoaPods/autolinked modules as needed. Use a full native build and physical iPhone validation for multi-touch or background behaviour the simulator cannot reproduce.
 - For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, active timer refresh, completed entry persistence, and queued event sync.
 - For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
-- For mobile UI/timer changes, read `docs/feature-fix-tracker.md`, `docs/brand-style-guide.md`, `.codex/reference/components.md`, `.codex/reference/style.md`, and `.codex/reference/validation-matrix.md` before implementation. Record any conflict between old docs and current tracker state in the PR instead of silently choosing one.
+- For mobile UI/timer changes, read `docs/feature-fix-tracker.md`, `docs/brand-style-guide.md`, `.codex/reference/components.md`, `.codex/reference/style.md`, and `.codex/reference/validation-matrix.md` before implementation. Resolve conflicts using documentation governance and record the decision where it affects engineering or product behaviour.
 - For features that introduce or change movement, also read `.codex/reference/motion.md`. Validate the complete transition rather than only its trigger: entrance, state/layout update, exit, cancellation, rapid repeat, timeout/Undo/failure rollback where applicable, and the Reduce Motion path.
 - For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.
-- Every implementation PR receives a Vercel Preview backed by the staging Supabase project. Never use production credentials or production data for PR testing.
-- Before merge, promote the selected Ready Preview to `dayframe-staging.vercel.app`, apply required migrations to staging, and complete the relevant browser/mobile smoke checks. The stable alias does not move automatically between PRs.
+- Validate high-risk changes in an isolated Vercel Preview backed by staging Supabase before landing. Batch other hosted smoke tests on a pinned Ready candidate. When the stable staging alias is needed, verify the Preview and schema before promotion, then smoke with a disposable fixture. Never use production credentials or data for staging tests.
 - Mobile `preview` builds must use `https://dayframe-staging.vercel.app` with `com.layereight.dayframe.staging`; production/TestFlight builds must use `https://dayframe-web.vercel.app` with `com.layereight.dayframe`. Their App Groups, Keychain groups, URL schemes, Live Activity extensions, and on-device state are isolated. Verify the signed identities and shared-container hand-off before treating a staging build as device evidence.
-- Merge only after automated checks and hands-on staging validation pass. After merge, verify the production Vercel deployment and apply production migrations in the documented safe order.
+- Complete checks needed to protect production before promoting high-risk changes. For production-bound server changes, verify the deployment and follow the documented safe order for migrations.
 - Do not claim scripts passed if they were not run.
 - Before diagnosing screenshots or production regressions, use `.codex/reference/debugging-playbook.md` to verify build, deployment, schema, and runtime state before changing code.
 - When a bug exposes a missing recurring guardrail, update the relevant `.codex/reference/` doc or investigation note as part of the fix.
-- Before every PR, classify documentation impact using `docs/documentation-governance.md`. Update the canonical source in the same PR or state why no documentation change is needed; do not leave merged work marked `In progress` in the tracker.
+- Update affected canonical sources with the change using `docs/documentation-governance.md`. Keep delivery status accurate when verification state changes.
 
 ## Important Files
 

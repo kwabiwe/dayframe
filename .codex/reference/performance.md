@@ -81,11 +81,9 @@ Network reads (request-storm fix, 30 Oct 2026): a view that loads history as it 
 
 Before every TestFlight upload, take the 5-minute Today reading (foreground method above) on a Staging build of the exact release commit. Record it, with its baseline, in `.codex/reference/release-and-testflight.md`. After the TestFlight build is installed, repeat it on production data when the owner can leave the phone untouched. A reading over budget stops the release unless the owner accepts it.
 
-## Pull requests
+## Performance evidence
 
-Every implementation PR fills the template's "Performance impact" section. It applies when the PR touches anything listed at the top of this document:
+For a change affecting the paths listed above, keep a brief record of the applicable checks:
 - Name the budget rows it could affect.
 - Name the automated guard that covers it.
 - Say whether a device reading was taken, and its numbers.
-
-Otherwise write `Not applicable` with the reason.

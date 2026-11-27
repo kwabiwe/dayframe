@@ -1,6 +1,6 @@
 # Documentation Governance
 
-This document defines where Dayframe guidance lives and how it stays aligned with code. It is intentionally short enough to use before every PR.
+This document defines where Dayframe guidance lives and how it stays aligned with code.
 
 ## Canonical document map
 
@@ -29,9 +29,9 @@ This document defines where Dayframe guidance lives and how it stays aligned wit
 - A merged implementation may be `Done`, `Watch`, or `Release pending`; never leave it `In progress` solely because a historical investigation says so.
 - Do not claim hosted, TestFlight, physical-device, or production validation unless that exact environment was checked.
 
-## Documentation impact gate
+## Documentation impact
 
-Before opening a PR, classify its impact:
+When a change affects durable guidance, update the relevant canonical source:
 
 | Change | Required documentation review |
 | --- | --- |
@@ -41,7 +41,6 @@ Before opening a PR, classify its impact:
 | User-visible UI or motion | Brand/style/components/motion references and regression checklist |
 | Mobile/native behavior | Mobile references, validation matrix, release/TestFlight reference |
 | Bug that exposed a missing guardrail | Investigation plus a focused test or automated check |
-| No documentation impact | State why in the PR checklist |
 
 Run:
 
@@ -59,12 +58,9 @@ When guidance conflicts with code:
 1. Verify the current `origin/main` implementation and tests.
 2. Check the PR/merge and dated investigation that introduced the behavior.
 3. Decide whether the stable document is stale or the implementation violates an explicit product invariant.
-4. Fix clear defects and stale text in the same focused PR.
+4. Fix clear defects and stale text together.
 5. If product intent, privacy, rollout, or destructive behavior is genuinely ambiguous, add it to the tracker’s decision register instead of guessing.
 
-## Maintenance cadence
+## Maintenance
 
-- Every implementation PR: complete the PR documentation checklist and update affected canonical sources.
-- Every merge/release: update the delivery tracker only when repository, hosted, or TestFlight evidence actually changes.
-- Every 3–5 material changes: remove superseded tracker detail, promote durable lessons from investigations, and convert repeated manual checks into tests where practical.
-- Periodic audit: run this document’s impact gate, check `git log`/GitHub state against the tracker, and review configuration examples against actual `process.env` use.
+Update the delivery tracker when verification or release state changes. Retire stale guidance when it could mislead and automate repeated manual checks where practical.
