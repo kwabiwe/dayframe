@@ -68,7 +68,8 @@ function iconTextButtons(path: string) {
           !(tag === "Button" && /"(?:primary|danger)"/.test(attribute(opening, "variant")))) {
         const hasText = node.children.some((child) => (ts.isJsxText(child) && child.text.trim().length > 0) ||
           (ts.isJsxExpression(child) && child.expression !== undefined && !containsIcon(child)) ||
-          (ts.isJsxElement(child) && child.openingElement.tagName.getText() === "span"));
+          (ts.isJsxElement(child) && child.openingElement.tagName.getText() === "span" &&
+            !/\bsr-only\b/.test(attribute(child.openingElement, "className"))));
         const hasIcon = node.children.some((child) => !ts.isJsxText(child) && containsIcon(child) &&
           !(ts.isJsxElement(child) && child.openingElement.tagName.getText() === "span"));
         if (hasIcon && hasText) found.push(`${relative(webRoot, path)}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
