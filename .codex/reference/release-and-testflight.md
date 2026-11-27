@@ -16,6 +16,8 @@ Preview and production use separate iOS identities and can be installed together
 
 App Group selection must use the same `DAYFRAME_APP_GROUP` setting in the host/extension entitlements and `DayframeSharedAppGroupIdentifier` Info.plist key. Run `npm run check:ios-config`, `bash scripts/validate-ios-shared-storage.sh`, then `npm run check:ios-config -- --built-app <Dayframe.app>` after building. Before device acceptance, run `npm run check:ios-config -- --signed-app <Dayframe.app>` to compare both products' signed App Groups with their baked identities. Missing/unresolved or cross-lane native configuration must fail closed, never fall back to production. Unsigned Simulator products prove configuration/compilation only; verify shared Shortcut queue/catalog and Live Activity Stop hand-off on the signed staging app with both app identities installed.
 
+Xcode 27 source builds require the ExpoModulesJSI SDK 56 setter fix, included in `56.0.13`. CocoaPods raises dependencies with lower iOS deployment targets to the app’s existing minimum. The app’s supported iOS versions and signing configuration stay the same.
+
 ## Version Truth Table
 
 A Dayframe fix may span several independently deployed surfaces:
