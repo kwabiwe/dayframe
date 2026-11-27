@@ -47,6 +47,8 @@ private final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
   @Published private var waiting = false
   private let formatter = ISO8601DateFormatter()
   private var session: WCSession?
+  private var refreshingSnapshot = false
+  private var snapshotSequence = 0
 
   struct Snapshot {
     let revision: String
@@ -95,7 +97,25 @@ private final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     }
   }
 
+  private func refreshSnapshot() {
+    guard reachable, !waiting, !refreshingSnapshot, let session else { return }
+    refreshingSnapshot = true
+    let sequence = snapshotSequence
+    session.sendMessage(["dayframeWatchVersion": 1, "action": "snapshot"]) { [weak self] reply in
+      Task { @MainActor in
+        guard let self else { return }
+        self.refreshingSnapshot = false
+        if self.snapshotSequence == sequence, let context = reply["snapshot"] as? [String: Any] {
+          self.apply(context)
+        }
+      }
+    } errorHandler: { [weak self] _ in
+      Task { @MainActor in self?.refreshingSnapshot = false }
+    }
+  }
+
   private func apply(_ context: [String: Any]) {
+    snapshotSequence += 1
     guard context["dayframeWatchVersion"] as? Int == 1, let revision = context["revision"] as? String else {
       snapshot = nil
       return
@@ -115,12 +135,16 @@ private final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     Task { @MainActor in
       self.reachable = canReachPhone
       self.apply(context)
+      self.refreshSnapshot()
     }
   }
 
   nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
     let canReachPhone = session.isReachable
-    Task { @MainActor in self.reachable = canReachPhone }
+    Task { @MainActor in
+      self.reachable = canReachPhone
+      self.refreshSnapshot()
+    }
   }
 
   nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {

@@ -103,6 +103,10 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
   nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                            replyHandler: @escaping ([String: Any]) -> Void) {
     Task { @MainActor in
+      if message["dayframeWatchVersion"] as? Int == 1, message["action"] as? String == "snapshot" {
+        replyHandler(["snapshot": self.snapshot])
+        return
+      }
       let current = self.snapshot["entryId"] as? String
       guard self.pending == nil, let emitter = self.emitter,
             message["dayframeWatchVersion"] as? Int == 1,
