@@ -252,9 +252,9 @@ export function ReportRangeControls({
           <ChevronRight aria-hidden="true" size={18} />
         </Link>
       ) : (
-        <span className="df-range-nav is-disabled" aria-label="Next report period unavailable" aria-disabled="true">
+        <button className="df-range-nav is-disabled" aria-label="Next report period unavailable" type="button" disabled>
           <ChevronRight aria-hidden="true" size={18} />
-        </span>
+        </button>
       )}
       {range.wasClamped ? <span className="df-faint df-range-note" role="status">Custom ranges are limited to 366 days.</span> : null}
 

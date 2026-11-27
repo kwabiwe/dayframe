@@ -38,8 +38,8 @@ beforeEach(() => {
 });
 
 /** Renders as the page does: the range is in the key, so a new range remounts the controls. */
-function render(filters: ReportFilters) {
-  const range = { preset: filters.range, label: "5 – 11 Oct", dayCount: 7, canNavigateNext: true, wasClamped: false } as unknown as ReportRangeMetadata;
+function render(filters: ReportFilters, canNavigateNext = true) {
+  const range = { preset: filters.range, label: "5 – 11 Oct", dayCount: 7, canNavigateNext, wasClamped: false } as unknown as ReportRangeMetadata;
   act(() => root.render(
     <>
       <ReportRangeControls filters={filters} key={`${filters.range}-${filters.from}-${filters.to}`} range={range} />
@@ -59,6 +59,15 @@ const menu = () => container.querySelector<HTMLElement>("[role=menu]");
 const key = (k: string) => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
 
 describe("Reports range menu (W8, menu pattern and motion)", () => {
+  it("exposes the unavailable next period as a disabled button and skips it on Tab", async () => {
+    render({ ...defaultReportFilters(NOW), range: "this-week" }, false);
+    const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next report period unavailable"]');
+    expect(next?.disabled).toBe(true);
+    trigger().focus();
+    await userEvent.tab();
+    expect(document.activeElement?.textContent).toBe("After");
+  });
+
   it("focuses the checked preset, moves with arrows/Home/End and returns focus on Escape", () => {
     act(() => trigger().click());
     expect(document.activeElement?.textContent).toBe("This week");

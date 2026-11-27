@@ -8859,7 +8859,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-faint {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
@@ -9057,7 +9057,7 @@ dialog.ui-dialog.df-palette {
 
 .df-ribbon-hours span {
   position: absolute;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -11951,7 +11951,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-crow small {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 12px;
   text-align: right;
 }
@@ -13747,7 +13747,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-report-row-when small {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
