@@ -30,8 +30,9 @@ export async function reconcileDashboardRefreshCandidate<Snapshot>(input: {
   candidate: Snapshot;
   currentRevision: () => number;
   guard: DashboardRefreshGuard;
-  reconcile: (candidate: Snapshot) => Promise<Snapshot>;
+  reconcile: (candidate: Snapshot, isCurrent: () => boolean) => Promise<Snapshot>;
   timerMutationsInFlight: () => number;
+  isCurrent?: () => boolean;
   /**
    * Told once, only when the guard accepted the reconciled candidate (it is about to be published): what settles
    * against applied server data waits for this, never for a read the guard discards (Codex r3 on #618).
@@ -41,9 +42,10 @@ export async function reconcileDashboardRefreshCandidate<Snapshot>(input: {
   | { action: "apply"; candidate: Snapshot }
   | { action: "refresh" }
 > {
-  if (!guardAllowsRefresh(input.guard, input)) return { action: "refresh" };
-  const candidate = await input.reconcile(input.candidate);
-  if (!guardAllowsRefresh(input.guard, input)) return { action: "refresh" };
+  const isCurrent = () => input.isCurrent?.() !== false && guardAllowsRefresh(input.guard, input);
+  if (!isCurrent()) return { action: "refresh" };
+  const candidate = await input.reconcile(input.candidate, isCurrent);
+  if (!isCurrent()) return { action: "refresh" };
   input.onApplied?.(candidate);
   return { action: "apply", candidate };
 }

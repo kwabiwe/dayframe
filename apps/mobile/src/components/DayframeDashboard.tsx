@@ -181,18 +181,21 @@ import {
 } from "@/lib/mobile-network";
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import {
-  activateMobileAccount,
   currentMobileAccountEpoch,
-  deactivateMobileAccount
+  deactivateMobileAccount,
+  mobileAccountOwnersEqual,
+  readActiveMobileAccount
 } from "@/lib/mobileAccount";
 import {
-  projectDurableLocalWork
+  projectDurableLocalWork,
+  type DurableLocalWork
 } from "@/lib/durableLocalProjection";
 import { projectCompletedEntryCopy, rollbackRejectedCompletedCopy } from "@/lib/completedEntryCopyProjection";
 import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
 import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import {
   currentSessionGeneration,
+  isAuthenticatedSessionSnapshotCurrent,
   readOwnedAuthenticatedSessionSnapshot
 } from "@/lib/secure-session";
 import {
@@ -1445,51 +1448,71 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     const openDashboard = async () => {
       const settingsSeedGeneration = captureSettingsSeedGeneration();
+      const generation = noticeSessionGeneration.current;
+      const accountEpoch = currentMobileAccountEpoch();
+      const isOpening = () => !cancelled && generation === noticeSessionGeneration.current &&
+        settingsSeedGeneration === currentSessionGeneration() && accountEpoch === currentMobileAccountEpoch();
+      const guard = captureDashboardRefreshGuard({
+        currentRevision: dashboardMutationRevision.current,
+        timerMutationsInFlight: timerMutationCount.current
+      });
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
+      if (!isOpening()) return;
       if (cached && !latestData.current) {
         const owner = timerStopOwner(cached.bootstrap);
-        const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner).catch(() => null);
-        if (sessionRead?.status !== "authenticated") {
-          await loadRef.current();
-          return;
+        const [sessionRead, activeOwner] = await Promise.all([
+          readOwnedAuthenticatedSessionSnapshot(owner).catch(() => null),
+          readActiveMobileAccount().catch(() => null)
+        ]);
+        if (sessionRead?.status === "authenticated" && mobileAccountOwnersEqual(activeOwner, owner)) {
+          await reconcileDashboardRefreshCandidate<{ bootstrap: MobileBootstrap; durableWork?: DurableLocalWork }>({
+            candidate: { bootstrap: cached.bootstrap },
+            currentRevision: () => dashboardMutationRevision.current,
+            timerMutationsInFlight: () => timerMutationCount.current,
+            guard,
+            isCurrent: () => isOpening() && !latestData.current && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+            reconcile: async (candidate, isCurrent) => {
+              const durableWork = await readDurableLocalWork(owner);
+              if (!isCurrent()) return candidate;
+              const projected = projectDurableLocalWork(candidate.bootstrap, durableWork);
+              const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
+                projected.activeEntry?.id ?? null, isCurrent
+              );
+              return { bootstrap: filterPendingDeletedTimeEntries(projected, pendingDeletionIds) as MobileBootstrap, durableWork };
+            },
+            onApplied: ({ bootstrap, durableWork }) => {
+              for (const [localId, timeEntryId] of durableWork?.correlations ?? []) {
+                optimisticTimerIds.current.set(localId, timeEntryId);
+              }
+              timerIdCorrelationsLoaded.current = true;
+              publishTodayBootstrapForSettings(cached.bootstrap, settingsSeedGeneration);
+              lastStopServerBootstrap.current = cached.bootstrap;
+              loadedBootstrap.current = bootstrap;
+              publishDashboardData(bootstrap);
+              setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
+              setAuthState("authenticated");
+            }
+          });
         }
-        let filtered = cached.bootstrap;
-        let durableWork = null;
-        await activateMobileAccount(owner);
-        publishTodayBootstrapForSettings(cached.bootstrap, settingsSeedGeneration);
-        durableWork = await readDurableLocalWork(owner);
-        for (const [localId, timeEntryId] of durableWork.correlations) {
-          optimisticTimerIds.current.set(localId, timeEntryId);
-        }
-        timerIdCorrelationsLoaded.current = true;
-        filtered = projectDurableLocalWork(cached.bootstrap, durableWork);
-        const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
-          filtered.activeEntry?.id ?? null
-        );
-        filtered = filterPendingDeletedTimeEntries(
-          filtered,
-          pendingDeletionIds
-        ) as MobileBootstrap;
-        lastStopServerBootstrap.current = cached.bootstrap;
-        loadedBootstrap.current = filtered;
-        publishDashboardData(filtered);
-        setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
-        setAuthState("authenticated");
       }
-      await loadRef.current();
+      if (isOpening()) await loadRef.current();
     };
     if (AppState.currentState === "active") {
       void openDashboard();
-      return undefined;
+      return () => { cancelled = true; };
     }
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       subscription.remove();
       void openDashboard();
     });
-    return () => subscription.remove();
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
   }, [load]);
 
   useEffect(() => {

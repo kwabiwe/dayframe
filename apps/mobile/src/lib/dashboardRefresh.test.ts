@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   captureDashboardRefreshGuard,
   reconcileDashboardRefreshCandidate,
@@ -82,5 +82,46 @@ describe("mobile dashboard refresh ordering", () => {
       action: "apply",
       candidate: { entryIds: ["entry-a"] }
     });
+  });
+
+  it("does not publish cached rows if sign-out overtakes their reconciliation", async () => {
+    let sessionCurrent = true;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const publish = vi.fn();
+    const candidate = { entryIds: ["departing-account-block"] };
+    const guard = captureDashboardRefreshGuard({ currentRevision: 7, timerMutationsInFlight: 0 });
+    const restoring = reconcileDashboardRefreshCandidate({
+      candidate,
+      currentRevision: () => 7,
+      guard,
+      reconcile: async () => { await barrier; return candidate; },
+      timerMutationsInFlight: () => 0,
+      isCurrent: () => sessionCurrent,
+      onApplied: publish
+    });
+
+    sessionCurrent = false;
+    release();
+
+    await expect(restoring).resolves.toEqual({ action: "refresh" });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("publishes cached rows with queued work while the same account stays current", async () => {
+    const publish = vi.fn();
+    const guard = captureDashboardRefreshGuard({ currentRevision: 7, timerMutationsInFlight: 0 });
+
+    await reconcileDashboardRefreshCandidate({
+      candidate: { entryIds: ["saved-block"] },
+      currentRevision: () => 7,
+      guard,
+      reconcile: async ({ entryIds }) => ({ entryIds: [...entryIds, "queued-block"] }),
+      timerMutationsInFlight: () => 0,
+      isCurrent: () => true,
+      onApplied: publish
+    });
+
+    expect(publish).toHaveBeenCalledExactlyOnceWith({ entryIds: ["saved-block", "queued-block"] });
   });
 });

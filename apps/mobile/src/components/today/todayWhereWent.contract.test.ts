@@ -50,7 +50,8 @@ describe("Today's \"Where today went\" wiring", () => {
     expect(fresh).toBeGreaterThan(-1);
     expect(dashboard.slice(fresh, fresh + 430)).toContain("publishDashboardData(bootstrap);");
     expect(dashboard).toContain("loadedBootstrap.current = next;\n    publishDashboardData(next);");
-    expect(dashboard).toContain("loadedBootstrap.current = filtered;\n        publishDashboardData(filtered);");
+    const cachedLaunch = body("const openDashboard = async () => {", "}, [load]);");
+    expect(cachedLaunch).toMatch(/loadedBootstrap\.current = (\w+);\s*publishDashboardData\(\1\);/);
     expect(dashboard).toContain("const todayWhereWentQuiet = data !== previousTodayData.current && data === loadedBootstrap.current;");
     // Mutations (Start, Stop, edits) never mark the commit quiet.
     const mutation = body("    dashboardMutationRevision.current += 1;\n    const next = filterPendingDeletedTimeEntries(", "publishDashboardData(next);");
