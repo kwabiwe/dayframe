@@ -1,5 +1,6 @@
 import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
+import { CalendarDayInspector, calendarInspectorWidth } from "@/components/calendar/CalendarDayInspector";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
 import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
 import { livePresentationAt } from "@/components/today/liveBlockClock";
@@ -27,6 +28,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from "react-native";
 import Reanimated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
@@ -399,6 +401,8 @@ const DashboardContext = createContext<DashboardContextValue | null>(null);
 
 // Native tabs mount their routes eagerly. Keep sync, HealthKit and timer state in one shared owner.
 export function DayframeDashboardProvider({ children }: { children: ReactNode }) {
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const inspectorWidth = calendarInspectorWidth(windowWidth, fontScale);
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
@@ -4539,7 +4543,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       };
 
       return (
-        <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
+        <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={[styles.safeArea, { flexDirection: "row" }]}>
           <View style={styles.nativeCalendarScreen}>
             <ScreenFocusReporter focused={isFocused} onChange={setCalendarOnScreen} />
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
@@ -4653,6 +4657,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             {/* The correction modal stays mounted when the same review link switches Day to List. */}
             {locationCorrections.sheet}
           </View>
+          {inspectorWidth > 0 ? (
+            <CalendarDayInspector
+              entries={nativeCalendarModel.entries}
+              onOpen={(entry) => routeOpenEvent(entry.actionKind, entry.actionId)}
+              theme={theme}
+              title={formatLocaleDate(dateFromKey(selectedDayKey), { weekday: "short", day: "numeric", month: "long" })}
+              total={nativeCalendarModel.loggedLabel}
+              width={inspectorWidth}
+            />
+          ) : null}
         </SafeAreaView>
       );
     }
