@@ -10,6 +10,7 @@
 		04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		DFB2000001BC49B8811A0006 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		4818EFEB6FC558C0DBAEC671 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 640246549EE50B97A533725A /* Assets.xcassets */; };
 		779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
@@ -469,6 +470,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4818EFEB6FC558C0DBAEC671 /* Assets.xcassets in Resources */,
+				DFB2000001BC49B8811A0006 /* BricolageGrotesque-Bold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

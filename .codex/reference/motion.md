@@ -745,3 +745,13 @@ On the iPhone Calendar, the native pinch and scroll coordinator keeps the existi
 - Entrance/update/exit: the sheet doesn't move, rubber-band or dismiss, and no discard prompt appears. A swipe that starts outside the panel drags as before.
 - Interruption: a second finger added during a drag can't stop it, and one outside the panel can't start one while the first is in the wheel (fingers landing together count in any order, and the pan has failed until every finger lifts).
 - Async outcome and accessibility: none; the wheel is hidden from VoiceOver as before, and Reduce Motion is unchanged.
+
+## Apple Watch timer (Blocks look, 28 Nov 2026)
+
+- Trigger and owner: `DayframeWatchApp.swift`'s `WatchRootView` is the single owner. `WatchTimer.screen` (waiting, idle, running) is the one animated value. The iPhone stays the data owner, and the Watch never calls Dayframe APIs.
+- Entrance and update: Start shows the live block at once with the `land` spring (stiffness 320, damping 21) and one `.start` haptic. A Stop flies the block up into Today's strip (620 ms, `timingCurve(.3,.7,.2,1)`) with one `.stop` haptic. While the iPhone confirms, "Sending to your iPhone" takes Recording's place in the header, so nothing below moves, and "Saved on iPhone" shows for 1.6 s after. There are no spinners.
+- Rollback: a refused or unanswered Start or Stop returns to the iPhone's state with the same spring, one `.failure` haptic and a failure card that shakes once (OK, Try again). An accepted action that the iPhone's snapshot never confirms within 10 s yields to the snapshot.
+- Rolling digits: a once-a-second `TimelineView` with `.numericText` while awake. On the dimmed always-on face and under Reduce Motion, `Text(timerInterval:)` keeps the time without waking the app.
+- Rings: the live block's breathing ring is opacity only (2.4 s cycle) and holds still under Reduce Motion and on the dimmed face. The seconds ring on Stop is a clock, so it steps once a second under Reduce Motion and hides on the dimmed face.
+- Reduce Motion: every transition becomes a 140 ms fade, the failure card does not shake, and the waiting pulse is still. Haptics and announcements are unchanged.
+- Frequency: the iPhone sends the Watch display (activity, colours, description, today's whole-minute totals) only when it changes, at most about once a minute. The display is never part of the timer revision.

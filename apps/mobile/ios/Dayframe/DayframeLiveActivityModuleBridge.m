@@ -66,6 +66,7 @@ RCT_EXTERN_METHOD(clearRuntimeContextIfToken:(NSString *)sessionToken
 @interface RCT_EXTERN_MODULE(DayframeWatchBridge, RCTEventEmitter)
 RCT_EXTERN_METHOD(updateTimerSnapshot:(NSString *)revision entryId:(NSString *)entryId startedAt:(NSString *)startedAt)
 RCT_EXTERN_METHOD(completeTimerCommand:(NSString *)requestId accepted:(BOOL)accepted)
+RCT_EXTERN_METHOD(updateTimerDisplay:(NSDictionary *)display)
 @end
 
 @interface RCT_EXTERN_MODULE(DayframeDeviceDisplay, NSObject)

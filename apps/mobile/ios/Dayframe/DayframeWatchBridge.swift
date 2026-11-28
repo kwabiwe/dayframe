@@ -28,6 +28,12 @@ final class DayframeWatchBridge: RCTEventEmitter {
     }
   }
 
+  @objc(updateTimerDisplay:)
+  func updateTimerDisplay(_ display: NSDictionary?) {
+    let value = display as? [String: Any]
+    Task { @MainActor in DayframeWatchPhoneLink.shared.setDisplay(value) }
+  }
+
   @objc(completeTimerCommand:accepted:)
   func completeTimerCommand(_ requestId: String, accepted: Bool) {
     Task { @MainActor in
@@ -43,6 +49,9 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
   private var session: WCSession?
   private var ownerKey: String?
   private var snapshot: [String: Any] = ["dayframeWatchVersion": 1]
+  // What the Watch draws around the timer (activity, colours, today's strip). Never part of the
+  // revision: it changes on the minute, and a Start or Stop the Watch sent must stay valid.
+  private var display: [String: Any]?
   private var consumedRevision: String?
   private var pending: (id: String, revision: String, reply: ([String: Any]) -> Void)?
 
@@ -60,6 +69,7 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
        startedAt == snapshot["startedAt"] as? String { return }
     let ownerChanged = ownerKey != self.ownerKey
     self.ownerKey = ownerKey
+    if ownerChanged || ownerKey == nil { display = nil }
     var state: [String: Any] = ["dayframeWatchVersion": 1]
     if ownerKey != nil {
       state["revision"] = UUID().uuidString
@@ -73,16 +83,30 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
     if ownerChanged, let pending { complete(requestId: pending.id, accepted: false) }
   }
 
+  func setDisplay(_ value: [String: Any]?) {
+    let next = ownerKey == nil ? nil : value
+    if next.map({ $0 as NSDictionary }) == display.map({ $0 as NSDictionary }) { return }
+    display = next
+    sendSnapshot()
+  }
+
+  /// The snapshot plus the display, as the Watch receives it in every context and reply.
+  private var context: [String: Any] {
+    var value = snapshot
+    if let display { value["display"] = display }
+    return value
+  }
+
   func complete(requestId: String, accepted: Bool) {
     guard let pending, pending.id == requestId else { return }
     self.pending = nil
     if accepted { consumedRevision = pending.revision }
-    pending.reply(["accepted": accepted, "snapshot": snapshot])
+    pending.reply(["accepted": accepted, "snapshot": context])
   }
 
   private func sendSnapshot() {
     guard let session, session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
-    try? session.updateApplicationContext(snapshot)
+    try? session.updateApplicationContext(context)
   }
 
   nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
@@ -104,7 +128,7 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
                            replyHandler: @escaping ([String: Any]) -> Void) {
     Task { @MainActor in
       if message["dayframeWatchVersion"] as? Int == 1, message["action"] as? String == "snapshot" {
-        replyHandler(["snapshot": self.snapshot])
+        replyHandler(["snapshot": self.context])
         return
       }
       let current = self.snapshot["entryId"] as? String
@@ -117,7 +141,7 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
             (action == "start" && current == nil && message["entryId"] == nil ||
              action == "stop" && current != nil && message["entryId"] as? String == current)
       else {
-        replyHandler(["accepted": false, "snapshot": self.snapshot])
+        replyHandler(["accepted": false, "snapshot": self.context])
         return
       }
       self.pending = (requestId, revision, replyHandler)

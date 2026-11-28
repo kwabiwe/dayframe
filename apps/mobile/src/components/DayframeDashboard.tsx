@@ -1,7 +1,7 @@
 import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
 import { KeepTodayAwake, useKeepTodayAwake } from "@/lib/deviceDisplay";
-import { useWatchTimer } from "@/lib/watchTimer";
+import { buildWatchDisplay, useWatchTimer } from "@/lib/watchTimer";
 import { FORGOTTEN_TIMER_AGE_MS, forgottenTimerAvailable, subscribeForgottenTimerOpens } from "@/lib/forgottenTimer";
 import { ForgottenTimerCard } from "@/components/today/ForgottenTimerCard";
 import { CalendarDayInspector, calendarInspectorWidth } from "@/components/calendar/CalendarDayInspector";
@@ -1685,21 +1685,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // another account lifetime, is dropped).
   const stopActiveTimerRef = useRef<() => Promise<boolean>>(async () => false);
   useShortcutStopHandoff(authState === "authenticated" && data !== null, () => stopActiveTimerRef.current());
-  useWatchTimer(
-    authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}:${noticeSessionGeneration.current}` : null,
-    data?.activeEntry?.id ?? null,
-    data?.activeEntry?.startedAt ?? null,
-    async (command) => {
-      if (authState !== "authenticated" || !latestData.current || !data) return false;
-      const owner = todayNoticeOwner();
-      if (!todayNoticeOwnerStill(owner)) return false;
-      if (command.action === "stop") return stopActiveTimer(command.entryId);
-      return startTaskWith(
-        { startedAt: null },
-        { fromWatch: true, canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
-      );
-    }
-  );
 
   const hasAuthenticatedTimerState = authState === "authenticated" && data !== null;
   useEffect(() => {
@@ -2021,6 +2006,37 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     hasLiveActiveTimer,
     resolveEntryId: timerEntryIdentity,
   });
+  const watchActiveEntry = data?.activeEntry ?? null;
+  const watchDisplay = useMemo(
+    () => buildWatchDisplay({
+      activeEntry: watchActiveEntry ? {
+        categoryName: watchActiveEntry.categoryName,
+        categoryColor: watchActiveEntry.categoryColor,
+        categoryId: watchActiveEntry.categoryId,
+        description: displayTimerDescription(watchActiveEntry) || null,
+      } : null,
+      segments: todayWhereWent?.segments ?? [],
+      totalSeconds: todayWhereWent?.totalSeconds ?? 0,
+      goalMinutes: data?.user.dailyGoalMinutes,
+    }),
+    [watchActiveEntry, todayWhereWent, data?.user.dailyGoalMinutes]
+  );
+  useWatchTimer(
+    authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}:${noticeSessionGeneration.current}` : null,
+    data?.activeEntry?.id ?? null,
+    data?.activeEntry?.startedAt ?? null,
+    async (command) => {
+      if (authState !== "authenticated" || !latestData.current || !data) return false;
+      const owner = todayNoticeOwner();
+      if (!todayNoticeOwnerStill(owner)) return false;
+      if (command.action === "stop") return stopActiveTimer(command.entryId);
+      return startTaskWith(
+        { startedAt: null },
+        { fromWatch: true, canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
+      );
+    },
+    watchDisplay
+  );
   const clockFormat = useClockFormat();
   const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
     categoryColor: displayedActiveEntry.categoryName
