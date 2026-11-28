@@ -534,16 +534,32 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     enum Kind: Equatable { case start(at: Date), stop }
     let kind: Kind
     var accepted = false
+    /// The reply never came. That does not mean nothing happened: the iPhone may have carried the
+    /// action out, so its timer state decides, never a guess.
+    var confirming = false
   }
 
   struct Failure: Equatable {
+    enum Reason: Equatable {
+      /// The iPhone answered no.
+      case refused
+      /// No answer, and the iPhone's timer state shows the action did not happen.
+      case noAnswer
+      /// No answer and no timer state either: the outcome is unknown.
+      case unconfirmed
+    }
     let isStart: Bool
-    let refused: Bool
-    var title: String { isStart ? "Not started" : "Not stopped" }
+    let reason: Reason
+    var title: String {
+      if reason == .unconfirmed { return "Not confirmed" }
+      return isStart ? "Not started" : "Not stopped"
+    }
     var message: String {
-      refused
-        ? "The timer changed on your iPhone. Check Dayframe there."
-        : "Your iPhone didn’t answer. Nothing changed."
+      switch reason {
+      case .refused: return "The timer changed on your iPhone. Check Dayframe there."
+      case .noAnswer: return "Your iPhone didn’t answer. Nothing changed."
+      case .unconfirmed: return "Your iPhone didn’t answer. Check Dayframe there before trying again."
+      }
     }
   }
 
@@ -633,36 +649,67 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
           self.pending?.accepted = true
           self.settlePending()
         } else {
-          self.rollBack(refused: true)
+          self.rollBack(.refused)
         }
       }
     } errorHandler: { [weak self] _ in
-      Task { @MainActor in self?.rollBack(refused: false) }
+      Task { @MainActor in self?.confirmWithPhone() }
     }
   }
 
-  private func rollBack(refused: Bool) {
+  private func rollBack(_ reason: Failure.Reason) {
     guard let pending else { return }
     let isStart: Bool
     if case .start = pending.kind { isStart = true } else { isStart = false }
     pendingTimeout?.cancel()
     self.pending = nil
-    failure = Failure(isStart: isStart, refused: refused)
+    failure = Failure(isStart: isStart, reason: reason)
     haptic(.failure)
   }
 
-  /// An accepted action stays shown until the iPhone's snapshot agrees with it.
-  private func settlePending() {
-    guard let pending, pending.accepted else { return }
-    let done: Bool
+  /// Whether the iPhone's snapshot shows the pending action carried out.
+  private var pendingIsDone: Bool {
+    guard let pending, let snapshot else { return false }
     switch pending.kind {
-    case .start: done = snapshot?.entryId != nil
-    case .stop: done = snapshot?.entryId == nil
+    case .start: return snapshot.entryId != nil
+    case .stop: return snapshot.entryId == nil
     }
-    guard done else { return }
+  }
+
+  /// An accepted (or unanswered) action stays shown until the iPhone's snapshot agrees with it.
+  private func settlePending() {
+    guard let pending, pending.accepted || pending.confirming, pendingIsDone else { return }
     pendingTimeout?.cancel()
     self.pending = nil
     flashSaved()
+  }
+
+  /// The reply failed or never came: ask the iPhone what its timer is doing now and go by that.
+  private func confirmWithPhone() {
+    guard let current = pending, !current.accepted else { return }
+    if current.confirming {
+      // Asked once already and still nothing settled: the outcome is unknown.
+      rollBack(.unconfirmed)
+      return
+    }
+    pending?.confirming = true
+    armPendingTimeout()
+    guard reachable, let session else { return }
+    session.sendMessage(["dayframeWatchVersion": 1, "action": "snapshot"]) { [weak self] reply in
+      Task { @MainActor in
+        guard let self, self.pending?.confirming == true else { return }
+        if let context = reply["snapshot"] as? [String: Any] { self.apply(context) }
+        guard self.pending != nil else { return } // apply settled it: the iPhone did it
+        // Still being carried out on the iPhone: its next snapshot or the timeout decides.
+        if reply["busy"] as? Bool == true { return }
+        self.rollBack(.noAnswer)
+      }
+    } errorHandler: { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.pending?.confirming == true else { return }
+        self.rollBack(.unconfirmed)
+      }
+    }
   }
 
   private func flashSaved() {
@@ -685,7 +732,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
         self.pending = nil
         self.refreshSnapshot()
       } else {
-        self.rollBack(refused: false)
+        self.confirmWithPhone()
       }
     }
   }
@@ -805,7 +852,7 @@ private enum WatchDemo {
     case "sending": timer.seedDemo(snapshot: idle, display: idleDisplay, reachable: true,
                                    pending: .init(kind: .start(at: Date().addingTimeInterval(-2))), failure: nil)
     case "error": timer.seedDemo(snapshot: idle, display: idleDisplay, reachable: true, pending: nil,
-                                 failure: .init(isStart: true, refused: false))
+                                 failure: .init(isStart: true, reason: .noAnswer))
     case "away": timer.seedDemo(snapshot: running, display: liveDisplay, reachable: false, pending: nil, failure: nil)
     default: return false
     }

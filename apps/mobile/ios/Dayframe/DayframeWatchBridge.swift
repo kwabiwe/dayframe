@@ -84,10 +84,30 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
   }
 
   func setDisplay(_ value: [String: Any]?) {
-    let next = ownerKey == nil ? nil : value
+    let next = ownerKey == nil ? nil : value.map(Self.propertyListSafe)
     if next.map({ $0 as NSDictionary }) == display.map({ $0 as NSDictionary }) { return }
     display = next
     sendSnapshot()
+  }
+
+  /// WatchConnectivity only carries property-list values. A JS `null` arrives as NSNull, and one
+  /// NSNull fails the whole reply or application context, so absent fields are left out instead.
+  private static func propertyListSafe(_ value: [String: Any]) -> [String: Any] {
+    var safe: [String: Any] = [:]
+    for (key, item) in value {
+      if let cleaned = propertyListSafeValue(item) { safe[key] = cleaned }
+    }
+    return safe
+  }
+
+  private static func propertyListSafeValue(_ value: Any) -> Any? {
+    switch value {
+    case is NSNull: return nil
+    case let dictionary as [String: Any]: return propertyListSafe(dictionary)
+    case let array as [Any]: return array.compactMap(propertyListSafeValue)
+    case is String, is NSNumber, is Date, is Data: return value
+    default: return nil
+    }
   }
 
   /// The snapshot plus the display, as the Watch receives it in every context and reply.
@@ -106,7 +126,8 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
 
   private func sendSnapshot() {
     guard let session, session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
-    try? session.updateApplicationContext(context)
+    // The display is decoration: if it is ever refused, the timer state must still reach the Watch.
+    do { try session.updateApplicationContext(context) } catch { try? session.updateApplicationContext(snapshot) }
   }
 
   nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
@@ -128,7 +149,8 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
                            replyHandler: @escaping ([String: Any]) -> Void) {
     Task { @MainActor in
       if message["dayframeWatchVersion"] as? Int == 1, message["action"] as? String == "snapshot" {
-        replyHandler(["snapshot": self.context])
+        // "busy": a Watch command is still being carried out, so this snapshot may not show it yet.
+        replyHandler(["snapshot": self.context, "busy": self.pending != nil])
         return
       }
       let current = self.snapshot["entryId"] as? String
