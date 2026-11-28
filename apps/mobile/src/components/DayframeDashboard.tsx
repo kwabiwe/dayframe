@@ -2,7 +2,7 @@ import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/l
 import { useAppForeground } from "@/lib/appForeground";
 import { KeepTodayAwake, useKeepTodayAwake } from "@/lib/deviceDisplay";
 import { useWatchTimer } from "@/lib/watchTimer";
-import { FORGOTTEN_TIMER_AGE_MS, subscribeForgottenTimerOpens } from "@/lib/forgottenTimer";
+import { FORGOTTEN_TIMER_AGE_MS, forgottenTimerAvailable, subscribeForgottenTimerOpens } from "@/lib/forgottenTimer";
 import { ForgottenTimerCard } from "@/components/today/ForgottenTimerCard";
 import { CalendarDayInspector, calendarInspectorWidth } from "@/components/calendar/CalendarDayInspector";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
@@ -1706,10 +1706,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!hasAuthenticatedTimerState || Platform.OS !== "ios") return;
     let disposed = false;
     let cleanup: (() => void) | undefined;
+    let pendingOpen: AbortController | undefined;
     void subscribeForgottenTimerOpens((entryId) => {
-      if (!disposed && latestData.current?.activeEntry?.id === entryId) router.navigate("/(tabs)/today");
+      const current = latestData.current;
+      if (disposed || !current) return;
+      const owner = timerStopOwner(current);
+      const generation = noticeSessionGeneration.current;
+      pendingOpen?.abort();
+      const request = new AbortController();
+      pendingOpen = request;
+      // A block started elsewhere may not exist in the phone's cached dashboard.
+      void forgottenTimerAvailable(owner, entryId, request.signal).then((available) => {
+        const latest = latestData.current;
+        if (!available || request.signal.aborted || disposed || !latest ||
+            authStateCurrent.current !== "authenticated" || noticeSessionGeneration.current !== generation ||
+            !sameTimerStopOwner(timerStopOwner(latest), owner)) return;
+        router.navigate("/(tabs)/today");
+        void loadRef.current({ silent: true });
+      }).catch(() => undefined);
     }).then((remove) => { if (disposed) remove(); else cleanup = remove; }).catch(() => undefined);
-    return () => { disposed = true; cleanup?.(); };
+    return () => {
+      disposed = true;
+      pendingOpen?.abort();
+      cleanup?.();
+    };
   }, [hasAuthenticatedTimerState]);
 
   useEffect(() => {
