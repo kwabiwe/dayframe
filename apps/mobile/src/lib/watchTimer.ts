@@ -4,7 +4,7 @@ import { blockColorsFor, paletteColorFor } from "@dayframe/shared";
 
 type WatchTimerCommand =
   | { requestId: string; action: "start" }
-  | { requestId: string; action: "stop"; entryId: string };
+  | { requestId: string; action: "stop"; entryId: string; stoppedAt?: string };
 
 const watchBridge = Platform.OS === "ios" ? NativeModules.DayframeWatchBridge : undefined;
 
@@ -64,6 +64,18 @@ export function buildWatchDisplay(input: WatchDisplayInput): WatchDisplay {
     goalSeconds: goalMinutes > 0 ? goalMinutes * 60 : null,
     segments,
   };
+}
+
+/**
+ * When a Stop takes effect. Now, unless the Watch queued it while the iPhone was out of reach: then the
+ * moment it was pressed, kept inside the block (never before its start, never in the future).
+ */
+export function watchStopTime(startedAt: string, requested: string | undefined, now: number): string {
+  const at = requested ? Date.parse(requested) : Number.NaN;
+  if (!Number.isFinite(at)) return new Date(now).toISOString();
+  const start = Date.parse(startedAt);
+  const floor = Number.isFinite(start) ? start : Number.NEGATIVE_INFINITY;
+  return new Date(Math.min(now, Math.max(floor, at))).toISOString();
 }
 
 export function useWatchTimer(

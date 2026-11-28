@@ -170,16 +170,28 @@ struct IdleView: View {
         }
         DayStrip(display: timer.display)
         TodayTotal(display: timer.display)
+        if let queuedLine = timer.queuedLine {
+          Text(queuedLine)
+            .font(.footnote)
+            .foregroundStyle(WatchStyle.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .transition(.opacity)
+        }
         PlayOrb(enabled: timer.canSend) { timer.changeRecording() }
           .frame(maxWidth: .infinity)
           .padding(.top, 4)
-        Text(timer.reachable ? "Tap to start a block" : "Bring your iPhone closer to start")
-          .font(.footnote)
-          .foregroundStyle(WatchStyle.textSecondary)
-          .frame(maxWidth: .infinity)
-          .multilineTextAlignment(.center)
+        if timer.queuedLine == nil {
+          Text(timer.idleHint)
+            .contentTransition(.opacity)
+            .font(.footnote)
+            .foregroundStyle(WatchStyle.textSecondary)
+            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+        }
       }
       .padding(.horizontal, 4)
+      .animation(WatchStyle.fade, value: timer.idleHint)
+      .animation(WatchStyle.fade, value: timer.queuedLine)
     }
   }
 }
@@ -296,8 +308,8 @@ struct RunningView: View {
           if !timer.reachable { AwayPill() }
         }
         LiveBlock(display: timer.isStartPending ? nil : timer.display, startedAt: startedAt)
-        StopOrb(startedAt: startedAt, enabled: timer.canSend) { timer.changeRecording() }
-          .accessibilityHint(timer.reachable ? "" : "Bring your iPhone closer to stop")
+        StopOrb(startedAt: startedAt, enabled: timer.canSend || timer.canQueueStop) { timer.changeRecording() }
+          .accessibilityHint(timer.reachable ? "" : "Stops now. Sent when your iPhone is back.")
           .frame(maxWidth: .infinity)
       }
       .padding(.horizontal, 2)
@@ -511,6 +523,22 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
   private var pendingTimeout: Task<Void, Never>?
   private var savedTimeout: Task<Void, Never>?
   private var lastAction: Pending.Kind?
+  /// A Stop pressed while the iPhone was out of reach. Kept on the Watch (it survives a relaunch) and
+  /// sent with the moment it was pressed once the iPhone is back.
+  @Published private(set) var queuedStop: QueuedStop?
+  private var deliveringQueuedStop = false
+  private static let queuedStopKey = "dayframe.watch.queuedStop"
+  private static let clock: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.timeStyle = .short
+    formatter.dateStyle = .none
+    return formatter
+  }()
+
+  struct QueuedStop: Equatable, Codable {
+    let entryId: String
+    let at: Date
+  }
 
   struct Snapshot: Equatable {
     let revision: String
@@ -531,7 +559,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
 
   /// An action the Watch has already shown, waiting for the iPhone to confirm it.
   struct Pending: Equatable {
-    enum Kind: Equatable { case start(at: Date), stop }
+    enum Kind: Equatable { case start(at: Date), stop(entryId: String, at: Date) }
     let kind: Kind
     var accepted = false
     /// The reply never came. That does not mean nothing happened: the iPhone may have carried the
@@ -575,6 +603,8 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
       }
     }
     guard let snapshot else { return .waiting }
+    // A queued Stop shows the block already stopped, as a sent one does.
+    if let queuedStop, snapshot.entryId == queuedStop.entryId { return .idle }
     if let startedAt = snapshot.startedAt { return .running(startedAt) }
     return .idle
   }
@@ -582,6 +612,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
   /// A Stop flies the block into the day; everything else lands with the shared spring.
   var screenAnimation: Animation {
     if case .stop = pending?.kind { return WatchStyle.flight }
+    if queuedStop != nil { return WatchStyle.flight }
     return WatchStyle.land
   }
 
@@ -590,7 +621,21 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     return false
   }
 
-  var canSend: Bool { reachable && pending == nil && snapshot != nil }
+  var canSend: Bool { reachable && pending == nil && snapshot != nil && queuedStop == nil }
+
+  /// Out of reach with a block running: Stop still works and is sent when the iPhone is back.
+  /// Start does not: a block can't begin until the iPhone has said what is running.
+  var canQueueStop: Bool { !reachable && pending == nil && queuedStop == nil && snapshot?.entryId != nil }
+
+  /// Shown under Today's total while a Stop waits for the iPhone.
+  var queuedLine: String? {
+    queuedStop.map { "Stopped at \(Self.clock.string(from: $0.at)) · sends when your iPhone is back" }
+  }
+
+  var idleHint: String {
+    if let deliveryLine { return deliveryLine }
+    return reachable ? "Tap to start a block" : "Bring your iPhone closer to start"
+  }
 
   var deliveryLine: String? {
     if pending != nil { return "Sending to your iPhone" }
@@ -604,6 +649,8 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     #if DEBUG
     if WatchDemo.apply(to: self) { return }
     #endif
+    queuedStop = UserDefaults.standard.data(forKey: Self.queuedStopKey)
+      .flatMap { try? JSONDecoder().decode(QueuedStop.self, from: $0) }
     guard WCSession.isSupported() else { return }
     let session = WCSession.default
     self.session = session
@@ -612,8 +659,12 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
   }
 
   func changeRecording() {
+    if canQueueStop, let entryId = snapshot?.entryId {
+      queueStop(entryId)
+      return
+    }
     guard canSend, let snapshot else { return }
-    let kind: Pending.Kind = snapshot.entryId == nil ? .start(at: Date()) : .stop
+    let kind: Pending.Kind = snapshot.entryId.map { .stop(entryId: $0, at: Date()) } ?? .start(at: Date())
     send(kind, against: snapshot)
   }
 
@@ -657,6 +708,70 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     }
   }
 
+  /// No answer and no timer state. A Start is unknown, so the card says so. A Stop is kept instead and
+  /// sent once the iPhone answers: it stops only that block, at the time it was pressed, and is dropped
+  /// if the iPhone has already stopped it.
+  private func giveUpOrQueue() {
+    guard case .stop(let entryId, let at) = pending?.kind else {
+      rollBack(.unconfirmed)
+      return
+    }
+    pendingTimeout?.cancel()
+    pending = nil
+    if let session { reachable = session.isReachable }
+    setQueuedStop(QueuedStop(entryId: entryId, at: at))
+  }
+
+  private func queueStop(_ entryId: String) {
+    failure = nil
+    savedAt = nil
+    setQueuedStop(QueuedStop(entryId: entryId, at: Date()))
+    haptic(.stop)
+  }
+
+  private func setQueuedStop(_ value: QueuedStop?) {
+    queuedStop = value
+    if let value, let data = try? JSONEncoder().encode(value) {
+      UserDefaults.standard.set(data, forKey: Self.queuedStopKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: Self.queuedStopKey)
+    }
+  }
+
+  /// Sends a queued Stop. Called when the iPhone becomes reachable or sends its state; a Stop it can't
+  /// take yet (signed out, loading, busy) stays queued for the next of those.
+  private func deliverQueuedStop() {
+    guard let stop = queuedStop, reachable, pending == nil, !deliveringQueuedStop, let session else { return }
+    deliveringQueuedStop = true
+    let message: [String: Any] = [
+      "dayframeWatchVersion": 1,
+      "requestId": UUID().uuidString,
+      "action": "queuedStop",
+      "entryId": stop.entryId,
+      "stoppedAt": formatter.string(from: stop.at)
+    ]
+    session.sendMessage(message) { [weak self] reply in
+      Task { @MainActor in
+        guard let self else { return }
+        self.deliveringQueuedStop = false
+        // Settle the Stop before the reply's state is applied, which would otherwise drop it unread.
+        if self.queuedStop == stop, reply["notReady"] as? Bool != true {
+          self.setQueuedStop(nil)
+          if reply["accepted"] as? Bool == true {
+            self.flashSaved()
+          } else {
+            self.failure = Failure(isStart: false, reason: .refused)
+            haptic(.failure)
+          }
+        }
+        if let context = reply["snapshot"] as? [String: Any] { self.apply(context) }
+      }
+    } errorHandler: { [weak self] _ in
+      // Kept: the next reachability change or iPhone state sends it again.
+      Task { @MainActor in self?.deliveringQueuedStop = false }
+    }
+  }
+
   private func rollBack(_ reason: Failure.Reason) {
     guard let pending else { return }
     let isStart: Bool
@@ -689,7 +804,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     guard let current = pending, !current.accepted else { return }
     if current.confirming {
       // Asked once already and still nothing settled: the outcome is unknown.
-      rollBack(.unconfirmed)
+      giveUpOrQueue()
       return
     }
     pending?.confirming = true
@@ -707,7 +822,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     } errorHandler: { [weak self] _ in
       Task { @MainActor in
         guard let self, self.pending?.confirming == true else { return }
-        self.rollBack(.unconfirmed)
+        self.giveUpOrQueue()
       }
     }
   }
@@ -769,6 +884,8 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
       return
     }
     snapshot = Snapshot(revision: revision, entryId: entry, startedAt: start)
+    // The iPhone has stopped or replaced that block itself since: its state stands.
+    if let queuedStop, entry != queuedStop.entryId { setQueuedStop(nil) }
     display = Self.parseDisplay(context["display"])
     settlePending()
   }
@@ -798,6 +915,10 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     self.pending = pending
     self.failure = failure
   }
+
+  fileprivate func seedQueuedStop(entryId: String, at: Date) {
+    queuedStop = QueuedStop(entryId: entryId, at: at)
+  }
   #endif
 
   nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
@@ -807,6 +928,7 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
       self.reachable = canReachPhone
       self.apply(context)
       self.refreshSnapshot()
+      self.deliverQueuedStop()
     }
   }
 
@@ -815,16 +937,20 @@ final class WatchTimer: NSObject, ObservableObject, WCSessionDelegate {
     Task { @MainActor in
       self.reachable = canReachPhone
       self.refreshSnapshot()
+      self.deliverQueuedStop()
     }
   }
 
   nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-    Task { @MainActor in self.apply(applicationContext) }
+    Task { @MainActor in
+      self.apply(applicationContext)
+      self.deliverQueuedStop()
+    }
   }
 }
 
 #if DEBUG
-/// Debug builds only: `-DayframeWatchDemo waiting|idle|running|sending|error|away` seeds one screen
+/// Debug builds only: `-DayframeWatchDemo waiting|idle|running|sending|error|away|queued` seeds one screen
 /// without a paired iPhone, for Simulator screenshots. Release and Staging builds never contain it.
 @MainActor
 private enum WatchDemo {
@@ -854,6 +980,9 @@ private enum WatchDemo {
     case "error": timer.seedDemo(snapshot: idle, display: idleDisplay, reachable: true, pending: nil,
                                  failure: .init(isStart: true, reason: .noAnswer))
     case "away": timer.seedDemo(snapshot: running, display: liveDisplay, reachable: false, pending: nil, failure: nil)
+    case "queued":
+      timer.seedDemo(snapshot: running, display: idleDisplay, reachable: false, pending: nil, failure: nil)
+      if let entryId = running.entryId { timer.seedQueuedStop(entryId: entryId, at: Date().addingTimeInterval(-90)) }
     default: return false
     }
     return true

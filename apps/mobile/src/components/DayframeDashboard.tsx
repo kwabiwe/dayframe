@@ -1,7 +1,7 @@
 import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
 import { KeepTodayAwake, useKeepTodayAwake } from "@/lib/deviceDisplay";
-import { buildWatchDisplay, useWatchTimer } from "@/lib/watchTimer";
+import { buildWatchDisplay, useWatchTimer, watchStopTime } from "@/lib/watchTimer";
 import { FORGOTTEN_TIMER_AGE_MS, forgottenTimerAvailable, subscribeForgottenTimerOpens } from "@/lib/forgottenTimer";
 import { ForgottenTimerCard } from "@/components/today/ForgottenTimerCard";
 import { CalendarDayInspector, calendarInspectorWidth } from "@/components/calendar/CalendarDayInspector";
@@ -2029,7 +2029,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (authState !== "authenticated" || !latestData.current || !data) return false;
       const owner = todayNoticeOwner();
       if (!todayNoticeOwnerStill(owner)) return false;
-      if (command.action === "stop") return stopActiveTimer(command.entryId);
+      if (command.action === "stop") return stopActiveTimer(command.entryId, command.stoppedAt);
       return startTaskWith(
         { startedAt: null },
         { fromWatch: true, canStart: () => todayNoticeOwnerStill(owner) && !runningForStartNow() }
@@ -3729,7 +3729,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [shiftSelectedCalendarDay]);
 
   stopActiveTimerRef.current = stopActiveTimer;
-  async function stopActiveTimer(expectedEntryId?: string) {
+  /** `requestedStoppedAt`: a Stop pressed earlier (on the Watch while the iPhone was out of reach). */
+  async function stopActiveTimer(expectedEntryId?: string, requestedStoppedAt?: string) {
     const generation = noticeSessionGeneration.current;
     const undoInFlight = runningSplit.undoInFlight();
     if (undoInFlight) await undoInFlight;
@@ -3739,7 +3740,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) return false;
     const bootstrap = latestData.current;
     if (!bootstrap) return false;
-    const stoppedAt = new Date().toISOString();
+    const stoppedAt = watchStopTime(activeEntry.startedAt, requestedStoppedAt, Date.now());
     runningSplit.finishBeforeTimerChange(activeEntry.id);
     let pendingStop: PendingTimerStop;
     let stopBackgroundReservation: Promise<void> | null;

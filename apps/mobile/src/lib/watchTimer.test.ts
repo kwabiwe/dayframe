@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("react-native", () => ({ NativeEventEmitter: class {}, NativeModules: {}, Platform: { OS: "ios" } }));
 
 import { blockColorsFor, paletteColorFor } from "@dayframe/shared";
-import { buildWatchDisplay, WATCH_NEUTRAL_FILL, WATCH_SEGMENT_LIMIT } from "./watchTimer";
+import { buildWatchDisplay, WATCH_NEUTRAL_FILL, WATCH_SEGMENT_LIMIT, watchStopTime } from "./watchTimer";
 
 describe("buildWatchDisplay", () => {
   it("names the running activity in its dark block colours and keeps its description", () => {
@@ -52,5 +52,24 @@ describe("buildWatchDisplay", () => {
     });
     expect(JSON.stringify(at(3_601))).toBe(JSON.stringify(at(3_659)));
     expect(JSON.stringify(at(3_660))).not.toBe(JSON.stringify(at(3_659)));
+  });
+});
+
+describe("watchStopTime", () => {
+  const start = "2026-11-28T10:00:00.000Z";
+  const now = Date.parse("2026-11-28T11:00:00.000Z");
+
+  it("stops now when the Watch sent no time", () => {
+    expect(watchStopTime(start, undefined, now)).toBe("2026-11-28T11:00:00.000Z");
+    expect(watchStopTime(start, "not a time", now)).toBe("2026-11-28T11:00:00.000Z");
+  });
+
+  it("keeps a queued Stop at the moment it was pressed", () => {
+    expect(watchStopTime(start, "2026-11-28T10:25:00.000Z", now)).toBe("2026-11-28T10:25:00.000Z");
+  });
+
+  it("never stops before the block began or after now", () => {
+    expect(watchStopTime(start, "2026-11-28T09:00:00.000Z", now)).toBe(start);
+    expect(watchStopTime(start, "2026-11-28T12:00:00.000Z", now)).toBe("2026-11-28T11:00:00.000Z");
   });
 });

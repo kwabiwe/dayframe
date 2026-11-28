@@ -90,6 +90,31 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
     sendSnapshot()
   }
 
+  /// A Stop pressed on the Watch while the iPhone was out of reach, sent once it is back. It carries no
+  /// revision (a relaunched iPhone has a new one); the block id decides: it stops only the block it was
+  /// pressed for, at the time it was pressed, and only while that block is still running.
+  private func receiveQueuedStop(_ message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+    guard let entryId = message["entryId"] as? String, !entryId.isEmpty,
+          let stoppedAt = message["stoppedAt"] as? String,
+          let requestId = message["requestId"] as? String, UUID(uuidString: requestId) != nil
+    else {
+      replyHandler(["accepted": false, "snapshot": context])
+      return
+    }
+    // Signed out, still loading, or busy with another Watch command: the Watch keeps it and asks again.
+    guard pending == nil, let emitter, ownerKey != nil, let revision = snapshot["revision"] as? String else {
+      replyHandler(["notReady": true, "snapshot": context])
+      return
+    }
+    guard snapshot["entryId"] as? String == entryId else {
+      replyHandler(["accepted": false, "snapshot": context])
+      return
+    }
+    pending = (requestId, revision, replyHandler)
+    emitter.sendEvent(withName: "dayframeWatchTimerCommand",
+                      body: ["requestId": requestId, "action": "stop", "entryId": entryId, "stoppedAt": stoppedAt])
+  }
+
   /// WatchConnectivity only carries property-list values. A JS `null` arrives as NSNull, and one
   /// NSNull fails the whole reply or application context, so absent fields are left out instead.
   private static func propertyListSafe(_ value: [String: Any]) -> [String: Any] {
@@ -151,6 +176,10 @@ final class DayframeWatchPhoneLink: NSObject, WCSessionDelegate {
       if message["dayframeWatchVersion"] as? Int == 1, message["action"] as? String == "snapshot" {
         // "busy": a Watch command is still being carried out, so this snapshot may not show it yet.
         replyHandler(["snapshot": self.context, "busy": self.pending != nil])
+        return
+      }
+      if message["dayframeWatchVersion"] as? Int == 1, message["action"] as? String == "queuedStop" {
+        self.receiveQueuedStop(message, replyHandler: replyHandler)
         return
       }
       let current = self.snapshot["entryId"] as? String
